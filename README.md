@@ -136,6 +136,14 @@ Full reference: [docs/structure.md](docs/structure.md).
 
 Requirements: stable Rust and Python 3.10+ on `PATH`.
 
+Install the published prerelease. The explicit version is required because `0.5.0-alpha` is a prerelease:
+
+```bash
+cargo install blabla --version 0.5.0-alpha
+```
+
+Or build from source:
+
 ```bash
 git clone https://github.com/Kiborgik/blabla.git blabla
 cd blabla
