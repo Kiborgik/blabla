@@ -8,6 +8,7 @@
 ![license MIT](https://img.shields.io/badge/license-MIT-green)
 ![Rust stable](https://img.shields.io/badge/rust-stable-black)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22761364.svg)](https://doi.org/10.5281/zenodo.22761364)
 
 Coding agents are good at making changes. The hard part is carrying every old requirement, edge case and architecture decision through a long project or a fresh session.
 
