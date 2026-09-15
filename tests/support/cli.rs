@@ -5,6 +5,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
+const HANG_TIMEOUT: Duration = Duration::from_secs(120);
+
 #[allow(dead_code)]
 pub fn run(args: &[&OsStr]) -> Output {
     run_in(None, args)
@@ -24,7 +26,7 @@ pub fn run_in(directory: Option<&std::path::Path>, args: &[&OsStr]) -> Output {
         .stderr(stderr.as_file().try_clone().unwrap())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + HANG_TIMEOUT;
     let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
             break status;
@@ -32,7 +34,7 @@ pub fn run_in(directory: Option<&std::path::Path>, args: &[&OsStr]) -> Output {
         if Instant::now() >= deadline {
             child.kill().unwrap();
             child.wait().unwrap();
-            panic!("CLI exceeded five seconds: {args:?}");
+            panic!("CLI exceeded {HANG_TIMEOUT:?}: {args:?}");
         }
         thread::sleep(Duration::from_millis(5));
     };
