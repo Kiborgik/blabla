@@ -1,0 +1,7 @@
+state count: int
+
+action increment()
+
+when increment {
+    expect "root-increment": after.count == before.count + 1
+}

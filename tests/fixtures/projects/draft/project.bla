@@ -1,0 +1,4 @@
+project Drafting
+
+use behavior "core.bla"
+draft behavior "next.bla"

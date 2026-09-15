@@ -1,0 +1,9 @@
+Add resonance recovery to Glyph Vault.
+
+A quarantined vault that has gathered enough resonance can recover from quarantine. Recovery must integrate correctly with the resonance rules, quarantine, sealing, vault phases and process restart.
+
+Preserve all existing behavior and architecture.
+
+Implement the feature completely and verify your work. When you believe the application is correct, stop.
+
+Execution notes: work only inside the current directory; use `python` for Python; do not install packages, use the network, or ask for hints.

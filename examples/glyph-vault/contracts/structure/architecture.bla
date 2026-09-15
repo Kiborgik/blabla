@@ -1,0 +1,58 @@
+module model    "glyph_vault/model.py"
+module domain   "glyph_vault/domain.py"
+module store    "glyph_vault/store.py"
+module protocol "glyph_vault/protocol.py"
+module main     "glyph_vault/main.py"
+
+require "vault-record":          symbol model::Vault
+require "durable-vault-record":  symbol model::DurableVault
+require "durable-fields":        symbol model::DURABLE_FIELDS
+require "domain-class":          symbol domain::VaultDomain
+require "store-class":           symbol store::VaultStore
+require "protocol-class":        symbol protocol::Protocol
+
+require "domain-observe":        symbol domain::VaultDomain.observe
+require "domain-snapshot":       symbol domain::VaultDomain.snapshot
+require "domain-attune":         symbol domain::VaultDomain.attune
+require "domain-echo":           symbol domain::VaultDomain.echo
+require "domain-recover":        symbol domain::VaultDomain.recover
+require "store-load":            symbol store::VaultStore.load
+require "store-save":            symbol store::VaultStore.save
+require "store-clear":           symbol store::VaultStore.clear
+require "protocol-dispatch":     symbol protocol::Protocol.dispatch
+require "protocol-serve":        symbol protocol::Protocol.serve
+
+forbid "model-independent-of-domain":     dependency model -> domain
+forbid "model-independent-of-store":      dependency model -> store
+forbid "model-independent-of-protocol":   dependency model -> protocol
+forbid "model-independent-of-main":       dependency model -> main
+forbid "domain-independent-of-store":     dependency domain -> store
+forbid "domain-independent-of-protocol":  dependency domain -> protocol
+forbid "domain-independent-of-main":      dependency domain -> main
+forbid "store-independent-of-domain":     dependency store -> domain
+forbid "store-independent-of-protocol":   dependency store -> protocol
+forbid "store-independent-of-main":       dependency store -> main
+forbid "protocol-independent-of-model":   dependency protocol -> model
+forbid "protocol-independent-of-domain":  dependency protocol -> domain
+forbid "protocol-independent-of-store":   dependency protocol -> store
+forbid "protocol-independent-of-main":    dependency protocol -> main
+require "store-serializes-through-model": dependency store -> model
+
+forbid "model-no-json":     dependency model -> "json"
+forbid "model-no-os":       dependency model -> "os"
+forbid "model-no-pathlib":  dependency model -> "pathlib"
+forbid "domain-no-json":    dependency domain -> "json"
+forbid "domain-no-os":      dependency domain -> "os"
+forbid "domain-no-pathlib": dependency domain -> "pathlib"
+
+require "durable-keeper":         value model::DURABLE_FIELDS contains "keeper"
+require "durable-glyph":          value model::DURABLE_FIELDS contains "glyph"
+require "durable-charge":         value model::DURABLE_FIELDS contains "charge"
+require "durable-sealed":         value model::DURABLE_FIELDS contains "sealed"
+require "durable-quarantined":    value model::DURABLE_FIELDS contains "quarantined"
+forbid  "id-is-the-key":          value model::DURABLE_FIELDS contains "id"
+forbid  "phase-is-transient":     value model::DURABLE_FIELDS contains "phase"
+forbid  "resonance-is-transient": value model::DURABLE_FIELDS contains "resonance"
+
+forbid "no-domain-restart":   symbol domain::VaultDomain.restart
+forbid "no-protocol-restart": value protocol::ARGUMENTS contains "restart"

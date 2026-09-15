@@ -1,0 +1,20 @@
+action seal(vault: string, keeper: string)
+action unseal(vault: string, keeper: string)
+
+when seal {
+    expect "seal-invalid-noop":
+        (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.phase == 1 and v.charge == 5 and not v.sealed and not v.quarantined)) or after.vaults == before.vaults
+    expect "seal-effect-and-frame":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.phase == 1 and v.charge == 5 and not v.sealed and not v.quarantined)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.id == old.id and now.keeper == old.keeper and now.glyph == old.glyph and now.charge == old.charge and now.phase == old.phase and now.sealed))))
+}
+
+when unseal {
+    expect "unseal-invalid-noop":
+        (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper)) or after.vaults == before.vaults
+    expect "unseal-effect-and-frame":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.id == old.id and now.keeper == old.keeper and now.glyph == old.glyph and now.charge == old.charge and now.phase == old.phase and not now.sealed))))
+}

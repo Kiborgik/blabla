@@ -1,0 +1,3 @@
+project Simple
+
+use behavior "contracts/behavior/core.bla"

@@ -1,0 +1,81 @@
+type Vault {
+    id: string,
+    keeper: optional<string>,
+    glyph: optional<string>,
+    charge: int,
+    phase: int,
+    sealed: bool,
+    quarantined: bool
+}
+
+state vaults: [Vault]
+
+action bind(vault: string, keeper: string, glyph: string, charge: int)
+action pulse(vault: string, keeper: string, amount: int)
+action rotate(vault: string, keeper: string)
+action transfer(source: string, target: string, keeper: string, amount: int)
+action release(vault: string, keeper: string)
+
+when bind {
+    expect "bind-invalid-noop":
+        (input.charge >= 1 and input.charge <= 9 and any(before.vaults, v => v.id == input.vault and v.keeper == null) and not any(before.vaults, v => v.glyph == input.glyph)) or after.vaults == before.vaults
+    expect "bind-effect-and-frame":
+        not (input.charge >= 1 and input.charge <= 9 and any(before.vaults, v => v.id == input.vault and v.keeper == null) and not any(before.vaults, v => v.glyph == input.glyph)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.id == old.id and now.keeper == input.keeper and now.glyph == input.glyph and now.charge == input.charge and now.phase == 0 and not now.sealed and not now.quarantined))))
+}
+
+when pulse {
+    expect "pulse-invalid-noop":
+        (input.amount >= 0 and input.amount <= 9 and any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and not v.sealed and not v.quarantined)) or after.vaults == before.vaults
+    expect "pulse-effect-and-frame":
+        not (input.amount >= 0 and input.amount <= 9 and any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and not v.sealed and not v.quarantined)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.id == old.id and now.keeper == old.keeper and now.glyph == old.glyph and now.phase == old.phase and now.sealed == old.sealed and ((old.phase == 0 and now.charge == input.amount) or (old.phase == 1 and ((old.charge + input.amount <= 9 and now.charge == old.charge + input.amount) or (old.charge + input.amount > 9 and now.charge == 9))))))))
+}
+
+when rotate {
+    expect "rotate-invalid-noop":
+        (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and not v.sealed)) or after.vaults == before.vaults
+    expect "rotate-effect-and-frame":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and not v.sealed)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.id == old.id and now.keeper == old.keeper and now.glyph == old.glyph and now.sealed == old.sealed and now.phase == 1 - old.phase and ((old.phase == 1 and old.charge > 5 and now.charge == 5) or ((old.phase == 0 or old.charge <= 5) and now.charge == old.charge))))))
+}
+
+when transfer {
+    expect "transfer-invalid-noop":
+        (input.source != input.target and input.amount > 0 and any(before.vaults, source => source.id == input.source and source.keeper != null and source.keeper == input.keeper and not source.sealed and not source.quarantined and source.charge >= input.amount and any(before.vaults, target => target.id == input.target and target.keeper != null and not target.sealed and (not target.quarantined or source.phase == 0) and target.phase != source.phase and target.charge + input.amount <= 9))) or after.vaults == before.vaults
+    expect "transfer-effect-and-frame":
+        not (input.source != input.target and input.amount > 0 and any(before.vaults, source => source.id == input.source and source.keeper != null and source.keeper == input.keeper and not source.sealed and not source.quarantined and source.charge >= input.amount and any(before.vaults, target => target.id == input.target and target.keeper != null and not target.sealed and (not target.quarantined or source.phase == 0) and target.phase != source.phase and target.charge + input.amount <= 9))) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and (now.id == old.id and now.keeper == old.keeper and now.glyph == old.glyph and now.phase == old.phase and now.sealed == old.sealed and ((old.id == input.source and now.charge == old.charge - input.amount) or (old.id == input.target and now.charge == old.charge + input.amount) or (old.id != input.source and old.id != input.target and now.charge == old.charge)))))
+}
+
+when release {
+    expect "release-invalid-noop":
+        (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.charge == 0 and not v.sealed and not v.quarantined)) or after.vaults == before.vaults
+    expect "release-effect-and-frame":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.charge == 0 and not v.sealed and not v.quarantined)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.id == old.id and now.keeper == null and now.glyph == null and now.charge == 0 and now.phase == 0 and not now.sealed))))
+}
+
+always "fixed-vault-registry" {
+    count(vaults) == 3 and unique(vaults, v => v.id) and
+    all(vaults, v => v.id == "A" or v.id == "B" or v.id == "C")
+}
+
+always "charge-and-phase-ranges" {
+    all(vaults, v => v.charge >= 0 and v.charge <= 9 and (v.phase == 0 or v.phase == 1))
+}
+
+always "coherent-binding" {
+    all(vaults, v =>
+        (v.keeper == null and v.glyph == null and v.charge == 0 and v.phase == 0 and not v.sealed) or
+        (v.keeper != null and v.glyph != null))
+}
+
+always "exclusive-glyph" {
+    all(vaults, v => v.glyph == null or all(vaults, other => other.id == v.id or other.glyph != v.glyph))
+}

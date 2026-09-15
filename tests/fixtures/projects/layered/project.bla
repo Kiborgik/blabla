@@ -1,0 +1,14 @@
+project Layered
+
+use structure "contracts/structure/architecture.bla"
+use behavior "contracts/behavior/core.bla"
+draft structure "contracts/structure/next.bla"
+
+verify behavior {
+    command ["python", "app.py", "persistent"]
+    seed 3
+    cases 2
+    steps 12
+    timeout_ms 1000
+    shrink_budget 256
+}

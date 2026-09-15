@@ -1,0 +1,8 @@
+state count: int
+
+action increment()
+action restart()
+
+when increment {
+    expect "increment-adds-one": after.count == before.count + 1
+}

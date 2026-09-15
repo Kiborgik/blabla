@@ -1,0 +1,5 @@
+project Multi
+
+use behavior "contracts/behavior/core.bla"
+use behavior "contracts/behavior/persistence.bla"
+use behavior "contracts/behavior/feature.bla"

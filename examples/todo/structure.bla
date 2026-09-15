@@ -1,0 +1,8 @@
+module app "app.py"
+
+require "storage-class":      symbol app::TodoStorage
+require "application-class":  symbol app::TodoApplication
+require "adapter-class":      symbol app::TodoAdapter
+require "atomic-save":        symbol app::TodoStorage.save
+forbid  "no-network":         dependency app -> "socket"
+forbid  "no-subprocess":      dependency app -> "subprocess"

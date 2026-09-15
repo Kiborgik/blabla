@@ -1,0 +1,59 @@
+type Todo {
+    id: int,
+    text: string,
+    done: bool
+}
+
+state todos: [Todo]
+
+action add(text: string)
+action complete(id: int)
+action remove(id: int)
+action restart()
+
+when add {
+    expect "empty-add-noop":
+        input.text != "" or after.todos == before.todos
+    expect "add-count":
+        input.text == "" or count(after.todos) == count(before.todos) + 1
+    expect "added-todo":
+        input.text == "" or any(after.todos, t =>
+            t.text == input.text and not t.done and
+            not any(before.todos, old => old.id == t.id))
+    expect "add-preserves-existing":
+        all(before.todos, old => any(after.todos, t => t == old))
+}
+
+when complete {
+    expect "complete-count": count(after.todos) == count(before.todos)
+    expect "complete-updates-only-target":
+        all(before.todos, old => any(after.todos, t =>
+            t.id == old.id and t.text == old.text and
+            ((old.id == input.id and t.done) or
+             (old.id != input.id and t.done == old.done))))
+    expect "missing-complete-noop":
+        any(before.todos, t => t.id == input.id) or after.todos == before.todos
+}
+
+when remove {
+    expect "removed-todo": not any(after.todos, t => t.id == input.id)
+    expect "remove-preserves-others":
+        all(before.todos, old => old.id == input.id or
+            any(after.todos, t => t == old))
+    expect "remove-introduces-nothing":
+        all(after.todos, t => any(before.todos, old => old == t))
+    expect "missing-remove-noop":
+        any(before.todos, t => t.id == input.id) or after.todos == before.todos
+}
+
+when restart {
+    expect "persistence": after.todos == before.todos
+}
+
+always "unique-ids" {
+    unique(todos, t => t.id)
+}
+
+never "empty-text" {
+    any(todos, t => t.text == "")
+}

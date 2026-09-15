@@ -1,0 +1,7 @@
+action restart()
+
+when restart {
+    expect "restart-durable-fields-and-zero-phase":
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and now.keeper == old.keeper and now.glyph == old.glyph and now.charge == old.charge and now.sealed == old.sealed and now.phase == 0))
+}

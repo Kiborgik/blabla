@@ -1,0 +1,9 @@
+Add echo to Glyph Vault.
+
+Echo passes resonance from one vault to another. It must integrate correctly with the resonance rules, vault phases, sealing, quarantine and the existing transfer rules.
+
+Preserve all existing behavior and architecture.
+
+Implement the feature completely and verify your work. When you believe the application is correct, stop.
+
+Execution notes: work only inside the current directory; use `python` for Python; do not install packages, use the network, or ask for hints.

@@ -1,0 +1,5 @@
+state count: string
+
+when increment {
+    expect "count-is-text": after.count != ""
+}

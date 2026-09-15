@@ -1,0 +1,395 @@
+{
+  "name": "haiku-handoff-benchmark",
+  "frozen_at_utc": "2026-09-14T09:42:59Z",
+  "research_question": "Can BlaBla preserve correctness across repeated fresh-agent handoffs while reducing the project context and rediscovery work each new agent requires?",
+  "model": {
+    "id": "claude-haiku-4-5-20251001",
+    "claude_code_version": "2.1.270 (Claude Code)",
+    "flags": [
+      "--model",
+      "claude-haiku-4-5-20251001",
+      "--safe-mode",
+      "--strict-mcp-config",
+      "--no-session-persistence",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--permission-mode",
+      "acceptEdits",
+      "--permission-prompts",
+      "none",
+      "--max-budget-usd",
+      "10"
+    ],
+    "allowed_tools": [
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(py *)",
+      "Bash(blabla *)",
+      "Bash(blabla.exe *)",
+      "Bash(ls *)",
+      "Bash(dir *)",
+      "Bash(cat *)",
+      "Bash(type *)",
+      "Bash(find *)",
+      "Bash(pwd)",
+      "Bash(cd *)",
+      "Bash(Get-ChildItem *)",
+      "Bash(Get-Content *)",
+      "Bash(Get-Location)",
+      "Bash(Set-Location *)",
+      "Bash(echo *)",
+      "Bash(Write-Output *)",
+      "PowerShell(python *)",
+      "PowerShell(python3 *)",
+      "PowerShell(py *)",
+      "PowerShell(blabla *)",
+      "PowerShell(blabla.exe *)",
+      "PowerShell(ls *)",
+      "PowerShell(dir *)",
+      "PowerShell(cat *)",
+      "PowerShell(type *)",
+      "PowerShell(find *)",
+      "PowerShell(pwd)",
+      "PowerShell(cd *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Get-Location)",
+      "PowerShell(Set-Location *)",
+      "PowerShell(echo *)",
+      "PowerShell(Write-Output *)"
+    ],
+    "effort": "default (flag unset)",
+    "system_prompt": "Claude Code default under --safe-mode: no user CLAUDE.md, skills, plugins, hooks or MCP servers",
+    "wall_clock_seconds": 2400,
+    "max_budget_usd_per_session": 10,
+    "max_budget_usd_total": 40,
+    "tool_timeout_ms": 600000
+  },
+  "conditions": [
+    "A",
+    "B",
+    "C"
+  ],
+  "stages": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "execution_order": {
+    "A": [
+      "A1",
+      "A2",
+      "A3",
+      "A4"
+    ],
+    "B": [
+      "B1",
+      "B2",
+      "B3",
+      "B4"
+    ],
+    "C": [
+      "C1",
+      "C2",
+      "C3",
+      "C4"
+    ]
+  },
+  "parallel_chains": "the three conditions run as independent concurrent chains (owner ruling 2026-09-14); stage N+1 of a chain starts as soon as stage N's subject has stopped; measure and score of stage N run concurrently with stage N+1's subject, scoring ordered within a chain; wall-clock columns therefore include contention between chains and scorers",
+  "fresh_context_every_stage": true,
+  "branch_continuity": "stage N+1 of a condition starts from the exact final tree of stage N of the same condition; caches removed; for Condition C the controller-owned contracts are audited (hashes before and after every subject, tampering recorded as an intent-drift event with diffs), any subject contract edit is discarded, and the stage's authoritative contracts are re-landed; application and other source changes are preserved",
+  "stage_3_interpretation": "BlaBla may be GREEN at the start of Stage 3; GREEN is behavioral completion only, the architecture scorer decides whether the refactor happened; no structure layer is added",
+  "template_sha256": {
+    "architecture.md": "cd098d3386a9e1446e646a7f3b0056f665f494e9efe773a44381d2d84d46afb8",
+    "glyph_vault/domain.py": "398189114e47cb224a4c52a6d708719e6f070e0e258093e965e9491430af5d44",
+    "glyph_vault/main.py": "eef1ca5d92a9ab683eb2459839b15cf0b098c6369eae7ef78ec13ea243e244cc",
+    "glyph_vault/model.py": "2fc79b9ba8b0bbcdc11b15a559bc9239248c043bdabeda76884902aa37205481",
+    "glyph_vault/protocol.py": "2e6ecd01c515bc5610aa6b586b1de12660930c3a591faf4945ca1ed2e6ca9c8d",
+    "glyph_vault/store.py": "2fe13e3012a471a4d69fc924650d84c9901c7973f28a979cfcc79367df13e8b9"
+  },
+  "template_c_sha256": {
+    ".agents/skills/blabla/SKILL.md": "a6c8c91b2881a6f5068eb885c69e472c28a7933f8c3743b5d623f48b7f40fec4",
+    "AGENTS.md": "5f4a1b81ed84df33a5aeefef5db96c95d7d4fdff8b043157d54ce3b2fc492cd9",
+    "architecture.md": "cd098d3386a9e1446e646a7f3b0056f665f494e9efe773a44381d2d84d46afb8",
+    "contracts/behavior/core.bla": "6014f63a47c15bab8f03b8e286d19ea24725c45f026f6d63660772abde89dfb6",
+    "contracts/behavior/persistence.bla": "e4e56ad7cfb7d1bad1feadc741e03be8a2aedc54ed2cd75ce5af92e00be6e331",
+    "contracts/behavior/quarantine.bla": "c9f0d0187633b34823114b3855e49db760524a3988f5d410be042a9f42feac0e",
+    "contracts/behavior/sealing.bla": "c6dd7b0f26b44983f40dd1867cc8f7328e5f098d6634624be3c22cd6aeedb12d",
+    "glyph_vault/domain.py": "398189114e47cb224a4c52a6d708719e6f070e0e258093e965e9491430af5d44",
+    "glyph_vault/main.py": "eef1ca5d92a9ab683eb2459839b15cf0b098c6369eae7ef78ec13ea243e244cc",
+    "glyph_vault/model.py": "2fc79b9ba8b0bbcdc11b15a559bc9239248c043bdabeda76884902aa37205481",
+    "glyph_vault/protocol.py": "2e6ecd01c515bc5610aa6b586b1de12660930c3a591faf4945ca1ed2e6ca9c8d",
+    "glyph_vault/store.py": "2fe13e3012a471a4d69fc924650d84c9901c7973f28a979cfcc79367df13e8b9",
+    "project.bla": "046a81bc88a4a9a8e99e33fcd65202664f5077303cdffc051645834d5cf9604f"
+  },
+  "contracts_sha256": {
+    "0": {
+      "core.bla": "6014f63a47c15bab8f03b8e286d19ea24725c45f026f6d63660772abde89dfb6",
+      "persistence.bla": "e4e56ad7cfb7d1bad1feadc741e03be8a2aedc54ed2cd75ce5af92e00be6e331",
+      "project.bla": "046a81bc88a4a9a8e99e33fcd65202664f5077303cdffc051645834d5cf9604f",
+      "quarantine.bla": "c9f0d0187633b34823114b3855e49db760524a3988f5d410be042a9f42feac0e",
+      "sealing.bla": "c6dd7b0f26b44983f40dd1867cc8f7328e5f098d6634624be3c22cd6aeedb12d"
+    },
+    "1": {
+      "core.bla": "0c328f759f82ffa9b29b75013a9341851158d73903fdc4ab3a4ce1912ec3bb5c",
+      "persistence.bla": "e4e56ad7cfb7d1bad1feadc741e03be8a2aedc54ed2cd75ce5af92e00be6e331",
+      "project.bla": "98017eb537f2d4c6a65ca1af014c9be58176d98f661f903cae5d494e6dbfdf94",
+      "quarantine.bla": "c9f0d0187633b34823114b3855e49db760524a3988f5d410be042a9f42feac0e",
+      "resonance.bla": "b82cbe7bf77ccbed38fafb860812329ebcf963b5e51b4a20980fd78c01a07003",
+      "sealing.bla": "c6dd7b0f26b44983f40dd1867cc8f7328e5f098d6634624be3c22cd6aeedb12d"
+    },
+    "2": {
+      "core.bla": "0c328f759f82ffa9b29b75013a9341851158d73903fdc4ab3a4ce1912ec3bb5c",
+      "echo.bla": "291d186114a62834b3d88595936d67dbd3f0b9293c6224ab869d2dfac2b4ed1c",
+      "persistence.bla": "e4e56ad7cfb7d1bad1feadc741e03be8a2aedc54ed2cd75ce5af92e00be6e331",
+      "project.bla": "4aea58692521abc6dc26e4d3d71d1878912d90c38a9d5f639d82c4138f5c5637",
+      "quarantine.bla": "c9f0d0187633b34823114b3855e49db760524a3988f5d410be042a9f42feac0e",
+      "resonance.bla": "b82cbe7bf77ccbed38fafb860812329ebcf963b5e51b4a20980fd78c01a07003",
+      "sealing.bla": "c6dd7b0f26b44983f40dd1867cc8f7328e5f098d6634624be3c22cd6aeedb12d"
+    },
+    "3": {
+      "core.bla": "0c328f759f82ffa9b29b75013a9341851158d73903fdc4ab3a4ce1912ec3bb5c",
+      "echo.bla": "291d186114a62834b3d88595936d67dbd3f0b9293c6224ab869d2dfac2b4ed1c",
+      "persistence.bla": "e4e56ad7cfb7d1bad1feadc741e03be8a2aedc54ed2cd75ce5af92e00be6e331",
+      "project.bla": "4aea58692521abc6dc26e4d3d71d1878912d90c38a9d5f639d82c4138f5c5637",
+      "quarantine.bla": "c9f0d0187633b34823114b3855e49db760524a3988f5d410be042a9f42feac0e",
+      "resonance.bla": "b82cbe7bf77ccbed38fafb860812329ebcf963b5e51b4a20980fd78c01a07003",
+      "sealing.bla": "c6dd7b0f26b44983f40dd1867cc8f7328e5f098d6634624be3c22cd6aeedb12d"
+    },
+    "4": {
+      "core.bla": "0c328f759f82ffa9b29b75013a9341851158d73903fdc4ab3a4ce1912ec3bb5c",
+      "echo.bla": "291d186114a62834b3d88595936d67dbd3f0b9293c6224ab869d2dfac2b4ed1c",
+      "persistence.bla": "e4e56ad7cfb7d1bad1feadc741e03be8a2aedc54ed2cd75ce5af92e00be6e331",
+      "project.bla": "e4e4406a1be46e008ad40346e7b917ccbe53786f44923000b530a852448a1ed2",
+      "quarantine.bla": "c9f0d0187633b34823114b3855e49db760524a3988f5d410be042a9f42feac0e",
+      "recovery.bla": "b9d008a84759ad8b1f283cebc3f05dfd4d3f46ddd3e4e4a819581f0f28d0f594",
+      "resonance.bla": "b82cbe7bf77ccbed38fafb860812329ebcf963b5e51b4a20980fd78c01a07003",
+      "sealing.bla": "c6dd7b0f26b44983f40dd1867cc8f7328e5f098d6634624be3c22cd6aeedb12d"
+    }
+  },
+  "reference_sha256": {
+    "0": {
+      "domain.py": "398189114e47cb224a4c52a6d708719e6f070e0e258093e965e9491430af5d44",
+      "main.py": "eef1ca5d92a9ab683eb2459839b15cf0b098c6369eae7ef78ec13ea243e244cc",
+      "model.py": "2fc79b9ba8b0bbcdc11b15a559bc9239248c043bdabeda76884902aa37205481",
+      "protocol.py": "2e6ecd01c515bc5610aa6b586b1de12660930c3a591faf4945ca1ed2e6ca9c8d",
+      "store.py": "2fe13e3012a471a4d69fc924650d84c9901c7973f28a979cfcc79367df13e8b9"
+    },
+    "1": {
+      "domain.py": "cec77fdce83c34040555e52a492ce4c7afffc5cda8eedbaa92087784927f4425",
+      "main.py": "eef1ca5d92a9ab683eb2459839b15cf0b098c6369eae7ef78ec13ea243e244cc",
+      "model.py": "ffbc53518e6c1a4fd138823f0dca4753a77803fcbfd85c83509232531ba52d58",
+      "protocol.py": "dac330326ba1190ef2eb7ed59dcd370235af682af38f31c7ce8a06b89670808d",
+      "store.py": "2fe13e3012a471a4d69fc924650d84c9901c7973f28a979cfcc79367df13e8b9"
+    },
+    "2": {
+      "domain.py": "c2c58975b6e2e62349ca253d0c73fb60838b1bd57b0fb2f35feecb54d231794f",
+      "main.py": "eef1ca5d92a9ab683eb2459839b15cf0b098c6369eae7ef78ec13ea243e244cc",
+      "model.py": "ffbc53518e6c1a4fd138823f0dca4753a77803fcbfd85c83509232531ba52d58",
+      "protocol.py": "482e68c03f63420f03d09a6287b15424e8c2aba0804e37a558193f22f97d4fc2",
+      "store.py": "2fe13e3012a471a4d69fc924650d84c9901c7973f28a979cfcc79367df13e8b9"
+    },
+    "3": {
+      "domain.py": "c2c58975b6e2e62349ca253d0c73fb60838b1bd57b0fb2f35feecb54d231794f",
+      "main.py": "eef1ca5d92a9ab683eb2459839b15cf0b098c6369eae7ef78ec13ea243e244cc",
+      "model.py": "5f0b7cb0932441417279ca86fc987073ab912196911517e92c271542b95063c9",
+      "protocol.py": "482e68c03f63420f03d09a6287b15424e8c2aba0804e37a558193f22f97d4fc2",
+      "store.py": "d044685a8cfcbf7e924bf7608bf46ea100887c4682dd84f3b0d86f6055a606bc"
+    },
+    "4": {
+      "domain.py": "8f0a19a67e9b7916ad5cc5c4465a9adb5fb1d70e4e907438fd1042f2df1fddbc",
+      "main.py": "eef1ca5d92a9ab683eb2459839b15cf0b098c6369eae7ef78ec13ea243e244cc",
+      "model.py": "5f0b7cb0932441417279ca86fc987073ab912196911517e92c271542b95063c9",
+      "protocol.py": "b4c708c9d95ff880ac2b7d304746e5aa2316d52c1c8e042a3d2d63f5bc258558",
+      "store.py": "d044685a8cfcbf7e924bf7608bf46ea100887c4682dd84f3b0d86f6055a606bc"
+    }
+  },
+  "packages_sha256": {
+    "stage-1/B-summary.md": "f5e0c2b760402e3c218d0a9afc9d7176f03f3eed4829610f63757cd8521fc1bd",
+    "stage-1/prompt-A.txt": "dbe2923fe2daa849783f1b4544c2982b7e99b3bcfd53ebe1bb9fd833fac4dd14",
+    "stage-1/prompt-B.txt": "5634798047e1ae52fe1e5faa0052b686e2b916dc5d1663636c4c61c17f17c434",
+    "stage-1/prompt-C.txt": "0a200c2d7c4f897e6e95980db817a5cf579c80b33064b30b5a5a55145efe786d",
+    "stage-1/task.txt": "08caae979f93d76f8a2f53491d70d77d3eca2f4c332a23b4076aa384565e3fc8",
+    "stage-2/B-summary.md": "78966f7ebb3c391475d193c73876086ece2b7f4b26f48059ad9b6ffb88b6065e",
+    "stage-2/prompt-A.txt": "a1f631faa9a9dca5a05ecc1375db73cd83842d3de8f401726d5196a27b9b9c32",
+    "stage-2/prompt-B.txt": "1fbc48d059e5d1abcaea2225f2062df7ab93209d29969fffb08d03d54d8d6f3c",
+    "stage-2/prompt-C.txt": "a1167740f7239be2c87ab712e8e9f1c53422e3d8ef8adee6b7aefe8c79f66c1a",
+    "stage-2/task.txt": "ae7a656ab0ad421570d3514cbafa5b5de46612f73493844e7d1bc208b4bf0e22",
+    "stage-3/B-summary.md": "5a99d19df613ff244da4144137456e0b800650fee82662bc030b39402b3643a3",
+    "stage-3/prompt-A.txt": "735b78f5f926d191315bd2f45399bbfcc7b20786b90a002375658b21bb0a9601",
+    "stage-3/prompt-B.txt": "93b7d8cb5845742b234f4b0e1fe79229a11d43a9e7340a777859230b3088d8e3",
+    "stage-3/prompt-C.txt": "4b891ccc32a7c3faebe0443b65ecd25fda4f539512417d3266537d3b4e347b76",
+    "stage-3/task.txt": "3ee558dd0726709d6b045361dd678d1f8722759c8c74ac14a657544208b2a297",
+    "stage-4/B-summary.md": "ab1bfc2839882be1d0f32188640874adff15791fe404c46c172c0fd68ab19f4f",
+    "stage-4/prompt-A.txt": "97fbd1cac2a699cb900507630de812a88d909564e5578c28a3b8410861024a34",
+    "stage-4/prompt-B.txt": "959f2887e28e6ab5d8cf1f0ff651dac0c8d029b71e93aad0515911f97fd78756",
+    "stage-4/prompt-C.txt": "1418b147530f362d8daea3367e7d46d38003906bd78c0f937d3469be390cbf8f",
+    "stage-4/task.txt": "eb240b0ff0a2822f65b9f11c4bb5adc42f1e648882f076c494fe272009fe7ba0",
+    "C-AGENTS.md": "5f4a1b81ed84df33a5aeefef5db96c95d7d4fdff8b043157d54ce3b2fc492cd9"
+  },
+  "requirements_sha256": {
+    "core-and-sealing.md": "437f470edc967cbff0952db41473df0b948c27e31bba2da3ef89b8a23038a61d",
+    "decisions-base.md": "1e0f99dc7a0ddb7adc6a3ee9a39dfb7ff09aa5981d2ced3defe492ba376f01ab",
+    "decisions-echo.md": "bf572fee925c2ccb80045590824df43abe7261d3327d92770fc0e6d98b2aecad",
+    "decisions-persistence.md": "7582f3696fcf239f2ae35ea8f702a9811dcc960856116315a972cc1feac4a5ce",
+    "decisions-recovery.md": "c840c13068a724e98c603a289b25145291513fd51bb8740549a79b4419b09fbf",
+    "decisions-resonance.md": "103f342b1a33d8ac742745ce7550bcf724b7348fa0ede89ec620039c5925c0ad",
+    "echo.md": "c8c060c5d1d5895d880cf518bef7e6385ec4259c8aed457c0b6c0cc332fd3797",
+    "persistence-refactor.md": "17aee2f1754134adaeae9c99e3752bd2a7b09e33a6b934bb1966e8ef71e0bdf2",
+    "quarantine.md": "a21a698dd3755bc1c9cf4e46117272c8743591cf1be5f7483cb81d85e86d4d9c",
+    "recovery.md": "5b475bdcc2744dfdebeae763a36f041a8be19edfeea38c9aea5bc041d8d65adf",
+    "resonance.md": "d882f40b25ad16e59394186820ddc93c0206549801d6dc50415af4243ad0eee6"
+  },
+  "architecture_sha256": "cd098d3386a9e1446e646a7f3b0056f665f494e9efe773a44381d2d84d46afb8",
+  "scoring_sha256": {
+    "test_architecture.py": "a1201f961349da5229e5c43fa99329c7f194c0e778849cfd5ec7ca24d36c12d9",
+    "test_behavior.py": "9a81ace726a1ce5df3cd73ce3d94a72eaae81d09a5c2c8e6f6874f3c29bfd072",
+    "test_echo.py": "c06e36d743dcfb6e82038ce38c1e548f731c1f4bcc7347bf9e57d4bfe6ea77bf",
+    "test_quarantine.py": "c3f1271cac507dbe83051b221c569ed62a7d2a805c68f67906d91661be9bfdce",
+    "test_recovery.py": "08d512fd54da372a4ad9aee1b8b091d51da0f0bde6941dfb73df37a7141997ed",
+    "test_resonance.py": "a5c9b2d8400f71de85701bbea987572fda21e2a41b7c40f4b1077a14b43a3ad2",
+    "test_sealing.py": "e70b95605fcd5059ce97b78a0178cc9cd720dd3910a07dcfd1e17ef1fcaa71e8",
+    "driver.py": "e3322ccfe7a81ba593a5d1ec80554bf1bb25672c8a4bbf3797a4bea0a2b01ab1"
+  },
+  "scorer_files_by_stage": {
+    "1": [
+      "test_behavior.py",
+      "test_sealing.py",
+      "test_quarantine.py",
+      "test_resonance.py"
+    ],
+    "2": [
+      "test_behavior.py",
+      "test_sealing.py",
+      "test_quarantine.py",
+      "test_resonance.py",
+      "test_echo.py"
+    ],
+    "3": [
+      "test_behavior.py",
+      "test_sealing.py",
+      "test_quarantine.py",
+      "test_resonance.py",
+      "test_echo.py"
+    ],
+    "4": [
+      "test_behavior.py",
+      "test_sealing.py",
+      "test_quarantine.py",
+      "test_resonance.py",
+      "test_echo.py",
+      "test_recovery.py"
+    ]
+  },
+  "prompts": {
+    "A": {
+      "1": {
+        "sha256": "f5dd7bb3c1182ed35f505120bb8c86061bbd797d6ac25017454a52bab3668f34",
+        "bytes": 15480,
+        "lines": 254
+      },
+      "2": {
+        "sha256": "e746c2ca6e38e85e44bac605b70f670c8175f378b5adb4d8b54f9848a312d83f",
+        "bytes": 17084,
+        "lines": 283
+      },
+      "3": {
+        "sha256": "3f86348d25790de2700c19d64580d9131433feb191a15fc5175337f90219e4e3",
+        "bytes": 18605,
+        "lines": 300
+      },
+      "4": {
+        "sha256": "9b3e12d48e2ce1f19f8f286c505a04a8e04ec3289ff3215484ba90c2509b070f",
+        "bytes": 20578,
+        "lines": 341
+      }
+    },
+    "B": {
+      "1": {
+        "sha256": "02e7fcee31a16dbdb52e36e6fd12725a7f7543f94b1b529087672f508e8bf389",
+        "bytes": 4897,
+        "lines": 75
+      },
+      "2": {
+        "sha256": "02f2adc3c4478927a7c2f6e12f30a694b679352e77f4d744d6df93e05cab41dc",
+        "bytes": 5248,
+        "lines": 80
+      },
+      "3": {
+        "sha256": "95b183bdd84e5e3cc1040e83414bc4ef651f45549d4f8902bce7d148c1f32f2d",
+        "bytes": 6063,
+        "lines": 82
+      },
+      "4": {
+        "sha256": "d4f1c712faa0c9cde86af8b0bcb7338fad5e4653475e021cb9edbca6eb44cac5",
+        "bytes": 6260,
+        "lines": 93
+      }
+    },
+    "C": {
+      "1": {
+        "sha256": "0f875af7bdc3ec5eac36e23974ab137d597469e47dcf50f6f8617b621bc9d6ad",
+        "bytes": 1102,
+        "lines": 38
+      },
+      "2": {
+        "sha256": "6ea2327b13db8b6e20024441e58831e5e0fd25be066fc61407de11329e80d450",
+        "bytes": 1021,
+        "lines": 38
+      },
+      "3": {
+        "sha256": "3c156038e158a4aae1e13c61365a92310660cb595989211671c5891fe216a970",
+        "bytes": 1528,
+        "lines": 38
+      },
+      "4": {
+        "sha256": "6a58408139e2a52c335514c0d6b40cb63f76c288bdd9c94d028c9a433dbc6489",
+        "bytes": 1064,
+        "lines": 38
+      }
+    }
+  },
+  "b_summary_metrics": {
+    "1": {
+      "bytes": 4314,
+      "lines": 63
+    },
+    "2": {
+      "bytes": 4746,
+      "lines": 68,
+      "lines_added": 29,
+      "lines_removed": 24
+    },
+    "3": {
+      "bytes": 5054,
+      "lines": 70,
+      "lines_added": 12,
+      "lines_removed": 10
+    },
+    "4": {
+      "bytes": 5715,
+      "lines": 81,
+      "lines_added": 24,
+      "lines_removed": 13
+    }
+  },
+  "canonical_profile": "verify behavior{\n    command [\"python\", \"glyph_vault/main.py\"]\n    seed 2\n    cases 1\n    steps 4096\n    timeout_ms 1000\n    shrink_budget 256\n}",
+  "blabla": {
+    "binary_sha256": "748214ac20718fcf83a3dc23e3d521c048014f0a3da9a1e1b224a106c2415988",
+    "version": "blabla 0.4.1"
+  },
+  "python": "3.14.7 (tags/v3.14.7:823f032, Aug  5 2026, 10:51:32) [MSC v.1944 64 bit (AMD64)]",
+  "python_executable": "C:\\Python314\\python.exe",
+  "controller_sha256": "e225b3dd961e517fc236a051c2e794222a9726cb3b628437f0d096b75a68c612",
+  "validation": "prep/validation.json",
+  "invalidity": [
+    "model id, Claude Code flags, allowed tools or budgets differ from the manifest",
+    "controller.py, a stage contract, a stage reference, a package, a requirements file, a scorer, the driver or the blabla binary hash differs from the manifest",
+    "a workspace is touched by anyone but the subject between prepare and run, or a stage does not start from the previous stage's final tree of the same condition",
+    "a run directory is reused, resumed or continued after the subject stopped",
+    "a subject receives any hint, fix, file pointer or interpretation from the controller or a human, or a branch is repaired between stages",
+    "the canonical profile in the stage manifests or the controller's diagnostic campaign differs from the frozen profile"
+  ]
+}

@@ -1,0 +1,12 @@
+state count: int
+
+action increment()
+action restart()
+
+when increment {
+    expect "server-increment": after.count == before.count + 1
+}
+
+when restart {
+    expect "server-persistence": after.count == before.count
+}

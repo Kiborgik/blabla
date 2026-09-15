@@ -1,0 +1,7 @@
+state count: int
+
+when increment {
+    expect "increment-grows": after.count > before.count
+}
+
+always "non-negative" { count >= 0 }

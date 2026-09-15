@@ -1,0 +1,16 @@
+project GlyphVault
+
+use behavior "contracts/behavior/core.bla"
+use behavior "contracts/behavior/persistence.bla"
+use behavior "contracts/behavior/sealing.bla"
+use behavior "contracts/behavior/quarantine.bla"
+use behavior "contracts/behavior/resonance.bla"
+
+verify behavior {
+    command ["python", "glyph_vault/main.py"]
+    seed 2
+    cases 1
+    steps 4096
+    timeout_ms 1000
+    shrink_budget 256
+}

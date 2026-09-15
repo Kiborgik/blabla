@@ -1,0 +1,4 @@
+project Collision
+
+use behavior "contracts/behavior/core.bla"
+use behavior "contracts/behavior/other.bla"

@@ -1,0 +1,13 @@
+action recover(vault: string, keeper: string)
+
+when recover {
+    expect "recover-invalid-noop":
+        (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.quarantined and v.resonance >= 3)) or after.vaults == before.vaults
+    expect "recover-effect-and-frame":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.quarantined and v.resonance >= 3)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.keeper == old.keeper and now.glyph == old.glyph and now.charge == old.charge and now.sealed == old.sealed and not now.quarantined and now.phase == 0 and now.resonance == 0))))
+    expect "recover-does-not-cap-charge":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.quarantined and v.resonance >= 3 and v.phase == 1 and v.charge > 5)) or
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and (old.id != input.vault or (now.charge == old.charge and now.phase == 0 and not now.quarantined))))
+}

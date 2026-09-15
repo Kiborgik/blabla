@@ -1,0 +1,57 @@
+name: Feature or language proposal
+description: A capability BlaBla is missing, including new contract syntax or a new structure fact
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful shape for this issue is **the contract you could not write**. Start there
+        rather than with a proposed syntax.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you could not express
+      description: The project intent you wanted to capture, and what happened when you tried.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: The contract you wanted to write
+      description: Sketch it, even informally. Say whether it is behavior or structure and why.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance case
+      description: >-
+        An executable case showing why the new primitive is needed: a project that must be RED
+        under the proposed rule and GREEN after the fix, which nothing in the current language
+        can distinguish. A language change is only accepted with one of these.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: >-
+        At least one alternative and why it does not work — an existing primitive, a differently
+        shaped contract, or solving it outside BlaBla (a test, a linter, a review rule).
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      options:
+        - behavior contracts
+        - structure contracts
+        - project composition / completion gate
+        - CLI or agent workflow
+        - a new language provider
+        - other
+    validations:
+      required: true

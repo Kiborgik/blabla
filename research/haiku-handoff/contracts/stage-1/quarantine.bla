@@ -1,0 +1,74 @@
+action quarantine(vault: string, keeper: string)
+action clear_quarantine(vault: string, keeper: string)
+
+when quarantine {
+    expect "quarantine-invalid-noop":
+        (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.phase == 1 and (v.charge == 1 or v.charge == 3 or v.charge == 5 or v.charge == 7 or v.charge == 9) and not v.sealed and not v.quarantined)) or after.vaults == before.vaults
+    expect "quarantine-effect-and-frame":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.phase == 1 and (v.charge == 1 or v.charge == 3 or v.charge == 5 or v.charge == 7 or v.charge == 9) and not v.sealed and not v.quarantined)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.keeper == old.keeper and now.glyph == old.glyph and now.charge == old.charge and now.phase == old.phase and now.sealed == old.sealed and now.quarantined))))
+}
+
+when clear_quarantine {
+    expect "clear-quarantine-invalid-noop":
+        (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper)) or after.vaults == before.vaults
+    expect "clear-quarantine-effect-and-frame":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.keeper == old.keeper and now.glyph == old.glyph and now.charge == old.charge and now.phase == old.phase and now.sealed == old.sealed and not now.quarantined))))
+}
+
+when rotate {
+    expect "rotate-quarantine-parity":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and not v.sealed)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and (old.id != input.vault or now.quarantined == (old.quarantined and (now.charge == 1 or now.charge == 3 or now.charge == 5 or now.charge == 7 or now.charge == 9)))))
+    expect "rotate-return-cap-preserves-quarantine":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and not v.sealed and v.quarantined and v.phase == 1 and (v.charge == 6 or v.charge == 8))) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and (old.id != input.vault or (now.charge == 5 and now.quarantined))))
+}
+
+when bind {
+    expect "bind-keeps-quarantine":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.quarantined == old.quarantined))
+}
+
+when pulse {
+    expect "pulse-keeps-quarantine":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.quarantined == old.quarantined))
+}
+
+when transfer {
+    expect "transfer-keeps-quarantine":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.quarantined == old.quarantined))
+}
+
+when release {
+    expect "release-keeps-quarantine":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.quarantined == old.quarantined))
+}
+
+when seal {
+    expect "seal-keeps-quarantine":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.quarantined == old.quarantined))
+}
+
+when unseal {
+    expect "unseal-keeps-quarantine":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.quarantined == old.quarantined))
+}
+
+when restart {
+    expect "quarantine-survives-restart":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.quarantined == old.quarantined))
+}
+
+always "unbound-never-quarantined" {
+    all(vaults, v => v.keeper != null or not v.quarantined)
+}
+
+always "quarantine-excludes-seal" {
+    all(vaults, v => not (v.sealed and v.quarantined))
+}

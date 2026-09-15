@@ -1,0 +1,14 @@
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#eef2ff","primaryTextColor":"#0f172a","primaryBorderColor":"#4338ca","lineColor":"#0f172a","secondaryColor":"#f1f5f9","tertiaryColor":"#f8fafc","clusterBkg":"#f8fafc","clusterBorder":"#64748b","edgeLabelBackground":"#ffffff"},"themeCSS":".edgePath path.path, path.flowchart-link { stroke-width: 3px; } marker path { fill: #0f172a; stroke: #0f172a; } .node rect, .node polygon, .node circle { stroke-width: 2px; }"}}%%
+flowchart TD
+    accTitle: BlaBla concept
+    accDescr: Human intent is written into executable project memory, a project manifest with behavior and structure contracts. A coding agent reads that memory through blabla status and explain, writes an ordinary implementation, and runs blabla finish, which verifies both layers and reports OVERALL GREEN only when every active contract is satisfied.
+    intent["Human intent<br/>requirements, decisions, architecture"]
+    memory["Executable project memory<br/>project.bla<br/>behavior.bla + structure.bla"]
+    agent["Coding agent<br/>blabla status → explain"]
+    implementation["Ordinary implementation<br/>any language behind a JSON Lines adapter"]
+    finish["blabla finish<br/>structure check + behavior campaign"]
+    green["OVERALL GREEN<br/>completion allowed"]
+    blocked["BLOCKED<br/>RED, YELLOW, STALE or INTERRUPTED"]
+    intent --> memory --> agent --> implementation --> finish
+    finish --> green
+    finish --> blocked --> agent

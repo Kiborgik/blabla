@@ -1,0 +1,341 @@
+Add resonance recovery to Glyph Vault.
+
+A quarantined vault that has gathered enough resonance can recover from quarantine. Recovery must integrate correctly with the resonance rules, quarantine, sealing, vault phases and process restart.
+
+Preserve all existing behavior and architecture.
+
+Implement the feature completely and verify your work. When you believe the application is correct, stop.
+
+Execution notes: work only inside the current directory; use `python` for Python; do not install packages, use the network, or ask for hints.
+
+---
+
+# Project context
+
+# Glyph Vault: behavioral requirements
+
+Glyph Vault has exactly three vaults with case-sensitive IDs `A`, `B`, and `C`.
+No action creates or removes a vault. Unknown vault IDs make domain actions exact no-ops.
+Each observation contains `vaults`, a list of records with `id`, `keeper`, `glyph`,
+`charge`, and `phase`. Keeper and glyph are nullable strings. Charge is an integer
+from 0 through 9. Phase is either 0 or 1. All strings, including empty strings,
+whitespace, and Unicode, are valid keeper/glyph tokens. Null means absence; an empty
+string does not mean absence. Inputs are the declared string and JSON-safe integer types.
+
+An unbound vault has null keeper and glyph, zero charge, and phase 0. A bound vault
+has non-null keeper and glyph; its charge may be zero. Every non-null glyph is held
+by at most one vault. These constraints hold after reset and every operation.
+
+All failing domain operations are exact no-ops: no field or list ordering changes.
+On a successful operation, every field and every other vault not explicitly affected
+below is preserved. List order on successful operations is not otherwise constrained.
+
+- `bind(vault, keeper, glyph, charge)` requires an existing unbound vault, a glyph
+  not held by another vault, and charge from 1 through 9 inclusive. It sets the supplied
+  keeper, glyph, and charge and sets phase to 0. Otherwise it is an exact no-op.
+- `pulse(vault, keeper, amount)` requires a bound vault, matching keeper, and amount
+  from 0 through 9 inclusive. In phase 0 it replaces charge with amount. In phase 1
+  it adds amount to charge, capped at 9. Otherwise it is an exact no-op.
+- `rotate(vault, keeper)` requires a bound vault and matching keeper. It toggles phase.
+  When the old phase was 1 and the new phase is 0, charge greater than 5 becomes 5.
+  In every other case charge is unchanged. Wrong keeper/unbound/unknown is an exact no-op.
+- `transfer(source, target, keeper, amount)` requires distinct existing bound vaults,
+  keeper matching the source keeper, different source/target phases, positive amount,
+  enough source charge, and room for the full amount at the target without exceeding 9.
+  If all conditions hold, subtract amount from source and add it to target atomically.
+  Target ownership need not match the supplied keeper. If any condition fails, neither
+  vault nor anything else may change. Partial transfer, partial debit, and clipping
+  the amount are not permitted.
+- `release(vault, keeper)` requires a bound vault, matching keeper, and charge zero.
+  It clears keeper and glyph, leaves charge zero, and resets phase to 0. Otherwise
+  it is an exact no-op.
+- Trusted process `restart` terminates the process and launches a fresh process using
+  the same data directory, without reset. It preserves every vault's ID, keeper,
+  glyph, and charge, but resets every phase to 0. This does not apply rotate's cap:
+  restarting a phase-1 vault with charge 9 preserves charge 9. Completed actions must
+  persist before acknowledgement; persistence cannot depend on clean process exit.
+
+The adapter uses UTF-8 JSONL on stdin/stdout, one flushed response per request.
+Requests carry `id` plus `op`: `reset`, `observe`, or `call`. Calls carry `name` and
+positional `args`. Responses echo `id` and put the acknowledgement or observation in
+`result`. Domain no-ops acknowledge `{"ok":true}`. Logs use stderr, never stdout.
+Close cleanly on stdin EOF. Test storage is relative to the working directory.
+
+Reset initializes a fresh test environment. The clean implementation initializes all
+three vaults unbound. The compared executable authorities check the registry and state
+invariants after reset and then model all transitions; they do not add a separate
+reset-only initial-content predicate. Fresh test directories are used consistently.
+
+# Add sealing
+
+Start from the clean pre-feature Glyph Vault implementation. Add the behavior below
+while preserving all existing requirements and the documented architecture. Modify
+application code, not the supplied behavioral authority. Do not add migrations or
+compatibility branches for old test data; every verification case starts from fresh storage.
+
+Every observable vault now includes `sealed: bool`. Unbound vaults are unsealed.
+Successful bind initializes sealed to false. Add `seal(vault, keeper)` and
+`unseal(vault, keeper)` to the protocol's declared action set.
+
+- Seal requires a bound vault, matching keeper, phase 1, charge exactly 5, and not
+  already sealed. It sets only sealed to true. Failure is an exact no-op.
+- While sealed, pulse, rotate, and release are exact no-ops. Transfer is an exact
+  no-op if either source or target is sealed. All other existing guards still apply.
+- Only the matching keeper of a bound vault may unseal it. Unseal sets only sealed
+  to false; wrong keeper/unknown/unbound is an exact no-op. Unsealing an already
+  unsealed vault leaves its state unchanged.
+- Sealed persists across trusted process restart. Phase still resets to 0, even
+  for sealed vaults. Keeper, glyph, and charge retain their existing persistence.
+- All fields and other vaults not explicitly affected remain unchanged.
+
+Implement through the existing model, domain, persistence, and protocol boundaries.
+Keep main as composition rather than moving business rules into it.
+
+
+# Add quarantine
+
+Every observable vault now includes `quarantined: bool`. Unbound vaults are never
+quarantined. Successful bind initializes quarantined to false. Add
+`quarantine(vault, keeper)` and `clear_quarantine(vault, keeper)` to the protocol's
+declared action set.
+
+- Quarantine requires a bound vault, matching keeper, phase 1, an odd charge (1, 3, 5,
+  7 or 9), not sealed, and not already quarantined. It sets only quarantined to true.
+  Failure is an exact no-op.
+- While a vault is quarantined, pulse and release on it are exact no-ops. A transfer
+  whose source is quarantined is an exact no-op. A transfer into a quarantined target is
+  allowed only when the source is in phase 0 and every other transfer condition holds;
+  otherwise it is an exact no-op. Seal on a quarantined vault is an exact no-op, and
+  quarantine on a sealed vault is an exact no-op: a vault is never both sealed and
+  quarantined.
+- Rotate is not blocked by quarantine. On a successful rotate of a quarantined vault the
+  existing phase toggle and return cap apply first; if the resulting charge is even the
+  quarantine clears, if it is odd the quarantine remains. The return cap therefore keeps
+  quarantine (it lands on 5, which is odd), and a phase-0 to phase-1 rotation with an even
+  charge clears it.
+- `clear_quarantine` requires a bound vault and matching keeper. It sets only quarantined
+  to false. Wrong keeper, unknown or unbound vault is an exact no-op. Clearing a vault that
+  is not quarantined leaves its state unchanged.
+- Quarantined persists across trusted process restart. Phase still resets to 0, so a
+  quarantined vault sits in phase 0 after restart until it is rotated. Keeper, glyph,
+  charge and sealed keep their existing persistence.
+- All fields and other vaults not explicitly affected remain unchanged.
+
+# Add resonance
+
+Every observable vault now includes `resonance: int`, zero or greater with no upper bound.
+Unbound vaults have resonance 0. Successful bind initializes resonance to 0. Add
+`attune(vault, keeper)` to the protocol's declared action set.
+
+- Resonance is transient. It is never persisted: after a trusted process restart every
+  vault has resonance 0, while keeper, glyph, charge, sealed and quarantined keep their
+  existing persistence and phase resets to 0 as before.
+- A successful rotate changes resonance. When the rotation applies the return cap (the
+  vault was in phase 1 with charge above 5, so charge becomes 5) resonance becomes 0.
+  Every other successful rotate, in either direction, increases resonance by exactly 1.
+  A failing rotate (wrong keeper, unbound, unknown, sealed) changes nothing.
+- A successful pulse in phase 0, which replaces the charge, sets resonance to 0, even when
+  the new charge equals the old one. A successful pulse in phase 1, which adds, leaves
+  resonance unchanged. Failing pulses change nothing.
+- Transfer leaves the resonance of both vaults unchanged. Seal, unseal, quarantine and
+  clear_quarantine leave resonance unchanged. Rotate on a quarantined vault follows the
+  rotate rule above together with the existing quarantine parity rule.
+- Release sets resonance to 0 together with the existing clearing of keeper, glyph and
+  phase.
+- `attune(vault, keeper)` requires a bound vault, matching keeper, phase 1, not sealed, not
+  quarantined, and resonance of at least 2. It adds the resonance to the charge, capped at
+  9, and sets resonance to 0. Nothing else changes. Failure is an exact no-op.
+- All fields and other vaults not explicitly affected remain unchanged.
+
+# Add echo
+
+Add `echo(source, target, keeper)` to the protocol's declared action set. Echo moves
+resonance, not charge.
+
+- Echo requires distinct existing bound vaults, keeper matching the source keeper, source
+  resonance of at least 1, the same phase on source and target (unlike transfer, which
+  requires different phases), neither vault sealed, and the source not quarantined. A
+  quarantined target is allowed only when the source is in phase 0, exactly as for
+  transfer; because the phases must also be equal, an echo into a quarantined vault
+  requires both vaults in phase 0.
+- On success the target's resonance becomes the sum of both resonances, with no upper
+  bound, and the source's resonance becomes 0. Charges, phases, keepers, glyphs, sealed
+  and quarantined flags are unchanged on both vaults, and the third vault is untouched.
+- If any condition fails, echo is an exact no-op.
+- Echoed resonance follows every existing resonance rule afterwards: it is consumed by
+  attune, reset by the return cap or a phase-0 pulse, and lost on restart.
+
+# Persistence refactor (no behavior change)
+
+The on-disk format is one JSON object keyed by vault id, `{"A": {...}, "B": {...}, "C": {...}}`,
+whose per-vault records contain exactly the durable vault fields: keeper, glyph, charge,
+sealed and quarantined. The durable field names are declared once as `DURABLE_FIELDS`, a
+tuple of field-name strings in `model.py`; `store.py` serializes and deserializes through
+that tuple and names no field itself.
+
+- Phase and resonance stay transient: they are never written and always start at 0 after
+  a process restart.
+- `DurableVault`, `VaultStore.load`, `VaultStore.save`, `VaultStore.clear`, the atomic write
+  (temporary file, then replace) and the five module roles are kept. Domain still builds the
+  durable projection (`snapshot`) and restores transient state; store still decides nothing
+  about phase, charge or ownership.
+- Every existing behavioral rule holds exactly as before; verification starts from fresh
+  storage, so no migration of old files is needed.
+
+# Add resonance recovery
+
+Add `recover(vault, keeper)` to the protocol's declared action set.
+
+- Recover requires a bound vault, matching keeper, the vault quarantined, and resonance of
+  at least 3. Sealed vaults are never quarantined, so recover never applies to them.
+- On success the vault leaves quarantine (quarantined becomes false), its phase becomes 0
+  and its resonance becomes 0. Keeper, glyph, charge and sealed are unchanged. Unlike
+  rotate, recover never applies the return cap: a quarantined vault recovered from phase 1
+  with charge 7 keeps charge 7. A vault already in phase 0 stays in phase 0.
+- If any condition fails (wrong keeper, unbound, unknown, not quarantined, resonance below
+  3), recover is an exact no-op.
+- Resonance for recovery follows the existing rules: it is built by rotations that neither
+  cap the charge nor clear the quarantine (odd resulting charge), or arrives through echo
+  (which, into a quarantined vault, needs both vaults in phase 0). Because resonance is
+  transient, a quarantined vault has resonance 0 after every restart and needs fresh
+  resonance before it can recover.
+- All fields and other vaults not explicitly affected remain unchanged.
+
+# Architecture
+
+# Glyph Vault architecture contract
+
+These same constraints accompany every behavioral condition and both tasks.
+
+```text
+glyph_vault/
+    model.py       Vault and DurableVault data structures; fixed vault ID data
+    domain.py      VaultDomain and all business transitions; observable/durable projections
+    store.py       VaultStore load/save/clear; JSON file persistence only
+    protocol.py    Protocol dispatch/serve; JSONL and typed argument translation
+    main.py        component construction and callbacks connecting domain/store/protocol
+```
+
+Dependencies within the application:
+
+```text
+main -> domain -> model
+main -> store  -> model
+main -> protocol
+```
+
+Protocol receives a domain object and commit/reset callbacks through composition.
+It dispatches declared action names and validates wire types. It does not inspect
+keeper/glyph/charge/phase/sealed or reproduce their behavioral rules.
+
+Domain is independent of files, JSON, processes, and protocol. Model contains data
+declarations only. Store serializes durable data and does no phase/charge/ownership
+decision-making. Domain constructs the durable projection and restores transient phase.
+Main composes components; it neither implements business rules nor performs file I/O.
+Keep the five public module roles and their named interfaces; refactor inside them as
+needed. Do not collapse the application into one file or leave placeholder layers.
+Runtime dependencies are Python standard-library modules only.
+
+Public structures are `Vault`, `DurableVault`, `VaultDomain`, `VaultStore`, and `Protocol`.
+Domain exposes the domain actions, `observe`, and `snapshot`; store exposes `load`,
+`save`, and `clear`; protocol exposes `dispatch` and `serve`.
+
+# Glyph Vault: recorded decisions and edge cases
+
+These decisions were settled while the existing behavior was built and verified. They are
+binding for every change.
+
+## Domain conventions
+
+- Every failing domain operation is an exact no-op: no field changes, no list reordering,
+  and the adapter still acknowledges `{"ok":true}`. Rejections are never protocol errors.
+- Null keeper/glyph means absence. Empty strings, whitespace and Unicode are valid keeper
+  and glyph tokens and flow through every operation like any other string.
+- The vault registry is fixed to `A`, `B`, `C`; no action creates or removes a vault, and
+  an unknown vault ID makes the action an exact no-op.
+- Glyph ownership is exclusive across bound vaults; unbound vaults hold null glyph, zero
+  charge and phase 0.
+- Only the fields named by an operation change; every other field and every other vault is
+  preserved. List order after a successful operation is not otherwise constrained.
+
+## Existing rules that interact with new features
+
+- Pulse replaces charge in phase 0 and adds with a cap of 9 in phase 1.
+- Rotate toggles phase. Only the phase-1 to phase-0 return applies the cap: a charge above 5
+  becomes 5. Charge is otherwise unchanged by rotate.
+- Transfer requires distinct bound vaults, the source keeper, different phases, a positive
+  amount, enough source charge and room at the target (at most 9). Target ownership need
+  not match the supplied keeper. Partial transfer, partial debit and clipping are not
+  permitted; any failing condition leaves both vaults unchanged.
+- Release requires charge zero and clears keeper, glyph and phase; it leaves charge zero.
+- Seal requires phase 1 and charge exactly 5; while sealed, pulse, rotate, release and both
+  transfer directions are exact no-ops. Unseal needs only the matching keeper.
+- Trusted restart kills the process and relaunches it on the same data directory. It
+  preserves keeper, glyph, charge and sealed but resets every phase to 0 and does NOT apply
+  rotate's cap: a phase-1 vault with charge 9 restarts with charge 9.
+- Completed actions must be persisted before they are acknowledged; persistence must not
+  depend on a clean process exit.
+- Reset initializes a fresh environment with all three vaults unbound. Verification always
+  starts from fresh storage, so no migrations or compatibility branches for old data.
+
+## Quarantine decisions
+
+- Oddness is a property of the observed charge (1, 3, 5, 7, 9); the rule is checked on the
+  charge as observed, not on how it was produced.
+- The parity check on rotate runs after the return cap: cap first, then parity. A quarantined
+  vault rotated back from charge 6 or 8 lands on 5 and remains quarantined.
+- Sealed and quarantined are mutually exclusive by construction: seal is refused while
+  quarantined, quarantine is refused while sealed.
+- The transfer-into-quarantined rule (source must be in phase 0) only matters after a
+  restart, because a quarantined vault is in phase 1 until restart resets its phase to 0.
+- `clear_quarantine` has no phase or charge condition; only ownership.
+- Quarantine survives restart exactly like sealed does; phase reset applies regardless.
+
+## Resonance decisions
+
+- Resonance is transient by decision, like phase: it is never written to storage, and every
+  vault has resonance 0 after a trusted restart. Do not persist it "for safety".
+- The rotate rule looks at whether the rotation reduced the charge, not at the direction of
+  the rotation: a phase-1 to phase-0 return with charge 5 or less builds resonance like any
+  other rotate; only a return that caps a charge above 5 resets it to 0.
+- A phase-0 pulse resets resonance to 0 regardless of whether the charge value changed
+  (pulsing 4 onto a charge of 4 still resets). A phase-1 pulse never touches resonance.
+- Resonance has no upper bound. Attune's cap of 9 applies to the charge only.
+- Attune requires phase 1 so that the added charge follows the additive (phase-1) pulse
+  semantics; quarantine and seal block attune exactly as they block pulse.
+- Transfer moves charge only; both vaults keep their resonance. Rotating a quarantined vault
+  builds or resets resonance by the same rule as any other vault, independently of whether
+  the parity rule clears the quarantine.
+
+## Echo decisions
+
+- Echo requires equal phases while transfer requires different phases; the two rules are
+  deliberately opposite and must not be copied from one to the other.
+- The quarantined-target condition is the same as transfer's (source in phase 0). Combined
+  with equal phases, echo into a quarantined vault happens only with both vaults in phase 0,
+  which a quarantined vault reaches after a restart or after a return rotation with odd
+  charge 5 or less.
+- Echo sums resonance without a cap; charges are never touched by echo.
+- A quarantined source cannot echo; a sealed vault can neither echo nor receive.
+
+## Persistence decisions (after the storage refactor)
+
+- The on-disk format is one JSON object keyed by vault id; each record holds exactly the
+  fields named by `DURABLE_FIELDS` in `model.py`: keeper, glyph, charge, sealed,
+  quarantined. Adding a durable field means extending that tuple and `DurableVault`.
+- Phase and resonance are transient and are never written; domain starts both at 0 when it
+  restores records.
+- Writes stay atomic (temporary file, then replace); `load()` on a missing file returns no
+  records; `clear()` deletes the file. Store makes no decision about any field value.
+
+## Recovery decisions
+
+- Recover is the only way out of quarantine besides rotate's parity rule and
+  clear_quarantine; it does not check phase or charge, only quarantine, ownership and
+  resonance of at least 3.
+- Recover resets phase to 0 the way restart does, without rotate's return cap: charge above 5
+  survives recovery unchanged.
+- Recover consumes all resonance. Because resonance is transient, a quarantined vault that
+  survived a restart always needs new rotations or an echo before it can recover.
+- Sealed and quarantined are mutually exclusive, so recover never meets a sealed vault; no
+  separate sealed rule is needed.

@@ -1,0 +1,70 @@
+name: Bug report
+description: Something BlaBla does is wrong, crashes, or is not reproducible
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If BlaBla reported GREEN while a declared rule was actually violated, use the
+        **False GREEN** template instead — that class of issue is handled first.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran and what it did.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: >-
+        The smallest contract, project or command sequence that shows it. Paste output as text,
+        not screenshots; `--json` output is ideal.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: BlaBla version
+      description: Output of `blabla --version`, or the commit you built.
+      placeholder: blabla 0.5.0-alpha
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system, Rust toolchain and Python version.
+      placeholder: Windows 11, rustc 1.9x stable, Python 3.12
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - behavior contracts / verifier
+        - structure contracts / provider
+        - project.bla / status / finish
+        - CLI, init or guides
+        - documentation
+        - build, CI or release
+        - not sure
+    validations:
+      required: true
+  - type: checkboxes
+    id: determinism
+    attributes:
+      label: Reproducibility
+      options:
+        - label: It happens every time with the same seed and settings
+        - label: It happens only sometimes (say how often in the description)

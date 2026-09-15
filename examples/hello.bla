@@ -1,0 +1,7 @@
+state stdout: string
+
+action start()
+
+when start {
+    expect "greeting": after.stdout == "Hello, world!"
+}

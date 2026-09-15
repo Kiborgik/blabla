@@ -1,0 +1,6 @@
+module app "app.py"
+
+require "storage-declared":  symbol app::storage
+require "counter-declared":  symbol app::count
+forbid  "no-socket":         dependency app -> "socket"
+require "uses-json":         dependency app -> "json"

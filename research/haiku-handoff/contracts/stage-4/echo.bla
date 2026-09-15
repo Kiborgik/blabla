@@ -1,0 +1,12 @@
+action echo(source: string, target: string, keeper: string)
+
+when echo {
+    expect "echo-invalid-noop":
+        (input.source != input.target and any(before.vaults, s => s.id == input.source and s.keeper != null and s.keeper == input.keeper and not s.sealed and not s.quarantined and s.resonance >= 1 and any(before.vaults, t => t.id == input.target and t.keeper != null and not t.sealed and t.phase == s.phase and (not t.quarantined or s.phase == 0)))) or after.vaults == before.vaults
+    expect "echo-effect-and-frame":
+        not (input.source != input.target and any(before.vaults, s => s.id == input.source and s.keeper != null and s.keeper == input.keeper and not s.sealed and not s.quarantined and s.resonance >= 1 and any(before.vaults, t => t.id == input.target and t.keeper != null and not t.sealed and t.phase == s.phase and (not t.quarantined or s.phase == 0)))) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and now.keeper == old.keeper and now.glyph == old.glyph and now.charge == old.charge and now.phase == old.phase and now.sealed == old.sealed and now.quarantined == old.quarantined and ((old.id == input.source and now.resonance == 0) or (old.id == input.target and any(before.vaults, s => s.id == input.source and now.resonance == old.resonance + s.resonance)) or (old.id != input.source and old.id != input.target and now.resonance == old.resonance))))
+    expect "echo-into-quarantine-needs-phase-zero":
+        not (input.source != input.target and any(before.vaults, s => s.id == input.source and s.keeper != null and s.keeper == input.keeper and not s.sealed and not s.quarantined and s.resonance >= 1 and s.phase == 1 and any(before.vaults, t => t.id == input.target and t.keeper != null and not t.sealed and t.quarantined and t.phase == 1))) or after.vaults == before.vaults
+}

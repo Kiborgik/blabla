@@ -1,0 +1,38 @@
+Add resonance to Glyph Vault.
+
+Vaults build resonance through smooth rotation and can attune to turn it into charge. Resonance has restricted interactions with pulse, transfer, release, sealing, quarantine and process restart, and it must integrate correctly with all of them.
+
+Preserve all existing behavior and architecture.
+
+Implement the feature completely and verify your work. When you believe the application is correct, stop.
+
+Execution notes: work only inside the current directory; use `python` for Python; do not install packages, use the network, or ask for hints.
+
+---
+
+# Repository onboarding (AGENTS.md)
+
+# Glyph Vault
+
+Layer rules for this repository: architecture.md.
+
+<!-- blabla:start -->
+## BlaBla
+
+BlaBla is executable project memory.
+`blabla` is a command-line tool on PATH; `blabla --help` lists its commands.
+
+Start with:
+  blabla status
+
+Use:
+  blabla explain <rule>
+  blabla guide agent
+
+Before declaring behavioral work complete:
+  blabla finish
+
+Only GREEN means behavioral completion.
+YELLOW means NOT COMPLETE.
+Do not weaken contracts to obtain GREEN.
+<!-- blabla:end -->

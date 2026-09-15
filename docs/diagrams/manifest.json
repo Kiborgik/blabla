@@ -1,0 +1,17 @@
+{
+  "agent-workflow.mmd": {
+    "source_sha256": "10d43bf669f7467b6cb0cb4e73ef24d1b1575e30cc9c2a45aafcad9f12273204",
+    "svg": "agent-workflow.svg",
+    "svg_sha256": "c143c8d392b9682418756ea3cbbb38aed48502c00b347e795c7d1872aeb1ceda"
+  },
+  "architecture.mmd": {
+    "source_sha256": "8518f4528ca2df122dd164bf4e7c242a88b260b397ebd23984a1cd110410ba96",
+    "svg": "architecture.svg",
+    "svg_sha256": "e81675cccb8c444fda35eaf580d8b12c7c8651d2ad249bd5a92febca81aa3da2"
+  },
+  "concept.mmd": {
+    "source_sha256": "87ff9112a5c878ee60c020364cba1f469b48cfbe8c76f6f2a8cadb8008fb028f",
+    "svg": "concept.svg",
+    "svg_sha256": "ffb973658b79395066628f400d13a8b46ae8e8d3313099b2d3967d2a3e766efc"
+  }
+}

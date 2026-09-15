@@ -1,0 +1,3 @@
+module app "app.py"
+
+forbid "no-subprocess": dependency app -> "subprocess"

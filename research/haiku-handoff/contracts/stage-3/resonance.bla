@@ -1,0 +1,68 @@
+action attune(vault: string, keeper: string)
+
+when attune {
+    expect "attune-invalid-noop":
+        (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.phase == 1 and not v.sealed and not v.quarantined and v.resonance >= 2)) or after.vaults == before.vaults
+    expect "attune-effect-and-frame":
+        not (any(before.vaults, v => v.id == input.vault and v.keeper != null and v.keeper == input.keeper and v.phase == 1 and not v.sealed and not v.quarantined and v.resonance >= 2)) or
+        all(before.vaults, old => any(after.vaults, now =>
+            now.id == old.id and ((old.id != input.vault and now == old) or (old.id == input.vault and now.keeper == old.keeper and now.glyph == old.glyph and now.phase == old.phase and now.sealed == old.sealed and now.quarantined == old.quarantined and now.resonance == 0 and ((old.charge + old.resonance <= 9 and now.charge == old.charge + old.resonance) or (old.charge + old.resonance > 9 and now.charge == 9))))))
+}
+
+when bind {
+    expect "bind-starts-without-resonance":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and (now == old or (old.id == input.vault and now.resonance == 0))))
+}
+
+when pulse {
+    expect "pulse-resonance":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and (now == old or (old.id == input.vault and ((old.phase == 0 and now.resonance == 0) or (old.phase == 1 and now.resonance == old.resonance))))))
+}
+
+when rotate {
+    expect "rotate-builds-resonance-unless-capped":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and (now == old or (old.id == input.vault and ((old.phase == 1 and old.charge > 5 and now.resonance == 0) or ((old.phase == 0 or old.charge <= 5) and now.resonance == old.resonance + 1))))))
+}
+
+when transfer {
+    expect "transfer-keeps-resonance":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.resonance == old.resonance))
+}
+
+when release {
+    expect "release-clears-resonance":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and (now == old or (old.id == input.vault and now.resonance == 0))))
+}
+
+when seal {
+    expect "seal-keeps-resonance":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.resonance == old.resonance))
+}
+
+when unseal {
+    expect "unseal-keeps-resonance":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.resonance == old.resonance))
+}
+
+when quarantine {
+    expect "quarantine-keeps-resonance":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.resonance == old.resonance))
+}
+
+when clear_quarantine {
+    expect "clear-quarantine-keeps-resonance":
+        all(before.vaults, old => any(after.vaults, now => now.id == old.id and now.resonance == old.resonance))
+}
+
+when restart {
+    expect "restart-resets-resonance":
+        all(after.vaults, now => now.resonance == 0)
+}
+
+always "resonance-non-negative" {
+    all(vaults, v => v.resonance >= 0)
+}
+
+always "unbound-without-resonance" {
+    all(vaults, v => v.keeper != null or v.resonance == 0)
+}

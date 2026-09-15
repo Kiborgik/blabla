@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows-x64
+            binary: blabla.exe
+            archive: zip
+            test_threads: 1
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x64
+            binary: blabla
+            archive: tar.gz
+            test_threads: 4
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Test
+        run: cargo test --release --target ${{ matrix.target }}
+        env:
+          RUST_TEST_THREADS: ${{ matrix.test_threads }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.binary }}", LICENSE, README.md -DestinationPath "blabla-${{ github.ref_name }}-${{ matrix.platform }}.zip"
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: tar -czf "blabla-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz" -C "target/${{ matrix.target }}/release" "${{ matrix.binary }}" -C "${{ github.workspace }}" LICENSE README.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: blabla-${{ matrix.platform }}
+          path: blabla-${{ github.ref_name }}-${{ matrix.platform }}.*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum blabla-* > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v3
+        with:
+          prerelease: true
+          files: dist/*
+          body_path: .github/release-notes/notes-${{ github.ref_name }}.md

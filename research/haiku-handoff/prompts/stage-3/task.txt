@@ -1,0 +1,9 @@
+Refactor Glyph Vault persistence without changing behavior.
+
+Replace the on-disk format with one JSON object keyed by vault id, `{"A": {...}, "B": {...}, "C": {...}}`, whose per-vault records contain exactly the durable vault fields. Declare the durable field names once as `DURABLE_FIELDS`, a tuple of field-name strings in `model.py`, and make `store.py` serialize and deserialize through that tuple instead of naming any field itself. Keep `DurableVault`, `VaultStore.load`, `VaultStore.save`, `VaultStore.clear`, the atomic write (temporary file, then replace) and the five module roles.
+
+Observable behavior must not change: the same fields persist across process restart, the same fields reset, and every existing rule holds exactly as before.
+
+Verify that nothing changed. When you believe the refactor is complete and the application is correct, stop.
+
+Execution notes: work only inside the current directory; use `python` for Python; do not install packages, use the network, or ask for hints.

@@ -1,0 +1,48 @@
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#eef2ff","primaryTextColor":"#0f172a","primaryBorderColor":"#4338ca","lineColor":"#0f172a","secondaryColor":"#f1f5f9","tertiaryColor":"#f8fafc","clusterBkg":"#f8fafc","clusterBorder":"#64748b","edgeLabelBackground":"#ffffff"},"themeCSS":".edgePath path.path, path.flowchart-link { stroke-width: 3px; } marker path { fill: #0f172a; stroke: #0f172a; } .node rect, .node polygon, .node circle { stroke-width: 2px; }"}}%%
+flowchart TB
+    accTitle: BlaBla architecture
+    accDescr: project.bla composes behavior and structure contracts. Behavior contracts are parsed and type-checked into one typed contract IR that the behavior verifier runs as a coverage-guided campaign against the application through the trusted runtime, with counterexample shrinking. Structure contracts are parsed into a structure IR that the structure verifier evaluates against facts from a language provider, in v0.5 the Python provider running an embedded AST extractor. The behavior result is recorded with a run-state marker; structure is evaluated live. blabla status, explain and finish render both layers and the OVERALL gate.
+    manifest["project.bla<br/>use behavior · use structure · verify behavior"]
+    behavior["behavior.bla files"]
+    structure["structure.bla files"]
+    manifest --> behavior
+    manifest --> structure
+    subgraph compile["Parsers and typed IR"]
+        bparse["behavior parser + semantic checks<br/>src/syntax, src/semantics"] --> bir["Contract IR<br/>src/ir"]
+        sparse["structure parser<br/>src/structure/syntax.rs"] --> sir["StructureContract IR<br/>src/structure"]
+    end
+    behavior --> bparse
+    structure --> sparse
+    subgraph bverify["Behavior verifier · src/verify"]
+        campaign["coverage-guided campaign<br/>generator · corpus · coverage"]
+        shrink["counterexample shrinking"]
+        runtime["trusted runtime<br/>src/runtime · JSON Lines adapter · runtime::restart"]
+        campaign --> shrink
+        campaign --> runtime
+    end
+    subgraph sverify["Structure verifier · src/structure"]
+        evaluator["rule evaluator<br/>GREEN · RED · ERROR"]
+        registry["provider registry by file extension"]
+        python["Python provider<br/>isolated interpreter + embedded ast extractor"]
+        evaluator --> registry --> python
+    end
+    bir --> campaign
+    sir --> evaluator
+    app["application under verification"]
+    runtime <--> app
+    python -. reads source text only .-> repo["repository files"]
+    record[".blabla/status.json record<br/>.blabla/verifying.json run state<br/>src/project/status.rs · runstate.rs"]
+    campaign --> record
+    subgraph cli["CLI · src/cli"]
+        status["blabla status"]
+        explain["blabla explain"]
+        finishcmd["blabla finish"]
+    end
+    record --> status
+    evaluator --> status
+    record --> explain
+    evaluator --> explain
+    finishcmd --> evaluator
+    finishcmd --> campaign
+    status --> overall["BEHAVIOR · STRUCTURE · OVERALL"]
+    finishcmd --> overall

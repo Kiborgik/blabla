@@ -1,0 +1,13 @@
+project Todo
+
+use structure "structure.bla"
+use behavior "../todo.bla"
+
+verify behavior {
+    command ["python", "app.py"]
+    seed 0
+    cases 4
+    steps 32
+    timeout_ms 1000
+    shrink_budget 256
+}

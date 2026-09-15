@@ -1,0 +1,81 @@
+type Lease {
+    resource: string,
+    holder: string,
+    ticks: int
+}
+
+state leases: [Lease]
+
+action claim(resource: string, holder: string, ttl: int)
+action renew(resource: string, holder: string, ttl: int)
+action release(resource: string, holder: string)
+action tick(delta: int)
+action restart()
+
+when claim {
+    expect "invalid-or-occupied-claim-noop":
+        (input.resource != "" and input.holder != "" and input.ttl >= 1 and input.ttl <= 8 and
+         not any(before.leases, l => l.resource == input.resource)) or after.leases == before.leases
+    expect "claim-creates-lease":
+        input.resource == "" or input.holder == "" or input.ttl < 1 or input.ttl > 8 or
+        any(before.leases, l => l.resource == input.resource) or
+        (count(after.leases) == count(before.leases) + 1 and
+         any(after.leases, l => l.resource == input.resource and l.holder == input.holder and l.ticks == input.ttl))
+    expect "claim-preserves-existing":
+        all(before.leases, old => any(after.leases, l => l == old))
+}
+
+when renew {
+    expect "invalid-renew-noop":
+        (input.ttl >= 1 and input.ttl <= 8 and any(before.leases, l =>
+            l.resource == input.resource and l.holder == input.holder)) or
+        after.leases == before.leases
+    expect "renew-count": count(after.leases) == count(before.leases)
+    expect "renew-replaces-lifetime":
+        input.ttl < 1 or input.ttl > 8 or all(before.leases, old =>
+            any(after.leases, l => l.resource == old.resource and l.holder == old.holder and
+                ((old.resource == input.resource and old.holder == input.holder and l.ticks == input.ttl) or
+                 ((old.resource != input.resource or old.holder != input.holder) and l.ticks == old.ticks))))
+}
+
+when release {
+    expect "release-only-owned-lease":
+        not any(after.leases, l => l.resource == input.resource and l.holder == input.holder)
+    expect "release-preserves-others":
+        all(before.leases, old => (old.resource == input.resource and old.holder == input.holder) or
+            any(after.leases, l => l == old))
+    expect "release-introduces-nothing":
+        all(after.leases, l => any(before.leases, old => old == l))
+    expect "missing-release-noop":
+        any(before.leases, l => l.resource == input.resource and l.holder == input.holder) or
+        after.leases == before.leases
+}
+
+when tick {
+    expect "invalid-tick-noop":
+        (input.delta >= 1 and input.delta <= 8) or after.leases == before.leases
+    expect "tick-preserves-unexpired":
+        input.delta < 1 or input.delta > 8 or all(before.leases, old => old.ticks <= input.delta or
+            any(after.leases, l => l.resource == old.resource and l.holder == old.holder and
+                l.ticks == old.ticks - input.delta))
+    expect "tick-expires-at-boundary":
+        input.delta < 1 or input.delta > 8 or all(after.leases, l =>
+            any(before.leases, old => old.ticks > input.delta and l.resource == old.resource and
+                l.holder == old.holder and l.ticks == old.ticks - input.delta))
+}
+
+when restart {
+    expect "persistence": after.leases == before.leases
+}
+
+always "one-holder-per-resource" {
+    unique(leases, l => l.resource)
+}
+
+always "positive-bounded-lifetime" {
+    all(leases, l => l.ticks >= 1 and l.ticks <= 8)
+}
+
+never "empty-lease-identities" {
+    any(leases, l => l.resource == "" or l.holder == "")
+}

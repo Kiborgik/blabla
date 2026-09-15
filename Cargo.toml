@@ -1,0 +1,24 @@
+[package]
+name = "blabla"
+version = "0.5.0-alpha"
+edition = "2024"
+rust-version = "1.85"
+description = "Executable project memory for coding agents"
+license = "MIT"
+repository = "https://github.com/Kiborgik/blabla"
+readme = "README.md"
+keywords = ["agents", "contracts", "verification", "testing", "cli"]
+categories = ["command-line-utilities", "development-tools::testing", "development-tools"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+tempfile = "3"
+getrandom = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
