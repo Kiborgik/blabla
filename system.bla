@@ -1,0 +1,157 @@
+system "cli" {
+    purpose "Parse arguments, choose a command, and render every human and JSON surface."
+    paths ["src/main.rs", "src/cli/mod.rs", "src/cli/project.rs", "src/cli/guide.rs", "src/cli/init.rs", "src/cli/heartbeat.rs", "src/cli/task.rs"]
+}
+
+system "project" {
+    purpose "Compose a manifest's contracts into one project, fingerprint the implementation, and decide staleness and completion."
+    paths ["src/project/mod.rs", "src/project/status.rs", "src/project/runstate.rs", "src/project/task.rs"]
+    knowledge ["testing"]
+}
+
+system "skeptic" {
+    purpose "Form one grounded challenge to the current account of the work, from evidence the project already holds."
+    paths ["src/skeptic.rs"]
+    knowledge ["reviewing", "engineering"]
+}
+
+system "behavior-contract" {
+    purpose "Turn behavior contract text into a typed, normalized IR, and reject what cannot be typed."
+    paths ["src/syntax/mod.rs", "src/semantics/mod.rs", "src/ir/mod.rs"]
+}
+
+system "behavior-verify" {
+    purpose "Search for a counterexample to the typed IR under a finite campaign, and shrink what it finds."
+    paths ["src/verify/mod.rs", "src/verify/campaign.rs", "src/verify/coverage.rs", "src/verify/corpus.rs", "src/verify/evaluator.rs", "src/verify/generator.rs"]
+    knowledge ["testing"]
+}
+
+system "adapter" {
+    purpose "Drive the application under test across the trust boundary: process, protocol, isolation and containment."
+    paths ["src/application.rs", "src/runtime/mod.rs", "src/runtime/primitives.rs", "src/runtime/process_tree.rs", "src/runtime/strict_json.rs"]
+}
+
+system "memory" {
+    purpose "Parse authored Mission, Knowledge, System and Process memory, validate it within project memory, and answer identity queries about it."
+    paths ["src/memory/mod.rs", "src/memory/syntax.rs", "src/memory/system.rs", "src/memory/process.rs", "src/memory/mission.rs", "src/memory/knowledge.rs", "src/memory/routing.rs"]
+    knowledge ["engineering"]
+}
+
+system "structure-eval" {
+    purpose "Parse structure contracts and decide each rule against an already-inspected fact map."
+    paths ["src/structure/mod.rs", "src/structure/syntax.rs", "src/structure/falsify.rs"]
+    knowledge ["testing"]
+}
+
+system "structure-providers" {
+    purpose "Turn one source file of one language into ModuleFacts, without executing it."
+    paths ["src/structure/python.rs", "src/structure/python_facts.py", "src/structure/rust.rs"]
+}
+
+system "report" {
+    purpose "Define the single result value that every rendering reads, and the diagnostic shape beside it."
+    paths ["src/report.rs", "src/diagnostic.rs"]
+    knowledge ["engineering"]
+}
+
+responsibility "inspect-source" {
+    owner "structure-providers"
+    statement "Read a declared source file and produce ModuleFacts from it. No other system reads project source for structural facts, and no system executes it."
+}
+
+responsibility "hold-project-memory" {
+    owner "memory"
+    statement "Parse, validate and answer queries about authored project memory: Mission, Knowledge, System and Process. Validation covers project memory against itself, including the knowledge packs System and Process route to, never against the repository, and no result of it reaches completion."
+}
+
+responsibility "decide-structure-rule" {
+    owner "structure-eval"
+    statement "Decide GREEN, RED or ERROR for one structure rule. The decision reads the inspected fact map and nothing else, which is also what lets the same decision be taken a second time against a counterfactual fact map when an author asks whether a rule can fail."
+}
+
+responsibility "execute-the-application" {
+    owner "adapter"
+    statement "Start, drive, restart and contain the process under test, and isolate each case's working directory."
+}
+
+responsibility "generate-behavior-cases" {
+    owner "behavior-verify"
+    statement "Choose action sequences, replay the bounded corpus, derive coverage obligations and shrink a failure."
+}
+
+responsibility "type-check-intent" {
+    owner "behavior-contract"
+    statement "Compile contract units against one project environment and produce the typed IR."
+}
+
+responsibility "decide-completion" {
+    owner "project"
+    statement "Combine the layer results into OVERALL, and map that to the exit code. No rendering surface decides it."
+}
+
+responsibility "decide-staleness" {
+    owner "project"
+    statement "Fingerprint the implementation tree and the project, profile and verifier identities, and say when a record is no longer current."
+}
+
+responsibility "hold-persistent-state" {
+    owner "project"
+    statement "Write and read everything under .blabla/: the status record, the in-flight run marker and the bounded task records. All of it is machine state rather than authored memory: it is written by BlaBla, never registered by the manifest, never validated for truth, and no state of it reaches OVERALL."
+}
+
+responsibility "form-a-challenge" {
+    owner "skeptic"
+    statement "Choose at most one challenge to the current account of the work, from the bounded task record, the working tree measured against the snapshot that record holds, the completion state and a falsification verdict. A class with no evidence behind it produces no challenge and states why instead, because a challenge that is not grounded is the overstatement this project treats as worse than silence. It reaches no verdict about correctness and takes no part in completion."
+}
+
+responsibility "hold-the-result-value" {
+    owner "report"
+    statement "Define the one value a finished run produces, so that no two surfaces can disagree about it."
+}
+
+responsibility "render" {
+    owner "cli"
+    statement "Turn a result value into the human and JSON surfaces. Rendering computes nothing that the value does not already carry."
+}
+
+seam "provider" {
+    between ["structure-eval", "structure-providers"]
+    value "ModuleFacts"
+    statement "Every language fact enters rule evaluation as ModuleFacts and nothing else crosses. Inspection runs once per provider per verification, before any rule is decided; deciding a rule is then a function of that materialised map. This is why a provider adds a language and never a fact, and why rule semantics cannot drift between languages."
+    moves_with ["src/structure/mod.rs", "src/structure/falsify.rs", "src/structure/python.rs", "src/structure/python_facts.py", "src/structure/rust.rs", "contracts/rust.bla", "docs/structure.md", "docs/architecture.md"]
+}
+
+seam "application" {
+    between ["behavior-verify", "adapter"]
+    value "Application"
+    statement "Everything above this boundary works in observations, so the verifier never knows whether a real process is behind them. An adapter that cannot provide trusted process restart reports that rather than faking it. The application's observations are trusted and BlaBla cannot prove they describe the real application."
+    moves_with ["src/application.rs", "src/runtime/mod.rs", "src/runtime/primitives.rs", "docs/language.md", "docs/architecture.md"]
+}
+
+seam "typed-ir" {
+    between ["behavior-contract", "behavior-verify"]
+    value "Contract"
+    statement "The verifier consumes the typed IR and never the syntax AST. Coverage obligations, failures, shrinking and rule identities are all defined over it, so a change to the IR reaches coverage derivation even when it compiles."
+    moves_with ["src/ir/mod.rs", "src/semantics/mod.rs", "src/verify/coverage.rs", "src/verify/mod.rs"]
+}
+
+seam "bounded-task" {
+    between ["project", "skeptic"]
+    value "Task"
+    statement "Everything the skeptic knows about a bounded change crosses as the recorded Task: its write scope, its deliverables, the findings raised against it and the tree snapshot taken when it opened. The skeptic reads no chat, no agent report and no diff of its own, so a challenge can only ever rest on what an orchestrator wrote down at assignment and what the tree says now. A class of challenge that would need anything else cannot be added here without first adding it to the record."
+    moves_with ["src/project/task.rs", "src/skeptic.rs", "src/cli/task.rs", "process.bla", "docs/agent-workflow.md"]
+}
+
+seam "run-report" {
+    between ["report", "cli"]
+    value "RunReport"
+    statement "The human rendering and the --json rendering are two views of one value. Neither computes anything the other does not see, so a field added for one surface is added to the value, never to a renderer."
+    moves_with ["src/report.rs", "src/cli/project.rs", "src/cli/mod.rs"]
+}
+
+seam "runtime-primitives" {
+    between ["adapter", "cli"]
+    value "primitives table"
+    statement "Every agent-facing surface renders runtime primitive semantics from one table. No surface carries its own prose copy, and a rule's dependency on a primitive is derived from the typed IR rather than annotated in a contract."
+    moves_with ["src/runtime/primitives.rs", "src/project/status.rs", "src/cli/project.rs", "src/cli/guide.rs", "src/cli/init.rs", "docs/architecture.md"]
+}

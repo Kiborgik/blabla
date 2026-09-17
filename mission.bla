@@ -1,0 +1,30 @@
+mission "blabla" {
+    statement "Move the project reasoning an agent needs out of transient chat context and into executable, queryable project memory, so that agent-driven development needs much less repeated human steering and stays predictable as the project grows."
+    non_goals [
+        "Replace frontier models. Product thinking, architecture, planning, broad expertise, constructive pushback and hard integration are where a strong model earns its cost; BlaBla exists so that reasoning is not spent again on work a bounded worker can carry out.",
+        "Become a general-purpose language, an agent orchestrator, a BDD framework or a theorem prover. One current contract language and one current API, with no versioned schemas, no migrations and no compatibility branches.",
+        "Let the presence of project memory decide completion. Mission, System, Process and Knowledge do not participate in OVERALL merely because they are registered, and a project that declares none of them is not thereby incomplete.",
+        "Claim enforcement BlaBla does not have. A policy is described as enforced only while an actual trusted enforcement mechanism is active; wherever none is active, every surface says advisory.",
+        "Prove anything. A behavior campaign is a bounded, heuristic search and structure evaluation reads only what a provider can establish statically; neither is a proof over all inputs."
+    ]
+}
+
+priority "truthful-over-convenient" {
+    statement "A status that overstates is worse than one that blocks. Unevaluable is never GREEN, YELLOW means incomplete verification rather than success, and a false STALE is acceptable where a stale GREEN never is. When a clearer signal and an honest one disagree, the honest one wins."
+}
+
+priority "steering-cost-over-token-cost" {
+    statement "Use a strong model where its breadth and reasoning create real value, and do not spend it on work an approved smaller model can safely carry out. Cheapest possible is not the goal: a delegation whose cost comes back as owner review burden, an oversized diff, repeated clarification or architectural cleanup has saved nothing. The steering and rework a change removes outrank the tokens it costs."
+}
+
+priority "bounded-workers-free-planners" {
+    statement "A small worker carries out a bounded decision inside an assigned scope and reports a contradiction rather than silently redesigning the system. A strong planner is expected to challenge an assumption, name missing expertise and propose a larger change when the evidence supports it, because a corrected direction is worth more to this project than compliance. These are different jobs and the guidance for them is never flattened into one."
+}
+
+priority "disclosure-over-dumping" {
+    statement "Project memory earns its place by what an agent can avoid reading. Every surface answers at the coarsest identity that settles the question and charges for detail only when the detail is asked for. Replacing a large prompt with a large .bla dump is the failure this project exists to avoid."
+}
+
+priority "proportionate-verification" {
+    statement "Verification exists to make ordinary development safe, and it is pointed at what changed. A check whose cost makes ordinary development wall time unreasonable has stopped paying for itself, whatever it establishes."
+}

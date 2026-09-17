@@ -165,10 +165,10 @@ fn parser_rejects_malformed_and_incompatible_declarations_deterministically() {
     }
 }
 
-struct FakeProvider {
-    facts: BTreeMap<String, ModuleFacts>,
-    calls: Cell<usize>,
-    failure: Option<ProviderFailure>,
+pub(super) struct FakeProvider {
+    pub(super) facts: BTreeMap<String, ModuleFacts>,
+    pub(super) calls: Cell<usize>,
+    pub(super) failure: Option<ProviderFailure>,
 }
 
 impl Provider for FakeProvider {
@@ -204,7 +204,7 @@ impl Provider for FakeProvider {
     }
 }
 
-fn symbols(paths: &[&str]) -> Vec<SymbolFact> {
+pub(super) fn symbols(paths: &[&str]) -> Vec<SymbolFact> {
     paths
         .iter()
         .enumerate()
@@ -221,6 +221,7 @@ fn clean_facts() -> BTreeMap<String, ModuleFacts> {
         "app/model.py".to_owned(),
         ModuleFacts {
             exists: true,
+            entries: Vec::new(),
             error: None,
             symbols: symbols(&["DURABLE_FIELDS", "Vault"]),
             imports: vec![ImportFact {
@@ -239,6 +240,7 @@ fn clean_facts() -> BTreeMap<String, ModuleFacts> {
         "app/domain.py".to_owned(),
         ModuleFacts {
             exists: true,
+            entries: Vec::new(),
             error: None,
             symbols: symbols(&["VaultDomain", "VaultDomain.rotate"]),
             imports: vec![ImportFact {
@@ -253,6 +255,7 @@ fn clean_facts() -> BTreeMap<String, ModuleFacts> {
         "app/store.py".to_owned(),
         ModuleFacts {
             exists: true,
+            entries: Vec::new(),
             error: None,
             symbols: symbols(&["VaultStore"]),
             imports: vec![ImportFact {
@@ -530,6 +533,7 @@ fn dependency_targets_match_stems_root_relative_and_package_relative_names() {
             display.to_owned(),
             ModuleFacts {
                 exists: true,
+                entries: Vec::new(),
                 error: None,
                 symbols: Vec::new(),
                 imports: imports
@@ -593,4 +597,155 @@ fn the_python_extractor_parses_and_never_executes() {
     assert!(PythonProvider.handles(Path::new("x.py")));
     assert!(!PythonProvider.handles(Path::new("x.rs")));
     assert_eq!(PythonProvider.symbol_depth(), 2);
+}
+
+const ASSOCIATION: &str = r#"
+module gate "app/gate.py"
+
+require "clippy-runs": value gate::GATES maps "clippy" to "clippy"
+"#;
+
+fn entry(name: &str, key: &str, line: usize, values: &[&str]) -> super::EntryFact {
+    super::EntryFact {
+        path: vec![name.to_owned()],
+        key: Literal::Str(key.to_owned()),
+        line,
+        values: Some(
+            values
+                .iter()
+                .map(|value| Literal::Str((*value).to_owned()))
+                .collect(),
+        ),
+    }
+}
+
+fn association_report(entries: Vec<super::EntryFact>, symbols_present: &[&str]) -> RuleStatus {
+    let mut facts = BTreeMap::new();
+    facts.insert(
+        "app/gate.py".to_owned(),
+        ModuleFacts {
+            exists: true,
+            entries,
+            error: None,
+            symbols: symbols(symbols_present),
+            imports: Vec::new(),
+            collections: Vec::new(),
+            unsupported: Vec::new(),
+        },
+    );
+    let provider = FakeProvider {
+        facts,
+        calls: Cell::new(0),
+        failure: None,
+    };
+    let providers: Vec<Box<dyn Provider>> = vec![Box::new(provider)];
+    let report = verify(&[contract(ASSOCIATION)], Path::new("/repo"), &providers);
+    report.result("architecture::clippy-runs").unwrap().status
+}
+
+#[test]
+fn an_association_holds_when_the_keyed_entry_carries_the_value() {
+    let entries = vec![entry(
+        "GATES",
+        "clippy",
+        27,
+        &["cargo", "clippy", "--offline"],
+    )];
+    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Green);
+}
+
+#[test]
+fn an_association_fails_when_the_keyed_entry_carries_another_payload() {
+    let entries = vec![entry("GATES", "clippy", 27, &["cargo", "check"])];
+    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
+}
+
+#[test]
+fn an_association_fails_when_the_value_sits_under_a_different_key() {
+    let entries = vec![
+        entry("GATES", "fmt", 26, &["cargo", "clippy"]),
+        entry("GATES", "clippy", 27, &["cargo", "check"]),
+    ];
+    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
+}
+
+#[test]
+fn an_association_fails_when_the_key_appears_only_inside_another_payload() {
+    let entries = vec![entry("GATES", "fmt", 26, &["cargo", "clippy"])];
+    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
+}
+
+#[test]
+fn an_association_fails_when_key_and_value_exist_but_are_not_paired() {
+    let entries = vec![
+        entry("GATES", "clippy", 27, &["cargo", "check"]),
+        entry("GATES", "lint", 28, &["cargo", "clippy"]),
+    ];
+    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
+}
+
+#[test]
+fn an_association_never_satisfies_itself_from_the_key() {
+    let entries = vec![entry("GATES", "clippy", 27, &["cargo", "check"])];
+    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
+}
+
+#[test]
+fn an_association_over_a_name_without_entries_is_an_error() {
+    assert_eq!(
+        association_report(Vec::new(), &["GATES"]),
+        RuleStatus::Error
+    );
+}
+
+#[test]
+fn an_association_reports_the_entry_line_and_rejects_a_missing_separator() {
+    let entries = vec![entry("GATES", "clippy", 27, &["cargo", "clippy"])];
+    let mut facts = BTreeMap::new();
+    facts.insert(
+        "app/gate.py".to_owned(),
+        ModuleFacts {
+            exists: true,
+            entries,
+            error: None,
+            symbols: symbols(&["GATES"]),
+            imports: Vec::new(),
+            collections: Vec::new(),
+            unsupported: Vec::new(),
+        },
+    );
+    let provider = FakeProvider {
+        facts,
+        calls: Cell::new(0),
+        failure: None,
+    };
+    let providers: Vec<Box<dyn Provider>> = vec![Box::new(provider)];
+    let report = verify(&[contract(ASSOCIATION)], Path::new("/repo"), &providers);
+    let rule = report.result("architecture::clippy-runs").unwrap();
+    assert_eq!(
+        rule.observed.as_deref(),
+        Some("app/gate.py:27 GATES maps \"clippy\" to \"clippy\"")
+    );
+    let broken = parse(
+        "s.bla",
+        "module gate \"app/gate.py\"\nrequire \"x\": value gate::GATES maps \"a\" \"b\"\n",
+        Path::new("/repo"),
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(broken.code, "E_STRUCTURE_FACT");
+}
+
+#[test]
+fn an_unreadable_payload_is_an_error_not_a_missing_association() {
+    let opaque = super::EntryFact {
+        path: vec!["GATES".to_owned()],
+        key: Literal::Str("clippy".to_owned()),
+        line: 27,
+        values: None,
+    };
+    assert_eq!(
+        association_report(vec![opaque], &["GATES"]),
+        RuleStatus::Error
+    );
 }

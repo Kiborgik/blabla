@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: If you use BlaBla or its benchmark artifacts, please cite this repository.
 title: "BlaBla: executable project memory for coding agents"
 type: software
-version: 0.5.0-alpha
-date-released: 2026-09-14
+version: 0.6.0-alpha
+date-released: 2026-09-16
 license: MIT
 repository-code: "https://github.com/Kiborgik/blabla"
 identifiers:
@@ -14,12 +14,15 @@ authors:
   - family-names: Yakovyshyn
     given-names: Petro
 abstract: >-
-  BlaBla moves behavioral and structural project intent out of chat context into
-  small compiled contracts that coding agents can query and verify. It provides a
-  coverage-guided behavior verifier with minimized counterexamples, a static
-  structure verifier with language providers, and a layered GREEN/YELLOW/RED
-  completion gate. The repository includes a four-stage fresh-context handoff
-  benchmark with its methodology, prompts, scorers and results.
+  BlaBla moves project intent out of chat context and into the repository, where
+  coding agents can query and verify it. Behavior and Structure contracts are
+  executable and decide completion through a GREEN/YELLOW/RED gate; Mission,
+  System, Process and Knowledge memory is queryable and advisory. A coverage-guided
+  behavior verifier produces minimized counterexamples, a static structure verifier
+  runs language providers, and bounded task records with a deterministic challenge
+  command carry scope, deliverables and findings across agent handoffs. The
+  repository includes a four-stage fresh-context handoff benchmark with its
+  methodology, prompts, scorers and results.
 keywords:
   - coding-agents
   - verification

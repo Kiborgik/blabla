@@ -1019,6 +1019,9 @@ pub fn explain_view(
         None => State::Unverified,
     };
     let subject = match project.lookup(query)? {
+        Lookup::Contract(group) => {
+            unreachable!("the contract view is rendered before {}", group.name)
+        }
         Lookup::Structure(rule) => {
             return Err(Diagnostic {
                 location: rule.location.clone(),

@@ -1,0 +1,33 @@
+knowledge "testing" {
+    purpose "What a check establishes and what it does not: where verification is pointed, how a run is read, what a passing result proves, and how a comparison is set up so its number means something. Reusable across projects and toolchains."
+}
+
+ruling "verification-follows-the-change" {
+    pack "testing"
+    statement "Run the checks that cover what changed: the tests for the touched modules, the type check for the touched package, the lint for the touched files. A whole-suite run to verify a one-module edit is cost without information, and running the full gate after every edit trains it to be a ritual rather than evidence. The full gate belongs at an integration point, where a result about the whole tree is the result being asked for."
+}
+
+ruling "read-the-whole-run" {
+    pack "testing"
+    statement "A run is evidence only when its whole report was read: the exit code first, the failed block second, the summary last. Failures print before the summary in most runners, and a passing count prints even on a red run, so reading only the tail shows a green looking line on a failure. A red run is re-read before it is re-run; the re-run is for the fix and the read is for the truth."
+}
+
+ruling "green-proves-only-what-it-checked" {
+    pack "testing"
+    statement "A passing check is authoritative about what it exercised and silent about everything else. No violation found and the behavior was exercised are different claims, and a suite that never reaches a state cannot report anything about it. Before trusting a green result, ask which obligation it actually reached, and treat a check that could never fail as uninformative rather than satisfied."
+}
+
+ruling "assert-structure-not-text" {
+    pack "testing"
+    statement "Assert identifiers, structural attributes, counts, roles and values the code exposes, never user-facing or translatable wording. A text assertion turns every wording change into a failing suite and teaches the team that a red run is normal. Where a formatted message must be checked, build the expectation through the same function the code uses instead of writing the literal a second time."
+}
+
+ruling "verification-is-not-progress" {
+    pack "testing"
+    statement "Adding checks is not implementing. When work stalls, writing more verification is the most common displacement activity: it feels productive, it is easy to justify, and it leaves the actual obligation untouched. Verification earns its place by the failure it would catch, not by its presence."
+}
+
+ruling "one-variable-per-comparison" {
+    pack "testing"
+    statement "A comparison that changes two things measures neither. Hold the model, the tooling, the task, the environment and the baseline fixed, and vary only the thing under test; anything else produces a number that cannot be attributed. A factor already known to dominate the result is held constant rather than studied again inside the same run, and a question about that factor is a separate experiment."
+}

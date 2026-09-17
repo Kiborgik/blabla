@@ -1,0 +1,6 @@
+module diagrams "experiments/render_diagrams.py"
+
+require "drift-check-exists": symbol diagrams::check
+require "hash-validation": symbol diagrams::sha256
+require "manifest-tracking": symbol diagrams::MANIFEST
+require "rendering-path": symbol diagrams::render

@@ -39,6 +39,41 @@ The interesting part is where the saving came from: not the first prompt. The in
 
 So the table is an observation to reproduce, not evidence that BlaBla will save 71% of context in general.
 
+## How a memory-utility comparison is set up
+
+Two rules govern every comparison that asks whether a memory kind helps. Both were learned from
+runs in this repository, and neither changes any result already recorded above.
+
+**Explicit CLI onboarding is held constant, never treated as the thing under test.** An agent that
+is merely near BlaBla may ignore it; that was established early and does not need re-establishing.
+So a memory comparison is
+
+```text
+A = explicit working BlaBla CLI + baseline memory
+B = explicit working BlaBla CLI + the memory under test
+```
+
+and onboarding is identical in both arms. Whether an agent discovers the CLI unprompted is a
+separate question, studied on its own, and mixing it into a memory comparison makes the result
+unattributable.
+
+**One meaningful variable changes at a time.** Model, tools, code-intel availability, task, CLI,
+onboarding, repository baseline and environment are fixed; only the memory under investigation
+differs. An arm that also changes the model family, the prompt or the tooling produces a number
+that no longer belongs to the memory.
+
+## An earlier small-model diagnostic
+
+A Qwen3 4B run on the sealing reference finished at 47/50 behavior with zero regressions once the
+onboarding named the CLI explicitly. It is a diagnostic rather than a benchmark, because a
+UI-only profile flag changed the frozen hash.
+
+Its lasting result was a verifier weakness, not a score: a 4096-action campaign made 518 `seal`
+calls and never once reached a state where sealing was eligible. The verifier of the day could
+therefore report PASS without ever exercising the feature under test. That observation is the
+origin of the GREEN/YELLOW distinction and of coverage-guided verification — YELLOW exists because
+"no violation found" and "the behavior was exercised" turned out to be different claims.
+
 ## What the benchmark changed in BlaBla
 
 Two failures in the benchmark became product features.
@@ -60,6 +95,21 @@ Useful replications:
 - several chains per condition
 - a fourth baseline using conventional tests plus prose
 - another application language once a structure provider exists
+
+## Model-size hypotheses
+
+**Hypotheses, none of them measured.** They are recorded so that a later experiment can aim at a
+stated claim rather than a vague expectation.
+
+| Agent | Hypothesised value of BlaBla |
+| --- | --- |
+| Small model | capability scaffolding, precise feedback, reliable completion |
+| Medium model | reliability, less search and self-authored verification work |
+| Large model | project-memory compression, handoff continuity, less rereading |
+| Orchestrator | continuity of goals, role boundaries and handoffs across fresh contexts |
+
+The handoff benchmark above tested one model at one size. Nothing in this repository separates these
+four cases.
 
 ## Broader hypothesis
 

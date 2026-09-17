@@ -1,0 +1,28 @@
+knowledge "engineering" {
+    purpose "General software engineering judgment: scope, duplication, abstraction, responsibility boundaries and falsification. Reusable across projects and languages."
+}
+
+ruling "reuse-before-reinvention" {
+    pack "engineering"
+    statement "Before adding an implementation, establish whether the capability already exists and why it does not fit. A second implementation of an existing capability is a defect even when it works, because from then on both have to be found, understood and changed together. Searching first is cheaper than the divergence that follows."
+}
+
+ruling "smallest-correct-change" {
+    pack "engineering"
+    statement "Change what the task requires and nothing else. Every changed line should trace to the request: no drive-by refactor, no unrelated rename, no aesthetic restructuring of code that was already working. Match the style in place rather than the style you would have chosen. Clean up only the orphans your own change created."
+}
+
+ruling "abstraction-needs-two-real-cases" {
+    pack "engineering"
+    statement "DRY is about duplicated knowledge, not about text that looks similar. Two pieces of code that happen to read alike but change for different reasons are not duplication, and merging them creates a coupling that has to be undone later. An abstraction, layer or configuration point built for a case that has not arrived costs more than the duplication it was meant to prevent."
+}
+
+ruling "one-reason-to-change" {
+    pack "engineering"
+    statement "A module that two different reasons can change is two modules that have not been separated yet. The useful question is not how many things a module does but how many independent sources of change reach it. Where that boundary is real, name it and let one value cross it, so a change on one side cannot quietly alter the meaning of the other."
+}
+
+ruling "falsify-before-building" {
+    pack "engineering"
+    statement "Before committing to a semantic or architectural change, look for the smallest case that would make it wrong, and try the cheaper alternative first. A proposal that has to grow to survive that question is evidence against itself. Confirming evidence is easy to find and decides nothing."
+}

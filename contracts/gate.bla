@@ -1,0 +1,21 @@
+module gate "experiments/gate_v05.py"
+
+require "run-command-executor": symbol gate::run
+require "gates-orchestrator": symbol gate::gates
+require "test-validation": symbol gate::test_lines_are_clean
+require "contract-checker": symbol gate::contracts
+require "demo-runner": symbol gate::demos
+require "glyph-verification": symbol gate::glyph_frozen
+require "glyph-layers-checker": symbol gate::glyph_layers
+require "main-entry": symbol gate::main
+
+require "gate-checks-defined": symbol gate::GATES
+
+require "subprocess-module": dependency gate -> "subprocess"
+require "json-module": dependency gate -> "json"
+
+require "fmt-gate-checks-formatting": value gate::GATES maps "fmt" to "fmt"
+require "clippy-gate-runs-clippy":    value gate::GATES maps "clippy" to "clippy"
+require "clippy-gate-denies-warnings": value gate::GATES maps "clippy" to "warnings"
+require "rust-tests-gate-runs-tests": value gate::GATES maps "rust-tests" to "test"
+require "build-gate-builds":          value gate::GATES maps "build" to "build"

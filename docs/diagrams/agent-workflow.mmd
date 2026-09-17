@@ -1,15 +1,22 @@
 %%{init: {"theme":"base","themeVariables":{"primaryColor":"#eef2ff","primaryTextColor":"#0f172a","primaryBorderColor":"#4338ca","lineColor":"#0f172a","secondaryColor":"#f1f5f9","tertiaryColor":"#f8fafc","clusterBkg":"#f8fafc","clusterBorder":"#64748b","edgeLabelBackground":"#ffffff"},"themeCSS":".edgePath path.path, path.flowchart-link { stroke-width: 3px; } marker path { fill: #0f172a; stroke: #0f172a; } .node rect, .node polygon, .node circle { stroke-width: 2px; }"}}%%
 flowchart TD
     accTitle: BlaBla agent workflow
-    accDescr: An agent starts from the AGENTS.md block, runs blabla status, sees which layer and which rules need attention, runs blabla explain on one rule, edits the implementation, and runs blabla finish. RED or YELLOW leads back to editing; OVERALL GREEN is the only completion signal.
+    accDescr: An agent starts from the AGENTS.md block and runs blabla status, then blabla explain to recover only the relevant memory and rules. Where a project uses the development loop, the orchestrator opens a bounded task recording write scope and deliverables; a worker implements inside that scope and runs the focused checks that cover the change. blabla challenge then checks the recorded account against deterministic evidence, which is separate from the independent reviewer role that reads the diff and records findings. The orchestrator resolves findings and integrates. Only blabla finish decides project completion, and a challenge does not change its verdict or its exit code.
     agents["AGENTS.md block<br/>Start with: blabla status"]
-    status["blabla status<br/>BEHAVIOR · STRUCTURE · OVERALL"]
-    layer["the layer that is not GREEN<br/>and its Next rules"]
-    explain["blabla explain &lt;rule&gt;<br/>counterexample or observed structural fact"]
-    edit["edit the implementation<br/>never the contracts"]
+    status["blabla status<br/>BEHAVIOR · STRUCTURE · OVERALL<br/>memory identities · open tasks"]
+    explain["blabla explain &lt;identity&gt;<br/>one rule, system, role or flow"]
+    task["blabla task open<br/>write scope · deliverables"]
+    implement["worker: implement inside scope<br/>ordinary code, never the contracts"]
+    focused["focused checks<br/>only what changed"]
+    challenge["blabla challenge<br/>deterministic evidence check<br/>decides no completion"]
+    review["reviewer: independent review<br/>reads the task and the diff"]
+    findings["blabla task finding<br/>recorded, outlives the context"]
+    integrate["orchestrator: resolve and integrate<br/>blabla task resolve"]
     finish["blabla finish<br/>VERIFYING → progress → verdict"]
     red["RED or YELLOW<br/>NOT COMPLETE"]
-    green["OVERALL GREEN<br/>completion"]
-    agents --> status --> layer --> explain --> edit --> finish
+    green["OVERALL GREEN<br/>the only completion signal"]
+    agents --> status --> explain --> task --> implement --> focused --> challenge
+    challenge -.unreconciled.-> implement
+    challenge --> review --> findings --> integrate --> finish
     finish --> red --> explain
     finish --> green

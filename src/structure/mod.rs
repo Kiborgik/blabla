@@ -1,4 +1,6 @@
+pub mod falsify;
 pub mod python;
+pub mod rust;
 pub mod syntax;
 #[cfg(test)]
 mod tests;
@@ -55,23 +57,27 @@ impl ModuleDecl {
     }
 
     pub fn dotted(&self, root: &Path) -> Option<String> {
-        let normalized = normalize(&self.path);
-        let relative = normalized.strip_prefix(normalize(root)).ok()?;
-        let mut parts: Vec<String> = relative
-            .components()
-            .filter_map(|component| match component {
-                Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
-                _ => None,
-            })
-            .collect();
-        let last = parts.pop()?;
-        let stem = Path::new(&last)
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .unwrap_or(last);
-        parts.push(stem);
-        Some(parts.join("."))
+        dotted(root, &self.path)
     }
+}
+
+pub fn dotted(root: &Path, path: &Path) -> Option<String> {
+    let normalized = normalize(path);
+    let relative = normalized.strip_prefix(normalize(root)).ok()?;
+    let mut parts: Vec<String> = relative
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    let last = parts.pop()?;
+    let stem = Path::new(&last)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or(last);
+    parts.push(stem);
+    Some(parts.join("."))
 }
 
 pub fn normalize(path: &Path) -> PathBuf {
@@ -125,6 +131,12 @@ pub enum Fact {
         path: Vec<String>,
         value: Literal,
     },
+    Maps {
+        module: String,
+        path: Vec<String>,
+        key: Literal,
+        value: Literal,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -169,6 +181,17 @@ impl Fact {
                 path.join("."),
                 value.render()
             ),
+            Fact::Maps {
+                module,
+                path,
+                key,
+                value,
+            } => format!(
+                "value {module}::{} maps {} to {}",
+                path.join("."),
+                key.render(),
+                value.render()
+            ),
         }
     }
 
@@ -176,7 +199,8 @@ impl Fact {
         match self {
             Fact::Module { module }
             | Fact::Symbol { module, .. }
-            | Fact::Contains { module, .. } => {
+            | Fact::Contains { module, .. }
+            | Fact::Maps { module, .. } => {
                 vec![module.as_str()]
             }
             Fact::Dependency { from, .. } => vec![from.as_str()],
@@ -215,6 +239,18 @@ impl Fact {
                 verb("must contain", "must not contain"),
                 value.render()
             ),
+            Fact::Maps {
+                module,
+                path,
+                key,
+                value,
+            } => format!(
+                "{module}::{} {} {} to {}",
+                path.join("."),
+                verb("must map", "must not map"),
+                key.render(),
+                value.render()
+            ),
         }
     }
 }
@@ -230,6 +266,8 @@ pub struct ModuleFacts {
     pub imports: Vec<ImportFact>,
     #[serde(default)]
     pub collections: Vec<CollectionFact>,
+    #[serde(default)]
+    pub entries: Vec<EntryFact>,
     #[serde(default)]
     pub unsupported: Vec<SymbolFact>,
 }
@@ -253,6 +291,14 @@ pub struct CollectionFact {
     pub values: Vec<Literal>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub struct EntryFact {
+    pub path: Vec<String>,
+    pub key: Literal,
+    pub line: usize,
+    pub values: Option<Vec<Literal>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderFailure {
     NoProvider {
@@ -268,7 +314,8 @@ impl ProviderFailure {
     fn message(&self) -> String {
         match self {
             ProviderFailure::NoProvider { extension } => format!(
-                "no structural provider inspects '{extension}' files; v0.5 ships the python provider only"
+                "no structural provider inspects '{extension}' files; BlaBla inspects {}",
+                INSPECTED_EXTENSIONS.join(" and ")
             ),
             ProviderFailure::Unavailable { provider, message } => {
                 format!("the {provider} provider could not run: {message}")
@@ -286,11 +333,19 @@ pub trait Provider {
         root: &Path,
         modules: &[&ModuleDecl],
     ) -> Result<BTreeMap<String, ModuleFacts>, ProviderFailure>;
+    fn external_target_error(&self, _target: &str) -> Option<String> {
+        None
+    }
 }
 
 pub fn default_providers() -> Vec<Box<dyn Provider>> {
-    vec![Box::new(python::PythonProvider)]
+    vec![
+        Box::new(python::PythonProvider),
+        Box::new(rust::RustProvider),
+    ]
 }
+
+pub const INSPECTED_EXTENSIONS: [&str; 2] = [".py", ".rs"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -384,22 +439,28 @@ impl StructureReport {
     }
 }
 
+#[derive(Clone)]
 struct Inspected<'a> {
     provider: Option<&'a dyn Provider>,
     facts: Result<ModuleFacts, ProviderFailure>,
 }
 
-pub fn verify(
+pub struct Inspection<'a> {
+    modules: BTreeMap<String, Inspected<'a>>,
+    invocations: usize,
+}
+
+pub fn inspect<'a>(
     contracts: &[StructureContract],
     root: &Path,
-    providers: &[Box<dyn Provider>],
-) -> StructureReport {
-    let mut inspected: BTreeMap<String, Inspected<'_>> = BTreeMap::new();
+    providers: &'a [Box<dyn Provider>],
+) -> Inspection<'a> {
+    let mut modules: BTreeMap<String, Inspected<'a>> = BTreeMap::new();
     let mut by_provider: Vec<Vec<&ModuleDecl>> = providers.iter().map(|_| Vec::new()).collect();
     for contract in contracts {
         for module in &contract.modules {
             let key = module.key();
-            if inspected.contains_key(&key) {
+            if modules.contains_key(&key) {
                 continue;
             }
             match providers
@@ -408,7 +469,7 @@ pub fn verify(
             {
                 Some(index) => {
                     by_provider[index].push(module);
-                    inspected.insert(
+                    modules.insert(
                         key,
                         Inspected {
                             provider: Some(providers[index].as_ref()),
@@ -422,7 +483,7 @@ pub fn verify(
                         .extension()
                         .map(|extension| format!(".{}", extension.to_string_lossy()))
                         .unwrap_or_else(|| "(no extension)".to_owned());
-                    inspected.insert(
+                    modules.insert(
                         key,
                         Inspected {
                             provider: None,
@@ -434,34 +495,53 @@ pub fn verify(
         }
     }
     let mut invocations = 0;
-    for (index, modules) in by_provider.iter().enumerate() {
-        if modules.is_empty() {
+    for (index, declarations) in by_provider.iter().enumerate() {
+        if declarations.is_empty() {
             continue;
         }
         invocations += 1;
-        match providers[index].inspect(root, modules) {
+        match providers[index].inspect(root, declarations) {
             Ok(mut facts) => {
-                for module in modules {
+                for module in declarations {
                     let key = module.key();
                     let entry = facts.remove(&key).unwrap_or_default();
-                    if let Some(slot) = inspected.get_mut(&key) {
+                    if let Some(slot) = modules.get_mut(&key) {
                         slot.facts = Ok(entry);
                     }
                 }
             }
             Err(failure) => {
-                for module in modules {
-                    if let Some(slot) = inspected.get_mut(&module.key()) {
+                for module in declarations {
+                    if let Some(slot) = modules.get_mut(&module.key()) {
                         slot.facts = Err(failure.clone());
                     }
                 }
             }
         }
     }
+    Inspection {
+        modules,
+        invocations,
+    }
+}
+
+pub fn verify(
+    contracts: &[StructureContract],
+    root: &Path,
+    providers: &[Box<dyn Provider>],
+) -> StructureReport {
+    evaluate(contracts, root, &inspect(contracts, root, providers))
+}
+
+fn evaluate(
+    contracts: &[StructureContract],
+    root: &Path,
+    inspection: &Inspection<'_>,
+) -> StructureReport {
     let mut rules = Vec::new();
     for contract in contracts {
         for rule in &contract.rules {
-            rules.push(evaluate_rule(contract, rule, root, &inspected));
+            rules.push(evaluate_rule(contract, rule, root, &inspection.modules));
         }
     }
     let verified = rules
@@ -491,7 +571,7 @@ pub fn verify(
         violated,
         errors,
         rules,
-        invocations,
+        invocations: inspection.invocations,
     }
 }
 
@@ -541,11 +621,10 @@ fn evaluate_rule(
                     Err(_) => None,
                 }
             };
-            let depth = module_by_name(rule.fact.modules()[0])
+            let declaring = module_by_name(rule.fact.modules()[0])
                 .and_then(|module| inspected.get(&module.key()))
-                .and_then(|slot| slot.provider)
-                .map(Provider::symbol_depth)
-                .unwrap_or(usize::MAX);
+                .and_then(|slot| slot.provider);
+            let depth = declaring.map(Provider::symbol_depth).unwrap_or(usize::MAX);
             match &rule.fact {
                 Fact::Module { module } => match facts(module) {
                     Some((decl, facts)) if facts.exists => {
@@ -555,38 +634,43 @@ fn evaluate_rule(
                     None => Outcome::Error(format!("module {module} was not inspected")),
                 },
                 Fact::Symbol { module, path } => symbol_outcome(facts(module), path, depth),
-                Fact::Dependency { from, to } => match facts(from) {
-                    Some((decl, facts)) => {
-                        let (targets, display) = match to {
-                            DependencyTarget::Module(name) => match module_by_name(name) {
-                                Some(target) => {
-                                    (module_names(target, decl, root), target.display.clone())
-                                }
-                                None => (Vec::new(), name.clone()),
-                            },
-                            DependencyTarget::External(name) => {
-                                (vec![name.clone()], format!("{name:?}"))
-                            }
-                        };
-                        let hit = facts.imports.iter().find(|import| {
-                            targets.iter().any(|target| {
-                                import.name == *target
-                                    || import.name.starts_with(&format!("{target}."))
-                            })
-                        });
-                        match hit {
-                            Some(import) => Outcome::Holds(format!(
-                                "{}:{} imports {} ({display})",
-                                decl.display, import.line, import.name
-                            )),
-                            None => Outcome::Absent(format!(
-                                "{} does not import {display}",
-                                decl.display
-                            )),
+                Fact::Dependency { from, to } => {
+                    match (facts(from), unusable_target(declaring, to)) {
+                        (Some((decl, _)), Some(problem)) => {
+                            Outcome::Error(format!("{}: {problem}", decl.display))
                         }
+                        (Some((decl, facts)), None) => {
+                            let (targets, display) = match to {
+                                DependencyTarget::Module(name) => match module_by_name(name) {
+                                    Some(target) => {
+                                        (module_names(target, decl, root), target.display.clone())
+                                    }
+                                    None => (Vec::new(), name.clone()),
+                                },
+                                DependencyTarget::External(name) => {
+                                    (vec![name.clone()], format!("{name:?}"))
+                                }
+                            };
+                            let hit = facts.imports.iter().find(|import| {
+                                targets.iter().any(|target| {
+                                    import.name == *target
+                                        || import.name.starts_with(&format!("{target}."))
+                                })
+                            });
+                            match hit {
+                                Some(import) => Outcome::Holds(format!(
+                                    "{}:{} imports {} ({display})",
+                                    decl.display, import.line, import.name
+                                )),
+                                None => Outcome::Absent(format!(
+                                    "{} does not import {display}",
+                                    decl.display
+                                )),
+                            }
+                        }
+                        (None, _) => Outcome::Error(format!("module {from} was not inspected")),
                     }
-                    None => Outcome::Error(format!("module {from} was not inspected")),
-                },
+                }
                 Fact::Contains {
                     module,
                     path,
@@ -631,6 +715,71 @@ fn evaluate_rule(
                     }
                     None => Outcome::Error(format!("module {module} was not inspected")),
                 },
+                Fact::Maps {
+                    module,
+                    path,
+                    key,
+                    value,
+                } => match facts(module) {
+                    Some((decl, facts)) => {
+                        let name = path.join(".");
+                        let named = |line: usize| format!("{}:{line}", decl.display);
+                        let mut for_path = facts
+                            .entries
+                            .iter()
+                            .filter(|entry| entry.path == *path)
+                            .peekable();
+                        if path.len() > depth {
+                            Outcome::Error(format!(
+                                "the provider reports symbols at most {depth} levels deep; {name} is deeper"
+                            ))
+                        } else if for_path.peek().is_none() {
+                            if let Some(symbol) =
+                                facts.symbols.iter().find(|symbol| symbol.path == *path)
+                            {
+                                Outcome::Error(format!(
+                                    "{} {name} is not a collection of key/value entries; association cannot be evaluated statically",
+                                    named(symbol.line)
+                                ))
+                            } else if !facts.exists {
+                                Outcome::Absent(format!("{} does not exist", decl.display))
+                            } else {
+                                Outcome::Absent(format!("{} does not define {name}", decl.display))
+                            }
+                        } else {
+                            let entries: Vec<&EntryFact> = for_path.collect();
+                            match entries.iter().find(|entry| entry.key == *key) {
+                                Some(entry) => match &entry.values {
+                                    None => Outcome::Error(format!(
+                                        "{} the payload of {name}[{}] is not a literal collection of strings, integers or booleans; the association cannot be evaluated statically",
+                                        named(entry.line),
+                                        key.render()
+                                    )),
+                                    Some(values) if values.contains(value) => {
+                                        Outcome::Holds(format!(
+                                            "{} {name} maps {} to {}",
+                                            named(entry.line),
+                                            key.render(),
+                                            value.render()
+                                        ))
+                                    }
+                                    Some(values) => Outcome::Absent(format!(
+                                        "{} {name}[{}] = {}",
+                                        named(entry.line),
+                                        key.render(),
+                                        render_values(values)
+                                    )),
+                                },
+                                None => Outcome::Absent(format!(
+                                    "{} {name} has no entry keyed {}",
+                                    named(entries[0].line),
+                                    key.render()
+                                )),
+                            }
+                        }
+                    }
+                    None => Outcome::Error(format!("module {module} was not inspected")),
+                },
             }
         }
     };
@@ -670,6 +819,13 @@ fn evaluate_rule(
         observed,
         message,
         provider,
+    }
+}
+
+fn unusable_target(provider: Option<&dyn Provider>, to: &DependencyTarget) -> Option<String> {
+    match to {
+        DependencyTarget::External(name) => provider?.external_target_error(name),
+        DependencyTarget::Module(_) => None,
     }
 }
 

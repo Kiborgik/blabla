@@ -20,6 +20,49 @@ def literal_collection(value):
     return values
 
 
+def render_payload(payload):
+    if isinstance(payload, ast.Constant) and type(payload.value) in LITERAL_TYPES:
+        return [payload.value]
+    if isinstance(payload, (ast.Tuple, ast.List, ast.Set)):
+        values = []
+        for element in payload.elts:
+            if not isinstance(element, ast.Constant) or type(element.value) not in LITERAL_TYPES:
+                return None
+            values.append(element.value)
+        return values
+    if isinstance(payload, ast.Dict):
+        values = []
+        for key in payload.keys:
+            if not isinstance(key, ast.Constant) or type(key.value) not in LITERAL_TYPES:
+                return None
+            values.append(key.value)
+        return values
+    return None
+
+
+def extract_entries(value):
+    if isinstance(value, (ast.Tuple, ast.List, ast.Set)):
+        entries = []
+        for element in value.elts:
+            if not isinstance(element, (ast.Tuple, ast.List)) or len(element.elts) != 2:
+                return None
+            key_node = element.elts[0]
+            if not isinstance(key_node, ast.Constant) or type(key_node.value) not in LITERAL_TYPES:
+                return None
+            payload = render_payload(element.elts[1])
+            entries.append((element.lineno, key_node.value, payload))
+        return entries
+    if isinstance(value, ast.Dict):
+        entries = []
+        for key_node, value_node in zip(value.keys, value.values):
+            if not isinstance(key_node, ast.Constant) or type(key_node.value) not in LITERAL_TYPES:
+                return None
+            payload = render_payload(value_node)
+            entries.append((key_node.lineno, key_node.value, payload))
+        return entries
+    return None
+
+
 def assigned_names(node):
     if isinstance(node, ast.Assign):
         return [target.id for target in node.targets if isinstance(target, ast.Name)]
@@ -42,6 +85,11 @@ def declarations(body, prefix, facts, depth):
                 facts["unsupported"].append({"path": path, "line": node.lineno})
             else:
                 facts["collections"].append({"path": path, "line": node.lineno, "values": values})
+            if node.value is not None:
+                entries = extract_entries(node.value)
+                if entries is not None:
+                    for entry_line, key, payload in entries:
+                        facts["entries"].append({"path": path, "key": key, "line": entry_line, "values": payload})
 
 
 def imports(tree, package):
@@ -66,7 +114,7 @@ def imports(tree, package):
 
 
 def inspect(module):
-    facts = {"exists": False, "error": None, "symbols": [], "imports": [], "collections": [], "unsupported": []}
+    facts = {"exists": False, "error": None, "symbols": [], "imports": [], "collections": [], "unsupported": [], "entries": []}
     try:
         with open(module["path"], encoding="utf-8") as handle:
             source = handle.read()

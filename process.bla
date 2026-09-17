@@ -1,0 +1,155 @@
+role "orchestrator" {
+    purpose "Decide what the work is, divide it, integrate what comes back, and decide completion."
+    owns ["decomposition and worker assignment", "shared and hot files", "integration of every worker's result", "contract semantics and the manifest", "project-wide falsification", "the product gate and blabla finish", "every commit"]
+    verification "product"
+    model "opus-5"
+    consult ["engineering", "testing"]
+}
+
+role "worker" {
+    purpose "Carry out one bounded task inside the write scope its orchestrator assigned."
+    owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
+    verification "focused"
+    model ["haiku-4.5", "qwen3.5:4b"]
+    consult ["engineering", "testing"]
+}
+
+role "reviewer" {
+    purpose "Independently review one bounded worker patch and report the defects that block its integration."
+    owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
+    verification "focused"
+    model ["qwen3.5:4b"]
+    consult ["reviewing", "engineering", "testing"]
+}
+
+policy "explicit-write-scope" {
+    statement "A worker is given an explicit set of paths it may write, and writes nothing outside it. Two workers running at the same time never share a path. Reading is unrestricted: a worker reads whatever it needs to make its edit correct."
+    applies_to ["orchestrator", "worker"]
+}
+
+policy "orchestrator-owns-integration" {
+    statement "Decomposition, worker assignment, files several tasks touch, and the integration of finished work belong to the orchestrator. A worker that finds it needs a shared file reports that instead of editing it."
+    applies_to ["orchestrator", "worker"]
+}
+
+policy "contracts-are-orchestrator-owned" {
+    statement "Contracts, the manifest and project memory change by an orchestrator decision or an explicit assignment naming them. A worker never edits them to make its own task pass; changing declared intent is a separate authoring act."
+    applies_to ["orchestrator", "worker"]
+}
+
+policy "verification-ownership" {
+    statement "A worker runs only the checks that cover what it changed, and reports rather than runs anything wider. The product gate and blabla finish belong to the orchestrator. Research and stress validation are not part of ordinary development and run only when the orchestrator asks for them."
+    applies_to ["orchestrator", "worker"]
+    consult ["testing"]
+}
+
+policy "planner-challenges-the-plan" {
+    statement "An orchestrator that finds the evidence points elsewhere says so before implementing, naming the assumption it is challenging, the evidence against it and what it proposes instead. Accepting a plan it believes is worse is a failure of the role rather than deference. A worker does not carry this authority: it reports the contradiction and the orchestrator decides."
+    applies_to ["orchestrator"]
+    consult ["engineering"]
+}
+
+policy "no-version-control-in-workers" {
+    statement "A worker runs no git command that changes state, and creates no branch or worktree. The default topology is one shared tree with disjoint write scopes. The orchestrator commits, one commit per batch of work."
+    applies_to ["orchestrator", "worker"]
+}
+
+policy "workers-do-not-spawn" {
+    statement "A worker does not start further agents. If its task turns out to need division, it reports that to the orchestrator, whose decision it is."
+    applies_to ["worker"]
+}
+
+policy "reports-are-advisory" {
+    statement "What an agent says it did is advisory evidence. The repository, the working tree and deterministic tool output outrank it, and a claim that matters is confirmed against them before it is acted on."
+    applies_to ["orchestrator", "worker"]
+}
+
+policy "review-follows-an-evidence-procedure" {
+    statement "A review reaches a verdict by working through the change, in this order. Read the original bounded task. Read the complete diff, every hunk of it. Account for each thing the task asked for and mark it implemented, intentionally unchanged with the evidence for that, or missing. Then, before writing any semantic or blocking finding, read the existing code that decides whether it is true: the definition of every function the change newly calls, the set of values that function can return, the guard or branch at issue, and the parser, classifier or helper standing behind it; a finding about behaviour whose controlling code was not read is not ready to be written. Where the change touches one semantic case, inspect the sibling cases for assumptions that are now stale or contradictory. Use focused execution only where it can falsify a concrete concern already formed. Then classify every finding as BLOCKING, meaning the change is wrong, incomplete or states something untrue, or NON-BLOCKING, meaning it is a suggestion, and ground every blocking finding in a file, a line or a command and what that evidence showed. Consult the knowledge packs the role names and open the rulings inside them rather than their identities alone, because retrieving a ruling is not applying it: a ruling counts only where the change has actually been held against it and the outcome stated. Nothing about the volume of the review is evidence of its quality: not the number of tool calls, not the number of checks run, not a stylistic preference, not cleanup nobody asked for, and no count of any of these is required or rewarded."
+    applies_to ["orchestrator", "reviewer"]
+    consult ["reviewing"]
+}
+
+policy "worker-output-is-independently-reviewed" {
+    statement "A bounded worker's patch is reviewed by an independent reviewer, in a context that never saw the work being done, before the orchestrator integrates it. The reviewer is given the original task, the write scope, the relevant identities and the actual diff, and retrieves whatever else it needs by progressive disclosure rather than being handed a summary of the project. Its job is to falsify the patch rather than confirm it: changes unrelated to the task, deletion or restructuring of what sat around the requested edit, capability reinvented where it already exists, an edit wider than the task required, a test pinned to wording where a structural assertion was available, a test that passes for the wrong reason, malformed generated output, a claim resting on partial check output, and anything that contradicts project memory. It reports blocking defects with file and line evidence and never edits the patch, never redesigns the architecture and never runs a product or research gate; a focused check is run only where the question actually needs one. The implementation worker's own account of what it did is not evidence for any of this, and a review that finds nothing says so rather than approving."
+    applies_to ["orchestrator", "reviewer"]
+    consult ["engineering", "testing"]
+}
+
+flow "development" {
+    purpose "One bounded change, from recovering what the project already decided through to the completion gate. The steps below are the order the roles and policies above are meant to be used in; each names the command that carries it, where a command exists. Advisory like the rest of Process: nothing here is enforced, and a step with no command is carried by judgment rather than by BlaBla."
+}
+
+step "recover-context" {
+    flow "development"
+    role ["orchestrator"]
+    statement "Read the project's own state before deciding anything about it: the layers and their verdicts, and the Mission, System, Process and Knowledge identities status lists. Open only the identities the change actually touches."
+    command "blabla status"
+}
+
+step "locate-the-change" {
+    flow "development"
+    role ["orchestrator"]
+    statement "Name the system the change belongs to, the responsibilities it owns, the seams it would cross, and the knowledge packs that system routes to. A change that crosses a seam is a different size of change from one inside a system."
+    command "blabla explain system::<name>"
+}
+
+step "decompose" {
+    flow "development"
+    role ["orchestrator"]
+    statement "Divide the work into bounded tasks whose write scopes do not overlap, keeping shared and hot files for the orchestrator itself. Choose the worker model from the choices role::worker declares; those are owner-approved permissions rather than a ranking, and a task that does not fit one is not a bounded task."
+}
+
+step "assign" {
+    flow "development"
+    role ["orchestrator"]
+    statement "Record the bounded task before the work starts: the role carrying it, the paths it may write and the deliverables it owes. Recording it snapshots the tree the task starts from, which is the only reason a later challenge can tell a produced deliverable from an untouched one."
+    command "blabla task open <name> --role worker --statement \"...\" --scope <path> --deliverable <path>"
+}
+
+step "implement" {
+    flow "development"
+    role ["worker"]
+    statement "Make the smallest correct edit inside the assigned write scope, reading whatever is needed to make it correct. A task that turns out to need a shared file, a contract, a wider scope or a second worker is reported back rather than taken."
+    command "blabla task show <name>"
+}
+
+step "verify-focused" {
+    flow "development"
+    role ["worker"]
+    statement "Run only the checks that cover what changed, and report rather than run anything wider. The product gate and the research gate belong to the orchestrator, and a worker that believes a wider run is needed says so instead of starting one."
+}
+
+step "challenge" {
+    flow "development"
+    role ["orchestrator", "worker", "reviewer"]
+    statement "Before reporting a task done, before writing a review verdict, and before the gate, ask BlaBla to contradict the current account of the work from evidence it already holds. It states one grounded challenge to reconcile, or says nothing can be grounded; it decides no correctness and grants no completion."
+    command "blabla challenge"
+}
+
+step "review" {
+    flow "development"
+    role ["reviewer"]
+    statement "Read the original task and the whole diff in a context that never saw the work being done, account for every deliverable the task named, and read the code that decides whether a finding is true before writing it. Falsify the patch rather than confirm it."
+}
+
+step "report-findings" {
+    flow "development"
+    role ["reviewer", "worker"]
+    statement "Record what the review found against the task it belongs to, one finding at a time. A finding recorded here survives the context that found it, which is what lets a later challenge notice it being dropped instead of settled."
+    command "blabla task finding <name> \"...\""
+}
+
+step "integrate" {
+    flow "development"
+    role ["orchestrator"]
+    statement "Take the finished work, settle every finding against the repository rather than against the worker's account of it, and record what settled each one. The evidence recorded is the agent's claim and never BlaBla's verdict. Close the task when nothing is outstanding."
+    command "blabla task resolve <name> <id> --evidence \"...\""
+}
+
+step "gate" {
+    flow "development"
+    role ["orchestrator"]
+    statement "Decide completion. Structure is checked live and the canonical behavior profile is run; only OVERALL GREEN is completion, and a contract or profile is never weakened to obtain it. Any challenge still standing is printed beside the verdict and changes none of it."
+    command "blabla finish"
+}

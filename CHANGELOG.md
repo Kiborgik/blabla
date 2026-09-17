@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.0-alpha (2026-09-16)
+
+### Project memory
+
+- Added Mission, System, Process and Knowledge memory, all reachable through canonical `status` / `explain` identities.
+- Added progressive routing from System and Process into reusable Knowledge packs.
+- Added reviewer, worker and orchestrator Process roles and explicit `flow` / `step` development workflows.
+- Project memory remains advisory/non-gating and is validated separately from repository truth.
+
+### Development loop
+
+- Added bounded task records under `.blabla/tasks/` for write scope, deliverables and persistent findings.
+- Added `blabla challenge`, a deterministic evidence-backed skeptic over unresolved findings, unchanged deliverables, scope breaches, vacuous structure rules and stale/incomplete verification.
+- Added `blabla guide loop`.
+- Challenges do not decide correctness and do not alter completion authority.
+
+### Structure
+
+- Added a Rust structure provider using `syn`.
+- Added `value ... maps K to V` for key/payload associations.
+- Added `blabla check --falsify` for detecting structure rules whose verdict does not depend on an observable fact.
+- Improved standalone structure-contract checking and diagnostics.
+
+### Self-hosting and tooling
+
+- BlaBla now carries its own Mission, System, Process and Knowledge memory and self-hosted Structure contracts.
+- Split current product verification from slower research/historical reproduction gates.
+- Added/updated public architecture and workflow documentation.
+
+### Dogfooding
+
+BlaBla 0.6 was developed using BlaBla's own project memory and development flow. During that work the new challenge path exposed defects in its own implementation before release. This is dogfooding under human direction, not autonomous self-modification.
+
 ## 0.5.0-alpha (2026-09-14) — first public alpha
 
 - `structure.bla`: declarative codebase contracts (`module`, `require`/`forbid` over `module`, `symbol`, `dependency`, `value ... contains`), `group::label` identities, `use structure` / `draft structure` in `project.bla`.

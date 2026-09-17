@@ -41,9 +41,15 @@ BlaBla is executable project memory.
 Start with:
   blabla status
 
-Use:
-  blabla explain <rule>
+Inspect what status printed, by its canonical identity; never invent one:
+  contract::<group>  <group>::<label>  mission::<name>  priority::<name>
+  system::<name>  responsibility::<name>  seam::<name>  role::<name>  policy::<name>
+  flow::<name>  step::<name>  knowledge::<pack>  ruling::<pack>::<name>  runtime::<name>
+  blabla explain <identity>
   blabla guide agent
+Process roles, policies and flows are ADVISORY; BlaBla does not enforce them, and a ruling is
+reusable expertise rather than permission to widen the task you were given.
+Delegating one bounded change, and challenging the account of it: blabla guide loop
 
 Before declaring work complete:
   blabla finish
@@ -67,7 +73,9 @@ The contracts are the authority; this skill only teaches the workflow.
 ## Implementation workflow
 
 1. `blabla status`: project name, BEHAVIOR / STRUCTURE / OVERALL state, per-contract summary, next rules, completion gate.
-2. `blabla explain <rule>`: owning contract and line, the rule text, required witnesses and counterexample, or the observed structural fact.
+2. `blabla explain <group>::<label>`: owning contract and line, the rule text, required witnesses and counterexample, or the observed structural fact.
+   Coarser identities open the level above: `contract::<group>` lists a contract's rules, `system::<name>` its responsibilities and seams.
+   Every identity is printed by the command before it; never construct one by guessing a separator.
 3. Implement.
 4. `blabla finish`: verifies structure, runs the project's canonical behavior verification and decides completion (exit 0 only for OVERALL GREEN).
 5. RED: repair using the minimized counterexample or the observed fact. YELLOW: supply the missing witness; NOT COMPLETE. OVERALL GREEN: done.
@@ -81,6 +89,11 @@ Read a contract file only when `explain` is not enough. Never edit a `.bla` file
 unknowns, draft contracts (`draft behavior \"path\"` in `project.bla`), the skeptic pass and
 promotion to `use behavior` by a human.
 
+## Authoring project memory
+
+`blabla guide memory`: the declaration and registration shape for Mission, System, Process and
+Knowledge, and the check/register/explain loop. No memory state reaches OVERALL.
+
 ## Changing intended behavior
 
 `blabla guide change`: the contract-author phase edits the rule first, then the
@@ -91,11 +104,18 @@ implementation phase reaches GREEN.
 | Command | Purpose |
 | --- | --- |
 | `blabla status` | BEHAVIOR, STRUCTURE and OVERALL state with the completion gate, exit 0 only for OVERALL GREEN |
-| `blabla explain <rule>` | one rule with evidence |
+| `blabla explain <group>::<label>` | one rule with evidence |
+| `blabla explain contract::<group>` | one contract: path, state and the canonical id of every rule |
+| `blabla explain mission::<name>` | why the project exists, the priorities that decide a tradeoff and the non-goals |
+| `blabla explain system::<name>` | one system: purpose, paths, the responsibilities it owns and its seams |
+| `blabla explain knowledge::<pack>` | one reusable knowledge pack and the id of every ruling in it |
+| `blabla explain flow::<name>` | the order the roles are meant to work in, one line per step |
+| `blabla task <action>` | record one bounded change: `open`, `show`, `finding`, `resolve`, `scope`, `close` |
+| `blabla challenge` | one grounded challenge to the current account of the work; exit 1 when one stands |
 | `blabla finish` | structure check plus canonical behavior verification from project.bla; exit 0 only for OVERALL GREEN |
 | `blabla run -- <app>` | manual verification with explicit settings; records the result |
 | `blabla check` | compile the project, including drafts |
-| `blabla guide <topic>` | agent, bootstrap, change |
+| `blabla guide <topic>` | agent, bootstrap, change, memory, loop |
 ";
 
 #[derive(Clone, Debug)]

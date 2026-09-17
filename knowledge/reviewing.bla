@@ -1,0 +1,43 @@
+knowledge "reviewing" {
+    purpose "Interrogating a change someone else has finished: what counts as evidence, how a task is accounted for, where a defect survives a fix, and which findings block. Reusable across projects and languages."
+}
+
+ruling "read-the-patch-not-the-report" {
+    pack "reviewing"
+    statement "The change itself is the evidence. What its author says they did is a claim about the change, and a claim is the thing under review rather than support for it. Read every hunk, including the ones the report does not mention, because the part an author summarises is the part they believed was finished. An author who reports a check as passing has told you the check passed and nothing about whether it covered the obligation."
+}
+
+ruling "account-for-every-deliverable" {
+    pack "reviewing"
+    statement "Take the task apart into the things it asked for and give each one a verdict against the change: present, deliberately absent with the reason visible, or missing. A deliverable the change never touches is missing even when everything the change does touch is correct, and this is the failure most easily hidden by a green check, because the work that was skipped is exactly the work that would have failed."
+}
+
+ruling "reconcile-the-sibling-cases" {
+    pack "reviewing"
+    statement "When a change alters one branch, message, case or clause, read the ones beside it in the same construct. A composite statement is edited a piece at a time, so the piece nobody touched is where the now-stale half survives, and a substitution that repairs one clause can make a neighbouring clause false in the same breath. Correct-looking output is not enough: check that each part of what it says is true of the case that produced it."
+}
+
+ruling "a-new-branch-hides-dead-logic" {
+    pack "reviewing"
+    statement "A fix that introduces a condition, a match or an extra arm is where unreachable code appears. For each guard ask what input makes it false, and for each arm what input selects it; where there is no such input the fix has invented noise that reads like care. Establish this from what the code it calls can actually return, not from the shape of the branch."
+}
+
+ruling "blocking-is-correctness-not-taste" {
+    pack "reviewing"
+    statement "A finding blocks when it leaves the change wrong, incomplete, or claiming something untrue. Duplication, naming, arrangement and anything that would merely be tidier is a suggestion and is labelled as one. Reporting taste as blocking spends the author's attention on the cheapest item in the list and teaches them that the review's severities carry no information."
+}
+
+ruling "assume-the-change-is-wrong" {
+    pack "reviewing"
+    statement "Open by looking for the smallest concrete case that would make the change fail, rather than by confirming that it looks right; the first reading of a finished change is the one most inclined to agree with it. The pass ends when every claim you intend to make rests on something you read, not when you have formed an opinion. Padding a report with restatements of one defect, or with preferences, hides how little was established; so does stopping early, which is the commoner failure and the harder one to see from inside."
+}
+
+ruling "establish-the-claim-before-making-it" {
+    pack "reviewing"
+    statement "A finding about what code does is worth nothing until you have read what decides it: the definition of each function the change newly calls, the values that function can actually return, the branch or guard in question, and the classifier or helper standing behind it. Judging a call by its name, or a branch by its shape, produces findings that read as specific and are guesses. This is the one class of reading that is never optional, and it comes before the finding is written rather than after it is doubted."
+}
+
+ruling "retrieving-guidance-is-not-applying-it" {
+    pack "reviewing"
+    statement "Naming a rule, quoting it, or citing its identity beside a finding is not evidence that the rule was used. A rule is applied only where the change is actually held against it and the outcome is stated for this change, in its own terms. A report that cites the rule about a failure while that very failure stands unexamined in the change is the most convincing way to look thorough while establishing nothing."
+}

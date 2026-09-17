@@ -60,13 +60,15 @@ checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
 
 [[package]]
 name = "blabla"
-version = "0.5.0-alpha"
+version = "0.6.0-alpha"
 dependencies = [
  "clap",
  "getrandom",
  "libc",
+ "proc-macro2",
  "serde",
  "serde_json",
+ "syn",
  "tempfile",
  "windows-sys",
 ]

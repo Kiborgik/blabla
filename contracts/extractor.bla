@@ -1,0 +1,13 @@
+module extractor "src/structure/python_facts.py"
+
+require "reads-source-text":         symbol extractor::inspect
+require "walks-declarations":        symbol extractor::declarations
+require "collects-imports":          symbol extractor::imports
+require "reads-literal-collections": symbol extractor::literal_collection
+require "reads-assigned-names":      symbol extractor::assigned_names
+require "stdio-entry-point":         symbol extractor::main
+require "parses-with-ast":           dependency extractor -> "ast"
+require "speaks-json":               dependency extractor -> "json"
+require "talks-over-stdio":          dependency extractor -> "sys"
+forbid  "imports-importlib":         dependency extractor -> "importlib"
+forbid  "imports-re":                dependency extractor -> "re"

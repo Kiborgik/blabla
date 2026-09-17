@@ -1,0 +1,7 @@
+module auditor "experiments/audit_public_tree.py"
+
+require "patterns-defined": symbol auditor::PATTERNS
+require "scan-function": symbol auditor::scan
+require "allowed-exceptions": symbol auditor::ALLOWED
+require "main-entry": symbol auditor::main
+require "audit-exempts-itself": value auditor::ALLOWED maps "experiments/audit_public_tree.py" to "owner-handle"

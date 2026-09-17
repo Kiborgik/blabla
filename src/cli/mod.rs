@@ -17,8 +17,9 @@ mod guide;
 mod heartbeat;
 mod init;
 mod project;
+mod task;
 
-const AGENT_WORKFLOW: &str = "AGENT WORKFLOW\nThe .bla contracts are authoritative intent: executable project memory with a BEHAVIOR layer (runtime behavior) and a STRUCTURE layer (codebase constraints).\nStart with `blabla status` (it finds project.bla for you); drill into one rule with `blabla explain <rule>`.\nRead a contract only when a rule is still unclear. Run `blabla finish` after meaningful changes and before declaring work complete.\nRED: repair the violated rule using the minimized counterexample or the observed structural fact.\nYELLOW: required behavior remains unexercised; NOT COMPLETE.\nGREEN per layer means its active behavioral or structural rules passed; only OVERALL GREEN is completion.\nDo not weaken contracts or the verification profile to obtain GREEN. Full onboarding: `blabla guide agent`.";
+const AGENT_WORKFLOW: &str = "AGENT WORKFLOW\nThe .bla contracts are authoritative intent: executable project memory with a BEHAVIOR layer (runtime behavior) and a STRUCTURE layer (codebase constraints).\nStart with `blabla status` (it finds project.bla for you); drill into one rule with `blabla explain <rule>`.\nRead a contract only when a rule is still unclear. Run `blabla finish` after meaningful changes and before declaring work complete.\n`blabla explain flow::<name>` is the development loop; `blabla task` records one bounded change and `blabla challenge` contradicts the account of it from evidence BlaBla already has.\nRED: repair the violated rule using the minimized counterexample or the observed structural fact.\nYELLOW: required behavior remains unexercised; NOT COMPLETE.\nGREEN per layer means its active behavioral or structural rules passed; only OVERALL GREEN is completion.\nDo not weaken contracts or the verification profile to obtain GREEN. Full onboarding: `blabla guide agent`.";
 
 #[derive(Parser)]
 #[command(
@@ -52,7 +53,14 @@ enum Command {
     #[command(
         about = "Check contract syntax, names and types without an application; without FILE, check the discovered project"
     )]
-    Check { file: Option<PathBuf> },
+    Check {
+        file: Option<PathBuf>,
+        #[arg(
+            long,
+            help = "Ask whether each rule can be made to fail, by inverting the fact it names in the already-inspected facts; with FILE one structure contract, without FILE every active structure contract of the discovered project; writes nothing"
+        )]
+        falsify: bool,
+    },
     #[command(
         about = "Generate action sequences and verify application behavior; without FILE, verify the discovered project and record its status",
         after_long_help = r#"ADAPTER PROTOCOL
@@ -109,15 +117,17 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
     )]
     Status,
     #[command(
-        about = "Explain one rule: owning contract, rule text, required witnesses and counterexample, or the observed structural fact"
+        about = "Explain one rule: owning contract, rule text, required witnesses and counterexample, or the observed structural fact; also resolves a system, responsibility or seam from the project's architectural memory"
     )]
     Explain {
         #[arg(
-            help = "Rule id such as sealing::sealed-restart or architecture::no-domain-restart, a unique label, an obligation id, or a runtime primitive such as runtime::restart"
+            help = "Rule id such as sealing::sealed-restart or architecture::no-domain-restart, a unique label, an obligation id, a runtime primitive such as runtime::restart, or a system, responsibility or seam name listed by blabla status"
         )]
         rule: String,
     },
-    #[command(about = "Print a guide: agent workflow, contract bootstrap, or behavior change")]
+    #[command(
+        about = "Print a guide: agent workflow, contract bootstrap, behavior change, or authoring project memory"
+    )]
     Guide {
         #[arg(value_enum)]
         topic: Option<guide::Topic>,
@@ -152,6 +162,76 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
         )]
         command: Vec<String>,
     },
+    #[command(
+        about = "Record and read one bounded task: the role it was given to, the paths it may write, the deliverables it owes and the findings raised during it"
+    )]
+    Task {
+        #[command(subcommand)]
+        action: TaskAction,
+    },
+    #[command(
+        about = "Hold the current work against the evidence BlaBla already has and state one grounded challenge to reconcile; reads only, decides nothing"
+    )]
+    Challenge {
+        #[arg(help = "Bounded task to challenge; default: the one open task")]
+        task: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TaskAction {
+    #[command(about = "Record a bounded task and snapshot the tree it starts from")]
+    Open {
+        name: String,
+        #[arg(long, help = "The role carrying it, as declared by process memory")]
+        role: String,
+        #[arg(long, help = "What the task is, in one sentence")]
+        statement: String,
+        #[arg(
+            long,
+            value_name = "PATH",
+            num_args = 1..,
+            help = "A path the task may write; repeat or list several"
+        )]
+        scope: Vec<String>,
+        #[arg(
+            long,
+            value_name = "PATH",
+            num_args = 1..,
+            help = "A path the task owes as a deliverable; repeat or list several"
+        )]
+        deliverable: Vec<String>,
+    },
+    #[command(about = "Record something discovered during the task that is not yet settled")]
+    Finding { name: String, statement: String },
+    #[command(about = "Record what settled a finding; the evidence is your claim, never BlaBla's")]
+    Resolve {
+        name: String,
+        id: usize,
+        #[arg(
+            long,
+            help = "What settled it: a file, a line, a command and what it showed"
+        )]
+        evidence: String,
+    },
+    #[command(
+        about = "Widen a bounded task's write scope deliberately, when the scope was declared too narrowly"
+    )]
+    Scope {
+        name: String,
+        #[arg(
+            long,
+            value_name = "PATH",
+            num_args = 1..,
+            required = true,
+            help = "A path to add to the write scope; repeat or list several"
+        )]
+        add: Vec<String>,
+    },
+    #[command(about = "Close a bounded task; its record stays readable")]
+    Close { name: String },
+    #[command(about = "Show one bounded task, or every recorded task without a name")]
+    Show { name: Option<String> },
 }
 
 #[derive(Serialize)]
@@ -294,6 +374,8 @@ struct RunOutput<'a> {
     project: Option<&'a blabla::project::status::StatusView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     completion: Option<&'a CompletionView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    challenge: Option<&'a blabla::skeptic::ChallengeReport>,
 }
 
 fn emit_run(
@@ -303,6 +385,7 @@ fn emit_run(
     timeout_ms: u64,
     project: Option<&blabla::project::status::StatusView>,
     gate: bool,
+    challenge: Option<&blabla::skeptic::ChallengeReport>,
 ) -> i32 {
     let behavior_exit = match (&report.status, &report.failure) {
         (RunStatus::Green, None)
@@ -343,6 +426,7 @@ fn emit_run(
             } else {
                 None
             },
+            challenge,
         })
     } else {
         write_human_run(&report, verbose).and_then(|()| match project {
@@ -352,7 +436,7 @@ fn emit_run(
                 project::write_layers(&mut output, view)?;
                 project::write_contracts(&mut output, view)?;
                 project::write_structure_issues(&mut output, view)?;
-                project::write_next(&mut output, view)?;
+                project::write_next(&mut output, view, &project::MemoryViews::default())?;
                 writeln!(
                     output,
                     "\nRecorded to {}; blabla status shows this result until contracts, implementation or the verification profile change.",
@@ -360,9 +444,13 @@ fn emit_run(
                         .display()
                 )?;
                 if gate {
-                    project::write_gate(&mut output, view)
+                    project::write_gate(&mut output, view)?;
                 } else {
-                    project::write_completion(&mut output, view)
+                    project::write_completion(&mut output, view)?;
+                }
+                match challenge {
+                    Some(report) => project::write_standing_challenge(&mut output, report),
+                    None => Ok(()),
                 }
             }
             None => Ok(()),
@@ -552,6 +640,41 @@ fn execute(cli: Cli) -> i32 {
             Ok(project) => project::finish(&project, json, cli.verbose),
             Err(exit) => exit,
         },
+        Command::Task { action } => match project::load(explicit, &cwd, json, None) {
+            Ok(loaded) => match action {
+                TaskAction::Open {
+                    name,
+                    role,
+                    statement,
+                    scope,
+                    deliverable,
+                } => task::open(
+                    &loaded,
+                    blabla::project::task::Opening {
+                        name,
+                        role,
+                        statement,
+                        scope,
+                        deliverables: deliverable,
+                    },
+                    json,
+                ),
+                TaskAction::Finding { name, statement } => {
+                    task::finding(&loaded, &name, &statement, json)
+                }
+                TaskAction::Resolve { name, id, evidence } => {
+                    task::resolve(&loaded, &name, id, &evidence, json)
+                }
+                TaskAction::Scope { name, add } => task::widen(&loaded, &name, add, json),
+                TaskAction::Close { name } => task::close(&loaded, &name, json),
+                TaskAction::Show { name } => task::show(&loaded, name.as_deref(), json),
+            },
+            Err(exit) => exit,
+        },
+        Command::Challenge { task: name } => match project::load(explicit, &cwd, json, None) {
+            Ok(loaded) => task::challenge(&loaded, name.as_deref(), json),
+            Err(exit) => exit,
+        },
         Command::Explain { rule } if rule.starts_with(runtime::primitives::PREFIX) => {
             project::explain_runtime(explicit, &cwd, &rule, json)
         }
@@ -559,11 +682,25 @@ fn execute(cli: Cli) -> i32 {
             Ok(project) => project::explain(&project, &rule, json),
             Err(exit) => exit,
         },
-        Command::Check { file: None } => match project::load(explicit, &cwd, json, None) {
+        Command::Check {
+            file: Some(file),
+            falsify: true,
+        } => falsify_file(&file, json),
+        Command::Check {
+            file: None,
+            falsify: true,
+        } => falsify_project(explicit, &cwd, json),
+        Command::Check {
+            file: None,
+            falsify: false,
+        } => match project::load(explicit, &cwd, json, None) {
             Ok(project) => project::check(&project, json),
             Err(exit) => exit,
         },
-        Command::Check { file: Some(file) } => check_file(&file, json),
+        Command::Check {
+            file: Some(file),
+            falsify: false,
+        } => check_file(&file, json),
         Command::Run {
             file,
             seed,
@@ -607,7 +744,9 @@ fn execute(cli: Cli) -> i32 {
                         timeout: Duration::from_millis(timeout_ms),
                     };
                     match verify::run(&contract, &options, || runtime::AppSession::spawn(&config)) {
-                        Ok(report) => emit_run(report, json, cli.verbose, timeout_ms, None, false),
+                        Ok(report) => {
+                            emit_run(report, json, cli.verbose, timeout_ms, None, false, None)
+                        }
                         Err(failure) => emit_verify_error(failure, json, seed),
                     }
                 }
@@ -647,6 +786,26 @@ struct StructureCheckReport {
     layer: &'static str,
     modules: usize,
     rules: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    evaluated: Option<StructureCheckEvaluation>,
+}
+
+#[derive(Serialize)]
+struct StructureCheckEvaluation {
+    state: &'static str,
+    verified: usize,
+    total: usize,
+    issues: Vec<StructureCheckIssue>,
+}
+
+#[derive(Serialize)]
+struct StructureCheckIssue {
+    id: String,
+    status: &'static str,
+    observed: Option<String>,
+    message: String,
 }
 
 fn check_file(file: &Path, json: bool) -> i32 {
@@ -654,6 +813,9 @@ fn check_file(file: &Path, json: bool) -> i32 {
         Ok(source) => source,
         Err(exit) => return exit,
     };
+    if let Some(kind) = blabla::memory::syntax::kind(&file.to_string_lossy(), &source) {
+        return check_memory(file, &source, kind, json);
+    }
     if !structure::syntax::is_structure_source(&source) {
         return match compile_file(file, json, None) {
             Ok(contract) => emit_check(&contract, json),
@@ -661,28 +823,472 @@ fn check_file(file: &Path, json: bool) -> i32 {
         };
     }
     let filename = file.to_string_lossy();
-    let root = file.parent().unwrap_or(Path::new("."));
-    let contract = match structure::syntax::parse(&filename, &source, root, None) {
+    let here = file.parent().unwrap_or(Path::new("."));
+    let manifest = blabla::project::locate(None, here).ok();
+    let root = manifest
+        .as_ref()
+        .and_then(|path| path.parent())
+        .unwrap_or(here);
+    let group = registered_group(manifest.as_deref(), file);
+    let contract = match structure::syntax::parse(&filename, &source, root, group.as_deref()) {
         Ok(contract) => contract,
         Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
     };
+    let evaluation = manifest.as_ref().map(|_| {
+        structure::verify(
+            std::slice::from_ref(&contract),
+            root,
+            &structure::default_providers(),
+        )
+    });
+    let exit = match &evaluation {
+        Some(report) => match report.status {
+            structure::LayerStatus::Red => 1,
+            structure::LayerStatus::Error => 3,
+            _ => 0,
+        },
+        None => 0,
+    };
     let report = StructureCheckReport {
-        status: "ok",
+        status: match exit {
+            1 => "red",
+            3 => "error",
+            _ => "ok",
+        },
         layer: "structure",
         modules: contract.modules.len(),
         rules: contract.rules.len(),
+        project: manifest.as_ref().map(|path| path.display().to_string()),
+        evaluated: evaluation.as_ref().map(|report| StructureCheckEvaluation {
+            state: report.status.word(),
+            verified: report.verified,
+            total: report.total(),
+            issues: report
+                .rules
+                .iter()
+                .filter(|rule| rule.status != structure::RuleStatus::Green)
+                .map(|rule| StructureCheckIssue {
+                    id: rule.id.clone(),
+                    status: rule.status.word(),
+                    observed: rule.observed.clone(),
+                    message: rule.message.clone(),
+                })
+                .collect(),
+        }),
     };
     let result = if json {
         write_json(&report)
     } else {
+        let mut output = io::stdout().lock();
         writeln!(
-            io::stdout().lock(),
+            output,
             "OK\nstructure contract\n{} modules\n{} rules",
-            report.modules,
-            report.rules
+            report.modules, report.rules
         )
+        .and_then(|()| match (&report.project, &report.evaluated) {
+            (Some(manifest), Some(evaluated)) => {
+                writeln!(
+                    output,
+                    "\nEvaluated against {manifest}\n{}/{} rules  {}",
+                    evaluated.verified, evaluated.total, evaluated.state
+                )?;
+                for issue in &evaluated.issues {
+                    writeln!(
+                        output,
+                        "  {:<6} {}  {}",
+                        issue.status,
+                        issue.id,
+                        issue.observed.as_deref().unwrap_or(&issue.message)
+                    )?;
+                }
+                if let Some(group) = &group {
+                    writeln!(
+                        output,
+                        "\nblabla explain contract::{group}   this contract's rules and their canonical ids"
+                    )?;
+                }
+                writeln!(
+                    output,
+                    "\nThis is one contract, not the project; blabla status and blabla finish remain the completion signal."
+                )
+            }
+            _ => writeln!(
+                output,
+                "\nNo project.bla was found above this file, so its modules were not evaluated."
+            ),
+        })
     };
-    if result.is_ok() { 0 } else { 4 }
+    if result.is_ok() { exit } else { 4 }
+}
+
+#[derive(Serialize)]
+struct MemoryCheckReport<'a> {
+    status: &'static str,
+    memory: &'static str,
+    file: &'a str,
+    declarations: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    problems: Vec<String>,
+    completion: &'static str,
+}
+
+fn check_memory(file: &Path, source: &str, kind: &'static str, json: bool) -> i32 {
+    let display = file.to_string_lossy().into_owned();
+    let blocks = match blabla::memory::syntax::parse(&display, source) {
+        Ok(blocks) => blocks,
+        Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
+    };
+    let problems = match kind {
+        "system" => match blabla::memory::system::build(&blocks) {
+            Ok(built) => blabla::memory::system::validate(&built),
+            Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
+        },
+        "mission" => match blabla::memory::mission::build(&blocks) {
+            Ok(built) => blabla::memory::mission::validate(&built),
+            Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
+        },
+        "knowledge" => match blabla::memory::knowledge::build(&blocks) {
+            Ok(built) => blabla::memory::knowledge::validate(&built),
+            Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
+        },
+        _ => match blabla::memory::process::build(&blocks) {
+            Ok(built) => blabla::memory::process::validate(&built),
+            Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
+        },
+    };
+    let valid = problems.is_empty();
+    let report = MemoryCheckReport {
+        status: if valid { "valid" } else { "invalid" },
+        memory: kind,
+        file: &display,
+        declarations: blocks.len(),
+        problems: problems.clone(),
+        completion: "none",
+    };
+    let result = if json {
+        write_json(&report)
+    } else {
+        let mut output = io::stdout().lock();
+        writeln!(
+            output,
+            "{}\n{kind} memory\n{} declarations",
+            if valid { "VALID" } else { "INVALID" },
+            blocks.len()
+        )
+        .and_then(|()| {
+            for problem in &problems {
+                writeln!(output, "  {problem}")?;
+            }
+            if kind == "process" {
+                writeln!(
+                    output,
+                    "\nProcess roles and policies are ADVISORY. BlaBla describes the intended authority and workflow and does not prevent an agent from bypassing them; a VALID file is a well-formed description, never an enforced one."
+                )?;
+            }
+            if kind == "knowledge" {
+                writeln!(
+                    output,
+                    "\nA ruling is reusable expertise, never an instruction to widen a task. This check reads the pack alone: it cannot see whether a system or a policy routes to it, which `blabla status` reports against the registered project."
+                )?;
+            }
+            writeln!(
+                output,
+                "\nThis validates the file against itself: syntax, fields, names and internal references. It is never checked against the repository, and neither VALID nor INVALID takes part in completion."
+            )
+        })
+    };
+    if result.is_err() {
+        return 4;
+    }
+    if valid { 0 } else { 2 }
+}
+
+fn registered_group(manifest: Option<&Path>, file: &Path) -> Option<String> {
+    let same = |left: &Path, right: &Path| match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    };
+    manifest
+        .and_then(|path| blabla::project::read_manifest(path).ok())
+        .and_then(|parsed| {
+            parsed
+                .entries
+                .iter()
+                .find(|entry| same(&entry.path, file))
+                .map(|entry| entry.group.clone())
+        })
+        .or_else(|| {
+            file.file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+        })
+}
+
+#[derive(Serialize)]
+struct FalsificationReport<'a> {
+    status: &'static str,
+    operation: &'static str,
+    layer: &'static str,
+    contract: String,
+    project: String,
+    completion: &'static str,
+    inspections: usize,
+    total: usize,
+    falsifiable: usize,
+    vacuous: usize,
+    unevaluable: usize,
+    limits: &'static [&'static str],
+    rules: &'a [structure::falsify::RuleFalsification],
+}
+
+#[derive(Serialize)]
+struct ProjectFalsificationReport<'a> {
+    status: &'static str,
+    operation: &'static str,
+    layer: &'static str,
+    scope: &'static str,
+    project: String,
+    contracts: Vec<String>,
+    active_structure: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    excluded_drafts: Vec<String>,
+    completion: &'static str,
+    inspections: usize,
+    total: usize,
+    falsifiable: usize,
+    vacuous: usize,
+    unevaluable: usize,
+    limits: &'static [&'static str],
+    rules: &'a [structure::falsify::RuleFalsification],
+}
+
+fn falsify_project(explicit: Option<&Path>, cwd: &Path, json: bool) -> i32 {
+    let loaded = match project::load(explicit, cwd, json, None) {
+        Ok(loaded) => loaded,
+        Err(exit) => return exit,
+    };
+    let excluded_drafts: Vec<String> = loaded
+        .drafts
+        .iter()
+        .filter(|draft| draft.layer == blabla::project::Layer::Structure)
+        .map(|draft| draft.name.clone())
+        .collect();
+    if loaded.structure.is_empty() {
+        let drafted = if excluded_drafts.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "; {} structure contract(s) are drafts and a draft is never falsified: {}",
+                excluded_drafts.len(),
+                excluded_drafts.join(", ")
+            )
+        };
+        return emit_error(
+            error(
+                "project",
+                format!(
+                    "{} declares no active structure contract, so nothing was falsified{drafted}",
+                    loaded.manifest.name
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    let report = structure::falsify::falsify(
+        &loaded.structure,
+        &loaded.manifest.root,
+        &structure::default_providers(),
+    );
+    let exit = report.exit_code();
+    let contracts: Vec<String> = loaded
+        .structure
+        .iter()
+        .map(|contract| {
+            contract
+                .group
+                .clone()
+                .unwrap_or_else(|| contract.file.clone())
+        })
+        .collect();
+    let view = ProjectFalsificationReport {
+        status: match exit {
+            1 => "vacuous",
+            3 => "unevaluable",
+            _ => "ok",
+        },
+        operation: "falsify",
+        layer: "structure",
+        scope: "project",
+        project: loaded.manifest.path.display().to_string(),
+        active_structure: contracts.len(),
+        contracts,
+        excluded_drafts,
+        completion: "not a completion signal",
+        inspections: report.invocations,
+        total: report.total,
+        falsifiable: report.falsifiable,
+        vacuous: report.vacuous,
+        unevaluable: report.unevaluable,
+        limits: &structure::falsify::LIMITS,
+        rules: &report.rules,
+    };
+    let result = if json {
+        write_json(&view)
+    } else {
+        emit_project_falsification(&view)
+    };
+    if result.is_ok() { exit } else { 4 }
+}
+
+fn falsify_file(file: &Path, json: bool) -> i32 {
+    let source = match read_source(file, json, None) {
+        Ok(source) => source,
+        Err(exit) => return exit,
+    };
+    if !structure::syntax::is_structure_source(&source) {
+        let display = file.display();
+        let reason = match blabla::memory::syntax::kind(&file.to_string_lossy(), &source) {
+            Some(kind) => format!(
+                "--falsify inverts a structural fact; {display} declares {kind} memory, which states no rule to invert. blabla check {display} validates it instead"
+            ),
+            None => format!(
+                "--falsify inspects structure contracts; {display} declares behavior, whose rules are falsified by running a campaign against an application rather than by inverting a structural fact"
+            ),
+        };
+        return emit_error(error("usage", reason, None), json, 2);
+    }
+    let here = file.parent().unwrap_or(Path::new("."));
+    let Ok(manifest) = blabla::project::locate(None, here) else {
+        return emit_error(
+            error(
+                "project",
+                format!(
+                    "no project.bla above {}: falsification reads the facts this contract's modules resolve to, and without a manifest no module is inspected",
+                    file.display()
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    };
+    let root = manifest.parent().unwrap_or(here).to_path_buf();
+    let group = registered_group(Some(&manifest), file);
+    let contract =
+        match structure::syntax::parse(&file.to_string_lossy(), &source, &root, group.as_deref()) {
+            Ok(contract) => contract,
+            Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
+        };
+    let report = structure::falsify::falsify(
+        std::slice::from_ref(&contract),
+        &root,
+        &structure::default_providers(),
+    );
+    let exit = report.exit_code();
+    let view = FalsificationReport {
+        status: match exit {
+            1 => "vacuous",
+            3 => "unevaluable",
+            _ => "ok",
+        },
+        operation: "falsify",
+        layer: "structure",
+        contract: file.display().to_string(),
+        project: manifest.display().to_string(),
+        completion: "not a completion signal",
+        inspections: report.invocations,
+        total: report.total,
+        falsifiable: report.falsifiable,
+        vacuous: report.vacuous,
+        unevaluable: report.unevaluable,
+        limits: &structure::falsify::LIMITS,
+        rules: &report.rules,
+    };
+    let result = if json {
+        write_json(&view)
+    } else {
+        emit_falsification(&view)
+    };
+    if result.is_ok() { exit } else { 4 }
+}
+
+fn emit_project_falsification(view: &ProjectFalsificationReport<'_>) -> io::Result<()> {
+    let mut output = io::stdout().lock();
+    writeln!(
+        output,
+        "FALSIFICATION  {} active structure contracts",
+        view.active_structure
+    )?;
+    writeln!(output, "Evaluated against {}", view.project)?;
+    writeln!(output, "Scope: {}", view.contracts.join(", "))?;
+    if !view.excluded_drafts.is_empty() {
+        writeln!(
+            output,
+            "Excluded: {} (a draft is never falsified)",
+            view.excluded_drafts.join(", ")
+        )?;
+    }
+    writeln!(
+        output,
+        "{} rules  {} falsifiable  {} vacuous  {} unevaluable  ({} inspection, nothing written)\n",
+        view.total, view.falsifiable, view.vacuous, view.unevaluable, view.inspections
+    )?;
+    write_falsification_rules(&mut output, view.rules)?;
+    writeln!(output)?;
+    for limit in view.limits {
+        writeln!(output, "{limit}")?;
+    }
+    writeln!(
+        output,
+        "\nExit 0 every rule falsifiable, 1 any vacuous, 3 any unevaluable."
+    )
+}
+
+fn write_falsification_rules(
+    output: &mut impl Write,
+    rules: &[structure::falsify::RuleFalsification],
+) -> io::Result<()> {
+    let width = rules.iter().map(|rule| rule.id.len()).max().unwrap_or(0);
+    for rule in rules {
+        let transition = match rule.counterfactual_status {
+            Some(status) => format!("{} -> {}", rule.status.word(), status.word()),
+            None => rule.status.word().to_owned(),
+        };
+        let detail = rule
+            .finding
+            .as_deref()
+            .or(rule.counterfactual.as_deref())
+            .unwrap_or_default();
+        writeln!(
+            output,
+            "  {:<11}  {:<width$}  {:<15}  {detail}",
+            rule.verdict.word(),
+            rule.id,
+            transition
+        )?;
+    }
+    Ok(())
+}
+
+fn emit_falsification(view: &FalsificationReport<'_>) -> io::Result<()> {
+    let mut output = io::stdout().lock();
+    writeln!(output, "FALSIFICATION  {}", view.contract)?;
+    writeln!(output, "Evaluated against {}", view.project)?;
+    writeln!(
+        output,
+        "{} rules  {} falsifiable  {} vacuous  {} unevaluable  ({} inspection, nothing written)\n",
+        view.total, view.falsifiable, view.vacuous, view.unevaluable, view.inspections
+    )?;
+    write_falsification_rules(&mut output, view.rules)?;
+    writeln!(output)?;
+    for limit in view.limits {
+        writeln!(output, "{limit}")?;
+    }
+    writeln!(
+        output,
+        "\nExit 0 every rule falsifiable, 1 any vacuous, 3 any unevaluable."
+    )
 }
 
 fn emit_check(contract: &blabla::ir::Contract, json: bool) -> i32 {

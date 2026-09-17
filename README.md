@@ -1,18 +1,20 @@
 # BlaBla
 
-**Executable project memory for coding agents.**
+**Executable, queryable project memory for coding agents.**
 
 [![CI](https://github.com/Kiborgik/blabla/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Kiborgik/blabla/actions/workflows/ci.yml)
 ![status: experimental alpha](https://img.shields.io/badge/status-experimental%20alpha-orange)
-![version 0.5.0-alpha](https://img.shields.io/badge/version-0.5.0--alpha-blue)
+![version 0.6.0-alpha](https://img.shields.io/badge/version-0.6.0--alpha-blue)
 ![license MIT](https://img.shields.io/badge/license-MIT-green)
 ![Rust stable](https://img.shields.io/badge/rust-stable-black)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22761364.svg)](https://doi.org/10.5281/zenodo.22761364)
 
-Coding agents are good at making changes. The hard part is carrying every old requirement, edge case and architecture decision through a long project or a fresh session.
+Coding agents can change code quickly. The harder problem is carrying project intent, architecture, constraints and unfinished findings across fresh sessions and different models.
 
-BlaBla moves the parts that matter into small executable contracts. Agents can ask what is wrong, inspect one rule at a time, and use `blabla finish` as a completion gate instead of reconstructing the whole project from chat history.
+BlaBla keeps that information in the repository. Agents enter through `blabla status`, follow canonical identities with `blabla explain`, work inside a bounded task when the project uses that workflow, and finish against deterministic project evidence instead of reconstructing the project from chat history.
+
+BlaBla has two executable completion layers, Behavior and Structure, plus four queryable memory kinds: Mission, System, Process and Knowledge. Project memory informs the work; it does not decide completion.
 
 ![BlaBla concept: human intent becomes project.bla composing behavior and structure contracts; a coding agent reads them through blabla status and explain, writes an ordinary implementation, and runs blabla finish, which reports OVERALL GREEN only when every active contract is satisfied.](docs/assets/concept.svg)
 
@@ -51,12 +53,20 @@ Those are abridged outputs from the included Glyph Vault fixtures.
 
 ## The idea
 
-BlaBla currently has two contract layers:
+Two kinds of thing live in a BlaBla project, and the difference matters.
 
-- **`behavior.bla`** describes observable runtime behavior: state, actions, postconditions and invariants.
-- **`structure.bla`** describes static codebase boundaries: modules, symbols, dependencies and literal collections.
+| Kind | Purpose |
+| --- | --- |
+| Mission | project purpose, priorities and non-goals |
+| System | architecture, responsibilities and seams |
+| Process | roles, policies and development flows |
+| Knowledge | reusable engineering/project expertise |
+| Structure | executable static-code invariants |
+| Behavior | executable runtime invariants |
 
-`project.bla` composes them and defines the canonical verification profile.
+Structure and Behavior are checked and decide completion. Mission, System, Process and Knowledge are queried; they inform the work and never reach `OVERALL`.
+
+`project.bla` composes the contracts, registers the memory, and defines the canonical verification profile.
 
 The normal agent workflow is deliberately small:
 
@@ -64,7 +74,7 @@ The normal agent workflow is deliberately small:
 
 ```text
 blabla status
-blabla explain <rule>
+blabla explain <group>::<label>
 # edit ordinary application code
 blabla finish
 ```
@@ -129,18 +139,77 @@ forbid  "id-is-the-key":               value model::DURABLE_FIELDS contains "id"
 forbid  "no-domain-restart":           symbol domain::VaultDomain.restart
 ```
 
-v0.5 ships one structure provider: Python. It parses source with Python's `ast` module in an isolated interpreter and never imports or executes project code.
+Structure has two providers, chosen by file extension. Python is parsed with Python's own `ast` module in an isolated interpreter; Rust is parsed in-process with `syn`. Neither imports or executes project code, and neither adds a fact — a provider adds a language. A module in any other language is ERROR for every rule that names it.
+
+`blabla check --falsify` asks a second question: can each rule actually be made to fail? A rule that reports `VACUOUS` is GREEN for a reason unrelated to the project.
 
 Full reference: [docs/structure.md](docs/structure.md).
 
+## Project memory
+
+Contracts say what must remain true. Project memory says the rest of what an agent would otherwise be told in chat, and it is queried rather than read whole.
+
+| Memory | Declares | Answers |
+| --- | --- | --- |
+| Mission | `mission`, `priority` | why the project exists and what decides a tradeoff |
+| System | `system`, `responsibility`, `seam` | what part is being touched and who owns it |
+| Process | `role`, `policy`, `flow`, `step` | who is expected to do what, and in what order |
+| Knowledge | `knowledge`, `ruling` | reusable expertise, portable between projects |
+
+```text
+mission   "mission.bla"
+system    "system.bla"
+process   "process.bla"
+knowledge "knowledge/engineering.bla"
+```
+
+```text
+blabla status                                       every declared kind and its state
+blabla explain system::cli                          one system, its responsibilities and its seams
+blabla explain knowledge::testing                   a pack's purpose and the id of every ruling in it
+blabla explain ruling::testing::read-the-whole-run  one ruling, in full
+```
+
+Surveying a pack costs one line per ruling; reading a ruling costs one more `explain`. An agent loads the entry it needs, not the file.
+
+Project memory is validated within itself, never against the repository, and never reaches `OVERALL`. A project that declares none of it is not thereby incomplete. Process is advisory: BlaBla describes the intended authority and does not enforce it.
+
+`blabla guide memory` is the authoring procedure; `blabla check <file>.bla` validates a memory file while it is still being written. Full reference: [docs/project.md](docs/project.md).
+
+## The development loop
+
+A project that wants it can describe how work moves between agents:
+
+```text
+status → explain relevant memory → task → implement → focused checks
+       → challenge → review/findings → integrate → finish
+```
+
+Process declares that flow as ordered `flow` and `step` entries. It describes the loop; it does not schedule work or launch agents.
+
+A **bounded task** carries one change across a handoff: the paths it may write, the deliverables it owes, and the findings raised against it. Tasks live under `.blabla/tasks/` as transient machine state — not authored memory, not validated for truth, not part of completion.
+
+`blabla challenge` checks that recorded account against evidence BlaBla already holds and reports one concrete discrepancy, such as a deliverable that never changed or a finding left unresolved. It is a deterministic check, not a semantic code reviewer, and it does not change what `finish` decides or what it exits with.
+
+```text
+blabla status
+blabla explain flow::development
+blabla task open ...
+# implement and run focused checks
+blabla challenge
+blabla finish
+```
+
+The classes it can report, and their limits: [docs/agent-workflow.md](docs/agent-workflow.md).
+
 ## Quick start
 
-Requirements: stable Rust and Python 3.10+ on `PATH`.
+Requirements: stable Rust, plus Python 3.10+ on `PATH` if a structure contract names a `.py` module.
 
-Install the published prerelease. The explicit version is required because `0.5.0-alpha` is a prerelease:
+Install the published prerelease. The explicit version is required because `0.6.0-alpha` is a prerelease:
 
 ```bash
-cargo install blabla --version 0.5.0-alpha
+cargo install blabla --version 0.6.0-alpha
 ```
 
 Or build from source:
@@ -155,7 +224,7 @@ The binary is `target/release/blabla` (`blabla.exe` on Windows).
 
 ```text
 $ blabla --version
-blabla 0.5.0-alpha
+blabla 0.6.0-alpha
 ```
 
 ### Try the Todo example
@@ -222,7 +291,7 @@ verify behavior {
 
 The behavior adapter is a small synchronous JSON Lines protocol (`reset`, `call`, `observe`). Logs go to stderr. Protocol errors, crashes and timeouts are reported separately from contract violations.
 
-More detail: [project](docs/project.md) · [agent workflow](docs/agent-workflow.md) · [language](docs/language.md) · [structure](docs/structure.md)
+More detail: [architecture](docs/architecture.md) · [project](docs/project.md) · [agent workflow](docs/agent-workflow.md) · [language](docs/language.md) · [structure](docs/structure.md)
 
 ## A first experiment
 
@@ -263,17 +332,20 @@ It is a small executable boundary around the parts of project intent you choose 
 
 - behavior verification is bounded and heuristic
 - behavior absent from the contracts is not verified
-- the structure provider is Python-only in v0.5
-- structural facts are limited to modules, symbols, dependencies and literal collection membership
+- structure inspects Python and Rust; a module in any other language is ERROR for every rule naming it
+- structural facts are limited to modules, symbols, dependencies, literal collection membership and key/payload association
 - dynamic Python imports/attributes and non-literal values may be invisible
+- Rust structure does no name or type resolution, no re-export or alias chasing and no macro expansion
+- a scalar constant cannot be contracted; `value` reads literal collections, not single values
 - adapter observations are trusted
 - no distributed/temporal verification
-- no process or mission layer yet
-- v0.5.0-alpha has limited external testing; language and JSON/CLI APIs may change
+- project memory is validated only within itself: it is never checked against the repository, never reaches `OVERALL`, and Process policies and flows are advisory rather than enforced
+- a challenge sees only what was recorded: an unopened task, an undeclared deliverable and an unwritten finding are all invisible to it
+- `0.6.0-alpha` is an experimental alpha with limited external testing; language, JSON and CLI APIs may still change
 
 ## Roadmap
 
-No dates. Current directions: more structure providers, benchmark replication, higher-level process/orchestrator contracts, and mission-level executable intent.
+No dates. Current directions include improving the development-loop handoff, evaluating where smaller models are useful, reproducing the project-memory results on more projects and models, and adding structure providers only where they expose useful invariants.
 
 ## Contributing
 

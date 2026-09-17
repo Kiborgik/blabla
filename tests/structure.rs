@@ -167,3 +167,347 @@ fn syntax_errors_and_relative_imports_are_reported_per_module() {
         RuleStatus::Green
     );
 }
+
+#[test]
+fn rust_trait_method_is_a_symbol_and_renaming_it_turns_rule_red() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub trait Reader {\n    fn read(&self);\n    fn close(&self);\n}\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nrequire \"has-read\": symbol core::Reader.read\nrequire \"has-close\": symbol core::Reader.close";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(report.status, LayerStatus::Green);
+    assert_eq!(status(&report, "has-read").0, RuleStatus::Green);
+    assert_eq!(status(&report, "has-close").0, RuleStatus::Green);
+
+    write(
+        root,
+        "src/lib.rs",
+        "pub trait Reader {\n    fn scan(&self);\n    fn close(&self);\n}\n",
+    );
+    let contract2 = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report2 = verify(&[contract2], root, &default_providers());
+    let (state, _) = status(&report2, "has-read");
+    assert_eq!(state, RuleStatus::Red);
+    assert_eq!(status(&report2, "has-close").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_impl_trait_for_type_method_is_a_symbol() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub trait Writer {\n    fn write(&mut self, data: &str);\n}\npub struct Buffer {}\nimpl Writer for Buffer {\n    fn write(&mut self, data: &str) {}\n}\n",
+    );
+    let contract_text =
+        "module core \"src/lib.rs\"\nrequire \"buffer-write\": symbol core::Buffer.write";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(report.status, LayerStatus::Green);
+    assert_eq!(status(&report, "buffer-write").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_inherent_impl_method_struct_field_and_enum_variant_are_symbols() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub struct Config {\n    pub name: String,\n    pub timeout: u32,\n}\nimpl Config {\n    pub fn new() -> Self { Config { name: String::new(), timeout: 30 } }\n    pub fn reset(&mut self) {}\n}\npub enum Status {\n    Ready,\n    Running,\n    Done,\n}\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nrequire \"config-name\": symbol core::Config.name\nrequire \"config-timeout\": symbol core::Config.timeout\nrequire \"config-new\": symbol core::Config.new\nrequire \"config-reset\": symbol core::Config.reset\nrequire \"status-ready\": symbol core::Status.Ready\nrequire \"status-done\": symbol core::Status.Done";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(report.status, LayerStatus::Green);
+    assert_eq!(status(&report, "config-name").0, RuleStatus::Green);
+    assert_eq!(status(&report, "config-timeout").0, RuleStatus::Green);
+    assert_eq!(status(&report, "config-new").0, RuleStatus::Green);
+    assert_eq!(status(&report, "config-reset").0, RuleStatus::Green);
+    assert_eq!(status(&report, "status-ready").0, RuleStatus::Green);
+    assert_eq!(status(&report, "status-done").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_inline_mod_body_items_are_not_symbols() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub struct Public {}\nmod hidden {\n    pub struct InlineHidden {}\n    pub fn inline_func() {}\n}\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nrequire \"public\": symbol core::Public\nforbid \"inline-hidden\": symbol core::InlineHidden";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "public").0, RuleStatus::Green);
+    assert_eq!(status(&report, "inline-hidden").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_dependency_through_plain_use() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "src/lib.rs", "pub mod utils;\npub fn main() {}\n");
+    write(root, "src/utils.rs", "pub fn help() {}\n");
+    write(
+        root,
+        "src/app.rs",
+        "use crate::utils;\nfn run() { utils::help(); }\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nmodule app \"src/app.rs\"\nmodule utils \"src/utils.rs\"\nrequire \"app-uses-utils\": dependency app -> utils";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "app-uses-utils").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_dependency_through_fully_qualified_path_without_use() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "src/lib.rs", "pub mod utils;\npub fn main() {}\n");
+    write(root, "src/utils.rs", "pub fn help() {}\n");
+    write(
+        root,
+        "src/app.rs",
+        "fn run() {\n    crate::utils::help();\n}\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nmodule app \"src/app.rs\"\nmodule utils \"src/utils.rs\"\nrequire \"app-uses-utils\": dependency app -> utils";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "app-uses-utils").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_dependency_through_path_inside_macro() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "src/lib.rs", "pub mod config;\npub fn main() {}\n");
+    write(root, "src/config.rs", "pub const TIMEOUT: u32 = 30;\n");
+    write(
+        root,
+        "src/app.rs",
+        "fn run() {\n    let values = vec![crate::config::TIMEOUT];\n}\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nmodule app \"src/app.rs\"\nmodule config \"src/config.rs\"\nrequire \"app-uses-config\": dependency app -> config";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "app-uses-config").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_dependency_through_mod_declaration() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "src/lib.rs", "pub mod child;\nfn main() {}\n");
+    write(root, "src/child.rs", "pub fn helper() {}\n");
+    let contract_text = "module core \"src/lib.rs\"\nmodule child \"src/child.rs\"\nrequire \"declares-child\": dependency core -> child";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "declares-child").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_forbid_dependency_is_red_on_fully_qualified_path() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "src/lib.rs", "pub mod db;\nfn main() {}\n");
+    write(root, "src/db.rs", "pub fn query() {}\n");
+    write(
+        root,
+        "src/app.rs",
+        "fn run() {\n    crate::db::query();\n}\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nmodule app \"src/app.rs\"\nmodule db \"src/db.rs\"\nforbid \"no-db\": dependency app -> db";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "no-db").0, RuleStatus::Red);
+}
+
+#[test]
+fn rust_value_contains_over_const_array_of_strings() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub const ALLOWED: &[&str] = &[\"read\", \"write\", \"admin\"];\npub const BLACKLIST: &[&str] = &[\"guest\", \"deny\"];\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nrequire \"has-read\": value core::ALLOWED contains \"read\"\nrequire \"has-write\": value core::ALLOWED contains \"write\"\nforbid \"no-guest\": value core::ALLOWED contains \"guest\"\nrequire \"has-deny\": value core::BLACKLIST contains \"deny\"";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "has-read").0, RuleStatus::Green);
+    assert_eq!(status(&report, "has-write").0, RuleStatus::Green);
+    assert_eq!(status(&report, "no-guest").0, RuleStatus::Green);
+    assert_eq!(status(&report, "has-deny").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_value_maps_k_to_v_over_const_array_of_tuples() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub const DEFAULTS: &[(u32, &str)] = &[(1, \"low\"), (5, \"medium\"), (10, \"high\")];\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nrequire \"map-1-to-low\": value core::DEFAULTS maps 1 to \"low\"\nrequire \"map-5-to-medium\": value core::DEFAULTS maps 5 to \"medium\"\nrequire \"map-10-to-high\": value core::DEFAULTS maps 10 to \"high\"\nrequire \"map-1-to-high\": value core::DEFAULTS maps 1 to \"high\"";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "map-1-to-low").0, RuleStatus::Green);
+    assert_eq!(status(&report, "map-5-to-medium").0, RuleStatus::Green);
+    assert_eq!(status(&report, "map-10-to-high").0, RuleStatus::Green);
+    assert_eq!(status(&report, "map-1-to-high").0, RuleStatus::Red);
+}
+
+#[test]
+fn rust_parse_error_sets_rule_to_error() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "src/lib.rs", "pub fn broken(\n    pass\n}\n");
+    let contract_text = "module core \"src/lib.rs\"\nrequire \"check-fn\": symbol core::broken";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "check-fn").0, RuleStatus::Error);
+    assert_eq!(report.status, LayerStatus::Error);
+}
+
+#[test]
+fn rust_missing_file_is_red_on_require_and_green_on_forbid() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "src/lib.rs", "fn main() {}\n");
+    let contract_text = "module core \"src/lib.rs\"\nmodule missing \"src/missing.rs\"\nrequire \"missing-exists\": module missing\nforbid \"missing-forbidden\": symbol missing::Item";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    let (state, _) = status(&report, "missing-exists");
+    assert_eq!(state, RuleStatus::Red);
+    let (state, _) = status(&report, "missing-forbidden");
+    assert_eq!(state, RuleStatus::Green);
+}
+
+#[test]
+fn rust_generic_impl_type_name_ignores_generic_parameters() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub struct Container<T> {}\nimpl<T> Container<T> {\n    pub fn get(&self) -> Option<&T> { None }\n}\n",
+    );
+    let contract_text =
+        "module core \"src/lib.rs\"\nrequire \"container-get\": symbol core::Container.get";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "container-get").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_static_const_values_are_extractable() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub const MODES: &[&str] = &[\"sync\", \"async\"];\npub const COUNTS: &[i32] = &[10, 20, 30];\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nrequire \"sync-mode\": value core::MODES contains \"sync\"\nrequire \"async-mode\": value core::MODES contains \"async\"\nrequire \"has-20\": value core::COUNTS contains 20";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "sync-mode").0, RuleStatus::Green);
+    assert_eq!(status(&report, "async-mode").0, RuleStatus::Green);
+    assert_eq!(status(&report, "has-20").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_impl_const_and_trait_const_are_symbols() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub trait Config {\n    const VERSION: u32;\n    const NAME: &str;\n}\npub struct AppConfig;\nimpl Config for AppConfig {\n    const VERSION: u32 = 2;\n    const NAME: &str = \"App\";\n}\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nrequire \"trait-version\": symbol core::Config.VERSION\nrequire \"trait-name\": symbol core::Config.NAME\nrequire \"impl-version\": symbol core::AppConfig.VERSION\nrequire \"impl-name\": symbol core::AppConfig.NAME";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "trait-version").0, RuleStatus::Green);
+    assert_eq!(status(&report, "trait-name").0, RuleStatus::Green);
+    assert_eq!(status(&report, "impl-version").0, RuleStatus::Green);
+    assert_eq!(status(&report, "impl-name").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_external_crate_dependency() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "src/lib.rs", "use serde::Serialize;\nfn main() {}\n");
+    let contract_text =
+        "module core \"src/lib.rs\"\nforbid \"no-serde\": dependency core -> \"serde\"";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "no-serde").0, RuleStatus::Red);
+}
+
+#[test]
+fn rust_union_fields_are_symbols() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        root,
+        "src/lib.rs",
+        "pub union Data {\n    pub i: u32,\n    pub b: bool,\n}\n",
+    );
+    let contract_text = "module core \"src/lib.rs\"\nrequire \"union-i\": symbol core::Data.i\nrequire \"union-b\": symbol core::Data.b";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "union-i").0, RuleStatus::Green);
+    assert_eq!(status(&report, "union-b").0, RuleStatus::Green);
+}
+
+#[test]
+fn rust_external_target_naming_an_internal_route_is_error_not_a_vacuous_forbid() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "src/lib.rs", "pub mod core;\n");
+    write(
+        root,
+        "src/core.rs",
+        "use serde::Serialize;\n\npub fn run() {\n    let _ = crate::other::helper();\n}\n",
+    );
+    let contract_text = "module core \"src/core.rs\"\n\
+forbid \"internal-colon\": dependency core -> \"crate::other\"\n\
+forbid \"internal-dot\": dependency core -> \"super.other\"\n\
+forbid \"crate-path\": dependency core -> \"serde::Serialize\"\n\
+require \"crate-root\": dependency core -> \"serde\"\n";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "internal-colon").0, RuleStatus::Error);
+    assert_eq!(status(&report, "internal-dot").0, RuleStatus::Error);
+    assert_eq!(status(&report, "crate-path").0, RuleStatus::Error);
+    assert_eq!(status(&report, "crate-root").0, RuleStatus::Green);
+    assert_eq!(report.status, LayerStatus::Error);
+}
+
+#[test]
+fn python_external_targets_keep_their_dotted_submodule_semantics() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "app/thing.py", "import os.path\nimport json\n");
+    let contract_text = "module thing \"app/thing.py\"\n\
+require \"submodule\": dependency thing -> \"os.path\"\n\
+require \"root\": dependency thing -> \"os\"\n\
+forbid \"absent\": dependency thing -> \"socket\"\n";
+    let contract = parse("arch.bla", contract_text, root, Some("architecture")).unwrap();
+    let report = verify(&[contract], root, &default_providers());
+    assert_eq!(status(&report, "submodule").0, RuleStatus::Green);
+    assert_eq!(status(&report, "root").0, RuleStatus::Green);
+    assert_eq!(status(&report, "absent").0, RuleStatus::Green);
+    assert_eq!(report.status, LayerStatus::Green);
+}

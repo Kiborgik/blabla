@@ -6,7 +6,7 @@ use crate::syntax::{Lexer, Token, TokenKind};
 use std::collections::HashSet;
 use std::path::Path;
 
-pub const FACT_FORMS: &str = "`module <m>`, `symbol <m>::<Name>[.<member>]`, `dependency <m> -> <m>|\"<external>\"`, `value <m>::<Name> contains <literal>`";
+pub const FACT_FORMS: &str = "`module <m>`, `symbol <m>::<Name>[.<member>]`, `dependency <m> -> <m>|\"<external>\"`, `value <m>::<Name> contains <literal>`, `value <m>::<Name> maps <literal> to <literal>`";
 
 pub fn is_structure_source(source: &str) -> bool {
     source
@@ -209,44 +209,49 @@ impl StructureParser<'_> {
                 let (module, path, _) = self.symbol_reference()?;
                 let keyword = self.current().clone();
                 match &keyword.kind {
-                    TokenKind::Identifier(word) if word == "contains" => self.position += 1,
-                    _ => {
-                        return Err(self.error(
-                            keyword.span,
-                            "E_STRUCTURE_FACT",
-                            "expected `contains <literal>` after the value reference",
-                        ));
+                    TokenKind::Identifier(word) if word == "contains" => {
+                        self.position += 1;
+                        let (value, end) = self.literal("contains")?;
+                        Ok((
+                            Fact::Contains {
+                                module,
+                                path,
+                                value,
+                            },
+                            end,
+                        ))
                     }
+                    TokenKind::Identifier(word) if word == "maps" => {
+                        self.position += 1;
+                        let (key, _) = self.literal("maps")?;
+                        let separator = self.current().clone();
+                        match &separator.kind {
+                            TokenKind::Identifier(word) if word == "to" => self.position += 1,
+                            _ => {
+                                return Err(self.error(
+                                    separator.span,
+                                    "E_STRUCTURE_FACT",
+                                    "expected `to <literal>` after the mapped key",
+                                ));
+                            }
+                        }
+                        let (value, end) = self.literal("to")?;
+                        Ok((
+                            Fact::Maps {
+                                module,
+                                path,
+                                key,
+                                value,
+                            },
+                            end,
+                        ))
+                    }
+                    _ => Err(self.error(
+                        keyword.span,
+                        "E_STRUCTURE_FACT",
+                        "expected `contains <literal>` or `maps <literal> to <literal>` after the value reference",
+                    )),
                 }
-                let literal = self.current().clone();
-                self.position += 1;
-                let value = match &literal.kind {
-                    TokenKind::String(text) => Literal::Str(text.clone()),
-                    TokenKind::Integer(text) => Literal::Int(text.parse().map_err(|_| {
-                        self.error(
-                            literal.span,
-                            "E_STRUCTURE_FACT",
-                            "integer literal out of range",
-                        )
-                    })?),
-                    TokenKind::Identifier(word) if word == "true" => Literal::Bool(true),
-                    TokenKind::Identifier(word) if word == "false" => Literal::Bool(false),
-                    _ => {
-                        return Err(self.error(
-                            literal.span,
-                            "E_STRUCTURE_FACT",
-                            "expected a string, integer, `true` or `false` after `contains`",
-                        ));
-                    }
-                };
-                Ok((
-                    Fact::Contains {
-                        module,
-                        path,
-                        value,
-                    },
-                    literal.span.end,
-                ))
             }
             other => Err(self.error(
                 token.span,
@@ -254,6 +259,31 @@ impl StructureParser<'_> {
                 format!("unknown structural fact '{other}'; supported facts: {FACT_FORMS}"),
             )),
         }
+    }
+
+    fn literal(&mut self, after: &str) -> Result<(Literal, usize), Diagnostic> {
+        let token = self.current().clone();
+        self.position += 1;
+        let value = match &token.kind {
+            TokenKind::String(text) => Literal::Str(text.clone()),
+            TokenKind::Integer(text) => Literal::Int(text.parse().map_err(|_| {
+                self.error(
+                    token.span,
+                    "E_STRUCTURE_FACT",
+                    "integer literal out of range",
+                )
+            })?),
+            TokenKind::Identifier(word) if word == "true" => Literal::Bool(true),
+            TokenKind::Identifier(word) if word == "false" => Literal::Bool(false),
+            _ => {
+                return Err(self.error(
+                    token.span,
+                    "E_STRUCTURE_FACT",
+                    format!("expected a string, integer, `true` or `false` after `{after}`"),
+                ));
+            }
+        };
+        Ok((value, token.span.end))
     }
 
     fn module_reference(&mut self) -> Result<(String, Span), Diagnostic> {

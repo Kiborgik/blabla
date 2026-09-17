@@ -1,0 +1,16 @@
+project blabla
+
+mission "mission.bla"
+system "system.bla"
+process "process.bla"
+
+knowledge "knowledge/engineering.bla"
+knowledge "knowledge/testing.bla"
+knowledge "knowledge/reviewing.bla"
+
+use structure "contracts/extractor.bla"
+use structure "contracts/publication.bla"
+use structure "contracts/secrets.bla"
+use structure "contracts/gate.bla"
+use structure "contracts/diagrams.bla"
+use structure "contracts/rust.bla"

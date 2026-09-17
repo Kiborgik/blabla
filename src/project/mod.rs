@@ -6,12 +6,13 @@ use crate::semantics::{Unit, compile_units};
 use crate::structure::{self, StructureContract, StructureReport, StructureRule};
 use crate::syntax::{self, Lexer, Token, TokenKind};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
 pub mod runstate;
 pub mod status;
+pub mod task;
 
 pub const MANIFEST_NAME: &str = "project.bla";
 pub const PROFILE_FIELDS: &str = "command, seed, cases, steps, timeout_ms, shrink_budget";
@@ -40,8 +41,19 @@ pub struct Manifest {
     pub root: PathBuf,
     pub source: String,
     pub entries: Vec<Entry>,
+    pub mission: Option<MemoryEntry>,
+    pub system: Option<MemoryEntry>,
+    pub process: Option<MemoryEntry>,
+    pub knowledge: Vec<MemoryEntry>,
     pub profile: Option<Profile>,
     pub profile_span: Option<Span>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MemoryEntry {
+    pub display: String,
+    pub path: PathBuf,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,7 +75,39 @@ pub struct ResolvedCommand {
 
 enum Statement {
     Entry(Entry),
+    Mission(MemoryEntry),
+    System(MemoryEntry),
+    Process(MemoryEntry),
+    Knowledge(MemoryEntry),
     Profile(Profile, Span),
+}
+
+pub const RESERVED_GROUPS: &[&str] = &[
+    "contract",
+    "mission",
+    "priority",
+    "knowledge",
+    "ruling",
+    "system",
+    "responsibility",
+    "seam",
+    "role",
+    "policy",
+    "flow",
+    "step",
+    "runtime",
+    "task",
+];
+
+const MEMORY_STATEMENTS: &[&str] = &["mission", "system", "process", "knowledge"];
+
+fn memory_example(keyword: &str) -> &'static str {
+    match keyword {
+        "mission" => "mission.bla",
+        "system" => "system.bla",
+        "knowledge" => "knowledge/engineering.bla",
+        _ => "process.bla",
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -133,18 +177,54 @@ pub struct Project {
 }
 
 #[derive(Clone)]
+pub enum Resolution<'a> {
+    Project(Lookup<'a>),
+    Memory(String),
+}
+
+const OFFERED: usize = 6;
+
+fn offer(ids: &[String]) -> String {
+    let shown: Vec<String> = ids
+        .iter()
+        .take(OFFERED)
+        .map(|id| format!("blabla explain {id}"))
+        .collect();
+    match ids.len().checked_sub(OFFERED) {
+        Some(rest) if rest > 0 => format!("{} ({rest} more)", shown.join(" | ")),
+        _ => shown.join(" | "),
+    }
+}
+
+fn narrow<'a, 'b>(candidates: &'b [Lookup<'a>], candidate: &str) -> Vec<&'b Lookup<'a>> {
+    let by_label: Vec<&Lookup<'_>> = candidates
+        .iter()
+        .filter(|found| found.label() == candidate)
+        .collect();
+    if !by_label.is_empty() {
+        return by_label;
+    }
+    candidates
+        .iter()
+        .filter(|found| found.id().contains(candidate))
+        .collect()
+}
+
+#[derive(Clone)]
 pub enum Lookup<'a> {
     Rule(&'a Rule),
     Structure(&'a StructureRule),
+    Contract(&'a Group),
     Action(String),
 }
 
 impl Lookup<'_> {
-    fn id(&self) -> &str {
+    pub fn id(&self) -> String {
         match self {
-            Lookup::Rule(rule) => &rule.id,
-            Lookup::Structure(rule) => &rule.id,
-            Lookup::Action(name) => name,
+            Lookup::Rule(rule) => rule.id.clone(),
+            Lookup::Structure(rule) => rule.id.clone(),
+            Lookup::Contract(group) => format!("contract::{}", group.name),
+            Lookup::Action(name) => name.clone(),
         }
     }
 
@@ -152,6 +232,7 @@ impl Lookup<'_> {
         match self {
             Lookup::Rule(rule) => &rule.label,
             Lookup::Structure(rule) => &rule.label,
+            Lookup::Contract(group) => &group.name,
             Lookup::Action(name) => name,
         }
     }
@@ -251,8 +332,58 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
     let mut groups = HashSet::new();
     let mut profile = None;
     let mut profile_span = None;
+    let mut mission: Option<MemoryEntry> = None;
+    let mut system: Option<MemoryEntry> = None;
+    let mut process: Option<MemoryEntry> = None;
+    let mut knowledge: Vec<MemoryEntry> = Vec::new();
     while !parser.at_end() {
         match parser.statement(&root)? {
+            Statement::Mission(entry) => {
+                if mission.is_some() {
+                    return Err(parser.error(
+                        entry.span,
+                        "E_DUPLICATE_MISSION",
+                        "the manifest registers more than one mission memory file; a project states one mission",
+                    ));
+                }
+                mission = Some(entry);
+            }
+            Statement::Knowledge(entry) => {
+                if knowledge
+                    .iter()
+                    .any(|seen| normalize(&seen.path) == normalize(&entry.path))
+                {
+                    return Err(parser.error(
+                        entry.span,
+                        "E_DUPLICATE_KNOWLEDGE",
+                        format!(
+                            "knowledge memory '{}' is registered more than once",
+                            entry.display
+                        ),
+                    ));
+                }
+                knowledge.push(entry);
+            }
+            Statement::System(entry) => {
+                if system.is_some() {
+                    return Err(parser.error(
+                        entry.span,
+                        "E_DUPLICATE_SYSTEM",
+                        "the manifest registers more than one system memory file; a project has at most one",
+                    ));
+                }
+                system = Some(entry);
+            }
+            Statement::Process(entry) => {
+                if process.is_some() {
+                    return Err(parser.error(
+                        entry.span,
+                        "E_DUPLICATE_PROCESS",
+                        "the manifest registers more than one process memory file; a project has at most one",
+                    ));
+                }
+                process = Some(entry);
+            }
             Statement::Profile(parsed, span) => {
                 if profile.is_some() {
                     return Err(parser.error(
@@ -270,6 +401,16 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
                         entry.span,
                         "E_DUPLICATE_USE",
                         format!("contract '{}' is referenced more than once", entry.display),
+                    ));
+                }
+                if RESERVED_GROUPS.contains(&entry.group.as_str()) {
+                    return Err(parser.error(
+                        entry.span,
+                        "E_RESERVED_GROUP",
+                        format!(
+                            "group '{}' is reserved because '{}::' names a canonical identity kind; add `as <name>` to give this contract another group",
+                            entry.group, entry.group
+                        ),
                     ));
                 }
                 if !groups.insert(entry.group.clone()) {
@@ -292,6 +433,10 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
         root,
         source: source.to_owned(),
         entries,
+        mission,
+        system,
+        process,
+        knowledge,
         profile,
         profile_span,
     })
@@ -337,6 +482,38 @@ impl ManifestParser<'_> {
         let draft = match &start.kind {
             TokenKind::Identifier(word) if word == "use" => false,
             TokenKind::Identifier(word) if word == "draft" => true,
+            TokenKind::Identifier(word) if MEMORY_STATEMENTS.contains(&word.as_str()) => {
+                let keyword = word.clone();
+                self.position += 1;
+                let path_token = self.current().clone();
+                let TokenKind::String(written) = &path_token.kind else {
+                    return Err(self.error(
+                        path_token.span,
+                        "E_MANIFEST_STATEMENT",
+                        format!(
+                            "expected a quoted path after `{keyword}`, as in `{keyword} \"{}\"`",
+                            memory_example(&keyword)
+                        ),
+                    ));
+                };
+                self.position += 1;
+                let entry = MemoryEntry {
+                    display: written.clone(),
+                    path: root.join(written),
+                    span: Span {
+                        start: start.span.start,
+                        end: path_token.span.end,
+                        line: start.span.line,
+                        column: start.span.column,
+                    },
+                };
+                return Ok(match keyword.as_str() {
+                    "mission" => Statement::Mission(entry),
+                    "system" => Statement::System(entry),
+                    "knowledge" => Statement::Knowledge(entry),
+                    _ => Statement::Process(entry),
+                });
+            }
             TokenKind::Identifier(word) if word == "verify" => {
                 self.position += 1;
                 let layer_span = self.current().span;
@@ -355,7 +532,7 @@ impl ManifestParser<'_> {
                 return Err(self.error(
                     start.span,
                     "E_MANIFEST_STATEMENT",
-                    "expected `use behavior \"path\"`, `draft behavior \"path\"` or `verify behavior { ... }`",
+                    "expected `use behavior \"path\"`, `draft behavior \"path\"`, `mission \"path\"`, `system \"path\"`, `process \"path\"`, `knowledge \"path\"` or `verify behavior { ... }`",
                 ));
             }
         };
@@ -436,7 +613,7 @@ impl ManifestParser<'_> {
                     layer.span,
                     "E_UNSUPPORTED_LAYER",
                     format!(
-                        "layer '{other}' is not supported; v0.5 composes `behavior` and `structure` contracts (mission and process are documented future work)"
+                        "layer '{other}' is not supported; a project composes `behavior` and `structure` contracts, and mission, system, process and knowledge memory are registered by their own statements `mission \"path\"`, `system \"path\"`, `process \"path\"` and `knowledge \"path\"` because they are not layers and never decide completion"
                     ),
                 ));
             }
@@ -903,33 +1080,101 @@ impl Project {
         if let Some(index) = query.find("/root") {
             candidate = &query[..index];
         }
-        let candidates: Vec<Lookup<'_>> = self
-            .rules
-            .iter()
-            .map(Lookup::Rule)
-            .chain(self.structure_rules().map(Lookup::Structure))
-            .collect();
+        if let Some(name) = candidate.strip_prefix("contract::") {
+            return match self.groups.iter().find(|group| group.name == name) {
+                Some(group) => Ok(Lookup::Contract(group)),
+                None => Err(self.unknown_rule(query)),
+            };
+        }
+        let candidates = self.all_lookups();
         if let Some(found) = candidates.iter().find(|found| found.id() == candidate) {
             return Ok(found.clone());
         }
-        let by_label: Vec<&Lookup<'_>> = candidates
-            .iter()
-            .filter(|found| found.label() == candidate)
-            .collect();
-        match by_label.as_slice() {
-            [found] => return Ok((*found).clone()),
-            [] => {}
-            many => return Err(self.ambiguous(query, many)),
+        if let Some(group) = self.groups.iter().find(|group| group.name == candidate) {
+            return Err(self.diagnostic(
+                "E_COARSE_IDENTITY",
+                format!(
+                    "'{query}' is the group of a contract, not an identity; run: blabla explain contract::{}",
+                    group.name
+                ),
+            ));
         }
-        let by_substring: Vec<&Lookup<'_>> = candidates
-            .iter()
-            .filter(|found| found.id().contains(candidate))
-            .collect();
-        match by_substring.as_slice() {
+        match narrow(&candidates, candidate).as_slice() {
             [found] => Ok((*found).clone()),
             [] => Err(self.unknown_rule(query)),
             many => Err(self.ambiguous(query, many)),
         }
+    }
+
+    fn all_lookups(&self) -> Vec<Lookup<'_>> {
+        self.rules
+            .iter()
+            .map(Lookup::Rule)
+            .chain(self.structure_rules().map(Lookup::Structure))
+            .collect()
+    }
+
+    pub fn candidate_ids(&self, query: &str) -> Vec<String> {
+        let candidates = self.all_lookups();
+        narrow(&candidates, query)
+            .iter()
+            .map(|found| found.id())
+            .collect()
+    }
+
+    pub fn resolve<'a>(
+        &'a self,
+        query: &str,
+        names: &[String],
+    ) -> Result<Resolution<'a>, Diagnostic> {
+        let found = self.lookup(query);
+        if names.is_empty() {
+            return match found {
+                Ok(lookup) => Ok(Resolution::Project(lookup)),
+                Err(diagnostic) if diagnostic.code == "E_UNKNOWN_RULE" => {
+                    Err(self.unknown_identity(query))
+                }
+                Err(diagnostic) => Err(diagnostic),
+            };
+        }
+        match found {
+            Ok(lookup) => Err(self.collision(query, &[lookup.id()], names)),
+            Err(diagnostic) if diagnostic.code == "E_AMBIGUOUS_RULE" => {
+                Err(self.collision(query, &self.candidate_ids(query), names))
+            }
+            Err(diagnostic) if diagnostic.code == "E_COARSE_IDENTITY" => {
+                Err(self.collision(query, &[format!("contract::{query}")], names))
+            }
+            Err(_) if names.len() > 1 => Err(self.collision(query, &[], names)),
+            Err(_) => Ok(Resolution::Memory(names[0].clone())),
+        }
+    }
+
+    fn unknown_identity(&self, query: &str) -> Diagnostic {
+        self.diagnostic(
+            "E_UNKNOWN_RULE",
+            format!(
+                "no object matches '{query}' in project {}; blabla status lists every contract::<group>, mission::<name>, knowledge::<pack>, system::<name> and role::<name> this project has",
+                self.manifest.name
+            ),
+        )
+    }
+
+    fn collision(&self, query: &str, rules: &[String], names: &[String]) -> Diagnostic {
+        let ids: Vec<String> = names.iter().chain(rules.iter()).cloned().collect();
+        let scope = if rules.is_empty() {
+            "in project memory"
+        } else {
+            "across rules and project memory"
+        };
+        self.diagnostic(
+            "E_AMBIGUOUS_IDENTITY",
+            format!(
+                "'{query}' is not a canonical identity and names {} objects {scope}; run one of: {}",
+                ids.len(),
+                offer(&ids)
+            ),
+        )
     }
 
     pub fn structure_rules(&self) -> impl Iterator<Item = &StructureRule> {
@@ -967,12 +1212,13 @@ impl Project {
     }
 
     fn ambiguous(&self, query: &str, candidates: &[&Lookup<'_>]) -> Diagnostic {
-        let ids: Vec<&str> = candidates.iter().map(|found| found.id()).collect();
+        let ids: Vec<String> = candidates.iter().map(|found| found.id()).collect();
         self.diagnostic(
             "E_AMBIGUOUS_RULE",
             format!(
-                "'{query}' matches more than one rule; use one of: {}",
-                ids.join(", ")
+                "'{query}' is not a canonical identity and matches {} rules; run one of: {}",
+                ids.len(),
+                offer(&ids)
             ),
         )
     }
@@ -1023,7 +1269,13 @@ impl Default for Fnv {
 pub fn fingerprint(root: &Path, extra_files: &[PathBuf], excluded: &[PathBuf]) -> String {
     let mut hasher = Fnv::new();
     let excluded: Vec<PathBuf> = excluded.iter().map(|path| normalize(path)).collect();
-    walk(root, root, &excluded, &mut hasher);
+    walk(root, root, &excluded, &mut |visit| match visit {
+        Visit::UnreadableDirectory(name) => {
+            hasher.write_str("unreadable-directory");
+            hasher.write_str(name);
+        }
+        Visit::File(name, path) => hash_file(name, path, &mut hasher),
+    });
     for file in extra_files {
         if file.is_file() {
             hash_file(&file.display().to_string(), file, &mut hasher);
@@ -1117,10 +1369,9 @@ impl Project {
     }
 }
 
-fn walk(root: &Path, directory: &Path, excluded: &[PathBuf], hasher: &mut Fnv) {
+fn walk(root: &Path, directory: &Path, excluded: &[PathBuf], visit: &mut dyn FnMut(Visit<'_>)) {
     let Ok(entries) = std::fs::read_dir(directory) else {
-        hasher.write_str("unreadable-directory");
-        hasher.write_str(&relative(root, directory));
+        visit(Visit::UnreadableDirectory(&relative(root, directory)));
         return;
     };
     let mut children: Vec<_> = entries.flatten().collect();
@@ -1141,14 +1392,41 @@ fn walk(root: &Path, directory: &Path, excluded: &[PathBuf], hasher: &mut Fnv) {
             {
                 continue;
             }
-            walk(root, &path, excluded, hasher);
+            walk(root, &path, excluded, visit);
         } else if kind.is_file() {
             if excluded.contains(&normalize(&path)) {
                 continue;
             }
-            hash_file(&relative(root, &path), &path, hasher);
+            visit(Visit::File(&relative(root, &path), &path));
         }
     }
+}
+
+enum Visit<'a> {
+    UnreadableDirectory(&'a str),
+    File(&'a str, &'a Path),
+}
+
+pub fn snapshot(root: &Path) -> BTreeMap<String, String> {
+    let mut digests = BTreeMap::new();
+    walk(root, root, &[], &mut |visit| {
+        if let Visit::File(name, path) = visit {
+            let mut hasher = Fnv::new();
+            hash_file(name, path, &mut hasher);
+            digests.insert(name.to_owned(), hasher.finish());
+        }
+    });
+    digests
+}
+
+pub fn digest_of(root: &Path, relative_path: &str) -> Option<String> {
+    let path = root.join(relative_path);
+    if !path.is_file() {
+        return None;
+    }
+    let mut hasher = Fnv::new();
+    hash_file(relative_path, &path, &mut hasher);
+    Some(hasher.finish())
 }
 
 fn relative(root: &Path, path: &Path) -> String {

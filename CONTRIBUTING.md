@@ -28,9 +28,21 @@ python experiments/audit_public_tree.py
 python experiments/render_diagrams.py --check
 ```
 
+`cargo run --quiet --bin blabla -- <command>` is how you run BlaBla against this repository — `status`, `explain`, `check` and `finish` included. Do not use an installed `blabla` binary while changing BlaBla: Cargo rebuilds from the working tree, a prebuilt binary silently lags behind the semantics you are editing, and a GREEN it reports is evidence about the wrong code. Plain `blabla` stays correct for ordinary projects that consume a release.
+
 These are exactly the jobs CI runs on Windows and Linux. Run the ones that cover what you changed while you work; run all of them before opening a pull request. `cargo fmt --all` (without `--check`) applies the formatting.
 
-`python experiments/gate_v05.py --tag local` is the full release gate: every check above, the recorded demos, the frozen Glyph Vault identity campaign and the public-tree audit. It writes its evidence under `artifacts/v05/` (ignored by Git) and takes several minutes.
+Three gates exist and they are not interchangeable:
+
+| Script | Tier | Holds |
+| --- | --- | --- |
+| `experiments/gate.py` | current product gate | the checks above plus BlaBla's own `status` and `finish`; what every change must pass |
+| `experiments/research_gate.py` | current research gate | the ignored stress tests, the historical scorer suite, the 4096-step frozen Glyph reproduction and the layered `finish` reproductions; opt-in and slow |
+| `experiments/gate_v04.py`, `experiments/gate_v05.py` | historical reproduction | frozen replays of the v0.4 and v0.5 release gates, kept so those releases stay reproducible |
+
+Run `python experiments/gate.py --tag local` before opening a pull request. Both current gates invoke BlaBla through `cargo run`, so they verify the working tree rather than a stale binary.
+
+**The historical gates are not development infrastructure.** Do not add current tests to `gate_v04.py` or `gate_v05.py`, and do not retarget them: their value is that they still reproduce what those releases claimed. `contracts/gate.bla` deliberately contracts `gate_v05.py` for the same reason — it freezes that reproduction, and it is not a contract over the current gate.
 
 ## Adding tests
 

@@ -100,8 +100,11 @@ fn status_reports_behavior_structure_and_overall_independently() {
     assert!(human.contains("BEHAVIOR   UNVERIFIED"), "{human}");
     assert!(human.contains("STRUCTURE  4/4 rules  GREEN"), "{human}");
     assert!(human.contains("OVERALL    BLOCKED"), "{human}");
-    assert!(human.contains("structure  architecture"), "{human}");
-    assert!(human.contains("behavior   core"), "{human}");
+    assert!(
+        human.contains("structure  contract::architecture"),
+        "{human}"
+    );
+    assert!(human.contains("behavior   contract::core"), "{human}");
 
     let (exit, finished) = finish_json(root);
     assert_eq!(exit, 0, "{finished}");
@@ -500,4 +503,95 @@ fn finish_flushes_its_header_before_the_campaign_and_reports_progress() {
     assert!(stderr.contains("COMPLETION GATE: VERIFYING"), "{stderr}");
     assert!(stderr.contains("/40 actions"), "{stderr}");
     assert!(json(&output.stdout)["completion"]["state"] == "green");
+}
+
+#[test]
+fn check_structure_contract_inside_project_evaluates_green_with_exit_zero() {
+    let temp = layered();
+    let root = temp.path();
+    let output = run_in(
+        Some(root),
+        &args(&["--json", "check", "contracts/structure/architecture.bla"]),
+    );
+    assert_eq!(output.status.code().unwrap(), 0);
+    let check = json(&output.stdout);
+    assert_eq!(check["layer"], "structure");
+    assert_eq!(check["evaluated"]["state"], "GREEN");
+    assert_eq!(check["evaluated"]["verified"], 4);
+    assert_eq!(check["evaluated"]["total"], 4);
+    assert!(check["project"].is_string());
+}
+
+#[test]
+fn mutating_source_file_turns_structure_contract_red_with_exit_one() {
+    let temp = layered();
+    let root = temp.path();
+    write(
+        &root.join("app.py"),
+        &text(&std::fs::read(root.join("app.py")).unwrap()).replace("import json", ""),
+    );
+    let output = run_in(
+        Some(root),
+        &args(&["--json", "check", "contracts/structure/architecture.bla"]),
+    );
+    assert_eq!(output.status.code().unwrap(), 1);
+    let check = json(&output.stdout);
+    assert_eq!(check["evaluated"]["state"], "RED");
+    assert_eq!(check["evaluated"]["verified"], 3);
+    assert_eq!(check["evaluated"]["total"], 4);
+    let issues = check["evaluated"]["issues"].as_array().unwrap();
+    let violated_ids: Vec<String> = issues
+        .iter()
+        .filter(|issue| issue["status"] == "RED")
+        .map(|issue| issue["id"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        violated_ids.contains(&"architecture::uses-json".to_string()),
+        "violated_ids: {violated_ids:?}"
+    );
+}
+
+#[test]
+fn sibling_structure_contract_stays_green_when_peer_module_is_mutated() {
+    let temp = layered();
+    let root = temp.path();
+    write(
+        &root.join("app.py"),
+        &text(&std::fs::read(root.join("app.py")).unwrap()).replace("import json", ""),
+    );
+    write(
+        &root.join("contracts/structure/minimal.bla"),
+        "module app \"app.py\"\n\nrequire \"has-storage\": symbol app::storage\n",
+    );
+    let output = run_in(
+        Some(root),
+        &args(&["--json", "check", "contracts/structure/minimal.bla"]),
+    );
+    assert_eq!(output.status.code().unwrap(), 0, "{}", text(&output.stderr));
+    let check = json(&output.stdout);
+    assert_eq!(check["evaluated"]["state"], "GREEN");
+    assert_eq!(check["evaluated"]["verified"], 1);
+    assert_eq!(check["evaluated"]["total"], 1);
+}
+
+#[test]
+fn structure_contract_without_project_above_compiles_but_is_not_evaluated() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("contracts/structure")).unwrap();
+    std::fs::copy(
+        fixtures().join("projects/layered/contracts/structure/architecture.bla"),
+        root.join("contracts/structure/architecture.bla"),
+    )
+    .unwrap();
+    let output = run_in(
+        Some(root),
+        &args(&["--json", "check", "contracts/structure/architecture.bla"]),
+    );
+    assert_eq!(output.status.code().unwrap(), 0);
+    let check = json(&output.stdout);
+    assert!(check.get("evaluated").is_none(), "{}", check);
+    assert!(check.get("project").is_none(), "{}", check);
+    assert_eq!(check["status"], "ok");
+    assert_eq!(check["layer"], "structure");
 }

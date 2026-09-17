@@ -343,7 +343,12 @@ fn multi_contract_project_shares_state_across_files_and_aggregates_groups() {
     assert_eq!(red_groups, ["persistence"]);
     assert_eq!(status["next"][0]["id"], "persistence::persistence");
     let human = text(&run_in(Some(root), &args(&["status"])).stdout);
-    let rule_lines = human.lines().filter(|line| line.contains("::")).count();
+    let rule_lines = human
+        .lines()
+        .filter(|line| {
+            line.contains("::") && !line.contains("contract::") && !line.contains("system::")
+        })
+        .count();
     assert!(rule_lines <= 3, "{human}");
 }
 
@@ -482,7 +487,20 @@ fn init_creates_a_draft_project_idempotently_and_preserves_agents_md() {
     assert_eq!(agents.matches("<!-- blabla:start -->").count(), 1);
     assert_eq!(agents.matches("<!-- blabla:end -->").count(), 1);
     assert!(agents.contains("blabla status"), "{agents}");
-    assert!(agents.contains("blabla explain <rule>"), "{agents}");
+    for identity in [
+        "contract::<group>",
+        "<group>::<label>",
+        "system::<name>",
+        "responsibility::<name>",
+        "seam::<name>",
+        "role::<name>",
+        "policy::<name>",
+        "runtime::<name>",
+    ] {
+        assert!(agents.contains(identity), "missing {identity}: {agents}");
+    }
+    assert!(agents.contains("blabla explain <identity>"), "{agents}");
+    assert!(agents.contains("ADVISORY"), "{agents}");
     assert!(agents.contains("blabla finish"), "{agents}");
     assert!(agents.contains("OVERALL GREEN"), "{agents}");
     assert!(agents.contains("YELLOW means NOT COMPLETE"), "{agents}");
@@ -630,7 +648,7 @@ fn guides_and_help_carry_compact_onboarding() {
     ] {
         assert!(agent.contains(required), "missing {required}: {agent}");
     }
-    assert!(agent.lines().count() <= 24, "{agent}");
+    assert!(agent.lines().count() <= 28, "{agent}");
 
     let bootstrap = text(&run(&args(&["guide", "bootstrap"])).stdout);
     for required in [
@@ -664,12 +682,35 @@ fn guides_and_help_carry_compact_onboarding() {
     assert!(bootstrap.contains("verify behavior"), "{bootstrap}");
 
     let topics = text(&run(&args(&["guide"])).stdout);
-    for topic in ["agent", "bootstrap", "change"] {
+    for topic in ["agent", "bootstrap", "change", "memory"] {
         assert!(
             topics.contains(&format!("blabla guide {topic}")),
             "{topics}"
         );
     }
+
+    let memory = text(&run(&args(&["guide", "memory"])).stdout);
+    for declaration in [
+        "mission",
+        "priority",
+        "system",
+        "responsibility",
+        "seam",
+        "role",
+        "policy",
+        "knowledge",
+        "ruling",
+    ] {
+        assert!(
+            memory.contains(declaration),
+            "missing {declaration}: {memory}"
+        );
+    }
+    for command in ["blabla check", "blabla status", "blabla explain"] {
+        assert!(memory.contains(command), "missing {command}: {memory}");
+    }
+    assert!(memory.contains("OVERALL"), "{memory}");
+
     let json_guide = run(&args(&["--json", "guide", "agent"]));
     assert_eq!(json(&json_guide.stdout)["topic"], "agent");
 

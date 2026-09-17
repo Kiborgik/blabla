@@ -1,0 +1,69 @@
+module structure "src/structure/mod.rs"
+module syntax    "src/structure/syntax.rs"
+module python    "src/structure/python.rs"
+module rustp     "src/structure/rust.rs"
+module falsify   "src/structure/falsify.rs"
+module semantics "src/semantics/mod.rs"
+module verify    "src/verify/mod.rs"
+module cli       "src/cli/mod.rs"
+module skeptic   "src/skeptic.rs"
+module task      "src/project/task.rs"
+
+require "provider-seam":            symbol structure::Provider
+require "seam-identifies":          symbol structure::Provider.id
+require "seam-selects-by-path":     symbol structure::Provider.handles
+require "seam-declares-depth":      symbol structure::Provider.symbol_depth
+require "seam-inspects":            symbol structure::Provider.inspect
+require "provider-registry":        symbol structure::default_providers
+require "inspected-extensions":     symbol structure::INSPECTED_EXTENSIONS
+require "inspects-python":          value structure::INSPECTED_EXTENSIONS contains ".py"
+require "inspects-rust":            value structure::INSPECTED_EXTENSIONS contains ".rs"
+
+require "python-provider":          symbol python::PythonProvider
+require "python-provider-inspects": symbol python::PythonProvider.inspect
+require "python-provider-id":       symbol python::PROVIDER_ID
+require "python-extractor-embedded": symbol python::EXTRACTOR
+require "rust-provider":            symbol rustp::RustProvider
+require "rust-provider-inspects":   symbol rustp::RustProvider.inspect
+require "rust-provider-id":         symbol rustp::PROVIDER_ID
+
+require "falsification":            symbol falsify::falsify
+require "falsification-verdict":    symbol falsify::Verdict
+require "falsification-report":     symbol falsify::FalsifyReport
+require "falsification-exit-code":  symbol falsify::FalsifyReport.exit_code
+
+require "contract-parser":          symbol syntax::parse
+require "layer-detection":          symbol syntax::is_structure_source
+
+forbid  "providers-independent-python": dependency python -> rustp
+forbid  "providers-independent-rust":   dependency rustp -> python
+forbid  "structure-below-semantics":    dependency structure -> semantics
+forbid  "structure-below-verify":       dependency structure -> verify
+forbid  "structure-below-cli":          dependency structure -> cli
+forbid  "falsify-reads-facts-not-python": dependency falsify -> python
+forbid  "falsify-reads-facts-not-rust":   dependency falsify -> rustp
+forbid  "falsify-below-cli":              dependency falsify -> cli
+
+require "challenge-entry":          symbol skeptic::challenge
+require "challenge-classes":        symbol skeptic::Class
+require "challenge-report":         symbol skeptic::ChallengeReport
+require "challenge-exit-code":      symbol skeptic::ChallengeReport.exit_code
+require "challenge-evidence-seam":  symbol skeptic::Evidence
+require "challenge-states-limits":  symbol skeptic::LIMITS
+require "challenge-names-authority": symbol skeptic::AUTHORITY
+require "challenge-grounds-on-a-task":   value skeptic::CLASSES contains "unresolved-finding"
+require "challenge-grounds-on-deliverables": value skeptic::CLASSES contains "deliverable-unchanged"
+require "challenge-grounds-on-write-scope":  value skeptic::CLASSES contains "scope-breach"
+require "challenge-grounds-on-falsification": value skeptic::CLASSES contains "vacuous-rule"
+
+require "bounded-task":             symbol task::Task
+require "task-declares-deliverables": symbol task::Deliverable
+require "task-carries-findings":    symbol task::Finding
+require "task-snapshots-the-tree":  symbol task::record
+require "task-is-persistent-state": symbol task::TASK_DIRECTORY
+
+forbid  "skeptic-below-cli":        dependency skeptic -> cli
+forbid  "skeptic-reads-no-source":  dependency skeptic -> rustp
+forbid  "skeptic-runs-no-campaign": dependency skeptic -> verify
+forbid  "task-below-cli":           dependency task -> cli
+forbid  "task-forms-no-challenge":  dependency task -> skeptic
