@@ -1,8 +1,9 @@
 use super::python::{EXTRACTOR, PythonProvider};
 use super::syntax::{is_structure_source, parse};
 use super::{
-    DependencyTarget, Fact, ImportFact, LayerStatus, Literal, ModuleDecl, ModuleFacts, Polarity,
-    Provider, ProviderFailure, RuleStatus, StructureContract, SymbolFact, verify,
+    DependencyTarget, Fact, INSPECTED_EXTENSIONS, ImportFact, LayerStatus, Literal, ModuleDecl,
+    ModuleFacts, Polarity, Provider, ProviderFailure, RuleStatus, StructureContract, SymbolFact,
+    capabilities, default_providers, verify,
 };
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -176,8 +177,8 @@ impl Provider for FakeProvider {
         "fake"
     }
 
-    fn handles(&self, path: &Path) -> bool {
-        path.extension().is_some_and(|extension| extension == "py")
+    fn extensions(&self) -> &'static [&'static str] {
+        &["py"]
     }
 
     fn symbol_depth(&self) -> usize {
@@ -195,13 +196,101 @@ impl Provider for FakeProvider {
         }
         Ok(modules
             .iter()
-            .filter_map(|module| {
-                self.facts
-                    .get(&module.display)
-                    .map(|facts| (module.key(), facts.clone()))
+            .map(|module| {
+                (
+                    module.key(),
+                    self.facts.get(&module.display).cloned().unwrap_or_default(),
+                )
             })
             .collect())
     }
+}
+
+pub(super) struct SilentProvider;
+
+impl Provider for SilentProvider {
+    fn id(&self) -> &'static str {
+        "silent"
+    }
+
+    fn extensions(&self) -> &'static [&'static str] {
+        &["py"]
+    }
+
+    fn symbol_depth(&self) -> usize {
+        2
+    }
+
+    fn inspect(
+        &self,
+        _root: &Path,
+        _modules: &[&ModuleDecl],
+    ) -> Result<BTreeMap<String, ModuleFacts>, ProviderFailure> {
+        Ok(BTreeMap::new())
+    }
+}
+
+#[test]
+fn the_advertised_extensions_are_exactly_what_the_providers_declare() {
+    let mut declared: Vec<String> = default_providers()
+        .iter()
+        .flat_map(|provider| {
+            provider
+                .extensions()
+                .iter()
+                .map(|extension| format!(".{extension}"))
+        })
+        .collect();
+    declared.sort();
+    let mut advertised: Vec<String> = INSPECTED_EXTENSIONS
+        .iter()
+        .map(|extension| (*extension).to_owned())
+        .collect();
+    advertised.sort();
+    assert_eq!(declared, advertised);
+}
+
+#[test]
+fn a_capability_report_states_what_each_provider_reaches() {
+    let report = capabilities(Path::new("/repo"), &default_providers());
+    let rust = report
+        .iter()
+        .find(|capability| capability.provider == "rust")
+        .unwrap();
+    assert_eq!(rust.extensions, vec![".rs".to_owned()]);
+    assert_eq!(rust.symbol_depth, 2);
+    assert_eq!(rust.unavailable, None);
+}
+
+#[test]
+fn a_provider_that_cannot_run_reports_why_instead_of_a_reach() {
+    let providers: Vec<Box<dyn Provider>> = vec![Box::new(FakeProvider {
+        facts: BTreeMap::new(),
+        calls: Cell::new(0),
+        failure: Some(ProviderFailure::Unavailable {
+            provider: "fake",
+            message: "no interpreter on PATH".to_owned(),
+        }),
+    })];
+    let report = capabilities(Path::new("/repo"), &providers);
+    let stated = report[0].unavailable.as_deref().unwrap();
+    assert!(stated.contains("no interpreter on PATH"));
+    assert_eq!(report[0].extensions, vec![".py".to_owned()]);
+}
+
+#[test]
+fn a_module_a_provider_never_reported_is_an_error_not_an_absent_fact() {
+    let providers: Vec<Box<dyn Provider>> = vec![Box::new(SilentProvider)];
+    let report = verify(&[contract(ARCHITECTURE)], Path::new("/repo"), &providers);
+    assert_eq!(report.status, LayerStatus::Error);
+    assert_eq!(report.errors, report.total());
+    let rule = report.result("architecture::no-domain-restart").unwrap();
+    assert_eq!(rule.status, RuleStatus::Error);
+    assert!(
+        rule.message.contains("reported no facts for app/domain.py"),
+        "{}",
+        rule.message
+    );
 }
 
 pub(super) fn symbols(paths: &[&str]) -> Vec<SymbolFact> {
@@ -234,6 +323,7 @@ fn clean_facts() -> BTreeMap<String, ModuleFacts> {
                 values: vec![Literal::Str("keeper".into()), Literal::Str("glyph".into())],
             }],
             unsupported: Vec::new(),
+            unresolved_imports: Vec::new(),
         },
     );
     facts.insert(
@@ -249,6 +339,7 @@ fn clean_facts() -> BTreeMap<String, ModuleFacts> {
             }],
             collections: Vec::new(),
             unsupported: Vec::new(),
+            unresolved_imports: Vec::new(),
         },
     );
     facts.insert(
@@ -264,6 +355,7 @@ fn clean_facts() -> BTreeMap<String, ModuleFacts> {
             }],
             collections: Vec::new(),
             unsupported: Vec::new(),
+            unresolved_imports: Vec::new(),
         },
     );
     facts
@@ -545,6 +637,7 @@ fn dependency_targets_match_stems_root_relative_and_package_relative_names() {
                     .collect(),
                 collections: Vec::new(),
                 unsupported: Vec::new(),
+                unresolved_imports: Vec::new(),
             },
         );
     }
@@ -580,8 +673,11 @@ fn the_python_extractor_parses_and_never_executes() {
     for forbidden in [
         "exec(",
         "eval(",
-        "__import__",
-        "importlib",
+        "__import__(",
+        "= __import__",
+        "(__import__",
+        "import importlib",
+        "from importlib",
         "compile(",
         "import re",
         "subprocess",
@@ -631,6 +727,7 @@ fn association_report(entries: Vec<super::EntryFact>, symbols_present: &[&str]) 
             imports: Vec::new(),
             collections: Vec::new(),
             unsupported: Vec::new(),
+            unresolved_imports: Vec::new(),
         },
     );
     let provider = FakeProvider {
@@ -712,6 +809,7 @@ fn an_association_reports_the_entry_line_and_rejects_a_missing_separator() {
             imports: Vec::new(),
             collections: Vec::new(),
             unsupported: Vec::new(),
+            unresolved_imports: Vec::new(),
         },
     );
     let provider = FakeProvider {

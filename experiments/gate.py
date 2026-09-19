@@ -9,19 +9,61 @@ ROOT = Path(__file__).resolve().parent.parent
 PYTHON = sys.executable
 
 
+STEPS = (
+    ("fmt", ("cargo", "fmt", "--all", "--", "--check")),
+    ("clippy", ("cargo", "clippy", "@cargo", "--all-targets", "--", "-D", "warnings")),
+    ("rust-tests", ("cargo", "test", "@cargo")),
+    ("gate-schedule", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_gate*.py")),
+    ("todo-python", ("@python", "-m", "unittest", "discover", "-s", "examples/todo", "-p", "test_*.py")),
+    ("bridge", ("cargo", "build", "@cargo", "--quiet", "--example", "structure-adapter")),
+    ("self-hosting-finish", ("@blabla", "finish")),
+    ("self-hosting-status", ("@blabla", "status")),
+    ("example-python", ("@blabla", "--project", "examples/todo", "finish")),
+    ("example-typescript", ("@blabla", "--project", "examples/todo-ts", "finish")),
+    ("example-go", ("@blabla", "--project", "examples/todo-go", "finish")),
+    ("example-c", ("@blabla", "--project", "examples/todo-c", "finish")),
+    ("example-cpp", ("@blabla", "--project", "examples/todo-cpp", "finish")),
+    ("example-java", ("@blabla", "--project", "examples/todo-java", "finish")),
+    ("audit", ("@python", "experiments/audit_public_tree.py", "--out", "@out")),
+    ("diagrams", ("@python", "experiments/render_diagrams.py", "--check")),
+)
+
+REQUIRED_ORDER = (
+    ("bridge", "self-hosting-finish"),
+    ("self-hosting-finish", "self-hosting-status"),
+)
+
+
+def ordered(steps, required):
+    positions = {name: index for index, (name, _) in enumerate(steps)}
+    for earlier, later in required:
+        missing = [name for name in (earlier, later) if name not in positions]
+        if missing:
+            return f"the schedule does not contain {', '.join(missing)}"
+        if positions[earlier] >= positions[later]:
+            return f"{earlier} must run before {later}"
+    return None
+
+
 def checks(out, offline):
     cargo = ["--offline"] if offline else []
-    blabla = ["cargo", "run", *cargo, "--quiet", "--bin", "blabla", "--"]
+    expansions = {
+        "@cargo": cargo,
+        "@python": [PYTHON],
+        "@out": [str(out / "audit.json")],
+        "@blabla": ["cargo", "run", *cargo, "--quiet", "--bin", "blabla", "--"],
+    }
     return [
-        ("fmt", ["cargo", "fmt", "--all", "--", "--check"]),
-        ("clippy", ["cargo", "clippy", *cargo, "--all-targets", "--", "-D", "warnings"]),
-        ("rust-tests", ["cargo", "test", *cargo]),
-        ("todo-python", [PYTHON, "-m", "unittest", "discover", "-s", "examples/todo", "-p", "test_*.py"]),
-        ("self-hosting-status", [*blabla, "status"]),
-        ("self-hosting-finish", [*blabla, "finish"]),
-        ("audit", [PYTHON, "experiments/audit_public_tree.py", "--out", str(out / "audit.json")]),
-        ("diagrams", [PYTHON, "experiments/render_diagrams.py", "--check"]),
+        (name, [part for token in tokens for part in expansions.get(token, [token])])
+        for name, tokens in steps_of(STEPS)
     ]
+
+
+def steps_of(steps):
+    violation = ordered(steps, REQUIRED_ORDER)
+    if violation is not None:
+        raise SystemExit(f"gate schedule: {violation}")
+    return steps
 
 
 def run(command, timeout=1800):
@@ -55,14 +97,19 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     results = []
+    logs = []
     rust_log = ""
-    for name, command in checks(out, arguments.offline):
-        exit_code, log, seconds = run(command)
-        (out / f"{arguments.tag}-{name}.log").write_text(log, encoding="utf-8")
-        if name == "rust-tests":
-            rust_log = log
-        results.append({"name": name, "command": command, "exit": exit_code, "seconds": seconds})
-        print(f"{name}: exit {exit_code} in {seconds:.1f}s", flush=True)
+    try:
+        for name, command in checks(out, arguments.offline):
+            exit_code, log, seconds = run(command)
+            logs.append((name, log))
+            if name == "rust-tests":
+                rust_log = log
+            results.append({"name": name, "command": command, "exit": exit_code, "seconds": seconds})
+            print(f"{name}: exit {exit_code} in {seconds:.1f}s", flush=True)
+    finally:
+        for name, log in logs:
+            (out / f"{arguments.tag}-{name}.log").write_text(log, encoding="utf-8")
 
     summaries, failed_titles, clean = rust_tests_are_clean(rust_log)
     green = all(result["exit"] == 0 for result in results) and clean

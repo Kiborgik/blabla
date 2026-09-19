@@ -52,7 +52,19 @@ fn variant(original: &str, replacement: &str) -> (TempDir, PathBuf) {
         "mutation must target one application statement"
     );
     let directory = TempDir::new().unwrap();
-    let app = directory.path().join("app.py");
+    let transport = directory.path().join("adapters").join("python");
+    fs::create_dir_all(&transport).unwrap();
+    fs::copy(
+        "adapters/python/blabla_adapter.py",
+        transport.join("blabla_adapter.py"),
+    )
+    .unwrap();
+    let app = directory
+        .path()
+        .join("examples")
+        .join("todo")
+        .join("app.py");
+    fs::create_dir_all(app.parent().unwrap()).unwrap();
     fs::write(&app, source.replace(original, replacement)).unwrap();
     (directory, app)
 }

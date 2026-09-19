@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: If you use BlaBla or its benchmark artifacts, please cite this repository.
 title: "BlaBla: executable project memory for coding agents"
 type: software
-version: 0.6.0-alpha
-date-released: 2026-09-16
+version: 0.7.0-alpha
+date-released: 2026-09-18
 license: MIT
 repository-code: "https://github.com/Kiborgik/blabla"
 identifiers:

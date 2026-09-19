@@ -1,0 +1,25 @@
+module app "main.go"
+
+require "the-application-serves-the-protocol": symbol app::main
+require "a-todo-carries-its-identity":         symbol app::Todo.ID
+require "a-todo-carries-its-text":             symbol app::Todo.Text
+require "a-todo-carries-its-completion":       symbol app::Todo.Done
+require "the-store-is-the-applications-own":   symbol app::Storage
+require "state-survives-a-restart":            symbol app::Storage.Save
+require "state-is-read-back-at-start":         symbol app::Storage.Load
+require "the-domain-is-separate-from-the-wire": symbol app::Application
+require "adding-belongs-to-the-domain":        symbol app::Application.Add
+require "completing-belongs-to-the-domain":    symbol app::Application.Complete
+require "removing-belongs-to-the-domain":      symbol app::Application.Remove
+require "the-domain-reports-its-state":        symbol app::Application.Observe
+
+require "the-application-encodes-json":        dependency app -> "encoding/json"
+require "the-application-reads-and-writes":    dependency app -> "os"
+
+require "the-application-uses-the-transport":  dependency app -> "blabla.dev/adapter/blabla"
+
+forbid "no-protocol-loop-in-the-application":  symbol app::serve
+forbid "no-wire-types-in-the-application":     symbol app::Request
+forbid "no-network-in-the-example":            dependency app -> "net/http"
+forbid "no-database-in-the-example":           dependency app -> "database/sql"
+forbid "the-domain-does-not-restart-itself":   symbol app::Application.Restart

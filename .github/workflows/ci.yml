@@ -21,12 +21,17 @@ jobs:
             test_threads: 4
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.98.1"
           components: rustfmt, clippy
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
       - uses: Swatinem/rust-cache@v2
       - name: Product gate
         run: python experiments/gate.py --tag ci --out ci-artifacts/gate
@@ -60,7 +65,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"

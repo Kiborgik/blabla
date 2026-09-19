@@ -92,16 +92,24 @@ normal path:
 3. **Find your role and the flow.** `blabla explain role::<name>` for what you own and which
    verification is yours; `blabla explain flow::<name>` for the order, one line per step, and
    `blabla explain step::<name>` for one step in full.
-4. **Open or read the bounded task.** `blabla task open`, or `blabla task show <name>` if one was
-   assigned to you.
-5. **Implement inside the scope.** Ordinary code, only in the paths the task names.
-6. **Run the focused checks** that cover what changed — not the whole gate.
-7. **Challenge the account.** `blabla challenge` before reporting the task done.
-8. **Independent review.** A reviewer reads the task and the diff in a context that never saw the
-   work being done, and records what it finds with `blabla task finding`.
-9. **Integrate.** The orchestrator settles each finding against the repository and records what
-   settled it with `blabla task resolve`, then closes the task.
-10. **Decide completion.** `blabla finish`.
+4. **Open or read the bounded task.** The orchestrator opens it with `blabla task open`, naming
+   the scope, the deliverables and the check that covers it; a worker reads its assignment with
+   `blabla task show <name>`, which prints the routes below in the order they are taken.
+5. **Accept the assignment.** `blabla task accept <name> --model <id>` before changing anything.
+   Acceptance records that a role took the work through BlaBla and nothing about what it read.
+6. **Implement inside the scope.** Ordinary code, only in the paths the task names.
+7. **Run the declared check and record it.** `blabla task evidence <name> --exit <code> --tool <tool>`
+   after reading the whole run — not the whole gate, and never a summary line alone.
+8. **Challenge the account.** `blabla challenge <name>` before handing back.
+9. **Hand back.** `blabla task ready <name>`. A hand-back is not acceptance of the result.
+10. **Independent review.** A reviewer reads the task and the diff in a context that never saw the
+    work being done, records one assessment per lens the role consults with `blabla task lens`, and
+    records defects with `blabla task finding`.
+11. **Integrate.** The orchestrator settles each finding against the repository and records what
+    settled it with `blabla task resolve`.
+12. **Accept the result.** `blabla task close <name> --model <id>`, refused while a grounded
+    challenge stands.
+13. **Decide completion.** `blabla finish`.
 
 In this repository that flow is `flow::development`, and `role::orchestrator`, `role::worker` and
 `role::reviewer` are the roles its steps name.
@@ -113,6 +121,17 @@ It does not schedule work and does not launch agents.
 recorded evidence and reads no meaning from source code. The reviewer is a role: it reads the diff,
 forms judgements BlaBla cannot, and records them as findings. Neither decides completion.
 
+## Project verification versus task acceptance
+
+Two different questions, answered by different commands. `blabla finish` decides whether the
+**project** is complete: structure evaluated live, the canonical behavior campaign run, `OVERALL`
+GREEN or not. A task's transitions decide only whether one **handoff** is in order. Process prose
+stays advisory, but the implemented transitions do check selected recorded conditions: `ready`
+needs an acceptance on record, `close` needs a hand-back with no grounded challenge standing, and
+a closed task accepts no further amendment. That is the whole of the enforcement. Neither a clean
+task record nor `OVERALL GREEN` alone establishes everything: a record shows what was recorded
+rather than what was done, and GREEN is bounded by the campaign and the providers that produced it.
+
 ## Bounded tasks
 
 A bounded task is the handoff record between an orchestrator and a worker. It is **machine state,
@@ -120,18 +139,33 @@ not project memory**: BlaBla writes it under `.blabla/tasks/`, no manifest regis
 validates it for truth, and no state of it reaches `OVERALL`.
 
 ```text
-blabla task open <name> --role worker --statement "…" --scope src/cli --deliverable tests/cli.rs
-blabla task show <name>                 what this task may write and what it owes
+blabla task open <name> --role worker --statement "…" --scope src/cli --deliverable tests/cli.rs --check "…"
+blabla task show <name>                 what this task may write and what it owes, then its routes
+blabla task accept <name> --model <id>  take the assignment; the model is compared exactly against what the role lists, and `blabla challenge <name>` reports a mismatch immediately rather than at hand-back
+blabla task evidence <name> --exit <code> --tool <tool>   the declared check's result, bound to the inputs it saw
+blabla task block <name> "…"            stop, and record why as a finding
 blabla task finding <name> "…"          something discovered and not yet settled
+blabla task ready <name>                hand back for review
+blabla task lens <name> <lens> "…"      one reviewer assessment against one lens the role consults, named by its pack
 blabla task resolve <name> <id> --evidence "…"
+blabla task check <name> "…"            declare the check a record opened without, or correct it
 blabla task scope <name> --add <path>   widen a scope that was declared too narrowly
-blabla task close <name>
+blabla task close <name> --model <id>   accept the result; refused while a grounded challenge stands
 ```
+
+A task moves `open → accepted → ready → closed`, with `blocked` reachable from `accepted` and
+back. `blabla guide loop` prints the worker's routes in the order they are taken, generated from
+the same source as `task show`, so the two cannot drift apart.
 
 Opening a task snapshots the tree it starts from. That snapshot is the only reason a later
 challenge can distinguish a deliverable that was produced from one that was never touched, and a
 file changed inside the write scope from one changed outside it. `blabla status` lists every
 recorded task.
+
+A deliverable is measured per file, so a directory named as one becomes the files under it, the way
+`git add` treats a directory. `blabla task deliverable <name> --add <dir>` re-reads it and owes any
+file that appeared since. The files it walks are the ones the implementation fingerprint walks, so
+build output and `.blabla` are never owed.
 
 A recorded finding outlives the context that found it. A finding with no resolution is evidence
 still outstanding, and `challenge` reports it while it stays that way. The evidence written into a
@@ -155,8 +189,19 @@ The evidence it may use, and nothing else:
 | `unresolved-finding` | a finding recorded against an open task with no resolution |
 | `deliverable-unchanged` | a declared deliverable absent, or byte-identical to the task's snapshot |
 | `scope-breach` | a file changed since the task opened that no declared scope covers |
+| `work-without-acceptance` | a file changed since the task opened while no role accepted the assignment |
+| `model-outside-role-policy` | the task was accepted on a model the role's declared choices do not list, with no owner ruling |
+| `exception-unresolved` | a model exception was proposed and no owner ruling answers it |
+| `declared-check-failed` | the most recent result for the declared check exited non-zero |
+| `readiness-without-evidence` | a hand-back with no result recorded for the declared check, or only results for other checks |
+| `evidence-superseded` | the most recent result for the declared check ran against inputs that have since changed |
+| `lens-unassessed` | a hand-back with a lens the role consults carrying no assessment; a lens is one of the knowledge packs `role::<name>` lists under Consult, so `blabla task lens` takes the pack name and not a `ruling::<pack>::<name>` identity |
+| `attribution-unknown` | a path changed since the task opened whose origin, this task or concurrent work, is not stated |
 | `vacuous-rule` | a structure rule the falsifier reports VACUOUS — a rule standing on absent ground |
 | `verification-not-current` | the completion state is not GREEN |
+
+One challenge is reported at a time, the strongest available; the classes it could not ground are
+listed with the evidence each lacked.
 
 What it does **not** do: it decides no correctness, grants no completion and withholds none, and
 `blabla status` and `blabla finish` remain the only authority over that. `finish` prints a

@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/Kiborgik/blabla/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Kiborgik/blabla/actions/workflows/ci.yml)
 ![status: experimental alpha](https://img.shields.io/badge/status-experimental%20alpha-orange)
-![version 0.6.0-alpha](https://img.shields.io/badge/version-0.6.0--alpha-blue)
+![version 0.7.0-alpha](https://img.shields.io/badge/version-0.7.0--alpha-blue)
 ![license MIT](https://img.shields.io/badge/license-MIT-green)
 ![Rust stable](https://img.shields.io/badge/rust-stable-black)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -139,7 +139,9 @@ forbid  "id-is-the-key":               value model::DURABLE_FIELDS contains "id"
 forbid  "no-domain-restart":           symbol domain::VaultDomain.restart
 ```
 
-Structure has two providers, chosen by file extension. Python is parsed with Python's own `ast` module in an isolated interpreter; Rust is parsed in-process with `syn`. Neither imports or executes project code, and neither adds a fact — a provider adds a language. A module in any other language is ERROR for every rule that names it.
+Structure providers are chosen by file extension. Python is parsed with Python's own `ast` module in an isolated interpreter; Rust is parsed in-process with `syn`; TypeScript and JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), Go (`.go`), Java (`.java`), C (`.c`) and C++ (`.h`, `.hpp`, `.hh`, `.hxx`, `.cpp`, `.cc`, `.cxx`) are parsed in-process with tree-sitter, all five sharing one parse harness. None imports or executes project code, and none adds a fact — a provider adds a language. A module in any other language is ERROR for every rule that names it, and `blabla status` prints the live list rather than a copy of it.
+
+Every provider answers three ways, not two: found, established absent, and unknown. Unknown is ERROR. That third answer is what stops a `forbid` from passing through analysis blindness where a language can hide a reference — two Go or Java files in one package need no import between them, a Java wildcard import can supply any type in its package, a C `#include` may sit on a path the build system supplies, a dynamic `import()` of an expression could resolve anywhere. An unknown names the one declared module it could be hiding wherever the provider can bound it, so it makes exactly those rules ERROR and leaves every other dependency on that module decidable.
 
 `blabla check --falsify` asks a second question: can each rule actually be made to fail? A rule that reports `VACUOUS` is GREEN for a reason unrelated to the project.
 
@@ -181,8 +183,8 @@ Project memory is validated within itself, never against the repository, and nev
 A project that wants it can describe how work moves between agents:
 
 ```text
-status → explain relevant memory → task → implement → focused checks
-       → challenge → review/findings → integrate → finish
+status → explain relevant memory → task → accept → implement → declared check
+       → challenge → hand-back → review/findings → integrate → close → finish
 ```
 
 Process declares that flow as ordered `flow` and `step` entries. It describes the loop; it does not schedule work or launch agents.
@@ -194,11 +196,17 @@ A **bounded task** carries one change across a handoff: the paths it may write, 
 ```text
 blabla status
 blabla explain flow::development
-blabla task open ...
-# implement and run focused checks
-blabla challenge
+blabla task open <name> ...              orchestrator: scope, deliverables and the check that covers it
+blabla task accept <name> --model <id>   worker: take the assignment before changing anything
+# implement, run the declared check, then record what the whole run reported:
+blabla task evidence <name> --exit <code> --tool <tool>
+blabla challenge <name>
+blabla task ready <name>                 hand back; closing is the orchestrator's decision
+blabla task close <name> --model <id>    refused while a grounded challenge stands
 blabla finish
 ```
+
+`blabla task show <name>` prints those routes for one assignment, and `blabla guide loop` prints the same routes from the same source. Project verification and task acceptance are different questions: `finish` decides whether the project is complete, the task transitions decide only whether one handoff is in order, and neither a clean task record nor `OVERALL GREEN` alone establishes everything.
 
 The classes it can report, and their limits: [docs/agent-workflow.md](docs/agent-workflow.md).
 
@@ -206,10 +214,10 @@ The classes it can report, and their limits: [docs/agent-workflow.md](docs/agent
 
 Requirements: stable Rust, plus Python 3.10+ on `PATH` if a structure contract names a `.py` module.
 
-Install the published prerelease. The explicit version is required because `0.6.0-alpha` is a prerelease:
+Install the published prerelease. The explicit version is required because `0.7.0-alpha` is a prerelease:
 
 ```bash
-cargo install blabla --version 0.6.0-alpha
+cargo install blabla --version 0.7.0-alpha
 ```
 
 Or build from source:
@@ -224,7 +232,7 @@ The binary is `target/release/blabla` (`blabla.exe` on Windows).
 
 ```text
 $ blabla --version
-blabla 0.6.0-alpha
+blabla 0.7.0-alpha
 ```
 
 ### Try the Todo example
@@ -253,7 +261,17 @@ OVERALL    GREEN
 COMPLETION GATE: GREEN
 ```
 
-The two contracts are small: [`examples/todo.bla`](examples/todo.bla) for behavior and [`examples/todo/structure.bla`](examples/todo/structure.bla) for structure.
+The two contracts are small: [`examples/todo.bla`](examples/todo.bla) for behavior, shared by every language, and [`examples/todo/todo-python.bla`](examples/todo/todo-python.bla) for structure, which lives beside the Python sources it names. **The same behavior contract is satisfied by six applications in six languages** — Python, [TypeScript](examples/todo-ts), [Go](examples/todo-go), [C](examples/todo-c), [C++](examples/todo-cpp) and [Java](examples/todo-java) — each with its own structure contract. Each application holds only storage, domain logic and a table of actions; the JSON Lines loop lives once per language in [`adapters/`](adapters/README.md) and is copied or imported, never rewritten.
+
+A compiled application is built by the profile's `prepare` command before anything is launched, so a cold build never runs inside the per-response timeout:
+
+```text
+verify behavior {
+    prepare ["go", "build", "-o", ".blabla/todo-go", "."]
+    command [".blabla/todo-go"]
+    timeout_ms 1000
+}
+```
 
 ### Start a project
 
@@ -293,7 +311,9 @@ The behavior adapter is a small synchronous JSON Lines protocol (`reset`, `call`
 
 More detail: [architecture](docs/architecture.md) · [project](docs/project.md) · [agent workflow](docs/agent-workflow.md) · [language](docs/language.md) · [structure](docs/structure.md)
 
-## A first experiment
+## Experiments
+
+[docs/research.md](docs/research.md) records several: an earlier small-model diagnostic, whose lasting result was the GREEN/YELLOW distinction rather than a score; the rules a memory-utility comparison follows; and the handoff benchmark below, which is the headline comparison and carries stated limits.
 
 The original motivation was context and handoff drift, so I tested BlaBla on one synthetic project across four fresh Haiku sessions. All three conditions received the same underlying intent in different forms:
 
@@ -311,7 +331,7 @@ A hidden scorer checked 106 behaviors at the final stage, plus architecture inde
 
 In this run, the BlaBla condition used about **29% of the aggregate input tokens, 35% of the cost, 58% of the wall time, and roughly half the turns/tools** of the full-prose condition while preserving behavior and architecture with zero regressions.
 
-The important caveat: this is **one model, one synthetic project, one chain per condition**. It is an observation worth reproducing, not a statistical claim. The token difference came mainly from fewer turns and verification loops, not from shaving a few KB off the first prompt.
+The important caveat: this is **one model, one synthetic project, one chain per condition**, with project, contracts, prose and summaries written by the same author. It is an observation worth reproducing, not a statistical claim. The token difference came mainly from fewer turns and verification loops, not from shaving a few KB off the first prompt.
 
 The benchmark also directly motivated the structure layer: one condition kept passing every runtime check while violating the requested persistence shape. Behavior alone could not see it.
 
@@ -332,16 +352,22 @@ It is a small executable boundary around the parts of project intent you choose 
 
 - behavior verification is bounded and heuristic
 - behavior absent from the contracts is not verified
-- structure inspects Python and Rust; a module in any other language is ERROR for every rule naming it
+- structure inspects Python, Rust, TypeScript and JavaScript, Go, Java, C and C++; a module in any other language is ERROR for every rule naming it
 - structural facts are limited to modules, symbols, dependencies, literal collection membership and key/payload association
 - dynamic Python imports/attributes and non-literal values may be invisible
-- Rust structure does no name or type resolution, no re-export or alias chasing and no macro expansion
+- Rust structure does no name or type resolution, no re-export or alias chasing and no macro expansion; a `use` route that reaches no file and leaves more than one segment is an unknown scoped to the module it could be hiding rather than a guessed edge, so rules naming that module are ERROR
+- TypeScript structure does no type resolution, resolves no `tsconfig` path aliases, follows no re-export chain beyond one direct `export ... from`, and inspects neither namespaces nor decorators
+- Go structure reads no build tags and no cgo, and a reference between two files of one package is an unknown rather than an absent dependency
+- Java structure reads no classpath, no reflection and no annotation processing; a wildcard import and a same-package reference are unknowns
+- C and C++ structure runs no preprocessor: both arms of an `#ifdef` contribute symbols, a macro-generated declaration is invisible, `-D` and `-I` are unknown, and a header whose brace is opened in one preprocessor conditional and closed in another is unparseable
+- a `dependency` rule whose target module lies outside the project root cannot be observed, because the name it would be matched against is the target's path from the manifest directory
 - a scalar constant cannot be contracted; `value` reads literal collections, not single values
 - adapter observations are trusted
 - no distributed/temporal verification
 - project memory is validated only within itself: it is never checked against the repository, never reaches `OVERALL`, and Process policies and flows are advisory rather than enforced
 - a challenge sees only what was recorded: an unopened task, an undeclared deliverable and an unwritten finding are all invisible to it
-- `0.6.0-alpha` is an experimental alpha with limited external testing; language, JSON and CLI APIs may still change
+- Unix process containment is implemented and untested here: the recorded containment tests are Windows-only
+- `0.7.0-alpha` is an experimental alpha with limited external testing; language, JSON and CLI APIs may still change
 
 ## Roadmap
 

@@ -7,6 +7,7 @@ use std::process::{Command, Stdio};
 
 pub const EXTRACTOR: &str = include_str!("python_facts.py");
 pub const PROVIDER_ID: &str = "python";
+pub const EXTENSIONS: [&str; 1] = ["py"];
 const INTERPRETERS: [&str; 2] = ["python", "python3"];
 
 pub struct PythonProvider;
@@ -35,9 +36,8 @@ impl Provider for PythonProvider {
         PROVIDER_ID
     }
 
-    fn handles(&self, path: &Path) -> bool {
-        path.extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("py"))
+    fn extensions(&self) -> &'static [&'static str] {
+        &EXTENSIONS
     }
 
     fn symbol_depth(&self) -> usize {
@@ -125,5 +125,67 @@ fn unavailable(message: String) -> ProviderFailure {
     ProviderFailure::Unavailable {
         provider: PROVIDER_ID,
         message,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnostic::Location;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    fn module(root: &Path, name: &str, relative: &str) -> crate::structure::ModuleDecl {
+        crate::structure::ModuleDecl {
+            name: name.to_owned(),
+            display: relative.to_owned(),
+            path: root.join(relative),
+            location: Location {
+                file: "test.bla".to_owned(),
+                line: 1,
+                column: 1,
+            },
+        }
+    }
+
+    fn inspect_one(root: &Path, decl: &crate::structure::ModuleDecl) -> Vec<String> {
+        PythonProvider
+            .inspect(root, &[decl])
+            .unwrap()
+            .remove(&decl.key())
+            .unwrap()
+            .unresolved_imports
+            .iter()
+            .map(|u| u.form.clone())
+            .collect()
+    }
+
+    #[test]
+    fn importlib_import_module_with_variable_is_unresolved() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("m.py"),
+            "import importlib\nmod = 'sys'\nx = importlib.import_module(mod)\n",
+        )
+        .unwrap();
+        let decl = module(root, "m", "m.py");
+        let forms = inspect_one(root, &decl);
+        assert!(!forms.is_empty());
+        assert!(forms.iter().any(|f| f.contains("import_module")));
+    }
+
+    #[test]
+    fn importlib_import_module_with_string_literal_resolves() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("m.py"),
+            "import importlib\nx = importlib.import_module('sys')\n",
+        )
+        .unwrap();
+        let decl = module(root, "m", "m.py");
+        let forms = inspect_one(root, &decl);
+        assert!(forms.is_empty());
     }
 }

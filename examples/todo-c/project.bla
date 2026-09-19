@@ -1,0 +1,14 @@
+project TodoC
+
+use behavior  "../todo.bla"
+use structure "todo-c.bla"
+
+verify behavior {
+    prepare ["gcc", "-std=c17", "-O1", "-I", "../../adapters/c", "-o", ".blabla/todo-c", "main.c", "../../adapters/c/blabla_adapter.c"]
+    command [".blabla/todo-c"]
+    seed 0
+    cases 4
+    steps 32
+    timeout_ms 1000
+    shrink_budget 256
+}

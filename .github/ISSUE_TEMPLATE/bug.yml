@@ -36,7 +36,7 @@ body:
     attributes:
       label: BlaBla version
       description: Output of `blabla --version`, or the commit you built.
-      placeholder: blabla 0.6.0-alpha
+      placeholder: blabla 0.7.0-alpha
     validations:
       required: true
   - type: input

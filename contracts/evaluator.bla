@@ -1,0 +1,122 @@
+type Verdict {
+    rule: string,
+    status: string
+}
+
+state verdicts: [Verdict]
+state determinable: bool
+
+action report_collection_hit()
+action report_collection_miss()
+action report_value_unreadable()
+action report_unreadable_without_symbol()
+action report_scalar()
+action report_name_undefined()
+action report_module_missing()
+action report_module_unreported()
+action report_unbounded_unknown_import()
+action report_unknown_scoped_to_one_module()
+action report_import_found_despite_an_unknown()
+
+when report_collection_hit {
+    expect "found-satisfies-require":
+        any(after.verdicts, v => v.rule == "require-value" and v.status == "green")
+    expect "found-violates-forbid":
+        any(after.verdicts, v => v.rule == "forbid-value" and v.status == "red")
+    expect "found-is-determinable":
+        after.determinable
+}
+
+when report_collection_miss {
+    expect "absent-member-fails-require":
+        any(after.verdicts, v => v.rule == "require-value" and v.status == "red")
+    expect "absent-member-satisfies-forbid":
+        any(after.verdicts, v => v.rule == "forbid-value" and v.status == "green")
+    expect "absent-member-is-determinable":
+        after.determinable
+}
+
+when report_value_unreadable {
+    expect "unreadable-never-satisfies-forbid":
+        all(after.verdicts, v => v.rule != "forbid-value" or v.status == "error")
+    expect "unreadable-never-satisfies-require":
+        all(after.verdicts, v => v.rule != "require-value" or v.status == "error")
+    expect "unreadable-is-not-determinable":
+        not after.determinable
+}
+
+when report_unreadable_without_symbol {
+    expect "a-name-only-the-unreadable-list-carries-never-satisfies-forbid":
+        all(after.verdicts, v => v.rule != "forbid-value" or v.status == "error")
+    expect "a-name-only-the-unreadable-list-carries-never-satisfies-require":
+        all(after.verdicts, v => v.rule != "require-value" or v.status == "error")
+    expect "a-name-only-the-unreadable-list-carries-is-not-determinable":
+        not after.determinable
+}
+
+when report_scalar {
+    expect "a-scalar-is-not-an-absent-member":
+        all(after.verdicts, v => v.rule != "forbid-value" or v.status == "error")
+    expect "a-scalar-does-not-satisfy-require":
+        all(after.verdicts, v => v.rule != "require-value" or v.status == "error")
+}
+
+when report_name_undefined {
+    expect "undefined-name-satisfies-forbid-value":
+        any(after.verdicts, v => v.rule == "forbid-value" and v.status == "green")
+    expect "undefined-name-fails-require-symbol":
+        any(after.verdicts, v => v.rule == "require-symbol" and v.status == "red")
+    expect "undefined-name-satisfies-forbid-symbol":
+        any(after.verdicts, v => v.rule == "forbid-symbol" and v.status == "green")
+    expect "undefined-name-is-determinable":
+        after.determinable
+}
+
+when report_module_missing {
+    expect "missing-module-is-observed-state":
+        any(after.verdicts, v => v.rule == "forbid-symbol" and v.status == "green")
+    expect "missing-module-fails-require-symbol":
+        any(after.verdicts, v => v.rule == "require-symbol" and v.status == "red")
+    expect "missing-module-is-determinable":
+        after.determinable
+}
+
+when report_module_unreported {
+    expect "silence-decides-nothing":
+        all(after.verdicts, v => v.status == "error")
+    expect "silence-is-not-determinable":
+        not after.determinable
+}
+
+when report_unbounded_unknown_import {
+    expect "an-unbounded-unknown-blocks-the-module-it-names":
+        any(after.verdicts, v => v.rule == "forbid-near" and v.status == "error")
+    expect "an-unbounded-unknown-blocks-an-unrelated-module":
+        any(after.verdicts, v => v.rule == "forbid-far" and v.status == "error")
+    expect "an-unbounded-unknown-is-not-determinable":
+        not after.determinable
+}
+
+when report_unknown_scoped_to_one_module {
+    expect "a-scoped-unknown-blocks-the-module-it-could-hide":
+        any(after.verdicts, v => v.rule == "forbid-near" and v.status == "error")
+    expect "a-scoped-unknown-leaves-an-unrelated-module-decidable":
+        any(after.verdicts, v => v.rule == "forbid-far" and v.status == "green")
+    expect "a-scoped-unknown-never-satisfies-the-forbid-it-covers":
+        all(after.verdicts, v => v.rule != "forbid-near" or v.status != "green")
+}
+
+when report_import_found_despite_an_unknown {
+    expect "an-observed-import-outranks-an-unknown":
+        any(after.verdicts, v => v.rule == "forbid-near" and v.status == "red")
+    expect "an-unknown-still-blocks-what-it-could-hide":
+        any(after.verdicts, v => v.rule == "forbid-far" and v.status == "error")
+}
+
+always "every-declared-rule-has-a-verdict" {
+    count(verdicts) == 6
+}
+
+never "a-verdict-outside-the-three" {
+    any(verdicts, v => v.status != "green" and v.status != "red" and v.status != "error")
+}

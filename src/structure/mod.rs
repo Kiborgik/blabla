@@ -1,9 +1,14 @@
+pub mod cfamily;
 pub mod falsify;
+pub mod go;
+pub mod java;
 pub mod python;
 pub mod rust;
 pub mod syntax;
 #[cfg(test)]
 mod tests;
+pub mod treesitter;
+pub mod typescript;
 
 use crate::diagnostic::Location;
 use serde::{Deserialize, Serialize};
@@ -153,6 +158,8 @@ pub enum Literal {
     Str(String),
 }
 
+pub type Entry = (usize, Literal, Option<Vec<Literal>>);
+
 impl Literal {
     fn render(&self) -> String {
         match self {
@@ -270,6 +277,8 @@ pub struct ModuleFacts {
     pub entries: Vec<EntryFact>,
     #[serde(default)]
     pub unsupported: Vec<SymbolFact>,
+    #[serde(default)]
+    pub unresolved_imports: Vec<UnreadableImport>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -282,6 +291,14 @@ pub struct SymbolFact {
 pub struct ImportFact {
     pub name: String,
     pub line: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct UnreadableImport {
+    pub form: String,
+    pub line: usize,
+    #[serde(default)]
+    pub covers: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -308,26 +325,40 @@ pub enum ProviderFailure {
         provider: &'static str,
         message: String,
     },
+    NotReported {
+        provider: &'static str,
+        module: String,
+    },
 }
 
 impl ProviderFailure {
-    fn message(&self) -> String {
+    pub fn message(&self) -> String {
         match self {
             ProviderFailure::NoProvider { extension } => format!(
                 "no structural provider inspects '{extension}' files; BlaBla inspects {}",
-                INSPECTED_EXTENSIONS.join(" and ")
+                INSPECTED_EXTENSIONS.join(", ")
             ),
             ProviderFailure::Unavailable { provider, message } => {
                 format!("the {provider} provider could not run: {message}")
             }
+            ProviderFailure::NotReported { provider, module } => format!(
+                "the {provider} provider ran but reported no facts for {module}; a rule over it has no observed fact to decide against"
+            ),
         }
     }
 }
 
 pub trait Provider {
     fn id(&self) -> &'static str;
-    fn handles(&self, path: &Path) -> bool;
+    fn extensions(&self) -> &'static [&'static str];
     fn symbol_depth(&self) -> usize;
+    fn handles(&self, path: &Path) -> bool {
+        path.extension().is_some_and(|extension| {
+            self.extensions()
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
+    }
     fn inspect(
         &self,
         root: &Path,
@@ -338,14 +369,50 @@ pub trait Provider {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct Capability {
+    pub provider: &'static str,
+    pub extensions: Vec<String>,
+    pub symbol_depth: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
+}
+
+pub fn capabilities(root: &Path, providers: &[Box<dyn Provider>]) -> Vec<Capability> {
+    providers
+        .iter()
+        .map(|provider| Capability {
+            provider: provider.id(),
+            extensions: provider
+                .extensions()
+                .iter()
+                .map(|extension| format!(".{extension}"))
+                .collect(),
+            symbol_depth: provider.symbol_depth(),
+            unavailable: provider
+                .inspect(root, &[])
+                .err()
+                .map(|failure| failure.message()),
+        })
+        .collect()
+}
+
 pub fn default_providers() -> Vec<Box<dyn Provider>> {
     vec![
         Box::new(python::PythonProvider),
         Box::new(rust::RustProvider),
+        Box::new(typescript::TypeScriptProvider),
+        Box::new(go::GoProvider),
+        Box::new(java::JavaProvider),
+        Box::new(cfamily::CProvider),
+        Box::new(cfamily::CppProvider),
     ]
 }
 
-pub const INSPECTED_EXTENSIONS: [&str; 2] = [".py", ".rs"];
+pub const INSPECTED_EXTENSIONS: [&str; 18] = [
+    ".py", ".rs", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go", ".java", ".c", ".h", ".hpp",
+    ".hh", ".hxx", ".cpp", ".cc", ".cxx",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -504,9 +571,14 @@ pub fn inspect<'a>(
             Ok(mut facts) => {
                 for module in declarations {
                     let key = module.key();
-                    let entry = facts.remove(&key).unwrap_or_default();
+                    let reported = facts
+                        .remove(&key)
+                        .ok_or_else(|| ProviderFailure::NotReported {
+                            provider: providers[index].id(),
+                            module: module.display.clone(),
+                        });
                     if let Some(slot) = modules.get_mut(&key) {
-                        slot.facts = Ok(entry);
+                        slot.facts = reported;
                     }
                 }
             }
@@ -657,12 +729,20 @@ fn evaluate_rule(
                                         || import.name.starts_with(&format!("{target}."))
                                 })
                             });
-                            match hit {
-                                Some(import) => Outcome::Holds(format!(
+                            let blocked = facts
+                                .unresolved_imports
+                                .iter()
+                                .find(|unreadable| could_hide(unreadable, &targets));
+                            match (hit, blocked) {
+                                (Some(import), _) => Outcome::Holds(format!(
                                     "{}:{} imports {} ({display})",
                                     decl.display, import.line, import.name
                                 )),
-                                None => Outcome::Absent(format!(
+                                (None, Some(unreadable)) => Outcome::Error(format!(
+                                    "{}:{} {}; whether {display} is imported cannot be decided",
+                                    decl.display, unreadable.line, unreadable.form
+                                )),
+                                (None, None) => Outcome::Absent(format!(
                                     "{} does not import {display}",
                                     decl.display
                                 )),
@@ -707,6 +787,11 @@ fn evaluate_rule(
                                 "{}:{} {name} is not a literal collection of strings, integers or booleans; membership cannot be evaluated statically",
                                 decl.display, symbol.line
                             ))
+                        } else if let Some(unreadable) = unreadable(facts, path) {
+                            Outcome::Error(format!(
+                                "{}:{} {name} was reported as a name whose value could not be read; membership cannot be evaluated statically",
+                                decl.display, unreadable.line
+                            ))
                         } else if !facts.exists {
                             Outcome::Absent(format!("{} does not exist", decl.display))
                         } else {
@@ -740,6 +825,11 @@ fn evaluate_rule(
                                 Outcome::Error(format!(
                                     "{} {name} is not a collection of key/value entries; association cannot be evaluated statically",
                                     named(symbol.line)
+                                ))
+                            } else if let Some(unreadable) = unreadable(facts, path) {
+                                Outcome::Error(format!(
+                                    "{} {name} was reported as a name whose value could not be read; the association cannot be evaluated statically",
+                                    named(unreadable.line)
                                 ))
                             } else if !facts.exists {
                                 Outcome::Absent(format!("{} does not exist", decl.display))
@@ -819,6 +909,17 @@ fn evaluate_rule(
         observed,
         message,
         provider,
+    }
+}
+
+pub fn unreadable<'a>(facts: &'a ModuleFacts, path: &[String]) -> Option<&'a SymbolFact> {
+    facts.unsupported.iter().find(|symbol| symbol.path == *path)
+}
+
+pub fn could_hide(unreadable: &UnreadableImport, targets: &[String]) -> bool {
+    match &unreadable.covers {
+        None => true,
+        Some(covered) => targets.iter().any(|target| target == covered),
     }
 }
 

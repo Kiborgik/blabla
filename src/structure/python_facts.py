@@ -92,6 +92,27 @@ def declarations(body, prefix, facts, depth):
                         facts["entries"].append({"path": path, "key": key, "line": entry_line, "values": payload})
 
 
+def unresolved_imports(tree):
+    result = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr == "import_module":
+            form = "a dynamic import_module call with a non-literal argument"
+        elif isinstance(func, ast.Name) and func.id in ("import_module", "__import__"):
+            form = "a dynamic import call with a non-literal argument"
+        else:
+            continue
+        argument = next(
+            (keyword.value for keyword in node.keywords if keyword.arg == "name"),
+            node.args[0] if node.args else None,
+        )
+        if not isinstance(argument, ast.Constant) or not isinstance(argument.value, str):
+            result.append({"form": form, "line": node.lineno})
+    return result
+
+
 def imports(tree, package):
     result = []
     for node in ast.walk(tree):
@@ -114,7 +135,7 @@ def imports(tree, package):
 
 
 def inspect(module):
-    facts = {"exists": False, "error": None, "symbols": [], "imports": [], "collections": [], "unsupported": [], "entries": []}
+    facts = {"exists": False, "error": None, "symbols": [], "imports": [], "collections": [], "unsupported": [], "entries": [], "unresolved_imports": []}
     try:
         with open(module["path"], encoding="utf-8") as handle:
             source = handle.read()
@@ -131,6 +152,7 @@ def inspect(module):
         return facts
     declarations(tree.body, [], facts, 0)
     facts["imports"] = imports(tree, module["package"])
+    facts["unresolved_imports"] = unresolved_imports(tree)
     return facts
 
 

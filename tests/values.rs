@@ -28,6 +28,7 @@ when echo { expect "echoed": after.value == input.input_value }
                 .into_os_string(),
         ],
         timeout: Duration::from_secs(1),
+        startup: Duration::from_secs(1),
     };
     let options = RunOptions {
         seed: 1234,

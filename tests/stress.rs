@@ -58,7 +58,19 @@ fn variant(original: &str, replacement: &str) -> (TempDir, PathBuf) {
         "mutation must target one application statement"
     );
     let directory = TempDir::new().unwrap();
-    let app = directory.path().join("app.py");
+    let transport = directory.path().join("adapters").join("python");
+    fs::create_dir_all(&transport).unwrap();
+    fs::copy(
+        "adapters/python/blabla_adapter.py",
+        transport.join("blabla_adapter.py"),
+    )
+    .unwrap();
+    let app = directory
+        .path()
+        .join("examples")
+        .join("todo")
+        .join("app.py");
+    fs::create_dir_all(app.parent().unwrap()).unwrap();
     fs::write(&app, source.replace(original, replacement)).unwrap();
     (directory, app)
 }
@@ -120,6 +132,7 @@ fn the_generator_reaches_every_required_input_state_across_seeds() {
         executable: "python".into(),
         args: vec![app_path.into_os_string()],
         timeout: Duration::from_secs(5),
+        startup: Duration::from_secs(5),
     };
     let mut coverage = BTreeSet::new();
     for sequence in &sequences {

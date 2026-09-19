@@ -45,7 +45,19 @@ system "structure-eval" {
 
 system "structure-providers" {
     purpose "Turn one source file of one language into ModuleFacts, without executing it."
-    paths ["src/structure/python.rs", "src/structure/python_facts.py", "src/structure/rust.rs"]
+    paths ["src/structure/python.rs", "src/structure/python_facts.py", "src/structure/rust.rs", "src/structure/typescript.rs", "src/structure/go.rs", "src/structure/java.rs", "src/structure/cfamily.rs"]
+}
+
+system "structure-harness" {
+    purpose "Read, parse and classify one source file identically for every tree-sitter grammar, and hold the one accumulator a language walk fills."
+    paths ["src/structure/treesitter.rs"]
+    knowledge ["engineering"]
+}
+
+system "voice" {
+    purpose "Render a contradiction in the wording the owner selected, over evidence and verdicts it never changes."
+    paths ["src/voice.rs"]
+    knowledge ["design"]
 }
 
 system "report" {
@@ -118,7 +130,28 @@ seam "provider" {
     between ["structure-eval", "structure-providers"]
     value "ModuleFacts"
     statement "Every language fact enters rule evaluation as ModuleFacts and nothing else crosses. Inspection runs once per provider per verification, before any rule is decided; deciding a rule is then a function of that materialised map. This is why a provider adds a language and never a fact, and why rule semantics cannot drift between languages."
-    moves_with ["src/structure/mod.rs", "src/structure/falsify.rs", "src/structure/python.rs", "src/structure/python_facts.py", "src/structure/rust.rs", "contracts/rust.bla", "docs/structure.md", "docs/architecture.md"]
+    moves_with ["src/structure/mod.rs", "src/structure/falsify.rs", "src/structure/python.rs", "src/structure/python_facts.py", "src/structure/rust.rs", "src/structure/typescript.rs", "src/structure/go.rs", "src/structure/java.rs", "src/structure/cfamily.rs", "contracts/rust.bla", "contracts/providers.bla", "docs/structure.md", "docs/architecture.md"]
+}
+
+seam "parse-harness" {
+    between ["structure-harness", "structure-providers"]
+    value "Facts"
+    statement "Every tree-sitter language enters through one read-parse-classify preamble and fills one accumulator. A missing file leaves exists false with no error, an unreadable file sets error, and a file that does not parse sets error with its line: those three answers are decided once, for every grammar, because they are the difference between absent and unreadable and a language walk must not be able to reinvent it. A language module supplies its extensions, its grammar and its own node kinds, and nothing else."
+    moves_with ["src/structure/treesitter.rs", "src/structure/typescript.rs", "src/structure/go.rs", "src/structure/java.rs", "src/structure/cfamily.rs", "contracts/providers.bla", "docs/structure.md"]
+}
+
+seam "bounded-unknown" {
+    between ["structure-providers", "structure-eval"]
+    value "UnreadableImport.covers"
+    statement "A provider that cannot decide a dependency says so, and says how far the doubt reaches: the one declared module the unknown could be hiding, or nothing when it is genuinely unbounded. The evaluator turns that into ERROR for exactly the targets the unknown could cover and leaves every other dependency on the module decidable. Silence in place of an unknown is a false GREEN on a forbid; an unbounded unknown in place of a bounded one poisons unrelated facts. Both are defects and the contract holds the evaluator to both."
+    moves_with ["src/structure/mod.rs", "src/structure/treesitter.rs", "src/structure/go.rs", "src/structure/java.rs", "src/structure/cfamily.rs", "contracts/evaluator.bla", "bridge/structure_adapter.rs", "docs/structure.md"]
+}
+
+seam "rendered-contradiction" {
+    between ["voice", "cli"]
+    value "Voice"
+    statement "The voice is resolved once, from the manifest, and reaches rendering only. Adjudication never sees it: the standing set, the exit code and the machine-readable report are identical under every voice, and a blunt rendering is appended to the neutral statement rather than replacing it, so no wording choice can drop evidence or a hedge. Only a contradiction has a blunt rendering; an honest failure or a reported blocker has none."
+    moves_with ["src/voice.rs", "src/cli/task.rs", "src/cli/project.rs", "src/project/mod.rs", "contracts/voice.bla", "bridge/voice.rs", "docs/project.md"]
 }
 
 seam "application" {

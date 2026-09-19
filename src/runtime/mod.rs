@@ -18,6 +18,7 @@ use tempfile::TempDir;
 use process_tree::ProcessTree;
 
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(5);
+pub const MAX_STARTUP: Duration = Duration::from_secs(60);
 const RESPONSE_LINE_LIMIT: usize = 1024 * 1024;
 const CLEANUP_LIMIT: Duration = Duration::from_millis(250);
 
@@ -45,6 +46,8 @@ pub struct AppSession {
     config: AppConfig,
     initialized: bool,
     timeout: Duration,
+    startup: Duration,
+    booted: bool,
     closed: bool,
 }
 
@@ -54,6 +57,12 @@ impl AppSession {
             return Err(AppError::new(
                 "APP_CONFIG",
                 "exchange timeout must be greater than zero and at most five seconds",
+            ));
+        }
+        if config.startup.is_zero() || config.startup > MAX_STARTUP {
+            return Err(AppError::new(
+                "APP_CONFIG",
+                "startup allowance must be greater than zero and at most sixty seconds",
             ));
         }
 
@@ -150,6 +159,8 @@ impl AppSession {
             config: config.clone(),
             initialized: false,
             timeout: config.timeout,
+            startup: config.startup,
+            booted: false,
             closed: false,
         })
     }
@@ -166,7 +177,12 @@ impl AppSession {
         if self.closed {
             return Err(AppError::new("APP_IO", "application session is closed"));
         }
-        let deadline = Instant::now() + self.timeout;
+        let deadline = Instant::now()
+            + if self.booted {
+                self.timeout
+            } else {
+                self.startup
+            };
         let request_id = request_id()?;
         request
             .as_object_mut()
@@ -235,6 +251,7 @@ impl AppSession {
             }
             ResponseEvent::Io(message) => return Err(AppError::new("APP_IO", message)),
         };
+        self.booted = true;
         let response =
             serde_json::from_slice::<strict_json::StrictValue>(&line).map_err(|error| {
                 AppError::new(
@@ -621,6 +638,56 @@ impl Drop for AppSession {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+pub struct Preparation {
+    pub command: Vec<String>,
+    pub seconds: f64,
+}
+
+pub fn prepare(command: &[String], root: &std::path::Path) -> Result<Preparation, AppError> {
+    let Some((program, arguments)) = command.split_first() else {
+        return Err(AppError::new(
+            "APP_PREPARE",
+            "the preparation command is empty",
+        ));
+    };
+    let written = command.join(" ");
+    let started = Instant::now();
+    let output = Command::new(program)
+        .args(arguments)
+        .current_dir(root)
+        .output()
+        .map_err(|error| {
+            AppError::new(
+                "APP_PREPARE",
+                format!("could not start the preparation command `{written}`: {error}"),
+            )
+        })?;
+    let seconds = started.elapsed().as_secs_f64();
+    if output.status.success() {
+        return Ok(Preparation {
+            command: command.to_vec(),
+            seconds,
+        });
+    }
+    let mut detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if detail.is_empty() {
+        detail = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    }
+    let code = match output.status.code() {
+        Some(code) => code.to_string(),
+        None => "a signal".to_owned(),
+    };
+    Err(AppError::new(
+        "APP_PREPARE",
+        match detail.is_empty() {
+            true => format!("the preparation command `{written}` exited with {code}"),
+            false => {
+                format!("the preparation command `{written}` exited with {code}:\n{detail}")
+            }
+        },
+    ))
 }
 
 pub fn project_observation(value: &Value, schema: &[Field]) -> Result<Value, AppError> {

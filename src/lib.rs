@@ -10,3 +10,4 @@ pub mod skeptic;
 pub mod structure;
 pub mod syntax;
 pub mod verify;
+pub mod voice;

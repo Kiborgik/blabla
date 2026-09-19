@@ -9,6 +9,17 @@ use tempfile::TempDir;
 const MANIFEST: &str =
     "project Fixture\n\nprocess \"process.bla\"\n\nuse structure \"contracts/arch.bla\"\n";
 const CONTRACT: &str = "module thing \"src/thing.rs\"\n\nrequire \"entry\": symbol thing::run\n";
+const CONSULTING_MANIFEST: &str = "project Fixture\n\nprocess \"process.bla\"\n\nknowledge \"knowledge/engineering.bla\"\n\nuse structure \"contracts/arch.bla\"\n";
+const PACK: &str = r#"
+knowledge "engineering" {
+    purpose "engineering judgment for the fixture"
+}
+
+ruling "smallest-correct-change" {
+    pack "engineering"
+    statement "change what the task requires and nothing else"
+}
+"#;
 const SOURCE: &str = "pub fn run() {}\n";
 const OWED: &str = "pub fn owed() {}\n";
 
@@ -61,12 +72,33 @@ fn project() -> TempDir {
     temp
 }
 
+fn project_whose_role_consults_a_pack() -> TempDir {
+    let temp = project();
+    let root = temp.path();
+    let consulting = PROCESS.replace(
+        "    model \"qwen3.5:4b\"\n",
+        "    model \"qwen3.5:4b\"\n    consult [\"engineering\"]\n",
+    );
+    assert_ne!(
+        consulting, PROCESS,
+        "the fixture no longer declares the worker model it attaches consult to"
+    );
+    write(root, "project.bla", CONSULTING_MANIFEST);
+    write(root, "knowledge/engineering.bla", PACK);
+    write(root, "process.bla", &consulting);
+    temp
+}
+
 fn json_of(temp: &TempDir, arguments: &[&str]) -> (Value, i32) {
     let output = run_in(Some(temp.path()), &args(arguments));
     (
         serde_json::from_str(&String::from_utf8(output.stdout).unwrap()).unwrap(),
         output.status.code().unwrap(),
     )
+}
+
+fn stdout_of(temp: &TempDir, arguments: &[&str]) -> String {
+    String::from_utf8(run_in(Some(temp.path()), &args(arguments)).stdout).unwrap()
 }
 
 fn run(temp: &TempDir, arguments: &[&str]) -> i32 {
@@ -96,8 +128,17 @@ fn assign_within(temp: &TempDir, scope: &str, deliverable: &str) {
                 scope,
                 "--deliverable",
                 deliverable,
+                "--check",
+                "cargo test --lib",
                 "--json",
             ],
+        ),
+        0
+    );
+    assert_eq!(
+        run(
+            temp,
+            &["task", "accept", "one", "--model", "qwen3.5:4b", "--json"]
         ),
         0
     );
@@ -227,15 +268,58 @@ fn a_finding_on_a_closed_task_is_history_rather_than_an_open_challenge() {
         &temp,
         &["task", "finding", "one", "left outstanding", "--json"],
     );
-    assert_eq!(run(&temp, &["task", "close", "one", "--json"]), 0);
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "close", "one", "--model", "opus", "--json"]
+        ),
+        2,
+        "a result is not accepted while challenges stand"
+    );
+
+    write(temp.path(), "src/owed.rs", "pub fn owed() -> u8 { 1 }\n");
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "resolve",
+                "one",
+                "1",
+                "--evidence",
+                "settled in review",
+                "--json",
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task", "evidence", "one", "--exit", "0", "--tool", "cargo", "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
+    let (standing, _) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "close", "one", "--model", "opus", "--json"]
+        ),
+        0,
+        "a reconciled hand-back is accepted; standing: {standing}"
+    );
 
     let (view, code) = json_of(&temp, &["challenge", "one", "--json"]);
     assert_eq!(
         ungrounded(&view, "unresolved-finding"),
         "the task is closed; a finding on it is history rather than open evidence"
     );
-    assert_eq!(view["challenge"]["class"], "deliverable-unchanged");
-    assert_eq!(code, 1);
+    assert!(view["challenge"].is_null(), "{view}");
+    assert_eq!(code, 0);
 }
 
 #[test]
@@ -251,6 +335,25 @@ fn a_file_changed_outside_the_write_scope_is_challenged_and_one_inside_it_is_not
     );
 
     write(temp.path(), "src/other.rs", "pub fn run() -> u8 { 2 }\n");
+    let (view, code) = json_of(&temp, &["challenge", "--json"]);
+    assert_eq!(view["challenge"]["class"], "attribution-unknown", "{view}");
+    assert_eq!(code, 1);
+
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "one",
+                "src/other.rs",
+                "--kind",
+                "task",
+                "--json"
+            ]
+        ),
+        0
+    );
     let (view, code) = json_of(&temp, &["challenge", "--json"]);
     assert_eq!(view["challenge"]["class"], "scope-breach");
     assert_eq!(code, 1);
@@ -437,4 +540,521 @@ fn a_flow_that_declares_no_step_describes_no_loop_and_is_invalid() {
         1
     );
     assert_eq!(view["overall"]["status"], "green");
+}
+
+#[test]
+fn opening_a_name_that_is_already_open_refuses_and_leaves_the_record_it_found() {
+    let temp = project();
+    assign(&temp, "src/owed.rs");
+    run(
+        &temp,
+        &["task", "finding", "one", "left outstanding", "--json"],
+    );
+    let (before, _) = json_of(&temp, &["task", "show", "one", "--json"]);
+
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "one",
+                "--role",
+                "worker",
+                "--statement",
+                "a second opening",
+                "--scope",
+                "src",
+                "--json",
+            ],
+        ),
+        2
+    );
+
+    let (after, _) = json_of(&temp, &["task", "show", "one", "--json"]);
+    assert_eq!(after["task"]["statement"], before["task"]["statement"]);
+    assert_eq!(after["task"]["state"], before["task"]["state"]);
+    assert_eq!(after["task"]["accepted"], before["task"]["accepted"]);
+    assert_eq!(after["task"]["findings"], before["task"]["findings"]);
+    assert_eq!(
+        after["task"]["deliverables"],
+        before["task"]["deliverables"]
+    );
+}
+
+#[test]
+fn a_deliverable_a_record_lost_is_owed_again_once_it_is_named() {
+    let temp = project();
+    assign(&temp, "src/owed.rs");
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "deliverable",
+                "one",
+                "--add",
+                "src/thing.rs",
+                "--json"
+            ],
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "one", "--json"]);
+    let owed: Vec<&str> = view["task"]["deliverables"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(owed, ["src/owed.rs", "src/thing.rs"]);
+
+    let (challenge, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(challenge["challenge"]["class"], "deliverable-unchanged");
+    assert_eq!(code, 1, "a restored obligation is owed again");
+}
+
+#[test]
+fn a_failing_declared_check_is_challenged_and_blocks_result_acceptance() {
+    let temp = project();
+    assign(&temp, "src/owed.rs");
+    write(temp.path(), "src/owed.rs", "pub fn owed() -> u8 { 1 }\n");
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task", "evidence", "one", "--exit", "101", "--tool", "cargo", "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
+
+    let (view, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        view["challenge"]["class"], "declared-check-failed",
+        "{view}"
+    );
+    assert_eq!(code, 1);
+    assert_eq!(
+        ungrounded(&view, "readiness-without-evidence"),
+        "a result for the declared check is recorded against this hand-back"
+    );
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "close", "one", "--model", "opus", "--json"]
+        ),
+        2,
+        "a failing check is not a reconciled hand-back"
+    );
+
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task", "evidence", "one", "--exit", "0", "--tool", "cargo", "--json"
+            ],
+        ),
+        0
+    );
+    let (view, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert!(view["challenge"].is_null(), "{view}");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn a_stale_exact_declaration_does_not_discard_a_standing_directory_one() {
+    let temp = project();
+    assign_within(&temp, "src/thing.rs", "src/thing.rs");
+    write(temp.path(), "src/thing.rs", "pub fn run() -> u8 { 1 }\n");
+    write(temp.path(), "src/other.rs", "pub fn run() -> u8 { 2 }\n");
+
+    for path in ["src", "src/other.rs"] {
+        assert_eq!(
+            run(
+                &temp,
+                &[
+                    "task",
+                    "attribute",
+                    "one",
+                    path,
+                    "--kind",
+                    "concurrent",
+                    "--json"
+                ],
+            ),
+            0
+        );
+    }
+    write(temp.path(), "src/other.rs", "pub fn run() -> u8 { 3 }\n");
+
+    let (view, _) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        ungrounded(&view, "attribution-unknown"),
+        "every change since the task opened is attributable",
+        "the exact declaration went stale; the directory one still stands"
+    );
+}
+
+#[test]
+fn opening_a_name_a_closed_record_already_used_is_refused() {
+    let temp = project();
+    assign(&temp, "src/owed.rs");
+    write(temp.path(), "src/owed.rs", "pub fn owed() -> u8 { 1 }\n");
+    run(
+        &temp,
+        &[
+            "task", "evidence", "one", "--exit", "0", "--tool", "cargo", "--json",
+        ],
+    );
+    assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "close", "one", "--model", "opus", "--json"]
+        ),
+        0
+    );
+
+    let (before, _) = json_of(&temp, &["task", "show", "one", "--json"]);
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "one",
+                "--role",
+                "worker",
+                "--statement",
+                "reusing a closed name",
+                "--scope",
+                "src",
+                "--json",
+            ],
+        ),
+        2
+    );
+    let (after, _) = json_of(&temp, &["task", "show", "one", "--json"]);
+    assert_eq!(after["task"], before["task"]);
+}
+
+#[test]
+fn the_entry_names_the_route_that_carries_each_step_and_the_lifecycle_takes_them_in_that_order() {
+    let temp = project();
+    let guide = stdout_of(&temp, &["guide", "loop"]);
+    for route in [
+        "blabla task open <name>",
+        "blabla task accept <name> --model <id>",
+        "blabla task evidence <name> --exit <code> --tool <tool>",
+        "blabla challenge <name>",
+        "blabla task ready <name>",
+        "blabla task close <name> --model <id>",
+    ] {
+        assert!(
+            guide.contains(route),
+            "the loop guide never names {route}:\n{guide}"
+        );
+    }
+
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "one",
+                "--role",
+                "worker",
+                "--statement",
+                "a bounded change",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/owed.rs",
+                "--check",
+                "cargo test --lib",
+                "--json",
+            ],
+        ),
+        0
+    );
+    let view = stdout_of(&temp, &["task", "show", "one"]);
+    for route in [
+        "blabla task accept one --model <id>",
+        "blabla task evidence one --exit <code> --tool <tool>",
+        "blabla challenge one",
+        "blabla task ready one",
+    ] {
+        assert!(
+            view.contains(route),
+            "the assignment view never routes to {route}:\n{view}"
+        );
+    }
+
+    write(temp.path(), "src/owed.rs", "pub fn owed() -> u8 { 1 }\n");
+    let (unaccepted, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        unaccepted["challenge"]["class"], "work-without-acceptance",
+        "{unaccepted}"
+    );
+    assert_eq!(code, 1);
+
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "accept", "one", "--model", "qwen3.5:4b", "--json"]
+        ),
+        0
+    );
+    assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
+    let (unsupported, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        unsupported["challenge"]["class"], "readiness-without-evidence",
+        "{unsupported}"
+    );
+    assert_eq!(code, 1);
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "close", "one", "--model", "opus", "--json"]
+        ),
+        2,
+        "a hand-back with no result for the declared check is not a reconciled one"
+    );
+
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task", "evidence", "one", "--exit", "0", "--tool", "cargo", "--json"
+            ],
+        ),
+        0
+    );
+    let (settled, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert!(settled["challenge"].is_null(), "{settled}");
+    assert_eq!(code, 0);
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "close", "one", "--model", "opus", "--json"]
+        ),
+        0
+    );
+}
+
+#[test]
+fn a_lens_assessment_names_the_pack_the_role_consults_and_a_ruling_identity_does_not_clear_it() {
+    let temp = project_whose_role_consults_a_pack();
+    assign(&temp, "src/owed.rs");
+    write(temp.path(), "src/owed.rs", "pub fn owed() -> u8 { 1 }\n");
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task", "evidence", "one", "--exit", "0", "--tool", "cargo", "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
+
+    let (unassessed, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        unassessed["challenge"]["class"], "lens-unassessed",
+        "{unassessed}"
+    );
+    assert_eq!(code, 1);
+
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "one",
+                "ruling::engineering::smallest-correct-change",
+                "held against it",
+                "--json",
+            ],
+        ),
+        0
+    );
+    let (identity, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        identity["challenge"]["class"], "lens-unassessed",
+        "a ruling identity is not the lens the role consults: {identity}"
+    );
+    assert_eq!(code, 1);
+
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "one",
+                "engineering",
+                "held against it",
+                "--json",
+            ],
+        ),
+        0
+    );
+    let (assessed, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert!(assessed["challenge"].is_null(), "{assessed}");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn a_task_opened_with_no_check_can_be_given_one_and_then_reach_a_closed_record() {
+    let temp = project();
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "one",
+                "--role",
+                "worker",
+                "--statement",
+                "a bounded change",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/owed.rs",
+                "--json",
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "accept", "one", "--model", "qwen3.5:4b", "--json"]
+        ),
+        0
+    );
+    write(temp.path(), "src/owed.rs", "pub fn owed() -> u8 { 1 }\n");
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task", "evidence", "one", "--exit", "0", "--tool", "cargo", "--json"
+            ],
+        ),
+        2,
+        "a result cannot be bound to a check the record does not declare"
+    );
+    assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
+    let (unsupported, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        unsupported["challenge"]["class"], "readiness-without-evidence",
+        "{unsupported}"
+    );
+    assert_eq!(code, 1);
+
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "check", "one", "cargo test --lib", "--json"]
+        ),
+        0
+    );
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task", "evidence", "one", "--exit", "0", "--tool", "cargo", "--json"
+            ],
+        ),
+        0
+    );
+    let (settled, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert!(settled["challenge"].is_null(), "{settled}");
+    assert_eq!(code, 0);
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "close", "one", "--model", "opus", "--json"]
+        ),
+        0
+    );
+}
+
+#[test]
+fn a_closed_record_refuses_a_declared_check() {
+    let temp = project();
+    assign(&temp, "src/owed.rs");
+    write(temp.path(), "src/owed.rs", "pub fn owed() -> u8 { 1 }\n");
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task", "evidence", "one", "--exit", "0", "--tool", "cargo", "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "close", "one", "--model", "opus", "--json"]
+        ),
+        0
+    );
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "check", "one", "cargo test --doc", "--json"]
+        ),
+        2,
+        "a closed record is history rather than open evidence"
+    );
+}
+
+#[test]
+fn a_directory_deliverable_is_the_files_under_it_and_a_later_add_picks_up_new_ones() {
+    let temp = project();
+    assign(&temp, "src");
+    let opened = stdout_of(&temp, &["task", "show", "one"]);
+    for path in ["src/thing.rs", "src/other.rs", "src/owed.rs"] {
+        assert!(
+            opened.contains(path),
+            "a directory deliverable must owe the files under it; {path} is missing:\n{opened}"
+        );
+    }
+
+    let (unchanged, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        unchanged["challenge"]["class"], "deliverable-unchanged",
+        "{unchanged}"
+    );
+    assert_eq!(code, 1);
+
+    write(temp.path(), "src/thing.rs", "pub fn run() -> u8 { 1 }\n");
+    write(temp.path(), "src/other.rs", "pub fn run() -> u8 { 2 }\n");
+    write(temp.path(), "src/owed.rs", "pub fn owed() -> u8 { 3 }\n");
+    let (produced, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert!(produced["challenge"].is_null(), "{produced}");
+    assert_eq!(code, 0);
+
+    write(temp.path(), "src/added.rs", "pub fn added() {}\n");
+    assert_eq!(
+        run(
+            &temp,
+            &["task", "deliverable", "one", "--add", "src", "--json"]
+        ),
+        0
+    );
+    let (again, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        again["challenge"]["class"], "deliverable-unchanged",
+        "adding the directory again must owe the file that appeared in it: {again}"
+    );
+    assert_eq!(code, 1);
 }

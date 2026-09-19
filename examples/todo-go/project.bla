@@ -1,0 +1,14 @@
+project TodoGo
+
+use behavior  "../todo.bla"
+use structure "todo-go.bla"
+
+verify behavior {
+    prepare ["go", "build", "-o", ".blabla/todo-go", "."]
+    command [".blabla/todo-go"]
+    seed 0
+    cases 4
+    steps 32
+    timeout_ms 1000
+    shrink_budget 256
+}

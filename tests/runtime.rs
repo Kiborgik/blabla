@@ -23,6 +23,7 @@ fn python_config(script: &Path, mode: &str, timeout: Duration) -> AppConfig {
         executable: PathBuf::from("python"),
         args: vec![OsString::from(script.as_os_str()), OsString::from(mode)],
         timeout,
+        startup: timeout,
     }
 }
 
@@ -123,6 +124,7 @@ fn reports_process_start_failures() {
         executable: PathBuf::from("blabla-executable-that-does-not-exist"),
         args: vec![],
         timeout: Duration::from_secs(1),
+        startup: Duration::from_secs(1),
     };
 
     let error = match AppSession::spawn(&config) {

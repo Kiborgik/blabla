@@ -7,6 +7,7 @@ from score import score_application
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "examples" / "todo" / "app.py"
+ADAPTER = ROOT / "adapters" / "python" / "blabla_adapter.py"
 SCRATCH = ROOT / "artifacts" / "scratch" / "score-tests"
 
 
@@ -16,12 +17,19 @@ class ScorerTests(unittest.TestCase):
         self.directory = SCRATCH / uuid.uuid4().hex
         self.directory.mkdir()
 
+    def placed(self, source):
+        transport = self.directory / "adapters" / "python"
+        transport.mkdir(parents=True, exist_ok=True)
+        (transport / ADAPTER.name).write_text(ADAPTER.read_text(encoding="utf-8"), encoding="utf-8")
+        app = self.directory / "examples" / "todo" / "app.py"
+        app.parent.mkdir(parents=True, exist_ok=True)
+        app.write_text(source, encoding="utf-8")
+        return app
+
     def variant(self, original, replacement):
         source = APP.read_text(encoding="utf-8")
         self.assertEqual(source.count(original), 1)
-        app = self.directory / "app.py"
-        app.write_text(source.replace(original, replacement), encoding="utf-8")
-        return app
+        return self.placed(source.replace(original, replacement))
 
     def test_normal_application_passes_all_core_requirements(self):
         report = score_application(APP, 0)
@@ -44,10 +52,13 @@ class ScorerTests(unittest.TestCase):
             report = score_application(app, 0)
             checks = {check["name"]: check for check in report["checks"]}
             self.assertFalse(checks[name]["passed"], report)
+            self.assertGreater(report["passed"], 0, report)
 
     def test_trailing_output_cannot_count_as_success(self):
-        app = self.directory / "app.py"
-        app.write_text(APP.read_text(encoding="utf-8") + '\nprint("{}", flush=True)\n', encoding="utf-8")
+        app = self.placed(
+            'import atexit\natexit.register(lambda: print("{}", flush=True))\n'
+            + APP.read_text(encoding="utf-8")
+        )
         report = score_application(app, 0)
         self.assertEqual(report["passed"], 0, report)
         self.assertEqual(report["failed"], 8)

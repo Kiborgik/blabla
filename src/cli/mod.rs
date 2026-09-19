@@ -17,6 +17,7 @@ mod guide;
 mod heartbeat;
 mod init;
 mod project;
+mod recovery;
 mod task;
 
 const AGENT_WORKFLOW: &str = "AGENT WORKFLOW\nThe .bla contracts are authoritative intent: executable project memory with a BEHAVIOR layer (runtime behavior) and a STRUCTURE layer (codebase constraints).\nStart with `blabla status` (it finds project.bla for you); drill into one rule with `blabla explain <rule>`.\nRead a contract only when a rule is still unclear. Run `blabla finish` after meaningful changes and before declaring work complete.\n`blabla explain flow::<name>` is the development loop; `blabla task` records one bounded change and `blabla challenge` contradicts the account of it from evidence BlaBla already has.\nRED: repair the violated rule using the minimized counterexample or the observed structural fact.\nYELLOW: required behavior remains unexercised; NOT COMPLETE.\nGREEN per layer means its active behavioral or structural rules passed; only OVERALL GREEN is completion.\nDo not weaken contracts or the verification profile to obtain GREEN. Full onboarding: `blabla guide agent`.";
@@ -105,6 +106,12 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
         shrink_budget: usize,
         #[arg(long, default_value_t = DEFAULT_TIMEOUT_MS, value_parser = clap::value_parser!(u64).range(1..=5000))]
         timeout_ms: u64,
+        #[arg(
+            long,
+            value_parser = clap::value_parser!(u64).range(1..=60000),
+            help = "Allowance for the first exchange after each process start; defaults to timeout_ms"
+        )]
+        startup_ms: Option<u64>,
         #[arg(last = true, required = true, num_args = 1.., help = "Application executable and arguments; in a project, relative paths resolve against the working directory")]
         application: Vec<OsString>,
     },
@@ -201,6 +208,12 @@ enum TaskAction {
             help = "A path the task owes as a deliverable; repeat or list several"
         )]
         deliverable: Vec<String>,
+        #[arg(
+            long,
+            value_name = "COMMAND",
+            help = "The check that covers this task, run and recorded as its evidence"
+        )]
+        check: Option<String>,
     },
     #[command(about = "Record something discovered during the task that is not yet settled")]
     Finding { name: String, statement: String },
@@ -228,10 +241,79 @@ enum TaskAction {
         )]
         add: Vec<String>,
     },
-    #[command(about = "Close a bounded task; its record stays readable")]
-    Close { name: String },
+    #[command(
+        about = "Accept the result of a bounded task and close it; refused while a grounded challenge stands"
+    )]
+    Close {
+        name: String,
+        #[arg(long, help = "The model recording the acceptance of the result")]
+        model: String,
+    },
     #[command(about = "Show one bounded task, or every recorded task without a name")]
     Show { name: Option<String> },
+    #[command(about = "Accept a task and record which model took it")]
+    Accept {
+        name: String,
+        #[arg(long, help = "The model that accepted the task")]
+        model: String,
+    },
+    #[command(about = "Block a task due to a reason and record it as a finding")]
+    Block { name: String, reason: String },
+    #[command(about = "Mark a task as ready for review")]
+    Ready { name: String },
+    #[command(
+        about = "Append an assessment against one lens the role consults, named by its knowledge pack"
+    )]
+    Lens {
+        name: String,
+        lens: String,
+        statement: String,
+    },
+    #[command(about = "Propose an alternative model with a reason")]
+    ProposeModel {
+        name: String,
+        model: String,
+        #[arg(long, help = "Why this model is proposed")]
+        reason: String,
+    },
+    #[command(about = "Record the owner's ruling on a proposed model")]
+    ApproveModel {
+        name: String,
+        model: String,
+        #[arg(long, help = "The owner's ruling, transcribed from their words")]
+        approval: String,
+    },
+    #[command(
+        about = "Declare the check that covers this task, or correct the one it declares; a result is bound to the check it answers"
+    )]
+    Check { name: String, command: String },
+    #[command(
+        about = "Add a deliverable the task owes; a record that lost one owes it again once it is named"
+    )]
+    Deliverable {
+        name: String,
+        #[arg(long, value_name = "PATH", num_args = 1.., help = "Paths the task owes")]
+        add: Vec<String>,
+    },
+    #[command(
+        about = "Record the outcome of the task's declared check, bound to the deliverables it saw"
+    )]
+    Evidence {
+        name: String,
+        #[arg(long, help = "Exit code the check reported")]
+        exit: i32,
+        #[arg(long, help = "Tool that produced it, such as cargo or pytest")]
+        tool: String,
+    },
+    #[command(
+        about = "State where a changed path came from: the task itself, concurrent work, or unknown"
+    )]
+    Attribute {
+        name: String,
+        path: String,
+        #[arg(long, help = "task, concurrent or unknown")]
+        kind: String,
+    },
 }
 
 #[derive(Serialize)]
@@ -378,15 +460,26 @@ struct RunOutput<'a> {
     challenge: Option<&'a blabla::skeptic::ChallengeReport>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Rendering {
+    pub(super) json: bool,
+    pub(super) verbose: bool,
+    pub(super) voice: blabla::voice::Voice,
+}
+
 fn emit_run(
     report: RunReport,
-    json: bool,
-    verbose: bool,
+    shown: Rendering,
     timeout_ms: u64,
     project: Option<&blabla::project::status::StatusView>,
     gate: bool,
     challenge: Option<&blabla::skeptic::ChallengeReport>,
 ) -> i32 {
+    let Rendering {
+        json,
+        verbose,
+        voice,
+    } = shown;
     let behavior_exit = match (&report.status, &report.failure) {
         (RunStatus::Green, None)
             if report.coverage_summary.unexercised == 0
@@ -449,7 +542,9 @@ fn emit_run(
                     project::write_completion(&mut output, view)?;
                 }
                 match challenge {
-                    Some(report) => project::write_standing_challenge(&mut output, report),
+                    Some(report) => {
+                        project::write_standing_challenge(&mut output, report, voice)
+                    }
                     None => Ok(()),
                 }
             }
@@ -587,6 +682,55 @@ fn write_calls(output: &mut impl Write, calls: &[blabla::report::Call]) -> io::R
     Ok(())
 }
 
+#[derive(Serialize)]
+pub(super) struct CapabilityReport {
+    pub(super) providers: Vec<structure::Capability>,
+    pub(super) inspected_extensions: &'static [&'static str],
+}
+
+impl CapabilityReport {
+    pub(super) fn of(root: &Path) -> CapabilityReport {
+        CapabilityReport {
+            providers: structure::capabilities(root, &structure::default_providers()),
+            inspected_extensions: &structure::INSPECTED_EXTENSIONS,
+        }
+    }
+
+    pub(super) fn write(&self, output: &mut impl Write) -> io::Result<()> {
+        writeln!(output, "\nStructure providers:")?;
+        for capability in &self.providers {
+            let reach = match &capability.unavailable {
+                Some(reason) => format!("cannot run here: {reason}"),
+                None => format!("symbols {} deep", capability.symbol_depth),
+            };
+            writeln!(
+                output,
+                "  {:<12} {:<28} {reach}",
+                capability.provider,
+                capability.extensions.join(" ")
+            )?;
+        }
+        writeln!(
+            output,
+            "  A file BlaBla cannot inspect has no observed fact; a rule over it is unevaluable, never GREEN."
+        )
+    }
+}
+
+fn verb(command: &Command) -> &'static str {
+    match command {
+        Command::Check { .. } => "check",
+        Command::Run { .. } => "run",
+        Command::Finish => "finish",
+        Command::Status => "status",
+        Command::Explain { .. } => "explain",
+        Command::Guide { .. } => "guide",
+        Command::Init { .. } => "init",
+        Command::Task { .. } => "task",
+        Command::Challenge { .. } => "challenge",
+    }
+}
+
 fn execute(cli: Cli) -> i32 {
     let json = cli.json;
     let cwd = match std::env::current_dir() {
@@ -594,6 +738,11 @@ fn execute(cli: Cli) -> i32 {
         Err(failure) => return emit_error(error("invocation", failure.to_string(), None), json, 2),
     };
     let explicit = cli.project.as_deref();
+    if let Some(identity) = recovery::running()
+        && let Some(message) = recovery::withhold(identity, verb(&cli.command))
+    {
+        return emit_error(error("recovery", message, None), json, 2);
+    }
     match cli.command {
         Command::Guide { topic } => {
             let text = guide::text(topic);
@@ -603,7 +752,10 @@ fn execute(cli: Cli) -> i32 {
                     topic: Option<guide::Topic>,
                     text: &'a str,
                 }
-                write_json(&GuideOutput { topic, text })
+                write_json(&GuideOutput {
+                    topic,
+                    text: text.as_ref(),
+                })
             } else {
                 io::stdout().lock().write_all(text.as_bytes())
             };
@@ -648,6 +800,7 @@ fn execute(cli: Cli) -> i32 {
                     statement,
                     scope,
                     deliverable,
+                    check,
                 } => task::open(
                     &loaded,
                     blabla::project::task::Opening {
@@ -656,6 +809,7 @@ fn execute(cli: Cli) -> i32 {
                         statement,
                         scope,
                         deliverables: deliverable,
+                        check,
                     },
                     json,
                 ),
@@ -666,8 +820,36 @@ fn execute(cli: Cli) -> i32 {
                     task::resolve(&loaded, &name, id, &evidence, json)
                 }
                 TaskAction::Scope { name, add } => task::widen(&loaded, &name, add, json),
-                TaskAction::Close { name } => task::close(&loaded, &name, json),
+                TaskAction::Close { name, model } => task::close(&loaded, &name, &model, json),
                 TaskAction::Show { name } => task::show(&loaded, name.as_deref(), json),
+                TaskAction::Accept { name, model } => task::accept(&loaded, &name, &model, json),
+                TaskAction::Block { name, reason } => task::block(&loaded, &name, &reason, json),
+                TaskAction::Ready { name } => task::ready(&loaded, &name, json),
+                TaskAction::Lens {
+                    name,
+                    lens,
+                    statement,
+                } => task::lens(&loaded, &name, &lens, &statement, json),
+                TaskAction::ProposeModel {
+                    name,
+                    model,
+                    reason,
+                } => task::propose_model(&loaded, &name, &model, &reason, json),
+                TaskAction::ApproveModel {
+                    name,
+                    model,
+                    approval,
+                } => task::approve_model(&loaded, &name, &model, &approval, json),
+                TaskAction::Attribute { name, path, kind } => {
+                    task::attribute(&loaded, &name, &path, &kind, json)
+                }
+                TaskAction::Check { name, command } => {
+                    task::declare_check(&loaded, &name, &command, json)
+                }
+                TaskAction::Deliverable { name, add } => task::owe(&loaded, &name, add, json),
+                TaskAction::Evidence { name, exit, tool } => {
+                    task::evidence(&loaded, &name, exit, &tool, json)
+                }
             },
             Err(exit) => exit,
         },
@@ -708,6 +890,7 @@ fn execute(cli: Cli) -> i32 {
             steps,
             shrink_budget,
             timeout_ms,
+            startup_ms,
             application,
         } => {
             let options = RunOptions {
@@ -738,15 +921,25 @@ fn execute(cli: Cli) -> i32 {
                     if executable.is_relative() && executable.components().count() > 1 {
                         executable = cwd.join(executable);
                     }
-                    let config = AppConfig {
+                    let config = AppConfig::launched(
                         executable,
-                        args: application[1..].to_vec(),
-                        timeout: Duration::from_millis(timeout_ms),
-                    };
+                        application[1..].to_vec(),
+                        Duration::from_millis(timeout_ms),
+                    )
+                    .booting_within(Duration::from_millis(startup_ms.unwrap_or(timeout_ms)));
                     match verify::run(&contract, &options, || runtime::AppSession::spawn(&config)) {
-                        Ok(report) => {
-                            emit_run(report, json, cli.verbose, timeout_ms, None, false, None)
-                        }
+                        Ok(report) => emit_run(
+                            report,
+                            Rendering {
+                                json,
+                                verbose: cli.verbose,
+                                voice: blabla::voice::Voice::default(),
+                            },
+                            timeout_ms,
+                            None,
+                            false,
+                            None,
+                        ),
                         Err(failure) => emit_verify_error(failure, json, seed),
                     }
                 }

@@ -1,0 +1,57 @@
+module model     "todo/model/Todo.java"
+module store     "todo/store/TodoStore.java"
+module app       "todo/app/TodoApp.java"
+module entry     "Main.java"
+module transport "../../adapters/java/blabla/Adapter.java"
+
+require "a-todo-is-a-type":                  symbol model::Todo
+require "a-todo-reports-its-identity":       symbol model::Todo.id
+require "a-todo-reports-its-text":           symbol model::Todo.text
+require "a-todo-reports-its-completion":     symbol model::Todo.done
+require "completing-returns-a-new-todo":     symbol model::Todo.completed
+require "the-model-names-its-fields":        symbol model::Todo.FIELDS
+require "identity-is-a-field":               value model::Todo.FIELDS contains "id"
+require "text-is-a-field":                   value model::Todo.FIELDS contains "text"
+require "completion-is-a-field":             value model::Todo.FIELDS contains "done"
+
+require "the-store-is-a-type":               symbol store::TodoStore
+require "state-is-read-back-at-start":       symbol store::TodoStore.load
+require "state-survives-a-restart":          symbol store::TodoStore.save
+require "the-store-can-be-cleared":          symbol store::TodoStore.clear
+require "the-store-names-its-file":          symbol store::TodoStore.FILE_NAME
+
+require "the-application-is-a-type":         symbol app::TodoApp
+require "adding-belongs-to-the-application":     symbol app::TodoApp.add
+require "completing-belongs-to-the-application": symbol app::TodoApp.complete
+require "removing-belongs-to-the-application":   symbol app::TodoApp.remove
+require "the-application-names-its-actions": symbol app::TodoApp.ACTIONS
+require "adding-is-an-action":               value app::TodoApp.ACTIONS contains "add"
+require "completing-is-an-action":           value app::TodoApp.ACTIONS contains "complete"
+require "removing-is-an-action":             value app::TodoApp.ACTIONS contains "remove"
+
+require "the-application-uses-the-store":    dependency app -> store
+require "the-application-uses-the-model":    dependency app -> model
+require "the-store-uses-the-model":          dependency store -> model
+require "the-store-uses-the-filesystem":     dependency store -> "java.nio.file.Files"
+
+require "the-entry-binds-the-application":   symbol entry::Main.bind
+require "the-entry-launches-the-transport":  symbol entry::Main.main
+require "the-entry-uses-the-application":    dependency entry -> app
+
+require "the-transport-is-reusable":         symbol transport::Adapter.serve
+require "the-transport-dispatches-actions":  symbol transport::Adapter.action
+require "the-transport-checks-arguments":    symbol transport::Adapter.Args
+require "the-transport-names-its-limit":     symbol transport::Adapter.LINE_LIMIT
+
+forbid "no-protocol-loop-in-the-application":   symbol app::TodoApp.serve
+forbid "no-wire-envelope-in-the-application":   symbol app::TodoApp.emit
+forbid "no-todo-logic-in-the-transport":        symbol transport::Todo
+forbid "no-store-in-the-transport":             symbol transport::TodoStore
+forbid "the-transport-reaches-no-application":  dependency transport -> app
+forbid "the-transport-reaches-no-model":        dependency transport -> model
+
+forbid "the-model-stays-below-the-store":       dependency model -> store
+forbid "the-model-stays-below-the-application": dependency model -> app
+forbid "the-store-stays-below-the-application": dependency store -> app
+forbid "the-model-touches-no-filesystem":       dependency model -> "java.nio.file.Files"
+forbid "the-model-does-not-persist-itself":     symbol model::Todo.save

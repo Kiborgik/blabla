@@ -33,7 +33,47 @@ verify behavior {
 | `system "path"` | registers this project's system memory, at most once; not a layer, never decides completion (see below) |
 | `process "path"` | registers this project's process memory, at most once; not a layer, never decides completion, advisory only (see below) |
 | `knowledge "path"` | registers one reusable knowledge pack file; repeatable, not a layer, never decides completion (see below) |
-| `verify behavior { ... }` | the one canonical behavior profile: `command` is required; `seed`, `cases`, `steps`, `timeout_ms` and `shrink_budget` default to the `run` defaults |
+| `voice <name>` | the diagnostic voice for human output, at most once: `neutral` (the default) or `blunt`; it changes no verdict, no exit code and no `--json` field (see below) |
+| `verify behavior { ... }` | the one canonical behavior profile: `command` is required; `prepare`, `seed`, `cases`, `steps`, `timeout_ms`, `startup_ms` and `shrink_budget` are optional |
+
+### The verification profile
+
+| Field | Meaning |
+| --- | --- |
+| `command ["program", "argument", ...]` | the application launch; relative path-like elements resolve against the manifest directory |
+| `prepare ["program", "argument", ...]` | run once, before the command is resolved and before any process is spawned, in the manifest directory; a non-zero exit is a preparation error naming the command, its code and its output, never a behavior RED |
+| `timeout_ms` | the allowance for one request and its response, at most 5000 |
+| `startup_ms` | the allowance for the FIRST exchange after each process start, at most 60000; defaults to `timeout_ms` |
+| `seed`, `cases`, `steps`, `shrink_budget` | the campaign shape; they default to the `run` defaults |
+
+`prepare` exists because a compiled application must be built before it is launched, and a build
+does not belong inside a per-response timeout. `startup_ms` exists for the same reason one level
+down: a process that boots slowly should not force `timeout_ms` up for the other eight thousand
+exchanges. Both enter the profile fingerprint, so changing either makes a recorded run stale.
+
+**Write preparation output under `.blabla/`.** `project::fingerprint` walks the whole tree except
+the directories in `project::SKIPPED_DIRECTORIES`, so a build artifact written anywhere else
+changes the implementation fingerprint after `finish` has recorded the run against it, and the next
+`status` reports STALE. BlaBla creates `.blabla/` before running `prepare` so a fresh clone needs no
+setup step.
+
+```text
+verify behavior {
+    prepare ["go", "build", "-o", ".blabla/todo-go", "."]
+    command [".blabla/todo-go"]
+    timeout_ms 1000
+}
+```
+
+### The diagnostic voice
+
+`voice blunt` changes how a standing challenge READS and nothing else. The blunt rendering is
+appended to the neutral statement rather than replacing it, so no evidence, hedge or uncertainty can
+be dropped by choosing a voice; the machine-readable report is byte-identical under either voice;
+and the exit code, the rule verdicts and the task transitions are untouched. Only a contradiction
+has a blunt rendering — an honest failure or a reported blocker never does, because those are not
+contradictions. A project that declares no voice gets the neutral one, and nothing can escalate it.
+`contracts/voice.bla` holds all of that to the real adjudication path.
 
 Paths resolve from the manifest directory. The group name is the file stem or the `as` alias; rule identities are `group::label`, so `core::restart` and `sealing::restart` coexist. `verify structure` is rejected because structure needs no profile. A second `mission`, `system` or `process` statement is `E_DUPLICATE_MISSION`, `E_DUPLICATE_SYSTEM` or `E_DUPLICATE_PROCESS`; the same knowledge path registered twice is `E_DUPLICATE_KNOWLEDGE`. `use mission`, `use system`, `use process` and `use knowledge` are all `E_UNSUPPORTED_LAYER`, because project memory is not a layer.
 

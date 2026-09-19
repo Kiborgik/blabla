@@ -1,0 +1,90 @@
+module task     "src/project/task.rs"
+module clitask  "src/cli/task.rs"
+module project  "src/project/mod.rs"
+module skeptic  "src/skeptic.rs"
+module recovery "src/cli/recovery.rs"
+
+require "an-assignment-resolves-what-binds-it": symbol task::Resolution
+require "resolution-names-the-permitted-models": symbol task::Resolution.models
+require "resolution-names-the-consulted-lenses": symbol task::Resolution.lenses
+require "resolution-names-the-binding-requirements": symbol task::Resolution.requirements
+require "resolution-names-the-verification-tier": symbol task::Resolution.verification
+require "every-role-resolves-the-same-way": symbol task::resolve
+
+require "assignment-acceptance-is-recorded": symbol task::Task.accepted
+require "result-acceptance-is-separate":     symbol task::Task.result
+require "the-accepted-model-is-recorded":    symbol task::Acceptance.model
+require "lens-assessments-are-recorded":     symbol task::Assessment
+require "an-assessment-names-its-ruling":    symbol task::Assessment.ruling
+require "a-model-exception-is-recorded":     symbol task::Exception
+require "a-model-exception-carries-a-reason": symbol task::Exception.reason
+require "a-model-exception-is-unresolved-until-the-owner-rules": symbol task::Exception.approval
+
+require "a-task-declares-the-check-that-covers-it": symbol task::Task.check
+require "readiness-rests-on-observed-evidence":   symbol task::Evidence
+require "evidence-names-its-check":               symbol task::Evidence.check
+require "evidence-carries-its-outcome":           symbol task::Evidence.exit
+require "evidence-is-bound-to-the-source-it-saw": symbol task::Evidence.tree
+require "evidence-names-the-tool-that-saw-it":    symbol task::Evidence.tool
+require "stale-evidence-is-distinguished":        symbol task::stale
+require "evidence-names-the-inputs-it-saw":      symbol task::Evidence.inputs
+
+require "a-change-is-attributed-or-left-unknown": symbol task::Attribution
+require "attribution-has-a-readable-vocabulary":  symbol task::ATTRIBUTIONS
+require "a-change-can-be-attributed-to-the-task": value task::ATTRIBUTIONS contains "task"
+require "a-change-can-be-known-concurrent":       value task::ATTRIBUTIONS contains "concurrent"
+require "a-change-can-be-of-unknown-origin":      value task::ATTRIBUTIONS contains "unknown"
+require "attribution-is-decided-once":            symbol task::attribute
+require "an-attribution-is-bound-to-what-it-saw": symbol task::Attribution.digest
+
+require "task-states-are-a-readable-vocabulary": symbol task::STATES
+require "a-task-can-be-accepted":         value task::STATES contains "accepted"
+require "a-task-can-be-blocked":          value task::STATES contains "blocked"
+require "a-task-can-be-ready-for-review": value task::STATES contains "ready"
+require "a-task-can-be-closed":           value task::STATES contains "closed"
+require "invalid-transitions-are-refused": symbol task::transition
+
+require "the-task-view-resolves-what-binds-it": symbol clitask::resolved
+require "one-resolution-path-serves-the-view-and-acceptance": symbol task::resolve
+
+require "opening-a-task-cannot-replace-a-live-one": symbol clitask::open
+require "a-live-record-is-not-replaceable":          symbol task::replaceable
+require "a-lost-obligation-can-be-owed-again":       symbol clitask::owe
+require "accept-assignment-command": symbol clitask::accept
+require "accept-result-command":     symbol clitask::close
+require "blocked-command":           symbol clitask::block
+require "ready-for-review-command":  symbol clitask::ready
+require "lens-assessment-command":   symbol clitask::lens
+require "model-exception-command":   symbol clitask::propose_model
+require "attribution-command":       symbol clitask::attribute
+require "check-result-command":      symbol clitask::evidence
+require "declared-check-command":    symbol clitask::declare_check
+
+require "challenge-grounds-on-unaccepted-work":     value skeptic::CLASSES contains "work-without-acceptance"
+require "challenge-grounds-on-model-policy":        value skeptic::CLASSES contains "model-outside-role-policy"
+require "challenge-grounds-on-an-open-exception":   value skeptic::CLASSES contains "exception-unresolved"
+require "challenge-grounds-on-an-unassessed-lens":  value skeptic::CLASSES contains "lens-unassessed"
+require "challenge-grounds-on-unsupported-readiness": value skeptic::CLASSES contains "readiness-without-evidence"
+require "challenge-grounds-on-stale-evidence":        value skeptic::CLASSES contains "evidence-superseded"
+require "challenge-grounds-on-unknown-attribution":   value skeptic::CLASSES contains "attribution-unknown"
+require "challenge-grounds-on-a-failing-check":       value skeptic::CLASSES contains "declared-check-failed"
+require "a-closed-record-is-not-amended":             symbol clitask::mutate
+require "a-record-is-created-rather-than-amended":    symbol clitask::create
+
+require "scratch-is-named":                      symbol task::SCRATCH_DIRECTORY
+require "task-metadata-is-outside-the-snapshot": value project::SKIPPED_DIRECTORIES contains ".blabla"
+require "build-output-is-outside-the-snapshot":  value project::SKIPPED_DIRECTORIES contains "target"
+
+require "a-task-record-names-the-build-that-wrote-it": symbol task::Task.build
+require "a-recovery-build-knows-it-is-one":          symbol recovery::detect
+require "a-recovery-build-states-its-identity":      symbol recovery::Identity
+require "a-recovery-build-compares-identities":      symbol recovery::matches
+require "a-recovery-build-refuses-writes-on-mismatch": symbol recovery::refuse_write
+require "a-recovery-build-serves-task-management":   value recovery::SERVED contains "task"
+require "a-recovery-build-serves-intent-retrieval":  value recovery::SERVED contains "explain"
+require "a-recovery-build-refuses-completion":       value recovery::WITHHELD contains "finish"
+require "a-recovery-build-refuses-status":           value recovery::WITHHELD contains "status"
+require "a-recovery-build-refuses-verification":     value recovery::WITHHELD contains "run"
+require "a-recovery-build-refuses-structure-checks": value recovery::WITHHELD contains "check"
+
+forbid "the-task-record-stays-below-the-cli": dependency task -> clitask

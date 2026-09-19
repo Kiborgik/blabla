@@ -1,8 +1,8 @@
 [package]
 name = "blabla"
-version = "0.6.0-alpha"
+version = "0.7.0-alpha"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.90"
 description = "Executable project memory for coding agents"
 license = "MIT"
 repository = "https://github.com/Kiborgik/blabla"
@@ -10,17 +10,27 @@ readme = "README.md"
 keywords = ["agents", "contracts", "verification", "testing", "cli"]
 categories = ["command-line-utilities", "development-tools::testing", "development-tools"]
 
+[[example]]
+name = "structure-adapter"
+path = "bridge/structure_adapter.rs"
+
 [dependencies]
-clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["float_roundtrip"] }
-tempfile = "3"
-getrandom = "0.4"
-syn = { version = "3", default-features = false, features = ["parsing", "full", "clone-impls", "printing", "visit"] }
-proc-macro2 = { version = "1", features = ["span-locations"] }
+clap = { version = "=4.6.7", features = ["derive"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["float_roundtrip"] }
+tempfile = "=3.27.0"
+getrandom = "=0.4.3"
+syn = { version = "=3.0.6", default-features = false, features = ["parsing", "full", "clone-impls", "printing", "visit"] }
+proc-macro2 = { version = "=1.0.107", features = ["span-locations"] }
+tree-sitter = "=0.27.0"
+tree-sitter-typescript = "=0.23.2"
+tree-sitter-go = "=0.25.0"
+tree-sitter-java = "=0.23.5"
+tree-sitter-c = "=0.24.2"
+tree-sitter-cpp = "=0.23.4"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = "=0.2.189"

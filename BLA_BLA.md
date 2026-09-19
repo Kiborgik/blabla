@@ -4,6 +4,8 @@ BlaBla is executable project memory for coding agents. Important project intent 
 
 This file is the **current** project authority. It carries no version history: releases are in `CHANGELOG.md`, public research evidence in `docs/research.md` and `research/`, internal dogfooding evidence in `artifacts/`.
 
+`AGENTS.md` carries the entry path for anyone working **in this repository**: the CLI here is the working tree, reached through `cargo run --quiet --bin blabla --`, never a built or installed binary. The rest of this file, and every user-facing surface, says plain `blabla` because that is what a consumer has on PATH.
+
 `project.bla` is the machine entry point. `blabla status` is the agent entry point: an agent entering a project learns what project it is in, what is GREEN, YELLOW, RED or ERROR, which contract owns the problem and which rule to inspect next, without reading a single contract file.
 
 ## Evidence ordering
@@ -11,6 +13,8 @@ This file is the **current** project authority. It carries no version history: r
 **Agent self-reports are advisory evidence, never authoritative project state.** For any question about what is implemented or complete, prefer, in this order: the repository and working tree; deterministic tool output; `blabla status`, `check` and `finish`; test, build and compiler results; and only last, an agent's narrative.
 
 This is a rule about which evidence to trust. It is not a permissions mechanism and it is not a layer. Correct project memory does not remove it: an agent can navigate to the right identity and still narrate a meaning the entry does not contain. Read the entry, not a summary of the entry.
+
+Two limits on that ordering. Evidence tests claims about the implementation; it does not silently override owner intent. Mission is authoritative about what the project is for, and a planner whose evidence points elsewhere says so and names the assumption it is challenging (`policy::planner-challenges-the-plan`) rather than quietly complying or quietly overriding. And evidence does not make the verifier infallible: a GREEN is bounded by the campaign, the providers and the adapter that produced it, which is why `check --falsify` and the coverage distinction exist.
 
 A corollary: a tool result is authoritative about what it checked, never about what it did not. `blabla check` returning GREEN proves each rule *evaluates*. It does not prove any rule *can fail*; that is a separate question, and `blabla check --falsify <contract.bla>` is the command that asks it.
 
@@ -26,7 +30,9 @@ IMPLEMENTATION  ordinary Rust, Python, TypeScript, Go or anything else
 
 **BEHAVIOR** (`docs/language.md`): `type`, `state`, `action`, `when ... expect`, `always`, `never`. State is abstract observation, not storage. The application speaks one JSON object per line behind a small adapter. Results are GREEN (every derived obligation exercised and satisfied), YELLOW (no violation, but an obligation was never exercised — **not complete**), or RED (a confirmed violation with a shrunk counterexample).
 
-**STRUCTURE** (`docs/structure.md`): `module` bindings and labelled `require` / `forbid` rules over five fact forms — `module m`, `symbol m::Name[.member]`, `dependency m -> n | "external"`, `value m::Name contains literal`, `value m::Name maps K to V`. Facts come from a provider chosen by file extension; BlaBla inspects `.py` and `.rs`. Results are GREEN, RED (with the observed file and line) or ERROR. Structure is evaluated live on every call and never recorded as current, so a stale structure GREEN cannot exist.
+**STRUCTURE** (`docs/structure.md`): `module` bindings and labelled `require` / `forbid` rules over five fact forms — `module m`, `symbol m::Name[.member]`, `dependency m -> n | "external"`, `value m::Name contains literal`, `value m::Name maps K to V`. Facts come from a provider chosen by file extension; BlaBla inspects Python, Rust, TypeScript and JavaScript, Go, Java, C and C++, and `blabla status` prints the live list from the providers themselves. The five tree-sitter providers share one parse harness; Python and Rust keep their own backends. Results are GREEN, RED (with the observed file and line) or ERROR. Structure is evaluated live on every call and never recorded as current, so a stale structure GREEN cannot exist.
+
+Every provider answers three ways, never two: found, established absent, and unknown. Unknown is ERROR, and it is what keeps a `forbid` from passing through analysis blindness where a language hides a reference — a Go or Java same-package use with no import, a Java wildcard import, a C include on an unseen include path, a TypeScript dynamic import of an expression. An unknown names the one declared module it could be hiding wherever the provider can bound it, so it makes exactly those rules ERROR and leaves every other dependency on that module decidable.
 
 Rule identity is `group::label` in both layers, where the group is the contract's file stem or its `as` alias.
 
@@ -88,6 +94,8 @@ Authored memory says how the project is meant to work. A **bounded task** record
 
 `blabla challenge` reads that record, the tree measured against its snapshot, the completion state and a falsification verdict, and reports at most one discrepancy it can ground in them. A class with no evidence behind it says which evidence it lacked rather than reporting that it found nothing. It is a deterministic check over recorded facts, not a code reviewer: it reads no meaning from source code, decides no correctness, and `finish` keeps its verdict and its exit code. Classes and limits: `docs/agent-workflow.md`.
 
+Project verification and task acceptance are different questions. `finish` decides whether the project is complete. A task's transitions decide only whether one handoff is in order, and they are the one place Process leaves prose: `ready` needs an acceptance on record, `close` is refused while a grounded challenge stands, and a closed task accepts no amendment. Everything else in Process stays advisory. Neither a clean task record nor `OVERALL GREEN` alone establishes everything: the record shows what was recorded rather than what was done, and GREEN is bounded by the campaign that produced it. The worker's routes through that lifecycle are printed by `task show` and by `guide loop` from one source, and `contracts/onboarding.bla` holds the entry to them.
+
 ## Agent workflow
 
 ```text
@@ -99,9 +107,13 @@ blabla explain system::<name>     one system, the responsibilities it owns and t
 blabla explain role::<name>       one role, what it owns, the policies that bind it, what it consults
 blabla explain knowledge::<pack>  one pack and the identity of every ruling in it
 blabla explain flow::<name>       the development loop, one line per step
-blabla task open <name> ...       record the bounded change about to be made
-# change ordinary application code, then run the checks that cover it
-blabla challenge                  one discrepancy grounded in the task record and the tree
+blabla task open <name> ...       orchestrator: record the bounded change, its scope, deliverables and check
+blabla task accept <name> --model <id>   worker: take the assignment before changing anything
+# change ordinary application code, run the declared check, record what the whole run reported:
+blabla task evidence <name> --exit <code> --tool <tool>
+blabla challenge <name>           one discrepancy grounded in the task record and the tree
+blabla task ready <name>          hand back; closing is the orchestrator's decision
+blabla task close <name> --model <id>    accept the result; refused while a grounded challenge stands
 blabla finish                     canonical behavior campaign plus live structure evaluation
 ```
 
@@ -124,20 +136,35 @@ Cargo guarantees the CLI reflects the working tree. An installed or copied `blab
 
 This is a rule about developing BlaBla itself. Everywhere else — user-facing documentation, `blabla guide agent`, the generated `AGENTS.md` block and every example for an ordinary project — the command is plain `blabla`, because that is what a consumer has on PATH.
 
-BlaBla is a BlaBla project. The root `project.bla` registers `mission.bla`, `system.bla`, `process.bla` and the `engineering`, `testing` and `reviewing` knowledge packs, and carries six active structure contracts and no drafts:
+BlaBla is a BlaBla project. The root `project.bla` registers `mission.bla`, `system.bla`, `process.bla` and the `engineering`, `testing`, `reviewing` and `design` knowledge packs, and carries active structure and behavior contracts and no drafts:
 
 ```text
 extractor    src/structure/python_facts.py      the embedded fact extractor
 publication  experiments/audit_public_tree.py   the public-tree auditor
 secrets      experiments/audit_public_tree.py   its secret patterns and exemptions
 gate         experiments/gate_v05.py            the frozen v0.5 release gate, contracted to keep that reproduction intact
+schedule     experiments/gate.py                the production gate's step list and the order it must run in
 diagrams     experiments/render_diagrams.py     the diagram drift gate
 rust         src/structure/*.rs                 the structure subsystem and its seams
+providers    src/structure/*.rs                 the provider seam, the shared parse harness and the advertised extensions
+workflow     src/project/task.rs, src/cli/*.rs  the bounded-task record, its verbs and the recovery build
+onboarding   src/cli/init.rs, src/cli/task.rs   the portable entry and the routes an assignment view owes a worker
+evaluator    (behavior)                         found, absent and unknown, driven through the real evaluator
+assignment   (behavior)                         the bounded-task lifecycle, driven through real records
+voice        (behavior)                         that a diagnostic voice changes wording and nothing else
 ```
 
-BlaBla self-hosts with every active structure rule GREEN and OVERALL GREEN. Run `cargo run --quiet --bin blabla -- status` for the current rule count and state; the CLI is authoritative, and a count written into this file rots the moment a contract grows. Per-rule falsification evidence is kept under `artifacts/`.
+The three behavior contracts are driven by one adapter, `bridge/structure_adapter.rs`, which is a Cargo example: build it from the current source before `finish`, or run `experiments/gate.py`, which does it for you. A stale bridge verifies source that is no longer there.
 
-BlaBla implements the Behavior language and verifier, but this repository currently declares no self-hosted Behavior contract. Its own completion state therefore rests on Structure. That is a project choice, not a missing Behavior feature. `status` reads `BEHAVIOR none declared`.
+BlaBla self-hosts with every active rule GREEN and OVERALL GREEN. Run `cargo run --quiet --bin blabla -- status` for the current rule count and state; the CLI is authoritative, and a count written into this file rots the moment a contract grows. Per-rule falsification evidence is kept under `artifacts/`.
+
+## Preparation, startup and response
+
+Three different things, kept apart because conflating them hides defects. `prepare` is work done once before any process is spawned — a build, typically — and it is outside the verifier's timeouts because a build is not a response. `startup_ms` is the allowance for the first exchange after each process start, which every case pays afresh. `timeout_ms` is the allowance for one ordinary response, and separating the first two from it is what lets it stay tight. All three enter the profile fingerprint. Preparation output belongs under `.blabla/`, which the implementation fingerprint does not walk; anywhere else, the build invalidates the run it was preparing. Full semantics: `docs/project.md`.
+
+## The diagnostic voice
+
+`voice blunt` in `project.bla` is an owner-selected wording for a standing challenge, and it is presentation over the same evidence. The blunt sentence is appended to the neutral one rather than replacing it, so nothing can be dropped by choosing a voice; the machine-readable report is byte-identical under either; and the verdicts, the exit code and the task transitions are untouched. Only a contradiction has a blunt rendering — an honest failure or a reported blocker is not a contradiction and never meets one. The default is neutral and nothing escalates it. `contracts/voice.bla` holds all of that to the real adjudication path rather than to a style guide.
 
 ## Non-goals
 

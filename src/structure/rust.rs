@@ -1,6 +1,6 @@
 use super::{
-    CollectionFact, EntryFact, ImportFact, Literal, ModuleDecl, ModuleFacts, Provider,
-    ProviderFailure, SymbolFact, dotted, normalize,
+    CollectionFact, Entry, EntryFact, ImportFact, Literal, ModuleDecl, ModuleFacts, Provider,
+    ProviderFailure, SymbolFact, UnreadableImport, dotted, normalize,
 };
 use proc_macro2::{TokenStream, TokenTree};
 use std::collections::{BTreeMap, BTreeSet};
@@ -9,6 +9,7 @@ use syn::spanned::Spanned;
 use syn::visit::Visit;
 
 pub const PROVIDER_ID: &str = "rust";
+pub const EXTENSIONS: [&str; 1] = ["rs"];
 
 const ROOT_STEMS: [&str; 3] = ["mod", "lib", "main"];
 const ROUTE_KEYWORDS: [&str; 3] = ["crate", "self", "super"];
@@ -24,9 +25,8 @@ impl Provider for RustProvider {
         PROVIDER_ID
     }
 
-    fn handles(&self, path: &Path) -> bool {
-        path.extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("rs"))
+    fn extensions(&self) -> &'static [&'static str] {
+        &EXTENSIONS
     }
 
     fn symbol_depth(&self) -> usize {
@@ -135,6 +135,7 @@ struct Scan {
     collections: Vec<CollectionFact>,
     entries: Vec<EntryFact>,
     unsupported: Vec<SymbolFact>,
+    unresolved_imports: Vec<UnreadableImport>,
 }
 
 impl Scan {
@@ -164,6 +165,7 @@ impl Scan {
             collections: Vec::new(),
             entries: Vec::new(),
             unsupported: Vec::new(),
+            unresolved_imports: Vec::new(),
         }
     }
 
@@ -192,6 +194,7 @@ impl Scan {
         facts.collections = self.collections;
         facts.entries = self.entries;
         facts.unsupported = self.unsupported;
+        facts.unresolved_imports = self.unresolved_imports;
         facts
     }
 
@@ -379,18 +382,30 @@ impl Scan {
         })
     }
 
-    fn record(&mut self, route: &Route, line: usize) {
-        let name = match route {
+    fn record(&mut self, route_taken: &Route, line: usize) {
+        let name = match route_taken {
             Route::External { segments } => segments.join("."),
-            Route::Internal { base, segments } => {
-                let Some(target) = resolve(base, segments) else {
+            Route::Internal { base, segments } => match route(base, segments) {
+                Resolution::Module(target) => {
+                    let Some(name) = dotted(&self.root, &target) else {
+                        return;
+                    };
+                    name
+                }
+                Resolution::Item => {
+                    let Some(target) = module_file(base) else {
+                        return;
+                    };
+                    let Some(name) = dotted(&self.root, &target) else {
+                        return;
+                    };
+                    name
+                }
+                Resolution::Undecidable => {
+                    self.undecidable(base, segments, line);
                     return;
-                };
-                let Some(name) = dotted(&self.root, &target) else {
-                    return;
-                };
-                name
-            }
+                }
+            },
         };
         if name.is_empty() {
             return;
@@ -399,6 +414,24 @@ impl Scan {
             .entry(name)
             .and_modify(|existing| *existing = (*existing).min(line))
             .or_insert(line);
+    }
+
+    fn undecidable(&mut self, base: &Path, segments: &[String], line: usize) {
+        let covers = module_file(base).and_then(|target| dotted(&self.root, &target));
+        let form = format!(
+            "use {} names no module this provider can locate; whether it is an item of {} or a module it cannot see cannot be decided statically",
+            segments.join("::"),
+            covers.clone().unwrap_or_else(|| "that module".to_owned())
+        );
+        if self
+            .unresolved_imports
+            .iter()
+            .any(|unknown: &UnreadableImport| unknown.form == form)
+        {
+            return;
+        }
+        self.unresolved_imports
+            .push(UnreadableImport { form, line, covers });
     }
 
     fn declarations(&mut self, items: &[syn::Item]) {
@@ -623,7 +656,13 @@ fn source_root(directory: &Path, root: &Path) -> PathBuf {
     }
 }
 
-fn resolve(base: &Path, segments: &[String]) -> Option<PathBuf> {
+enum Resolution {
+    Module(PathBuf),
+    Item,
+    Undecidable,
+}
+
+fn route(base: &Path, segments: &[String]) -> Resolution {
     for length in (1..=segments.len()).rev() {
         let mut directory = base.to_path_buf();
         for part in &segments[..length - 1] {
@@ -632,14 +671,18 @@ fn resolve(base: &Path, segments: &[String]) -> Option<PathBuf> {
         let last = &segments[length - 1];
         let direct = directory.join(format!("{last}.rs"));
         if direct.is_file() {
-            return Some(direct);
+            return Resolution::Module(direct);
         }
         let nested = directory.join(last).join("mod.rs");
         if nested.is_file() {
-            return Some(nested);
+            return Resolution::Module(nested);
         }
     }
-    module_file(base)
+    if segments.len() <= 1 {
+        Resolution::Item
+    } else {
+        Resolution::Undecidable
+    }
 }
 
 fn module_file(directory: &Path) -> Option<PathBuf> {
@@ -741,8 +784,6 @@ fn payload(expr: &syn::Expr) -> Option<Vec<Literal>> {
     literal_collection(expr)
 }
 
-type Entry = (usize, Literal, Option<Vec<Literal>>);
-
 fn collection_entries(expr: &syn::Expr) -> Option<Vec<Entry>> {
     let mut entries = Vec::new();
     for element in elements(expr)? {
@@ -754,4 +795,95 @@ fn collection_entries(expr: &syn::Expr) -> Option<Vec<Entry>> {
         entries.push((element.span().start().line, key, payload(pair[1])));
     }
     Some(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnostic::Location;
+    use tempfile::TempDir;
+
+    fn module(root: &Path, name: &str, relative: &str) -> ModuleDecl {
+        ModuleDecl {
+            name: name.to_owned(),
+            display: relative.to_owned(),
+            path: root.join(relative),
+            location: Location {
+                file: "test.bla".to_owned(),
+                line: 1,
+                column: 1,
+            },
+        }
+    }
+
+    fn inspect_one(root: &Path, declaration: &ModuleDecl) -> ModuleFacts {
+        RustProvider
+            .inspect(root, &[declaration])
+            .unwrap()
+            .remove(&declaration.key())
+            .unwrap()
+    }
+
+    #[test]
+    fn an_unresolvable_internal_use_is_an_unknown_scoped_to_the_module_it_could_hide() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(root.join("lib.rs"), "use crate::absent::Thing;\n").unwrap();
+        let declaration = module(root, "lib", "lib.rs");
+        let facts = inspect_one(root, &declaration);
+        assert!(
+            facts.imports.is_empty(),
+            "a route naming no module this provider can locate must not become an edge; got {:?}",
+            facts.imports
+        );
+        assert_eq!(facts.unresolved_imports.len(), 1);
+        assert_eq!(
+            facts.unresolved_imports[0].covers.as_deref(),
+            Some("lib"),
+            "the unknown must name the one module it could be hiding so every other dependency stays decidable"
+        );
+    }
+
+    #[test]
+    fn a_single_remaining_segment_is_still_an_item_of_the_module_that_owns_it() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(root.join("lib.rs"), "use crate::Thing;\n").unwrap();
+        let declaration = module(root, "lib", "lib.rs");
+        let facts = inspect_one(root, &declaration);
+        let names: Vec<&str> = facts.imports.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["lib"]);
+        assert!(
+            facts.unresolved_imports.is_empty(),
+            "a module without a file does not compile, so one remaining segment can only be an item of that module; got {:?}",
+            facts.unresolved_imports
+        );
+    }
+
+    #[test]
+    fn a_super_route_still_reaches_the_parent_module_file() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("area")).unwrap();
+        std::fs::write(
+            root.join("area/mod.rs"),
+            "pub struct Thing;\npub mod leaf;\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("area/leaf.rs"), "use super::Thing;\n").unwrap();
+        let parent = module(root, "area", "area/mod.rs");
+        let leaf = module(root, "leaf", "area/leaf.rs");
+        let facts = RustProvider
+            .inspect(root, &[&parent, &leaf])
+            .unwrap()
+            .remove(&leaf.key())
+            .unwrap();
+        let observable = super::super::dotted(root, &parent.path).unwrap();
+        assert!(
+            facts.imports.iter().any(|i| i.name == observable),
+            "the documented super fallback must survive the correction ({observable}); got {:?}",
+            facts.imports
+        );
+        assert!(facts.unresolved_imports.is_empty());
+    }
 }

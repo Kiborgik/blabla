@@ -473,6 +473,7 @@ fn init_creates_a_draft_project_idempotently_and_preserves_agents_md() {
             ("contracts/behavior/core.bla", "create"),
             ("AGENTS.md", "appended"),
             (".agents/skills/blabla/SKILL.md", "create"),
+            (".claude/skills/blabla/SKILL.md", "create"),
         ]
     );
     let manifest = std::fs::read_to_string(root.join("project.bla")).unwrap();
@@ -513,7 +514,7 @@ fn init_creates_a_draft_project_idempotently_and_preserves_agents_md() {
     assert!(skill.contains("blabla guide bootstrap"), "{skill}");
     assert!(skill.contains("blabla guide change"), "{skill}");
     assert!(skill.contains("blabla finish"), "{skill}");
-    assert!(skill.lines().count() <= 60, "{skill}");
+    assert!(skill.lines().count() <= 80, "{skill}");
     assert_eq!(outcome["profile"], false);
     let manifest = std::fs::read_to_string(root.join("project.bla")).unwrap();
     assert!(!manifest.contains("verify behavior"), "{manifest}");
@@ -543,7 +544,10 @@ fn init_creates_a_draft_project_idempotently_and_preserves_agents_md() {
         .iter()
         .map(|step| step["action"].as_str().unwrap())
         .collect();
-    assert_eq!(actions, ["exists", "exists", "unchanged", "exists"]);
+    assert_eq!(
+        actions,
+        ["exists", "exists", "unchanged", "exists", "exists"]
+    );
     assert_eq!(tree(root), before);
 
     std::fs::write(

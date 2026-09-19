@@ -1,0 +1,24 @@
+module app      "main.c"
+module transport "../../adapters/c/blabla_adapter.c"
+module protocol  "../../adapters/c/blabla_adapter.h"
+
+require "the-application-serves-the-protocol": symbol app::main
+require "the-store-is-the-applications-own":   symbol app::Store
+require "a-todo-carries-its-identity":         symbol app::Todo.id
+require "a-todo-carries-its-text":             symbol app::Todo.text
+require "a-todo-carries-its-completion":       symbol app::Todo.done
+require "the-actions-are-declared-in-one-table": symbol app::ACTIONS
+require "adding-is-an-action":                 symbol app::add
+require "completing-is-an-action":             symbol app::complete
+require "removing-is-an-action":               symbol app::remove_todo
+require "state-survives-a-restart":            symbol app::store_save
+require "state-is-read-back-at-start":         symbol app::store_load
+
+require "the-transport-is-reusable":           symbol transport::blabla_serve
+require "the-transport-escapes-strings":       symbol transport::blabla_out_string
+require "the-protocol-declares-an-adapter":    symbol protocol::blabla_adapter
+require "the-protocol-declares-an-action":     symbol protocol::blabla_action
+require "arguments-carry-their-kind":          symbol protocol::blabla_arg.kind
+
+forbid "no-todo-logic-in-the-transport":       symbol transport::Todo
+forbid "no-store-in-the-transport":            symbol transport::Store

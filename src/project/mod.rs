@@ -1,10 +1,11 @@
 use crate::diagnostic::{Diagnostic, Location, Span};
 use crate::ir::Contract;
 use crate::report::{DEFAULT_CASES, DEFAULT_STEPS, DEFAULT_TIMEOUT_MS, MAX_SHRINK_ATTEMPTS};
-use crate::runtime::{MAX_TIMEOUT, primitives};
+use crate::runtime::{MAX_STARTUP, MAX_TIMEOUT, primitives};
 use crate::semantics::{Unit, compile_units};
 use crate::structure::{self, StructureContract, StructureReport, StructureRule};
 use crate::syntax::{self, Lexer, Token, TokenKind};
+use crate::voice::{VOICES, Voice};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
@@ -15,7 +16,8 @@ pub mod status;
 pub mod task;
 
 pub const MANIFEST_NAME: &str = "project.bla";
-pub const PROFILE_FIELDS: &str = "command, seed, cases, steps, timeout_ms, shrink_budget";
+pub const PROFILE_FIELDS: &str =
+    "command, prepare, seed, cases, steps, timeout_ms, startup_ms, shrink_budget";
 
 const SKIPPED_DIRECTORIES: &[&str] = &[
     ".blabla",
@@ -47,6 +49,7 @@ pub struct Manifest {
     pub knowledge: Vec<MemoryEntry>,
     pub profile: Option<Profile>,
     pub profile_span: Option<Span>,
+    pub voice: Voice,
 }
 
 #[derive(Clone, Debug)]
@@ -59,11 +62,21 @@ pub struct MemoryEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Profile {
     pub command: Vec<String>,
+    #[serde(default)]
+    pub prepare: Option<Vec<String>>,
     pub seed: u64,
     pub cases: usize,
     pub steps: usize,
     pub timeout_ms: u64,
+    #[serde(default)]
+    pub startup_ms: Option<u64>,
     pub shrink_budget: usize,
+}
+
+impl Profile {
+    pub fn startup(&self) -> u64 {
+        self.startup_ms.unwrap_or(self.timeout_ms)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -80,6 +93,7 @@ enum Statement {
     Process(MemoryEntry),
     Knowledge(MemoryEntry),
     Profile(Profile, Span),
+    Tone(Voice, Span),
 }
 
 pub const RESERVED_GROUPS: &[&str] = &[
@@ -332,6 +346,7 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
     let mut groups = HashSet::new();
     let mut profile = None;
     let mut profile_span = None;
+    let mut voice = None;
     let mut mission: Option<MemoryEntry> = None;
     let mut system: Option<MemoryEntry> = None;
     let mut process: Option<MemoryEntry> = None;
@@ -383,6 +398,16 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
                     ));
                 }
                 process = Some(entry);
+            }
+            Statement::Tone(chosen, span) => {
+                if voice.is_some() {
+                    return Err(parser.error(
+                        span,
+                        "E_DUPLICATE_VOICE",
+                        "the manifest declares more than one `voice`; a project has at most one",
+                    ));
+                }
+                voice = Some(chosen);
             }
             Statement::Profile(parsed, span) => {
                 if profile.is_some() {
@@ -439,6 +464,7 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
         knowledge,
         profile,
         profile_span,
+        voice: voice.unwrap_or_default(),
     })
 }
 
@@ -514,6 +540,38 @@ impl ManifestParser<'_> {
                     _ => Statement::Process(entry),
                 });
             }
+            TokenKind::Identifier(word) if word == "voice" => {
+                self.position += 1;
+                let chosen = self.current().clone();
+                let TokenKind::Identifier(name) = &chosen.kind else {
+                    return Err(self.error(
+                        chosen.span,
+                        "E_MANIFEST_VOICE",
+                        format!(
+                            "expected a voice after `voice`; the voices are {}",
+                            VOICES.join(", ")
+                        ),
+                    ));
+                };
+                let Some(voice) = Voice::parse(name) else {
+                    return Err(self.error(
+                        chosen.span,
+                        "E_MANIFEST_VOICE",
+                        format!(
+                            "unknown voice '{name}'; the voices are {}",
+                            VOICES.join(", ")
+                        ),
+                    ));
+                };
+                self.position += 1;
+                let span = Span {
+                    start: start.span.start,
+                    end: chosen.span.end,
+                    line: start.span.line,
+                    column: start.span.column,
+                };
+                return Ok(Statement::Tone(voice, span));
+            }
             TokenKind::Identifier(word) if word == "verify" => {
                 self.position += 1;
                 let layer_span = self.current().span;
@@ -532,7 +590,7 @@ impl ManifestParser<'_> {
                 return Err(self.error(
                     start.span,
                     "E_MANIFEST_STATEMENT",
-                    "expected `use behavior \"path\"`, `draft behavior \"path\"`, `mission \"path\"`, `system \"path\"`, `process \"path\"`, `knowledge \"path\"` or `verify behavior { ... }`",
+                    "expected `use behavior \"path\"`, `draft behavior \"path\"`, `mission \"path\"`, `system \"path\"`, `process \"path\"`, `knowledge \"path\"`, `voice <name>` or `verify behavior { ... }`",
                 ));
             }
         };
@@ -633,6 +691,8 @@ impl ManifestParser<'_> {
         }
         self.position += 1;
         let mut command: Option<Vec<String>> = None;
+        let mut prepare: Option<Vec<String>> = None;
+        let mut startup_ms = None;
         let mut seed = None;
         let mut cases = None;
         let mut steps = None;
@@ -659,6 +719,13 @@ impl ManifestParser<'_> {
                             let values = self.command_list(token.span)?;
                             command.replace(values).is_some()
                         }
+                        "prepare" => {
+                            let values = self.command_list(token.span)?;
+                            prepare.replace(values).is_some()
+                        }
+                        "startup_ms" => startup_ms
+                            .replace(self.integer(field, 1, MAX_STARTUP.as_millis() as u64)?)
+                            .is_some(),
                         "seed" => seed.replace(self.integer(field, 0, u64::MAX)?).is_some(),
                         "cases" => cases.replace(self.integer(field, 1, u64::MAX)?).is_some(),
                         "steps" => steps.replace(self.integer(field, 1, u64::MAX)?).is_some(),
@@ -711,6 +778,8 @@ impl ManifestParser<'_> {
         Ok((
             Profile {
                 command,
+                prepare,
+                startup_ms,
                 seed: seed.unwrap_or(0),
                 cases: cases.map(|value| value as usize).unwrap_or(DEFAULT_CASES),
                 steps: steps.map(|value| value as usize).unwrap_or(DEFAULT_STEPS),
@@ -1284,6 +1353,16 @@ pub fn fingerprint(root: &Path, extra_files: &[PathBuf], excluded: &[PathBuf]) -
     hasher.finish()
 }
 
+fn executable_form(candidate: &Path) -> Option<PathBuf> {
+    if candidate.exists() || std::env::consts::EXE_SUFFIX.is_empty() {
+        return None;
+    }
+    let mut name = candidate.file_name()?.to_os_string();
+    name.push(std::env::consts::EXE_SUFFIX);
+    let suffixed = candidate.with_file_name(name);
+    suffixed.exists().then_some(suffixed)
+}
+
 pub fn resolve_command(
     written: &[String],
     base: &Path,
@@ -1301,6 +1380,10 @@ pub fn resolve_command(
             candidate.to_path_buf()
         } else {
             normalize(&base.join(candidate))
+        };
+        let absolute = match executable_form(&absolute) {
+            Some(found) => found,
+            None => absolute,
         };
         if !absolute.exists() {
             return Err(Diagnostic::new(

@@ -1,7 +1,7 @@
 use super::heartbeat::{Heartbeat, INTERVAL};
 use super::{
-    ErrorReport, contract_error, emit_contract_error, emit_error, emit_run, error, verify_error,
-    write_json,
+    CapabilityReport, ErrorReport, Rendering, contract_error, emit_contract_error, emit_error,
+    emit_run, error, verify_error, write_json,
 };
 use blabla::application::AppConfig;
 use blabla::diagnostic::{Diagnostic, Location, Span};
@@ -20,9 +20,10 @@ use blabla::project::status::{
 };
 use blabla::project::task::{self, TaskStatus};
 use blabla::project::{self, Layer, Project, ResolvedCommand};
-use blabla::report::{CoverageStatus, RunOptions, RunReport, RunStatus};
+use blabla::report::{CoverageStatus, RunOptions, RunReport, RunStatus, VerifyError};
 use blabla::structure::{LayerStatus, RuleStatus, StructureReport};
 use blabla::verify::Progress;
+use blabla::voice::{Voice, contradiction};
 use blabla::{runtime, verify};
 use serde::Serialize;
 use std::ffi::OsString;
@@ -64,6 +65,7 @@ struct StatusWithMemory<'a> {
     knowledge_memory: Option<KnowledgeStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bounded_tasks: Option<TaskStatus>,
+    capabilities: CapabilityReport,
 }
 
 #[derive(Default)]
@@ -190,6 +192,7 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
     let view = status_view(project, &evaluation, &structure);
     let views = memories(project).views();
     let tasks = task::status(&project.manifest.root);
+    let capabilities = CapabilityReport::of(&project.manifest.root);
     let result = if json {
         write_json(&StatusWithMemory {
             project: &view,
@@ -198,9 +201,10 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             process_memory: views.process,
             knowledge_memory: views.knowledge,
             bounded_tasks: tasks,
+            capabilities,
         })
     } else {
-        write_status(&view, &views, tasks.as_ref())
+        write_status(&view, &views, tasks.as_ref(), &capabilities)
     };
     if result.is_ok() { view.exit } else { 4 }
 }
@@ -853,13 +857,24 @@ pub(super) fn run(
     match verify_and_record(
         project,
         options,
-        timeout_ms,
+        Allowance::flat(timeout_ms),
         &command,
         &structure,
         None,
         &mut |_| {},
     ) {
-        Ok((report, view)) => emit_run(report, json, verbose, timeout_ms, Some(&view), false, None),
+        Ok((report, view)) => emit_run(
+            report,
+            Rendering {
+                json,
+                verbose,
+                voice: project.manifest.voice,
+            },
+            timeout_ms,
+            Some(&view),
+            false,
+            None,
+        ),
         Err(failure) => {
             let (report, exit) = *failure;
             emit_error(report, json, exit)
@@ -925,7 +940,9 @@ pub(super) fn finish(project: &Project, json: bool, verbose: bool) -> i32 {
                 .and_then(|()| write_structure_issues(&mut output, &view))
                 .and_then(|()| write_next(&mut output, &view, &MemoryViews::default()))
                 .and_then(|()| write_gate(&mut output, &view))
-                .and_then(|()| write_standing_challenge(&mut output, &challenge))
+                .and_then(|()| {
+                    write_standing_challenge(&mut output, &challenge, project.manifest.voice)
+                })
         };
         return if result.is_ok() { view.exit } else { 4 };
     }
@@ -939,6 +956,34 @@ pub(super) fn finish(project: &Project, json: bool, verbose: bool) -> i32 {
             None,
         )));
     };
+    if let Some(steps) = &profile.prepare {
+        let scratch = root.join(blabla::project::status::RECORD_DIRECTORY);
+        if let Err(failure) = std::fs::create_dir_all(&scratch) {
+            let _ = writeln!(
+                io::stderr(),
+                "warning: could not create {}: {failure}",
+                scratch.display()
+            );
+        }
+        match runtime::prepare(steps, &root) {
+            Ok(preparation) => {
+                if !json {
+                    let _ = writeln!(
+                        io::stdout(),
+                        "prepared in {:.1}s: {}",
+                        preparation.seconds,
+                        preparation.command.join(" ")
+                    );
+                }
+            }
+            Err(failure) => {
+                return blocked(Box::new(verify_error(
+                    VerifyError::Application(failure),
+                    profile.seed,
+                )));
+            }
+        }
+    }
     let command = match project.launch() {
         Ok(Some(command)) => command,
         Ok(None) => unreachable!("profile presence was checked"),
@@ -1003,7 +1048,10 @@ pub(super) fn finish(project: &Project, json: bool, verbose: bool) -> i32 {
     let outcome = verify_and_record(
         project,
         options,
-        profile.timeout_ms,
+        Allowance {
+            response_ms: profile.timeout_ms,
+            startup_ms: profile.startup(),
+        },
         &command,
         &structure,
         Some(run_id),
@@ -1021,8 +1069,11 @@ pub(super) fn finish(project: &Project, json: bool, verbose: bool) -> i32 {
             let challenge = super::task::standing(project, &view);
             emit_run(
                 report,
-                json,
-                verbose,
+                Rendering {
+                    json,
+                    verbose,
+                    voice: project.manifest.voice,
+                },
                 profile.timeout_ms,
                 Some(&view),
                 true,
@@ -1033,10 +1084,25 @@ pub(super) fn finish(project: &Project, json: bool, verbose: bool) -> i32 {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct Allowance {
+    pub(super) response_ms: u64,
+    pub(super) startup_ms: u64,
+}
+
+impl Allowance {
+    fn flat(response_ms: u64) -> Allowance {
+        Allowance {
+            response_ms,
+            startup_ms: response_ms,
+        }
+    }
+}
+
 fn verify_and_record(
     project: &Project,
     options: RunOptions,
-    timeout_ms: u64,
+    allowance: Allowance,
     command: &ResolvedCommand,
     structure: &StructureReport,
     run_id: Option<String>,
@@ -1046,11 +1112,13 @@ fn verify_and_record(
     let Some(contract) = &project.contract else {
         return Err(Box::new(contract_error(no_contracts(project), Some(seed))));
     };
-    let config = AppConfig {
-        executable: command.program.clone(),
-        args: command.args.clone(),
-        timeout: Duration::from_millis(timeout_ms),
-    };
+    let timeout_ms = allowance.response_ms;
+    let config = AppConfig::launched(
+        command.program.clone(),
+        command.args.clone(),
+        Duration::from_millis(allowance.response_ms),
+    )
+    .booting_within(Duration::from_millis(allowance.startup_ms));
     let report = verify::run_observed(
         contract,
         &options,
@@ -1166,12 +1234,17 @@ pub(super) fn write_completion(output: &mut impl Write, view: &StatusView) -> io
 pub(super) fn write_standing_challenge(
     output: &mut impl Write,
     report: &blabla::skeptic::ChallengeReport,
+    voice: Voice,
 ) -> io::Result<()> {
     let Some(challenge) = &report.challenge else {
         return Ok(());
     };
     writeln!(output, "\nSTANDING CHALLENGE ({})", challenge.class.word())?;
-    writeln!(output, "{}", challenge.statement)?;
+    writeln!(
+        output,
+        "{}",
+        contradiction(voice, challenge.class.word(), &challenge.statement)
+    )?;
     for line in &challenge.evidence {
         writeln!(output, "  {line}")?;
     }
@@ -1700,6 +1773,7 @@ fn write_status(
     view: &StatusView,
     views: &MemoryViews,
     tasks: Option<&TaskStatus>,
+    capabilities: &CapabilityReport,
 ) -> io::Result<()> {
     let mut output = io::stdout().lock();
     writeln!(output, "BlaBla: executable project memory\n")?;
@@ -1722,6 +1796,7 @@ fn write_status(
     write_process_memory(&mut output, views.process.as_ref())?;
     write_knowledge_memory(&mut output, views.knowledge.as_ref())?;
     write_bounded_tasks(&mut output, tasks)?;
+    capabilities.write(&mut output)?;
     write_structure_issues(&mut output, view)?;
     write_runtime_primitives(&mut output, view)?;
     write_next(&mut output, view, views)?;

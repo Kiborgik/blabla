@@ -1,5 +1,7 @@
+use super::task;
 use clap::ValueEnum;
 use serde::Serialize;
+use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -20,53 +22,67 @@ pub const TOPICS: &str = "BlaBla guides
   blabla guide loop        delegating one bounded change, and challenging the account of it
 ";
 
-pub const LOOP: &str = r#"THE DEVELOPMENT LOOP: BOUNDED TASKS AND THE CHALLENGE
+const LOOP_HEAD: &str = r#"THE DEVELOPMENT LOOP: BOUNDED TASKS AND THE CHALLENGE
 
-blabla explain flow::<name> prints the order this project's roles are meant to work in: one line
-per step, each naming the roles that may carry it and the command that runs it, with
-blabla explain step::<name> opening one step in full. Advisory, like the rest of Process.
+blabla explain flow::<name> prints the order this project's roles are meant to work in, one line
+per step, and blabla explain step::<name> opens one step in full. Advisory, like the rest of
+Process: BlaBla describes the loop and enforces no part of it.
 
 A BOUNDED TASK is the handoff record between an orchestrator and a worker. It is machine state,
 not project memory: BlaBla writes it under .blabla/tasks/, no manifest registers it, nothing
 validates it for truth, and no state of it reaches OVERALL.
 
-  blabla task open <name> --role worker --statement "..." --scope <path> --deliverable <path>
-  blabla task show <name>                          what it may write and what it owes
-  blabla task finding <name> "..."                 discovered, not yet settled
-  blabla task resolve <name> <id> --evidence "..." what settled it
-  blabla task scope <name> --add <path>            widen a scope declared too narrowly
-  blabla task close <name>
+THE ORCHESTRATOR opens it, which snapshots the tree the task starts from. That snapshot is the
+only reason anything can later tell a deliverable that was produced from one never touched, or a
+file changed inside the write scope from one changed outside it.
 
-Opening a task snapshots the tree it starts from. That snapshot is the only reason anything can
-later tell a deliverable that was produced from one never touched, or a file changed inside the
-write scope from one changed outside it.
+  blabla task open <name> --role worker --statement "..." --scope <path> --deliverable <path> --check "..."
 
-Recording a finding is what survives the context that found it. An agent that discovers a
-contradiction, reasons on for an hour and then quietly drops it is the failure this record exists
-to catch. A finding with no resolution is evidence still outstanding, and the evidence written
-into a resolution is your claim about the repository, never BlaBla's verdict on it.
-
-  blabla challenge
-
-CHALLENGE holds the current account of the work against evidence BlaBla already has and states
-ONE challenge to reconcile -- the strongest available -- or says that nothing can be grounded.
-Run it before reporting a task done, before writing a review verdict and before the gate.
-Exit 0 when no challenge stands, 1 when one does. What it may use, and nothing else:
-
-  unresolved-finding        a finding on an open task with no resolution
-  deliverable-unchanged     a declared deliverable absent, or identical to the task's snapshot
-  scope-breach              a file changed since the task opened that no declared scope covers
-  vacuous-rule              a structure rule the falsifier reports VACUOUS: absent ground
-  verification-not-current  the completion state is not GREEN
-
-It decides no correctness, grants no completion and withholds none; blabla status and blabla
-finish remain the only authority over that, and finish prints a standing challenge beside its
-verdict without changing its exit code. Silence is not approval: no challenge means no
-contradiction was reachable from that evidence, which is a statement about the evidence rather
-than about the work. BlaBla reads no meaning from source code -- it cannot tell whether a branch
-is reachable, whether a name is the one you meant, or whether a test asserts what it claims -- so
-a challenge about any of those never appears, because it could not be grounded.
+THE WORKER takes it up in this order. blabla task show <name> prints these same routes for the
+task it was given, and that view is the authority over this text.
 "#;
+
+const LOOP_TAIL: &str = r#"
+A challenge is a question, never a verdict. It states ONE contradiction grounded in the task
+record, the tree measured against its snapshot, the completion state and a falsification verdict,
+or names the evidence it lacked. Silence is not approval: no challenge means none was reachable
+from that evidence. It reads no meaning from source code. Exit 0 when nothing stands, 1 when
+something does. What each class rests on: docs/agent-workflow.md.
+
+THE REVIEWER reads the task and the whole diff in a context that never saw the work being done,
+holds the hand-back against the lenses the role consults, and records what it finds. A finding
+recorded here survives the context that found it, which is what lets a later challenge notice it
+being dropped instead of settled.
+
+  blabla task lens <name> <lens> "..."   one assessment against one lens the role consults,
+                                         named by its knowledge pack rather than by a ruling id
+  blabla task finding <name> "..."       a defect, with the file and line that show it
+
+THE ORCHESTRATOR settles each finding against the repository, accepts the result, and decides
+completion. The evidence written into a resolution is the agent's claim about the repository,
+never BlaBla's verdict on it.
+
+  blabla task resolve <name> <id> --evidence "..."
+  blabla task check <name> "..."                     declare the check a record opened without, or
+                                                     correct the one it declares
+  blabla task close <name> --model <id>              refused while a grounded challenge stands
+  blabla finish
+
+PROJECT VERIFICATION AND TASK ACCEPTANCE ARE DIFFERENT QUESTIONS. blabla finish decides whether
+the project is complete: structure evaluated live, the canonical behavior campaign run, OVERALL
+GREEN or not. A task's transitions decide only whether one handoff is in order, and they check
+selected recorded conditions: ready needs an acceptance on record, close needs a hand-back with
+no challenge standing. Neither a clean task record nor OVERALL GREEN alone establishes
+everything: the record shows what was recorded rather than what was done, and GREEN is bounded
+by the campaign that produced it.
+"#;
+
+pub fn loop_text() -> String {
+    format!(
+        "{LOOP_HEAD}{}{LOOP_TAIL}",
+        task::routes_text("<name>", Some("<the check the assignment declares>"))
+    )
+}
 
 pub const AGENT: &str = "BlaBla is this project's executable memory.
 `blabla` is a command-line tool on PATH; `blabla --help` lists its commands.
@@ -238,13 +254,13 @@ What this is not:
 Every field and every diagnostic: docs/project.md.
 "#;
 
-pub fn text(topic: Option<Topic>) -> &'static str {
+pub fn text(topic: Option<Topic>) -> Cow<'static, str> {
     match topic {
-        None => TOPICS,
-        Some(Topic::Agent) => AGENT,
-        Some(Topic::Bootstrap) => BOOTSTRAP,
-        Some(Topic::Change) => CHANGE,
-        Some(Topic::Memory) => MEMORY,
-        Some(Topic::Loop) => LOOP,
+        None => Cow::Borrowed(TOPICS),
+        Some(Topic::Agent) => Cow::Borrowed(AGENT),
+        Some(Topic::Bootstrap) => Cow::Borrowed(BOOTSTRAP),
+        Some(Topic::Change) => Cow::Borrowed(CHANGE),
+        Some(Topic::Memory) => Cow::Borrowed(MEMORY),
+        Some(Topic::Loop) => Cow::Owned(loop_text()),
     }
 }

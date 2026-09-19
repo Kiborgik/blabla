@@ -1,0 +1,27 @@
+module app     "app.ts"
+module storage "storage.ts"
+
+module transport "../../adapters/typescript/blabla_adapter.ts"
+
+require "storage-class":     symbol storage::TodoStorage
+require "application-class": symbol app::TodoApplication
+require "actions-are-bound": symbol app::bind
+require "atomic-save":       symbol storage::TodoStorage.save
+require "the-transport-drives-the-process": dependency transport -> "node:readline"
+require "the-transport-validates-arguments": symbol transport::Args
+require "the-transport-refuses-bad-protocol": symbol transport::ProtocolError
+
+forbid  "no-protocol-loop-in-the-application": symbol app::serve
+forbid  "no-wire-writer-in-the-application":   symbol app::emit
+forbid  "no-todo-logic-in-the-transport":      symbol transport::TodoApplication
+forbid  "no-network":        dependency app -> "node:net"
+forbid  "no-subprocess":     dependency app -> "node:child_process"
+
+require "declared-actions":      symbol app::ACTIONS
+require "add-is-an-action":      value app::ACTIONS contains "add"
+require "complete-is-an-action": value app::ACTIONS contains "complete"
+forbid  "no-undeclared-drop":    value app::ACTIONS contains "drop"
+
+require "application-persists-through-storage": dependency app -> storage
+forbid  "storage-independent-of-the-application": dependency storage -> app
+forbid  "storage-does-not-drive-the-process":     dependency storage -> "node:readline"

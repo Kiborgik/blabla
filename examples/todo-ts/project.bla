@@ -1,0 +1,14 @@
+project TodoTypeScript
+
+use behavior  "../todo.bla"
+use structure "todo-typescript.bla"
+
+verify behavior {
+    command ["node", "app.ts"]
+    seed 0
+    cases 4
+    steps 32
+    timeout_ms 1000
+    startup_ms 15000
+    shrink_budget 256
+}

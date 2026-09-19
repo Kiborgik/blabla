@@ -1,0 +1,23 @@
+knowledge "design" {
+    purpose "The design lenses this project selects for every change it makes to itself: DRY and SOLID, each expressed by reference to the engineering rulings that already carry it, and each assessed for applicability per change rather than mandated."
+}
+
+ruling "dry" {
+    pack "design"
+    statement "The DRY lens. Its subject is duplicated KNOWLEDGE, never text that looks alike: ruling::engineering::abstraction-needs-two-real-cases carries that distinction and the cost of an abstraction built for a case that has not arrived, and ruling::engineering::reuse-before-reinvention carries the prior question of whether the capability already exists and why it does not fit. Read those two rather than a restatement of them here. Applying this lens to a change means answering, for that change, whether two sites now encode one decision that must move together; where they do not, the honest assessment is that the lens does not bite, and inventing a shared helper to satisfy it is the failure the second ruling names. A process-level duplication counts: a role's model policy or consulted packs copied into a brief is one decision stored twice."
+}
+
+ruling "solid" {
+    pack "design"
+    statement "The SOLID lens, whole, not one letter of it. Single responsibility is carried by ruling::engineering::one-reason-to-change and is the letter this project leans on most; the rest retain their ordinary meaning and are assessed alongside it. Open/closed: a new case should arrive by adding to a seam rather than by editing the decision that dispatches over it. Liskov: an implementation behind an interface must be usable wherever that interface is expected, so a provider that answers a question differently from its siblings breaks the seam even when it compiles. Interface segregation: a consumer should not have to satisfy obligations it never uses. Dependency inversion: the decision should depend on the seam, not on the particular thing behind it. Applying the lens means naming which letters the change actually touches and what the assessment was; a change that touches none is assessed as not applicable, and that is a complete answer. Adding an abstraction to score better against this lens is a defect, not compliance."
+}
+
+ruling "a-lens-assessment-is-evidence-not-proof" {
+    pack "design"
+    statement "Recording an assessment against a lens says that the question was asked and what the answer was. It establishes nothing about whether the design is actually DRY or actually SOLID, it is not a review verdict, and it never clears an unrelated obligation: a failing or unverified contract stays exactly as it was. The only obligation a recorded assessment discharges is the obligation to have assessed. Treat another agent's assessment as its claim, ranked where role memory ranks agent narrative, and form your own."
+}
+
+ruling "lens-applicability-follows-responsibility" {
+    pack "design"
+    statement "Who applies these lenses follows what the role is responsible for, never how large its model is. The orchestrator applies them while designing, decomposing and integrating, because that is where a duplicated decision or a misplaced responsibility is introduced. A reviewer assesses the letters the actual change touches. A bounded implementation worker does NOT owe an assessment: it is given the concrete requirement and the design constraint already decided - for example, that it must report through the shared unknown-versus-absent path rather than invent a second one - and its obligation is to follow that and to report a conflict with it, not to re-derive the architecture. Requiring an architecture essay from a bounded worker buys ceremony and costs attention that belonged to the change. A worker assignment that is genuinely design-heavy names the lenses it carries, explicitly, in its own statement. Selecting fewer lenses is never an exemption from the assignment's behavioural requirements, its write scope or its approval rules."
+}

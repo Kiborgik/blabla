@@ -17,6 +17,7 @@ fn config() -> AppConfig {
                 .into_os_string(),
         ],
         timeout: Duration::from_secs(1),
+        startup: Duration::from_secs(1),
     }
 }
 

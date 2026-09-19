@@ -1,6 +1,6 @@
 project Todo
 
-use structure "structure.bla"
+use structure "todo-python.bla"
 use behavior "../todo.bla"
 
 verify behavior {

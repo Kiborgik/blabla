@@ -1,5 +1,5 @@
 use crate::project::status::CompletionState;
-use crate::project::task::{self, Task};
+use crate::project::task::{self, Resolution, Task};
 use crate::structure::falsify::FalsifyReport;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -12,12 +12,20 @@ pub const LIMITS: [&str; 3] = [
     "BlaBla reads no meaning from source code. It cannot tell whether a branch is reachable, whether a name is the one you meant or whether a test asserts the thing it claims; a challenge about those never appears because it could not be grounded.",
 ];
 
-pub const CLASSES: [&str; 5] = [
+pub const CLASSES: [&str; 13] = [
     "unresolved-finding",
     "deliverable-unchanged",
     "scope-breach",
     "vacuous-rule",
     "verification-not-current",
+    "work-without-acceptance",
+    "model-outside-role-policy",
+    "exception-unresolved",
+    "lens-unassessed",
+    "readiness-without-evidence",
+    "evidence-superseded",
+    "attribution-unknown",
+    "declared-check-failed",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -28,6 +36,14 @@ pub enum Class {
     ScopeBreach,
     VacuousRule,
     VerificationNotCurrent,
+    WorkWithoutAcceptance,
+    ModelOutsideRolePolicy,
+    ExceptionUnresolved,
+    LensUnassessed,
+    ReadinessWithoutEvidence,
+    EvidenceSuperseded,
+    AttributionUnknown,
+    DeclaredCheckFailed,
 }
 
 impl Class {
@@ -38,6 +54,14 @@ impl Class {
             Class::ScopeBreach => CLASSES[2],
             Class::VacuousRule => CLASSES[3],
             Class::VerificationNotCurrent => CLASSES[4],
+            Class::WorkWithoutAcceptance => CLASSES[5],
+            Class::ModelOutsideRolePolicy => CLASSES[6],
+            Class::ExceptionUnresolved => CLASSES[7],
+            Class::LensUnassessed => CLASSES[8],
+            Class::ReadinessWithoutEvidence => CLASSES[9],
+            Class::EvidenceSuperseded => CLASSES[10],
+            Class::AttributionUnknown => CLASSES[11],
+            Class::DeclaredCheckFailed => CLASSES[12],
         }
     }
 }
@@ -74,6 +98,7 @@ pub struct Evidence<'a> {
     pub completion: CompletionState,
     pub completion_reason: &'a str,
     pub falsify: &'a dyn Fn() -> FalsifyReport,
+    pub role: Option<&'a Resolution>,
 }
 
 const NO_TASK: &str = "no bounded task is open; blabla task open records one";
@@ -81,17 +106,40 @@ const NOT_REACHED: &str = "a stronger challenge already stands, so this was not 
 
 pub fn challenge(evidence: &Evidence<'_>) -> ChallengeReport {
     let mut outcomes: Vec<(&'static str, Result<Challenge, &'static str>)> = Vec::new();
-    match evidence.task {
-        None => {
-            for class in [CLASSES[0], CLASSES[1], CLASSES[2]] {
-                outcomes.push((class, Err(NO_TASK)));
-            }
-        }
-        Some(task) => {
-            outcomes.push((CLASSES[0], unresolved_finding(task)));
-            outcomes.push((CLASSES[1], deliverable_unchanged(task, evidence.tree)));
-            outcomes.push((CLASSES[2], scope_breach(task, evidence.tree)));
-        }
+    type Grounding = fn(&Task, &BTreeMap<String, String>) -> Result<Challenge, &'static str>;
+    let against_the_task: [(&'static str, Grounding); 9] = [
+        (CLASSES[12], declared_check_failed),
+        (CLASSES[0], |task, _| unresolved_finding(task)),
+        (CLASSES[1], deliverable_unchanged),
+        (CLASSES[2], scope_breach),
+        (CLASSES[5], work_without_acceptance),
+        (CLASSES[7], |task, _| exception_unresolved(task)),
+        (CLASSES[9], |task, _| readiness_without_evidence(task)),
+        (CLASSES[10], evidence_superseded),
+        (CLASSES[11], attribution_unknown),
+    ];
+    for (class, grounding) in against_the_task {
+        outcomes.push((
+            class,
+            match evidence.task {
+                Some(task) => grounding(task, evidence.tree),
+                None => Err(NO_TASK),
+            },
+        ));
+    }
+    type RoleGrounding = fn(&Task, Option<&Resolution>) -> Result<Challenge, &'static str>;
+    let against_the_role: [(&'static str, RoleGrounding); 2] = [
+        (CLASSES[6], model_outside_role_policy),
+        (CLASSES[8], lens_unassessed),
+    ];
+    for (class, grounding) in against_the_role {
+        outcomes.push((
+            class,
+            match evidence.task {
+                Some(task) => grounding(task, evidence.role),
+                None => Err(NO_TASK),
+            },
+        ));
     }
     let standing = outcomes.iter().any(|(_, outcome)| outcome.is_ok());
     outcomes.push((
@@ -238,7 +286,9 @@ fn scope_breach(task: &Task, tree: &BTreeMap<String, String>) -> Result<Challeng
     let moved = task::changed(task, tree);
     let outside: Vec<&str> = moved
         .into_iter()
-        .filter(|path| !task.in_scope(path))
+        .filter(|path| {
+            !task.in_scope(path) && task::attribute(task, tree, path) == task::ATTRIBUTIONS[0]
+        })
         .collect();
     let Some(first) = outside.first() else {
         return Err("every file changed since the task opened is inside its write scope");
@@ -325,5 +375,240 @@ fn verification_not_current(
             reason.to_owned(),
         ],
         reconcile: "Run blabla finish and read its result before stating that the work is done; a claim of completion over a state BlaBla has not verified is the claim this project exists to block.".to_owned(),
+    })
+}
+
+fn work_without_acceptance(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Result<Challenge, &'static str> {
+    if task.accepted.is_some() {
+        return Err(
+            "an acceptance is recorded for this assignment; whether it preceded the work is not something BlaBla observes",
+        );
+    }
+    let moved = task::changed(task, tree);
+    let Some(first) = moved.first() else {
+        return Err("nothing has changed since the task opened");
+    };
+    Ok(Challenge {
+        class: Class::WorkWithoutAcceptance,
+        statement: format!(
+            "I don't believe this work was taken up through BlaBla. {first} changed, and no role ever accepted this assignment."
+        ),
+        evidence: vec![
+            format!("state: {}", task.state),
+            format!("changed since the task opened: {first}"),
+            "no acceptance is recorded on this task".to_owned(),
+        ],
+        reconcile: "Either the role accepts the assignment it is working on, with blabla task accept <name> --model <id>, or the change belongs to another task. An acceptance records that a role took the work through this CLI; it never proves the role read what it retrieved.".to_owned(),
+    })
+}
+
+fn exception_unresolved(task: &Task) -> Result<Challenge, &'static str> {
+    let Some(exception) = task
+        .exceptions
+        .iter()
+        .find(|exception| exception.approval.is_none())
+    else {
+        return Err("no model exception is waiting on the owner");
+    };
+    Ok(Challenge {
+        class: Class::ExceptionUnresolved,
+        statement: format!(
+            "I don't believe this assignment is settled. A model exception for {} was proposed and no owner ruling answers it.",
+            exception.model
+        ),
+        evidence: vec![
+            format!("proposed model: {}", exception.model),
+            format!("reason given: {}", exception.reason),
+            "approval: none recorded".to_owned(),
+        ],
+        reconcile: "Proposing a model outside role policy is allowed and is not dispatching on it. The owner either approves the exception or refuses it; until then the proposal stands unresolved.".to_owned(),
+    })
+}
+
+fn declared_check_failed(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Result<Challenge, &'static str> {
+    if task.state != "ready" {
+        return Err("the task has not been handed back for review");
+    }
+    let Some(latest) = task::latest_evidence(task) else {
+        return Err(
+            "no result for the declared check is recorded at all, which is a different fact",
+        );
+    };
+    if task::readiness(task, tree).answers_declared_check {
+        return Err("the most recent result for the declared check reports success");
+    }
+    Ok(Challenge {
+        class: Class::DeclaredCheckFailed,
+        statement: format!(
+            "I don't believe this hand-back is supported. {} is the check this task declared, and the most recent result for it exited {}.",
+            latest.check, latest.exit
+        ),
+        evidence: vec![
+            format!("state: {}", task.state),
+            format!("check: {}", latest.check),
+            format!("exit: {}", latest.exit),
+            format!("tool: {}", latest.tool),
+        ],
+        reconcile: "Repair what the check reports and record the new result, or state why a failing result is the intended outcome. A result that ran is not a result that passed, and neither absence nor staleness describes this one.".to_owned(),
+    })
+}
+
+fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
+    if task.state != "ready" {
+        return Err("the task has not been handed back for review");
+    }
+    if task::latest_evidence(task).is_some() {
+        return Err("a result for the declared check is recorded against this hand-back");
+    }
+    let declared = task.check.as_deref().unwrap_or("the task's declared check");
+    let seen: Vec<String> = task
+        .evidence
+        .iter()
+        .map(|entry| entry.check.clone())
+        .collect();
+    let (statement, observed) = if seen.is_empty() {
+        (
+            "I don't believe this hand-back is supported. It is ready for review and no check result is recorded against it.".to_owned(),
+            "evidence: none recorded".to_owned(),
+        )
+    } else {
+        (
+            format!(
+                "I don't believe this hand-back is supported. It is ready for review, and every result recorded against it answers a different check than {declared}."
+            ),
+            format!("evidence recorded, for: {}", seen.join(", ")),
+        )
+    };
+    Ok(Challenge {
+        class: Class::ReadinessWithoutEvidence,
+        statement,
+        evidence: vec![
+            format!("state: {}", task.state),
+            format!("declared check: {declared}"),
+            observed,
+        ],
+        reconcile: "Record the outcome of the task's declared check. A result for another check is not evidence about this one, missing evidence is not the same as a check that failed, and neither is the same as a claim in a message.".to_owned(),
+    })
+}
+
+fn evidence_superseded(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Result<Challenge, &'static str> {
+    let Some(evidence) = task::latest_evidence(task).filter(|entry| task::stale(entry, tree))
+    else {
+        return Err(
+            "the most recent result for the declared check still matches the inputs it saw",
+        );
+    };
+    Ok(Challenge {
+        class: Class::EvidenceSuperseded,
+        statement: format!(
+            "I don't believe this result still holds. {} ran against inputs that have since changed.",
+            evidence.check
+        ),
+        evidence: vec![
+            format!("check: {}", evidence.check),
+            format!("exit: {}", evidence.exit),
+            format!("inputs it saw: {}", evidence.inputs.len()),
+        ],
+        reconcile: "Re-run the check and record the new outcome. Superseded evidence is not absent evidence and is not a false claim; it is a result whose inputs moved.".to_owned(),
+    })
+}
+
+fn attribution_unknown(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Result<Challenge, &'static str> {
+    let moved = task::changed(task, tree);
+    let Some(first) = moved
+        .iter()
+        .find(|path| task::attribute(task, tree, path) == task::ATTRIBUTIONS[2])
+    else {
+        return Err("every change since the task opened is attributable");
+    };
+    Ok(Challenge {
+        class: Class::AttributionUnknown,
+        statement: format!(
+            "I cannot attribute {first}. It changed since this task opened, it is outside the task's scope, and nothing declares who changed it."
+        ),
+        evidence: vec![
+            format!("changed since the task opened: {first}"),
+            format!("write scope: {}", task.scope.join(", ")),
+            "no declaration covers it".to_owned(),
+        ],
+        reconcile: "Declare it as a concurrent change if it was yours, or widen the scope if it belongs to this task. Unknown attribution is a question to reconcile; it is not evidence that the worker wrote it.".to_owned(),
+    })
+}
+
+fn model_outside_role_policy(
+    task: &Task,
+    role: Option<&Resolution>,
+) -> Result<Challenge, &'static str> {
+    let Some(accepted) = &task.accepted else {
+        return Err("the assignment has not been accepted, so no model is on record");
+    };
+    let Some(role) = role else {
+        return Err("no role memory is registered, so no model policy can be read");
+    };
+    if role.models.is_empty() {
+        return Err("the role declares no model policy");
+    }
+    if role.models.iter().any(|model| model == &accepted.model) {
+        return Err("the accepted model is one the role permits");
+    }
+    if task
+        .exceptions
+        .iter()
+        .any(|exception| exception.model == accepted.model && exception.approval.is_some())
+    {
+        return Err("an owner ruling approved this model for this assignment");
+    }
+    Ok(Challenge {
+        class: Class::ModelOutsideRolePolicy,
+        statement: format!(
+            "I don't believe this assignment is running under a permitted model. It was accepted on {}, which {} does not list.",
+            accepted.model, task.role
+        ),
+        evidence: vec![
+            format!("accepted model: {}", accepted.model),
+            format!("role::{} permits: {}", task.role, role.models.join(", ")),
+            "no approved exception covers it".to_owned(),
+        ],
+        reconcile: "Either accept the assignment on a permitted model, or propose the exception with blabla task propose-model and let the owner rule on it. Proposing is allowed; running on it unruled is what this contradicts.".to_owned(),
+    })
+}
+
+fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, &'static str> {
+    if task.state != "ready" {
+        return Err("the task has not been handed back for review");
+    }
+    let Some(role) = role else {
+        return Err("no role memory is registered, so no lens is expected");
+    };
+    let Some(missing) = role
+        .lenses
+        .iter()
+        .find(|lens| !task.assessments.iter().any(|entry| &&entry.ruling == lens))
+    else {
+        return Err("every lens the role consults carries an assessment");
+    };
+    Ok(Challenge {
+        class: Class::LensUnassessed,
+        statement: format!(
+            "I don't believe this hand-back was held against everything the role consults. {missing} has no assessment on it."
+        ),
+        evidence: vec![
+            format!("state: {}", task.state),
+            format!("role::{} consults: {}", task.role, role.lenses.join(", ")),
+            format!("assessments recorded: {}", task.assessments.len()),
+        ],
+        reconcile: "Record what the assessment was with blabla task lens, including that the lens does not apply, which is a complete answer. Recording an assessment says the question was asked; it never establishes that the design is correct.".to_owned(),
     })
 }

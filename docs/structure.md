@@ -79,16 +79,69 @@ are different facts and only the first is a regression.
 | --- | --- |
 | GREEN | the fact holds under `require`, or is absent under `forbid` |
 | RED | the fact is absent under `require`, or holds under `forbid`; `blabla explain <rule>` prints the observed file and line |
-| ERROR | the fact could not be established: no provider for the file extension, the interpreter is missing, the module does not parse, the constant is not a literal collection, or the symbol path is deeper than the provider reports |
+| ERROR | the fact could not be established: no provider for the file extension, the interpreter is missing, the module does not parse, the provider returned without reporting that module at all, the constant is not a literal collection, the provider reported the name as one whose value it could not read, or the symbol path is deeper than the provider reports |
 
 A missing module file is observed state, not an error: `require ... module m` is RED and `forbid ... symbol m::X` is GREEN. ERROR blocks completion exactly like RED; a rule the verifier cannot evaluate is never counted GREEN.
 
 ## Providers
 
 Facts come from a language provider chosen by file extension, behind the `Provider` trait in
-`src/structure/mod.rs`. BlaBla inspects `.py` and `.rs`. A module in any other language is ERROR for
-every rule that names it. Neither provider executes project code, and the contract grammar is the
-same for both: a provider adds a language, never a fact.
+`src/structure/mod.rs`. A module in any other language is ERROR for every rule that names it. No
+provider executes project code, and the contract grammar is the same for all of them: a provider
+adds a language, never a fact. `blabla status` prints the live list, which is read from the
+providers themselves rather than from this table.
+
+| Provider | Extensions | Backend |
+| --- | --- | --- |
+| `python` | `.py` | one isolated interpreter running BlaBla's embedded `ast` extractor |
+| `rust` | `.rs` | `syn`, in process |
+| `typescript` | `.ts` `.tsx` `.js` `.jsx` `.mjs` `.cjs` | tree-sitter |
+| `go` | `.go` | tree-sitter |
+| `java` | `.java` | tree-sitter |
+| `c` | `.c` | tree-sitter |
+| `cpp` | `.h` `.hpp` `.hh` `.hxx` `.cpp` `.cc` `.cxx` | tree-sitter |
+
+`.h` belongs to the `cpp` provider on purpose. A provider is chosen by first match, `.h` is used by
+both languages, and the C++ grammar accepts C while the reverse fails on any class or template. A C
+construct that is not valid C++ is then a parse ERROR rather than a silently absent fact.
+
+The five tree-sitter providers share one harness, `src/structure/treesitter.rs`, which performs the
+read, the parse and the error classification identically for every grammar, and holds the single
+accumulator that turns a walk into `ModuleFacts`. A language module supplies its extensions, its
+grammar and its own walk over that grammar's node kinds — nothing else.
+
+### Found, absent, and unknown
+
+Three answers, never two. A fact the provider observed is found; a fact it looked for and did not
+find is absent; a fact it could not decide is unknown, and unknown is ERROR. The third answer is
+what stops a `forbid` from passing through analysis blindness, and several languages force it:
+
+- **Go and Java** let one file reference another in the same package with no import at all, so
+  whether `a` uses `b` inside one package cannot be decided statically.
+- **A Java wildcard import** `import a.b.*;` can supply any type in that package.
+- **A C or C++ `#include`** whose target sits on an include path BlaBla cannot see, or whose
+  operand is a macro, names something real that cannot be located.
+- **A TypeScript dynamic `import()` or `require()` of an expression** could resolve to anything.
+
+An unknown carries the ONE declared module it could be hiding wherever the provider can name it,
+and names nothing only when the unknown is genuinely unbounded. A bounded unknown makes exactly the
+rules over that one target ERROR and leaves every other dependency on the same module decidable; an
+unbounded one makes every dependency question on that module ERROR. `contracts/evaluator.bla` holds
+the evaluator to both halves of that, including the case where a scoped unknown must leave an
+unrelated target GREEN.
+
+A provider that returns successfully must report one entry for every module it was handed, and a
+file that is not there is reported as an entry that does not exist rather than as silence. Silence
+is not an absent fact: a module a provider never reported is ERROR for every rule that names it,
+because "the symbol is not there" and "nobody looked" are different answers and only the first may
+satisfy a `forbid`.
+
+The same rule covers a name inside a module. A provider that sees a name but cannot read its value
+reports it as unreadable, and the evaluator decides the `value` rules over it as ERROR whether or not
+the provider also listed it as a symbol. That decision lives in one place, so a language provider
+cannot reintroduce the difference by forgetting to record something: `contracts/evaluator.bla` drives
+the real evaluator through the `structure-adapter` bridge and holds it to that, and the case where a
+name is reported unreadable and nothing else was a confirmed RED before the evaluator was corrected.
 
 ### Python
 
@@ -151,6 +204,89 @@ These are limitations, not bugs, and a contract author should know them:
 - **Test code inside a module counts.** A `#[cfg(test)]` block's imports are that file's
   dependencies, exactly as in the Python provider. This is deliberate: excluding them would let any
   dependency be hidden by wrapping it in a test-only module.
+- **A route that reaches no file at all is an unknown, not an edge.** The base-directory fallback
+  above applies while the route still names something the provider can place. Where no prefix of the
+  route resolves to a file and more than one segment remains — `use crate::absent::Thing` — the
+  provider cannot tell an item path on that module from a module it failed to locate, which a
+  `#[path]` attribute, a macro-generated module or a non-standard source layout all produce. It
+  reports an unknown **scoped to the one module the route could be hiding** rather than inventing an
+  edge to it, so rules naming that module are `ERROR` while every other dependency stays decidable.
+  Where exactly one segment remains — `use crate::Thing`, `use super::Thing` — the fallback still
+  applies and is sound: a module needs a file to compile, so a single unresolved segment can only be
+  an item of the module that owns it, and `use super::Thing` still becomes a dependency on the
+  parent's `mod.rs`. `contracts/providers.bla` requires the decision to live in one place
+  (`rustp::route` over `Resolution.Module`, `Resolution.Item` and `Resolution.Undecidable`), and
+  three tests in `src/structure/rust.rs` hold the three arms apart.
+
+### Go
+
+Symbols are the file's top-level `func`, `type`, `const` and `var` names, including every name
+inside a grouped `const (...)`, `var (...)` or `type (...)` block, plus one member level: a struct
+type's fields, an interface's method names, and a method named by its receiver type, so
+`func (s *Storage) Save()` is `Storage.Save`.
+
+Dependencies are import specs, in both the single and the parenthesised block form. An import path
+that resolves inside this module — the module path comes from the nearest `go.mod`, which is read
+as text — becomes a dependency on every declared module in the directory that path names. Anything
+else is the import path verbatim, as an external target. Values are `var` and `const` composite
+literals: a slice or array of string, integer or boolean literals is a collection, and a
+`map[K]V{...}` or an array of two-element literals is a collection of key/payload entries.
+
+Not seen: build tags, cgo, generated code, and any reference between two files of the same package,
+which Go makes with no import at all and which is therefore reported as an unknown scoped to that
+sibling rather than as an absent dependency.
+
+### Java
+
+Symbols are the top-level `class`, `interface`, `enum`, `record` and annotation types, plus one
+member level: fields, methods, constructors, enum constants, record components and the simple name
+of a nested type. A nested type contributes its own name and nothing deeper.
+
+Dependencies are resolved by fully qualified name. A single-type import whose name equals a
+declared module's `package` declaration joined with its file stem becomes a dependency on that
+module; anything else is the fully qualified name verbatim. A static import names its owning type
+and is treated the same way. Values are field initialisers: array initialisers, `List.of` and
+`Set.of` are collections, and `Map.of`, `Map.entry` and arrays of two-element arrays are key/payload
+entries.
+
+Not seen: the classpath, reflection, annotation processing, generics and overload resolution. A
+wildcard import and a same-package reference are both reported as unknowns scoped to the declared
+modules they could be hiding.
+
+### C and C++
+
+One walk serves both grammars, because tree-sitter-cpp's node kinds are a superset of
+tree-sitter-c's. Symbols are top-level function definitions and prototypes, `struct`, `union`,
+`enum` and `class` names, `typedef` names, file-scope variables and object-like `#define` names,
+plus one member level of fields, enumerators and class members. A C++ out-of-line definition
+`void Foo::bar() {}` contributes `Foo.bar`; a qualified name deeper than two segments contributes
+its innermost owning type and member, because `symbol_depth` is two for every provider and a
+three-segment path is ERROR by design. A `namespace` contributes its members at the top level
+rather than as a third segment.
+
+Dependencies are `#include` only. A quoted include is resolved against the including file's own
+directory and then the manifest root; an angle include is the operand verbatim, as an external
+target. Values are file-scope initialisers: a brace-init list of literals is a collection, and an
+array of two-element brace groups is a collection of key/payload entries.
+
+**There is no preprocessing at all**, and the consequences are not small. Both arms of an `#if` or
+`#ifdef` are read, so a symbol inside a disabled arm is still reported. A declaration produced by a
+macro is invisible. `-D` and `-I` flags are unknown, so an include that only resolves through an
+include path is an unknown rather than an absent dependency. A brace opened inside one preprocessor
+conditional and closed inside another — the `#ifdef __cplusplus` / `extern "C" {` idiom — leaves the
+file unparseable, and every rule over it is ERROR.
+
+### What no provider does
+
+Two limits apply to every language and are worth knowing before writing a contract.
+
+- **No name resolution and no type resolution.** Routes are resolved syntactically against the
+  filesystem or against declared modules, never through a compiler's view of the program.
+- **A `dependency` rule whose TARGET module lies outside the project root cannot be observed.** The
+  name a dependency is matched against is the target's dotted path from the manifest directory, and
+  a file above that directory has none. Declaring such a module still works for `symbol` and
+  `value` rules; only `dependency` rules naming it as the target are unobservable, and the
+  falsifier reports them as VACUOUS rather than letting them stand.
 
 ## Falsification
 

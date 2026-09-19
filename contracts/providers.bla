@@ -1,0 +1,74 @@
+module structure  "src/structure/mod.rs"
+module harness    "src/structure/treesitter.rs"
+module typescript "src/structure/typescript.rs"
+module python     "src/structure/python.rs"
+module rustp      "src/structure/rust.rs"
+module go         "src/structure/go.rs"
+module java       "src/structure/java.rs"
+module cfamily    "src/structure/cfamily.rs"
+module cli        "src/cli/mod.rs"
+
+require "typescript-provider":            symbol typescript::TypeScriptProvider
+require "typescript-provider-inspects":   symbol typescript::TypeScriptProvider.inspect
+require "typescript-provider-id":         symbol typescript::PROVIDER_ID
+require "typescript-declares-extensions": symbol typescript::EXTENSIONS
+require "python-declares-extensions":     symbol python::EXTENSIONS
+require "rust-declares-extensions":       symbol rustp::EXTENSIONS
+
+require "inspects-typescript": value structure::INSPECTED_EXTENSIONS contains ".ts"
+require "inspects-javascript": value structure::INSPECTED_EXTENSIONS contains ".js"
+
+require "unreadable-is-decided-once": symbol structure::unreadable
+require "capability-surface":         symbol structure::capabilities
+require "capability-is-reported":     symbol cli::CapabilityReport
+
+forbid "typescript-independent-of-python": dependency typescript -> python
+forbid "typescript-independent-of-rust":   dependency typescript -> rustp
+forbid "typescript-below-cli":             dependency typescript -> cli
+
+require "go-provider":               symbol go::GoProvider
+require "go-provider-inspects":      symbol go::GoProvider.inspect
+require "go-provider-id":            symbol go::PROVIDER_ID
+require "go-declares-extensions":    symbol go::EXTENSIONS
+require "java-provider":             symbol java::JavaProvider
+require "java-provider-inspects":    symbol java::JavaProvider.inspect
+require "java-provider-id":          symbol java::PROVIDER_ID
+require "java-declares-extensions":  symbol java::EXTENSIONS
+require "c-provider":                symbol cfamily::CProvider
+require "c-provider-inspects":       symbol cfamily::CProvider.inspect
+require "c-declares-extensions":     symbol cfamily::C_EXTENSIONS
+require "cpp-provider":              symbol cfamily::CppProvider
+require "cpp-provider-inspects":     symbol cfamily::CppProvider.inspect
+require "cpp-declares-extensions":   symbol cfamily::CPP_EXTENSIONS
+
+require "inspects-go":     value structure::INSPECTED_EXTENSIONS contains ".go"
+require "inspects-java":   value structure::INSPECTED_EXTENSIONS contains ".java"
+require "inspects-c":      value structure::INSPECTED_EXTENSIONS contains ".c"
+require "inspects-headers": value structure::INSPECTED_EXTENSIONS contains ".h"
+require "inspects-cpp":    value structure::INSPECTED_EXTENSIONS contains ".cpp"
+
+require "one-parse-preamble-for-every-grammar": symbol harness::inspect_module
+require "one-fact-accumulator":                 symbol harness::Facts
+require "one-unknown-import-channel":           symbol harness::Facts.unknown_import
+require "one-line-index":                       symbol harness::LineIndex
+require "declared-neighbours-are-shared":       symbol harness::Neighbourhood
+
+require "an-unknown-import-can-name-what-it-hides": symbol structure::UnreadableImport.covers
+require "an-unknown-blocks-only-what-it-could-hide": symbol structure::could_hide
+
+require "a-rust-route-is-resolved-or-refused-in-one-place": symbol rustp::Resolution
+require "a-rust-route-that-reaches-a-file-is-an-edge":      symbol rustp::Resolution.Module
+require "a-rust-route-of-one-segment-is-an-item-of-its-module": symbol rustp::Resolution.Item
+require "a-rust-route-that-reaches-nothing-is-an-unknown":   symbol rustp::Resolution.Undecidable
+require "the-rust-route-decision-has-one-author":            symbol rustp::route
+
+require "typescript-is-on-the-harness": dependency typescript -> harness
+require "go-is-on-the-harness":         dependency go -> harness
+require "java-is-on-the-harness":       dependency java -> harness
+require "c-and-cpp-are-on-the-harness": dependency cfamily -> harness
+
+forbid "the-harness-stays-below-the-cli":     dependency harness -> cli
+forbid "the-harness-knows-no-language":       dependency harness -> typescript
+forbid "go-independent-of-typescript":        dependency go -> typescript
+forbid "java-independent-of-go":              dependency java -> go
+forbid "cfamily-independent-of-java":         dependency cfamily -> java

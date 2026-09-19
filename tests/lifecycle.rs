@@ -23,6 +23,7 @@ fn config(mode: &str) -> AppConfig {
             mode.into(),
         ],
         timeout: Duration::from_secs(1),
+        startup: Duration::from_secs(1),
     }
 }
 

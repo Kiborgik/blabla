@@ -1,0 +1,19 @@
+module app       "main.cpp"
+module transport "../../adapters/c/blabla_adapter.c"
+module protocol  "../../adapters/c/blabla_adapter.h"
+
+require "the-application-serves-the-protocol": symbol app::main
+require "the-store-is-a-class-of-its-own":     symbol app::Store
+require "the-store-reports-its-items":         symbol app::Store.items
+require "adding-belongs-to-the-store":         symbol app::Store.add
+require "completing-belongs-to-the-store":     symbol app::Store.complete
+require "removing-belongs-to-the-store":       symbol app::Store.remove
+require "a-todo-carries-its-identity":         symbol app::Todo.id
+require "a-todo-carries-its-text":             symbol app::Todo.text
+require "a-todo-carries-its-completion":       symbol app::Todo.done
+require "the-actions-are-declared-in-one-table": symbol app::ACTIONS
+require "state-survives-a-restart":            symbol app::Store.save
+require "state-is-read-back-at-start":         symbol app::Store.load
+
+forbid "no-todo-logic-in-the-transport":       symbol transport::Todo
+forbid "no-store-in-the-transport":            symbol transport::Store

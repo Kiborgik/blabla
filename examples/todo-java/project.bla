@@ -1,0 +1,15 @@
+project TodoJava
+
+use behavior  "../todo.bla"
+use structure "todo-java.bla"
+
+verify behavior {
+    prepare ["javac", "-d", ".blabla/classes", "Main.java", "todo/model/Todo.java", "todo/store/TodoStore.java", "todo/app/TodoApp.java", "../../adapters/java/blabla/Adapter.java"]
+    command ["java", "-cp", ".blabla/classes", "Main"]
+    seed 0
+    cases 4
+    steps 32
+    startup_ms 5000
+    timeout_ms 1000
+    shrink_budget 256
+}

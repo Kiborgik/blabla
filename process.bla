@@ -2,8 +2,8 @@ role "orchestrator" {
     purpose "Decide what the work is, divide it, integrate what comes back, and decide completion."
     owns ["decomposition and worker assignment", "shared and hot files", "integration of every worker's result", "contract semantics and the manifest", "project-wide falsification", "the product gate and blabla finish", "every commit"]
     verification "product"
-    model "opus-5"
-    consult ["engineering", "testing"]
+    model ["opus-5", "claude-fable-5-1"]
+    consult ["engineering", "testing", "design"]
 }
 
 role "worker" {
@@ -18,8 +18,8 @@ role "reviewer" {
     purpose "Independently review one bounded worker patch and report the defects that block its integration."
     owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
     verification "focused"
-    model ["qwen3.5:4b"]
-    consult ["reviewing", "engineering", "testing"]
+    model ["qwen3.5:4b", "opus-5"]
+    consult ["reviewing", "engineering", "testing", "design"]
 }
 
 policy "explicit-write-scope" {
@@ -104,7 +104,14 @@ step "assign" {
     flow "development"
     role ["orchestrator"]
     statement "Record the bounded task before the work starts: the role carrying it, the paths it may write and the deliverables it owes. Recording it snapshots the tree the task starts from, which is the only reason a later challenge can tell a produced deliverable from an untouched one."
-    command "blabla task open <name> --role worker --statement \"...\" --scope <path> --deliverable <path>"
+    command "blabla task open <name> --role worker --statement \"...\" --scope <path> --deliverable <path> --check \"...\""
+}
+
+step "accept" {
+    flow "development"
+    role ["worker"]
+    statement "Take the assignment through BlaBla before changing anything, then challenge immediately rather than waiting for the hand-back. Acceptance records which role and model took the work and nothing about what was read; a deliverable changed on an unaccepted task is challenged as work done outside BlaBla, and a model the role does not list is challenged unless the owner has ruled on it. The model comparison is exact and needs no hand-back to fire, so a mis-typed model is visible one command after acceptance and costs the whole task only when nobody asks."
+    command "blabla task accept <name> --model <id>"
 }
 
 step "implement" {
@@ -117,7 +124,8 @@ step "implement" {
 step "verify-focused" {
     flow "development"
     role ["worker"]
-    statement "Run only the checks that cover what changed, and report rather than run anything wider. The product gate and the research gate belong to the orchestrator, and a worker that believes a wider run is needed says so instead of starting one."
+    statement "Run only the declared check, read the whole run, exit code first, and record what it reported. The product gate and the research gate belong to the orchestrator, and a worker that believes a wider run is needed says so instead of starting one. A hand-back with no result for the declared check, with a failing one, or with one whose inputs have since changed is challenged."
+    command "blabla task evidence <name> --exit <code> --tool <tool>"
 }
 
 step "challenge" {
@@ -127,10 +135,18 @@ step "challenge" {
     command "blabla challenge"
 }
 
+step "hand-back" {
+    flow "development"
+    role ["worker"]
+    statement "Mark the task ready for review once the declared check is recorded and no challenge stands. A hand-back is not acceptance of the result: closing the task is the orchestrator's decision, never the worker's."
+    command "blabla task ready <name>"
+}
+
 step "review" {
     flow "development"
     role ["reviewer"]
-    statement "Read the original task and the whole diff in a context that never saw the work being done, account for every deliverable the task named, and read the code that decides whether a finding is true before writing it. Falsify the patch rather than confirm it."
+    statement "Read the original task and the whole diff in a context that never saw the work being done, account for every deliverable the task named, and read the code that decides whether a finding is true before writing it. Falsify the patch rather than confirm it, and record one assessment against each lens the role consults; a hand-back with a lens unassessed is challenged."
+    command "blabla task lens <name> <lens> \"...\""
 }
 
 step "report-findings" {
@@ -143,8 +159,15 @@ step "report-findings" {
 step "integrate" {
     flow "development"
     role ["orchestrator"]
-    statement "Take the finished work, settle every finding against the repository rather than against the worker's account of it, and record what settled each one. The evidence recorded is the agent's claim and never BlaBla's verdict. Close the task when nothing is outstanding."
+    statement "Take the finished work, settle every finding against the repository rather than against the worker's account of it, and record what settled each one. The evidence recorded is the agent's claim and never BlaBla's verdict."
     command "blabla task resolve <name> <id> --evidence \"...\""
+}
+
+step "accept-result" {
+    flow "development"
+    role ["orchestrator"]
+    statement "Accept the result and close the task; BlaBla refuses while a grounded challenge stands. Accepting a result says one handoff is in order and nothing more: project completion is the gate's question, and neither a clean task record nor OVERALL GREEN alone establishes everything."
+    command "blabla task close <name> --model <id>"
 }
 
 step "gate" {

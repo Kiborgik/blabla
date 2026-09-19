@@ -3,6 +3,9 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "adapters" / "python"))
+
+from blabla_adapter import Adapter
 
 sys.stdin.reconfigure(encoding="utf-8", errors="strict")
 sys.stdout.reconfigure(encoding="utf-8", errors="strict")
@@ -63,50 +66,13 @@ class TodoApplication:
         return {"todos": [dict(todo) for todo in self.todos]}
 
 
-class TodoAdapter:
-    def __init__(self, application):
-        self.application = application
-
-    def reset(self):
-        self.application.reset()
-
-    def observe(self):
-        return self.application.observe()
-
-    def call(self, name, args):
-        if name == "add" and len(args) == 1 and isinstance(args[0], str):
-            self.application.add(args[0])
-        elif name == "complete" and len(args) == 1 and type(args[0]) is int:
-            self.application.complete(args[0])
-        elif name == "remove" and len(args) == 1 and type(args[0]) is int:
-            self.application.remove(args[0])
-        else:
-            raise ValueError("unknown action or invalid arguments")
-
-
-def emit(request, result):
-    value = {"id": request["id"], "result": result}
-    print(json.dumps(value, ensure_ascii=False, separators=(",", ":")), flush=True)
-
-
-def serve(adapter):
-    for line in sys.stdin:
-        try:
-            request = json.loads(line)
-            operation = request.get("op")
-            if operation == "reset":
-                adapter.reset()
-                emit(request, {"ok": True})
-            elif operation == "observe":
-                emit(request, adapter.observe())
-            elif operation == "call":
-                adapter.call(request.get("name"), request.get("args"))
-                emit(request, {"ok": True})
-            else:
-                emit(request, {"ok": False, "error": "unknown request"})
-        except Exception as error:
-            emit(request, {"ok": False, "error": str(error)})
+def bind(application):
+    adapter = Adapter(application.reset, application.observe)
+    adapter.action("add", 1, lambda args: application.add(args.string(0)))
+    adapter.action("complete", 1, lambda args: application.complete(args.integer(0)))
+    adapter.action("remove", 1, lambda args: application.remove(args.integer(0)))
+    return adapter
 
 
 if __name__ == "__main__":
-    serve(TodoAdapter(TodoApplication(TodoStorage())))
+    sys.exit(bind(TodoApplication(TodoStorage())).serve())

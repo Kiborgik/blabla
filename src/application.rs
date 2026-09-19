@@ -11,6 +11,23 @@ pub struct AppConfig {
     pub executable: PathBuf,
     pub args: Vec<OsString>,
     pub timeout: Duration,
+    pub startup: Duration,
+}
+
+impl AppConfig {
+    pub fn launched(executable: PathBuf, args: Vec<OsString>, timeout: Duration) -> AppConfig {
+        AppConfig {
+            executable,
+            args,
+            timeout,
+            startup: timeout,
+        }
+    }
+
+    pub fn booting_within(mut self, startup: Duration) -> AppConfig {
+        self.startup = startup;
+        self
+    }
 }
 
 pub trait Application {

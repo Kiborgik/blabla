@@ -859,10 +859,12 @@ fn manifest_parses_one_verification_profile_with_defaults_and_rejects_bad_ones()
         full.profile,
         Some(Profile {
             command: vec!["python".into(), "app.py".into()],
+            prepare: None,
             seed: 7,
             cases: 1,
             steps: 8,
             timeout_ms: 1000,
+            startup_ms: None,
             shrink_budget: 256,
         })
     );
@@ -877,10 +879,12 @@ fn manifest_parses_one_verification_profile_with_defaults_and_rejects_bad_ones()
         minimal.profile,
         Some(Profile {
             command: vec!["./run.sh".into()],
+            prepare: None,
             seed: 0,
             cases: 16,
             steps: 32,
             timeout_ms: 1000,
+            startup_ms: None,
             shrink_budget: 256,
         })
     );

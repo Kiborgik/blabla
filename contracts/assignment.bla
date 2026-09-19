@@ -1,0 +1,264 @@
+type Standing { class: string }
+type Named { id: string }
+type Verdict { rule: string, status: string }
+
+state phase: string
+state role: string
+state lenses: [Named]
+state assessed: [Named]
+state standing: [Standing]
+state assignment_accepted: bool
+state result_accepted: bool
+state verdicts: [Verdict]
+state evidence_recorded: bool
+state evidence_current: bool
+state evidence_answers_the_declared_check: bool
+state readiness_supported: bool
+state exception_approved: bool
+state breach_in_scope: bool
+state closed: bool
+state deliverables: int
+state findings: int
+
+action open_a_task()
+action resume_a_task_already_under_way()
+action open_a_task_whose_name_is_already_recorded()
+action record_a_finding()
+action widen_the_scope_to_cover_the_breach()
+action accept_with_a_permitted_model()
+action accept_with_an_outside_policy_model()
+action propose_an_outside_policy_model()
+action approve_the_proposed_model()
+action change_a_deliverable()
+action record_a_lens_assessment()
+action mark_ready_for_review()
+action accept_the_result()
+
+action record_a_check_result()
+action change_the_source_after_a_check()
+action a_concurrent_orchestrator_change_lands()
+action a_change_of_unknown_origin_appears()
+action the_worker_writes_outside_its_scope()
+action an_unrelated_file_changes()
+action record_a_result_for_a_different_check()
+action record_a_failing_check_result()
+action reconcile_the_standing_challenges()
+
+when open_a_task {
+    expect "every-role-resolves-its-lenses": count(after.lenses) != 0
+    expect "a-reviewer-consults-more-lenses-than-it-carries-alone":
+        after.role != "reviewer" or count(after.lenses) > 2
+    expect "a-worker-is-not-given-the-review-lenses":
+        after.role != "worker" or count(after.lenses) == 2
+    expect "opening-a-task-is-not-accepting-it": not after.assignment_accepted
+    expect "opening-a-task-is-not-accepting-a-result": not after.result_accepted
+}
+
+when open_a_task_whose_name_is_already_recorded {
+    expect "a-second-opening-leaves-the-phase-it-found":
+        after.phase == before.phase
+    expect "a-second-opening-leaves-the-acceptance-it-found":
+        after.assignment_accepted == before.assignment_accepted
+    expect "a-second-opening-leaves-the-obligations-it-found":
+        after.deliverables == before.deliverables
+    expect "a-second-opening-leaves-the-findings-it-found":
+        after.findings == before.findings
+    expect "a-second-opening-leaves-the-assessments-it-found":
+        count(after.assessed) == count(before.assessed)
+    expect "a-second-opening-leaves-the-evidence-it-found":
+        after.evidence_recorded == before.evidence_recorded
+    expect "a-closed-record-is-history-rather-than-a-free-name":
+        after.closed == before.closed
+}
+
+when record_a_finding {
+    expect "a-finding-is-recorded-exactly-once":
+        before.closed or after.findings == before.findings + 1
+    expect "recording-a-finding-accepts-no-result":
+        after.result_accepted == before.result_accepted
+}
+
+when resume_a_task_already_under_way {
+    expect "a-resumed-hand-back-is-already-supported":
+        after.phase != "ready" or after.readiness_supported
+    expect "a-resumed-hand-back-stands-unchallenged":
+        after.phase != "ready" or count(after.standing) == 0
+    expect "a-resumed-task-resolves-its-lenses": count(after.lenses) != 0
+}
+
+when widen_the_scope_to_cover_the_breach {
+    expect "widening-the-scope-clears-the-breach-it-covers":
+        before.closed or
+        not any(after.standing, s => s.class == "scope-breach")
+    expect "widening-the-scope-accepts-no-result":
+        after.result_accepted == before.result_accepted
+}
+
+when accept_with_a_permitted_model {
+    expect "a-permitted-model-raises-no-policy-challenge":
+        before.closed or
+        not any(after.standing, s => s.class == "model-outside-role-policy")
+    expect "accepting-an-assignment-is-not-accepting-a-result":
+        before.closed or not after.result_accepted
+}
+
+when accept_with_an_outside_policy_model {
+    expect "an-outside-policy-model-is-visible-unless-the-owner-ruled":
+        before.closed or
+        after.exception_approved or
+        any(after.standing, s => s.class == "model-outside-role-policy")
+}
+
+when propose_an_outside_policy_model {
+    expect "a-proposal-stands-unresolved":
+        before.closed or any(after.standing, s => s.class == "exception-unresolved")
+    expect "proposing-is-not-dispatching":
+        after.assignment_accepted == before.assignment_accepted
+}
+
+when approve_the_proposed_model {
+    expect "an-owner-ruling-settles-the-proposal":
+        before.closed or
+        not any(after.standing, s => s.class == "exception-unresolved")
+}
+
+when change_a_deliverable {
+    expect "work-without-acceptance-is-visible":
+        after.assignment_accepted or
+        any(after.standing, s => s.class == "work-without-acceptance")
+    expect "a-changed-deliverable-is-no-longer-an-unchanged-one":
+        not any(after.standing, s => s.class == "deliverable-unchanged")
+}
+
+when record_a_lens_assessment {
+    expect "an-assessment-records-exactly-itself":
+        before.closed or count(after.assessed) == count(before.assessed) + 1
+    expect "a-closed-task-records-no-further-assessment":
+        not before.closed or count(after.assessed) == count(before.assessed)
+    expect "an-assessment-does-not-accept-a-result":
+        after.result_accepted == before.result_accepted
+    expect "an-assessment-decides-nothing":
+        after.verdicts == before.verdicts
+}
+
+when mark_ready_for_review {
+    expect "an-invalid-transition-changes-nothing":
+        before.assignment_accepted or after.phase == before.phase
+    expect "ready-for-review-is-not-result-acceptance":
+        before.closed or not after.result_accepted
+    expect "an-unassessed-lens-is-visible-at-hand-back":
+        after.phase != "ready" or
+        all(after.lenses, l => any(after.assessed, a => a.id == l.id)) or
+        any(after.standing, s => s.class == "lens-unassessed")
+    expect "unsupported-readiness-is-visible":
+        after.phase != "ready" or
+        after.readiness_supported or
+        any(after.standing, s => s.class == "readiness-without-evidence") or
+        any(after.standing, s => s.class == "evidence-superseded") or
+        any(after.standing, s => s.class == "declared-check-failed")
+    expect "absent-evidence-is-not-superseded-evidence":
+        after.evidence_recorded or
+        not any(after.standing, s => s.class == "evidence-superseded")
+}
+
+when record_a_check_result {
+    expect "evidence-is-bound-to-the-source-it-saw":
+        before.closed or after.evidence_current
+    expect "a-result-for-the-declared-check-supports-readiness":
+        before.closed or after.evidence_answers_the_declared_check
+    expect "recording-evidence-is-not-handing-back":
+        after.phase == before.phase
+}
+
+when record_a_failing_check_result {
+    expect "a-result-that-ran-is-not-a-result-that-passed":
+        before.closed or not after.evidence_answers_the_declared_check
+    expect "a-failing-check-leaves-readiness-unsupported":
+        before.closed or not after.readiness_supported
+    expect "a-failing-check-is-visible-at-hand-back":
+        before.closed or
+        after.phase != "ready" or
+        any(after.standing, s => s.class == "declared-check-failed")
+    expect "a-failure-is-neither-absent-nor-superseded-evidence":
+        before.closed or
+        not any(after.standing, s => s.class == "readiness-without-evidence")
+}
+
+when change_the_source_after_a_check {
+    expect "a-source-change-supersedes-earlier-evidence": not after.evidence_current
+    expect "superseded-evidence-is-not-absent-evidence":
+        before.closed or after.evidence_recorded
+}
+
+when a_concurrent_orchestrator_change_lands {
+    expect "a-known-concurrent-change-introduces-no-breach":
+        any(before.standing, s => s.class == "scope-breach") or
+        not any(after.standing, s => s.class == "scope-breach")
+    expect "a-known-concurrent-change-introduces-no-unknown":
+        before.closed or
+        any(before.standing, s => s.class == "attribution-unknown") or
+        not any(after.standing, s => s.class == "attribution-unknown")
+}
+
+when a_change_of_unknown_origin_appears {
+    expect "unknown-attribution-is-visible":
+        any(after.standing, s => s.class == "attribution-unknown")
+    expect "unknown-attribution-introduces-no-breach":
+        any(before.standing, s => s.class == "scope-breach") or
+        not any(after.standing, s => s.class == "scope-breach")
+}
+
+when the_worker_writes_outside_its_scope {
+    expect "an-attributable-breach-is-a-breach":
+        before.closed or
+        after.breach_in_scope or
+        any(after.standing, s => s.class == "scope-breach")
+}
+
+when an_unrelated_file_changes {
+    expect "an-unrelated-change-leaves-focused-evidence-standing":
+        after.evidence_current == before.evidence_current
+}
+
+when record_a_result_for_a_different_check {
+    expect "a-result-for-another-check-is-not-this-task-s-evidence":
+        after.evidence_answers_the_declared_check ==
+        before.evidence_answers_the_declared_check
+    expect "a-result-for-another-check-does-not-support-readiness":
+        after.readiness_supported == before.readiness_supported
+}
+
+when accept_the_result {
+    expect "a-result-is-not-accepted-while-a-challenge-stands":
+        before.closed or count(after.standing) == 0 or not after.result_accepted
+    expect "a-reconciled-hand-back-is-what-accepts-a-result":
+        before.result_accepted or
+        after.result_accepted ==
+            (before.phase == "ready" and count(before.standing) == 0)
+}
+
+when reconcile_the_standing_challenges {
+    expect "reconciling-is-not-result-acceptance":
+        after.result_accepted == before.result_accepted
+    expect "reconciling-does-not-move-the-phase": after.phase == before.phase
+    expect "reconciling-decides-no-rule":
+        after.verdicts == before.verdicts
+    expect "an-attributable-breach-survives-reconciliation":
+        not any(before.standing, s => s.class == "scope-breach") or
+        any(after.standing, s => s.class == "scope-breach")
+    expect "reconciling-leaves-no-unassessed-lens":
+        before.closed or
+        all(after.lenses, l => any(after.assessed, a => a.id == l.id))
+}
+
+always "a-result-is-never-accepted-without-its-assignment" {
+    not result_accepted or assignment_accepted
+}
+
+never "a-result-is-accepted-without-closing-the-task" {
+    result_accepted and not closed
+}
+
+never "a-closed-task-absorbs-a-later-write" {
+    closed and any(standing, s => s.class == "scope-breach")
+}

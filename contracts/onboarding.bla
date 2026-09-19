@@ -1,0 +1,40 @@
+module init    "src/cli/init.rs"
+module clitask "src/cli/task.rs"
+module guide   "src/cli/guide.rs"
+
+require "a-portable-skill-is-shipped":        symbol init::skill
+require "the-skill-has-a-declared-location":  symbol init::SKILL_PATH
+require "the-agents-block-is-shipped":        symbol init::AGENTS_SNIPPET
+require "the-agents-block-has-a-location":    symbol init::AGENTS_PATH
+
+require "the-entry-declares-what-it-teaches": symbol init::SKILL_TOPICS
+require "the-entry-leads-to-an-assignment":   value init::SKILL_TOPICS contains "assignment"
+require "the-entry-leads-to-a-role":          value init::SKILL_TOPICS contains "role"
+require "the-entry-leads-to-a-working-area":  value init::SKILL_TOPICS contains "scope"
+require "the-entry-leads-to-verification":    value init::SKILL_TOPICS contains "verification"
+require "the-entry-leads-to-a-hand-back":     value init::SKILL_TOPICS contains "hand-back"
+
+require "the-entry-has-a-host-location":      symbol init::HOST_SKILL_PATH
+
+require "the-entry-leads-to-a-blocker":       value init::SKILL_TOPICS contains "blocker"
+require "the-entry-leads-to-acceptance":      value init::SKILL_TOPICS contains "acceptance"
+require "the-entry-leads-to-evidence":        value init::SKILL_TOPICS contains "evidence"
+require "the-entry-leads-to-a-challenge":     value init::SKILL_TOPICS contains "challenge"
+
+require "the-assignment-view-names-its-routes":   symbol clitask::ROUTES
+require "the-view-routes-to-acceptance":          value clitask::ROUTES contains "accept"
+require "the-view-routes-to-the-declared-check":  value clitask::ROUTES contains "check"
+require "the-view-routes-to-a-blocker":           value clitask::ROUTES contains "blocker"
+require "the-view-routes-to-a-finding":           value clitask::ROUTES contains "finding"
+require "the-view-routes-to-a-challenge":         value clitask::ROUTES contains "challenge"
+require "the-view-routes-to-a-hand-back":         value clitask::ROUTES contains "hand-back"
+require "the-routes-are-written-in-one-place":    symbol clitask::write_routes
+require "the-routes-render-without-a-record":     symbol clitask::route_text
+require "the-routes-render-as-one-text":          symbol clitask::routes_text
+require "the-loop-guide-is-generated":            symbol guide::loop_text
+require "the-loop-guide-reuses-the-routes":       dependency guide -> clitask
+require "the-entry-reuses-the-routes":            dependency init -> clitask
+forbid  "the-loop-guide-is-not-a-second-copy":    symbol guide::LOOP
+
+forbid "the-entry-names-no-model":            value init::SKILL_TOPICS contains "model-list"
+forbid "the-entry-names-no-host-command":     value init::SKILL_TOPICS contains "cargo"

@@ -1,0 +1,30 @@
+module gate "experiments/gate.py"
+
+require "the-schedule-is-a-value":                           symbol gate::STEPS
+require "the-required-order-is-a-value":                     symbol gate::REQUIRED_ORDER
+require "the-runner-derives-its-commands-from-the-schedule": symbol gate::checks
+require "the-order-is-decided-in-one-place":                 symbol gate::ordered
+require "no-step-runs-before-the-order-is-checked":          symbol gate::steps_of
+
+require "formatting-is-checked":       value gate::STEPS maps "fmt" to "--check"
+require "lint-denies-warnings":        value gate::STEPS maps "clippy" to "warnings"
+require "the-rust-tests-run":          value gate::STEPS maps "rust-tests" to "test"
+require "the-schedule-tests-itself":   value gate::STEPS maps "gate-schedule" to "test_gate*.py"
+require "the-bridge-is-built":         value gate::STEPS maps "bridge" to "structure-adapter"
+require "completion-is-decided":       value gate::STEPS maps "self-hosting-finish" to "finish"
+require "the-record-is-read-back":     value gate::STEPS maps "self-hosting-status" to "status"
+require "python-support-is-exercised":     value gate::STEPS maps "example-python" to "examples/todo"
+require "typescript-support-is-exercised": value gate::STEPS maps "example-typescript" to "examples/todo-ts"
+require "go-support-is-exercised":         value gate::STEPS maps "example-go" to "examples/todo-go"
+require "c-support-is-exercised":          value gate::STEPS maps "example-c" to "examples/todo-c"
+require "cpp-support-is-exercised":        value gate::STEPS maps "example-cpp" to "examples/todo-cpp"
+require "java-support-is-exercised":       value gate::STEPS maps "example-java" to "examples/todo-java"
+
+require "the-public-tree-is-audited":  value gate::STEPS maps "audit" to "experiments/audit_public_tree.py"
+require "the-diagrams-are-checked":    value gate::STEPS maps "diagrams" to "--check"
+
+require "the-bridge-precedes-completion":    value gate::REQUIRED_ORDER maps "bridge" to "self-hosting-finish"
+require "completion-precedes-the-read-back": value gate::REQUIRED_ORDER maps "self-hosting-finish" to "self-hosting-status"
+
+require "the-gate-runs-processes": dependency gate -> "subprocess"
+require "the-gate-writes-a-summary": dependency gate -> "json"

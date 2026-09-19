@@ -79,6 +79,11 @@ pub fn profile_identity(profile: Option<&Profile>) -> String {
             for element in &profile.command {
                 hasher.write_str(element);
             }
+            hasher.write_str("prepare");
+            for element in profile.prepare.iter().flatten() {
+                hasher.write_str(element);
+            }
+            hasher.write(&profile.startup().to_le_bytes());
             hasher.write(&profile.seed.to_le_bytes());
             hasher.write(&profile.cases.to_le_bytes());
             hasher.write(&profile.steps.to_le_bytes());

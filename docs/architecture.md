@@ -31,11 +31,11 @@ Registered by the manifest, parsed and validated within project memory, never ch
         src/ir                                src/structure/mod.rs
             |  typed contract IR                   |  rule evaluator
         src/verify                            Provider trait
-            |  coverage-guided campaign        /            \
-        src/application (Application trait)  python.rs      rust.rs
-            |  adapter boundary               |               |
-        src/runtime                          isolated        syn,
-            process, JSON Lines, containment  interpreter    in-process
+            |  coverage-guided campaign        /       |       \
+        src/application (Application trait)  python  rust   treesitter.rs
+            |  adapter boundary               |       |        |  one harness
+        src/runtime                          isolated syn,   typescript, go,
+            process, JSON Lines, containment interp.  in-proc java, cfamily
                         \                        /
                           src/report, src/project/status.rs
                                       |
@@ -90,6 +90,9 @@ status | explain | check | run | finish | task | challenge | guide | init
 | `src/structure/falsify.rs` | the counterfactual fact map and the per-rule falsification verdict behind `blabla check --falsify` |
 | `src/structure/python.rs`, `python_facts.py` | the Python provider and its embedded extractor |
 | `src/structure/rust.rs` | the Rust provider |
+| `src/structure/treesitter.rs` | the shared tree-sitter harness: the read/parse/error preamble, the line index and the one `Facts` accumulator every language walk fills |
+| `src/structure/typescript.rs`, `go.rs`, `java.rs`, `cfamily.rs` | one language walk each over its own grammar's node kinds; `cfamily.rs` carries both C providers because the C++ node kinds are a superset of the C ones |
+| `src/voice.rs` | the diagnostic voice: the catalogue of blunt renderings and the one function that appends one to a neutral statement |
 | `src/report.rs`, `src/diagnostic.rs` | the report and diagnostic shapes both renderings read from |
 
 ## Stable seams
@@ -98,7 +101,7 @@ Changing one of these is an interface change with consequences beyond its own fi
 
 **`Application`** (`src/application.rs`) — `reset`, `call`, `observe`, `restart`, `finish`. Everything above it works in terms of observations, so the verifier never knows whether it is driving a real process. `restart` defaults to an `APP_LIFECYCLE` error, so an adapter that cannot provide trusted process restart says so rather than faking it.
 
-**`Provider`** (`src/structure/mod.rs`) — `id`, `handles`, `symbol_depth`, `inspect`, `external_target_error`. A provider adds a language. It never adds a fact, and the contract grammar does not change when one is added. `handles` selects by file extension and the first match wins.
+**`Provider`** (`src/structure/mod.rs`) — `id`, `handles`, `symbol_depth`, `inspect`, `external_target_error`. A provider adds a language. It never adds a fact, and the contract grammar does not change when one is added. `handles` selects by file extension and the first match wins. A successful `inspect` reports one entry for every module it was handed; a module left unreported is ERROR for every rule naming it, never an absent fact that a `forbid` could pass on.
 
 **`ModuleFacts`** (`src/structure/mod.rs`) — the fact shape every provider produces: existence, a parse error, symbols, imports, literal collections, key/payload entries, and unsupported names. It derives `Deserialize` because the Python provider delivers it as JSON over a pipe; the Rust provider constructs it directly in process. Both go through the same evaluator, so rule semantics cannot drift between languages.
 

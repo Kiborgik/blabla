@@ -6,6 +6,19 @@ use std::path::{Path, PathBuf};
 pub const CONTRACT_PATH: &str = "contracts/behavior/core.bla";
 pub const AGENTS_PATH: &str = "AGENTS.md";
 pub const SKILL_PATH: &str = ".agents/skills/blabla/SKILL.md";
+pub const HOST_SKILL_PATH: &str = ".claude/skills/blabla/SKILL.md";
+pub const SKILL_TOPICS: [&str; 9] = [
+    "assignment",
+    "role",
+    "scope",
+    "verification",
+    "acceptance",
+    "evidence",
+    "blocker",
+    "challenge",
+    "hand-back",
+];
+
 pub const MARKER_START: &str = "<!-- blabla:start -->";
 pub const MARKER_END: &str = "<!-- blabla:end -->";
 
@@ -59,7 +72,7 @@ YELLOW means NOT COMPLETE.
 Do not weaken contracts to obtain GREEN.
 ";
 
-pub const SKILL: &str = "---
+const SKILL_HEAD: &str = "---
 name: blabla
 description: Use when a repository contains project.bla or .bla contracts. BlaBla is the project's executable memory: check status, explain rules, verify an implementation, author or change contracts.
 ---
@@ -89,6 +102,18 @@ Read a contract file only when `explain` is not enough. Never edit a `.bla` file
 unknowns, draft contracts (`draft behavior \"path\"` in `project.bla`), the skeptic pass and
 promotion to `use behavior` by a human.
 
+## Working under an assignment
+
+A project may hand you a bounded task instead of the whole repository. `blabla task show <name>` prints the assignment -- statement, role, write scope,
+deliverables, findings, declared check, scratch -- then the routes below, in the order they are taken: acceptance, the declared check and its evidence,
+a blocker, a finding, the challenge, the hand-back. That view is the authority, never this file.
+";
+
+const SKILL_TAIL: &str = "
+Acceptance records that a role took the work through BlaBla, not that it read what it retrieved. `blabla explain role::<name>` and its policies outrank
+any brief; a path outside the write scope is a finding, never a widening; a summary prints a passing count on a red run, so read the whole run before
+recording it. A hand-back is not acceptance: closing is the orchestrator's decision, and only `blabla finish` decides whether the project is complete.
+
 ## Authoring project memory
 
 `blabla guide memory`: the declaration and registration shape for Mission, System, Process and
@@ -110,13 +135,20 @@ implementation phase reaches GREEN.
 | `blabla explain system::<name>` | one system: purpose, paths, the responsibilities it owns and its seams |
 | `blabla explain knowledge::<pack>` | one reusable knowledge pack and the id of every ruling in it |
 | `blabla explain flow::<name>` | the order the roles are meant to work in, one line per step |
-| `blabla task <action>` | record one bounded change: `open`, `show`, `finding`, `resolve`, `scope`, `close` |
+| `blabla task <action>` | record one bounded change; `show <name>` prints the routes your role takes next; `open`, `resolve` and `close` are the orchestrator's |
 | `blabla challenge` | one grounded challenge to the current account of the work; exit 1 when one stands |
 | `blabla finish` | structure check plus canonical behavior verification from project.bla; exit 0 only for OVERALL GREEN |
 | `blabla run -- <app>` | manual verification with explicit settings; records the result |
 | `blabla check` | compile the project, including drafts |
 | `blabla guide <topic>` | agent, bootstrap, change, memory, loop |
 ";
+
+pub fn skill() -> String {
+    format!(
+        "{SKILL_HEAD}{}{SKILL_TAIL}",
+        super::task::routes_text("<name>", Some("<the declared check>"))
+    )
+}
 
 #[derive(Clone, Debug)]
 pub struct Options {
@@ -142,6 +174,11 @@ pub struct Outcome {
     pub steps: Vec<Step>,
     pub nested_in: Option<String>,
     pub agents_block: Option<String>,
+    pub entry_teaches: Vec<&'static str>,
+}
+
+pub fn entry_teaches() -> Vec<&'static str> {
+    SKILL_TOPICS.to_vec()
 }
 
 pub fn agents_block() -> String {
@@ -248,10 +285,17 @@ pub fn run(options: &Options) -> Result<Outcome, String> {
             &options.dir.join(AGENTS_PATH),
             options.dry_run,
         )?);
+        let skill = skill();
         steps.push(create_if_missing(
             &options.dir,
             &options.dir.join(SKILL_PATH),
-            SKILL,
+            &skill,
+            options.dry_run,
+        )?);
+        steps.push(create_if_missing(
+            &options.dir,
+            &options.dir.join(HOST_SKILL_PATH),
+            &skill,
             options.dry_run,
         )?);
         block = Some(agents_block());
@@ -264,6 +308,7 @@ pub fn run(options: &Options) -> Result<Outcome, String> {
         steps,
         nested_in,
         agents_block: block,
+        entry_teaches: entry_teaches(),
     })
 }
 
@@ -370,4 +415,40 @@ fn integrate_agents(root: &Path, path: &Path, dry_run: bool) -> Result<Step, Str
             "updated"
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_portable_entry_covers_every_topic_it_declares() {
+        let skill = skill();
+        for topic in SKILL_TOPICS {
+            assert!(skill.contains(topic), "the skill never mentions {topic}");
+        }
+    }
+
+    #[test]
+    fn this_repository_ships_the_same_entry_it_generates() {
+        let installed = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(HOST_SKILL_PATH);
+        let text = std::fs::read_to_string(&installed)
+            .expect("this repository carries the host-loaded copy of the entry");
+        assert_eq!(
+            text.replace("\r\n", "\n"),
+            skill(),
+            "the installed entry has drifted from the one init generates"
+        );
+    }
+
+    #[test]
+    fn the_portable_entry_names_no_host_command_and_no_model() {
+        let skill = skill();
+        for forbidden in ["cargo run", "haiku", "opus", "qwen", "sonnet"] {
+            assert!(
+                !skill.contains(forbidden),
+                "the portable skill hardcodes {forbidden}"
+            );
+        }
+    }
 }
