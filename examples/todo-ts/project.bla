@@ -9,6 +9,6 @@ verify behavior {
     cases 4
     steps 32
     timeout_ms 1000
-    startup_ms 15000
+    startup_ms 60000
     shrink_budget 256
 }

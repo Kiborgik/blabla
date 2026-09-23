@@ -2,7 +2,7 @@
 
 **Executable, queryable project memory for coding agents.**
 
-[![CI](https://github.com/Kiborgik/blabla/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Kiborgik/blabla/actions/workflows/ci.yml)
+[![Release](https://github.com/Kiborgik/blabla/actions/workflows/release.yml/badge.svg)](https://github.com/Kiborgik/blabla/actions/workflows/release.yml)
 ![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-yellow)
 ![version 0.8.0](https://img.shields.io/badge/version-0.8.0-blue)
 ![license MIT](https://img.shields.io/badge/license-MIT-green)

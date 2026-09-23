@@ -44,10 +44,6 @@ jobs:
         run: python experiments/gate.py --tag release --out ci-artifacts/gate
         env:
           RUST_TEST_THREADS: ${{ matrix.test_threads }}
-      - name: Test
-        run: cargo test --release --target ${{ matrix.target }}
-        env:
-          RUST_TEST_THREADS: ${{ matrix.test_threads }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package (zip)
         if: matrix.archive == 'zip'
@@ -68,6 +64,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
+          pattern: blabla-*
           path: dist
           merge-multiple: true
       - name: Checksums

@@ -12,6 +12,13 @@ import uuid
 ROOT = Path(__file__).resolve().parent.parent
 BUILDER = ROOT / "evals/materials.py"
 SKILL = ROOT / ".claude/skills/blabla/SKILL.md"
+BUILT = ROOT / "target" / "debug"
+
+
+def working_tree_environment(**overrides):
+    environment = dict(os.environ, **overrides)
+    environment["PATH"] = str(BUILT) + os.pathsep + environment.get("PATH", "")
+    return environment
 
 
 class TestDirectory:
@@ -65,7 +72,7 @@ class EvalMaterialsTests(unittest.TestCase):
         temporary = TestDirectory()
         self.addCleanup(temporary.cleanup)
         destination = temporary.path / "workspace"
-        environment = dict(os.environ, BLABLA_EVAL_ARM=arm)
+        environment = working_tree_environment(BLABLA_EVAL_ARM=arm)
         environment.pop("BLABLA_EVAL_HOST", None)
         if host:
             environment["BLABLA_EVAL_HOST"] = host
@@ -191,7 +198,7 @@ class EvalMaterialsTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         result = subprocess.run(
             [sys.executable, str(BUILDER), "diagnoses-yellow-verification", str(temporary.path / "workspace")],
-            cwd=ROOT, env=dict(os.environ, BLABLA_EVAL_ARM="without"), capture_output=True, text=True,
+            cwd=ROOT, env=working_tree_environment(BLABLA_EVAL_ARM="without"), capture_output=True, text=True,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no arm without BlaBla", result.stderr)
@@ -301,7 +308,7 @@ class EvalMaterialsTests(unittest.TestCase):
         )
         result = subprocess.run(
             [sys.executable, str(temporary.path / "evals" / "materials.py"), "probe", str(temporary.path / "workspace")],
-            cwd=ROOT, env=dict(os.environ, BLABLA_EVAL_ARM="with"), capture_output=True, text=True,
+            cwd=ROOT, env=working_tree_environment(BLABLA_EVAL_ARM="with"), capture_output=True, text=True,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("exited 3", result.stderr)
@@ -311,7 +318,7 @@ class EvalMaterialsTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         destination = temporary.path / "workspace"
         capture_root = temporary.path / "captures"
-        environment = dict(os.environ, BLABLA_EVAL_CAPTURE_ROOT=str(capture_root))
+        environment = working_tree_environment(BLABLA_EVAL_CAPTURE_ROOT=str(capture_root))
         result = subprocess.run(
             [sys.executable, str(BUILDER), "repairs-a-red-project", str(destination)],
             cwd=ROOT,
@@ -331,7 +338,7 @@ class EvalMaterialsTests(unittest.TestCase):
         destination = temporary.path / "workspace"
         result = subprocess.run(
             [sys.executable, str(BUILDER), "repairs-a-red-project", str(destination)],
-            cwd=ROOT, env=dict(os.environ, BLABLA_EVAL_EXPECTED_SHA256="wrong"),
+            cwd=ROOT, env=working_tree_environment(BLABLA_EVAL_EXPECTED_SHA256="wrong"),
             capture_output=True, text=True,
         )
         self.assertNotEqual(result.returncode, 0)
