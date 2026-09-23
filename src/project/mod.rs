@@ -6,11 +6,13 @@ use crate::semantics::{Unit, compile_units};
 use crate::structure::{self, StructureContract, StructureReport, StructureRule};
 use crate::syntax::{self, Lexer, Token, TokenKind};
 use crate::voice::{VOICES, Voice};
+use ignore::{Ignore, IgnoreDeclaration};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
+pub mod ignore;
 pub mod runstate;
 pub mod status;
 pub mod task;
@@ -50,6 +52,7 @@ pub struct Manifest {
     pub profile: Option<Profile>,
     pub profile_span: Option<Span>,
     pub voice: Voice,
+    pub ignores: Vec<IgnoreDeclaration>,
 }
 
 #[derive(Clone, Debug)]
@@ -94,6 +97,7 @@ enum Statement {
     Knowledge(MemoryEntry),
     Profile(Profile, Span),
     Tone(Voice, Span),
+    Ignore(IgnoreDeclaration),
 }
 
 pub const RESERVED_GROUPS: &[&str] = &[
@@ -188,6 +192,7 @@ pub struct Project {
     pub structure: Vec<StructureContract>,
     pub drafts: Vec<Draft>,
     pub identity: String,
+    pub ignore: Ignore,
 }
 
 #[derive(Clone)]
@@ -351,8 +356,25 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
     let mut system: Option<MemoryEntry> = None;
     let mut process: Option<MemoryEntry> = None;
     let mut knowledge: Vec<MemoryEntry> = Vec::new();
+    let mut ignores: Vec<IgnoreDeclaration> = Vec::new();
     while !parser.at_end() {
         match parser.statement(&root)? {
+            Statement::Ignore(declaration) => {
+                if ignores.iter().any(|seen| {
+                    seen.is_list() == declaration.is_list()
+                        && seen.written() == declaration.written()
+                }) {
+                    return Err(parser.error(
+                        declaration.span(),
+                        "E_DUPLICATE_IGNORE",
+                        format!(
+                            "'{}' is declared by `ignore` more than once",
+                            declaration.written()
+                        ),
+                    ));
+                }
+                ignores.push(declaration);
+            }
             Statement::Mission(entry) => {
                 if mission.is_some() {
                     return Err(parser.error(
@@ -465,6 +487,7 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
         profile,
         profile_span,
         voice: voice.unwrap_or_default(),
+        ignores,
     })
 }
 
@@ -586,11 +609,47 @@ impl ManifestParser<'_> {
                     .profile(start.span)
                     .map(|(profile, span)| Statement::Profile(profile, span));
             }
+            TokenKind::Identifier(word) if word == "ignore" => {
+                self.position += 1;
+                let listed =
+                    matches!(&self.current().kind, TokenKind::Identifier(word) if word == "from");
+                if listed {
+                    self.position += 1;
+                }
+                let path_token = self.current().clone();
+                let TokenKind::String(written) = &path_token.kind else {
+                    return Err(self.error(
+                        path_token.span,
+                        "E_MANIFEST_IGNORE",
+                        "expected a quoted pattern, as in `ignore \"dist/\"`, or a quoted list file after `from`, as in `ignore from \".gitignore\"`",
+                    ));
+                };
+                self.position += 1;
+                let span = Span {
+                    start: start.span.start,
+                    end: path_token.span.end,
+                    line: start.span.line,
+                    column: start.span.column,
+                };
+                let declaration = if listed {
+                    IgnoreDeclaration::List {
+                        written: written.clone(),
+                        path: root.join(written),
+                        span,
+                    }
+                } else {
+                    IgnoreDeclaration::Pattern {
+                        written: written.clone(),
+                        span,
+                    }
+                };
+                return Ok(Statement::Ignore(declaration));
+            }
             _ => {
                 return Err(self.error(
                     start.span,
                     "E_MANIFEST_STATEMENT",
-                    "expected `use behavior \"path\"`, `draft behavior \"path\"`, `mission \"path\"`, `system \"path\"`, `process \"path\"`, `knowledge \"path\"`, `voice <name>` or `verify behavior { ... }`",
+                    "expected `use behavior \"path\"`, `draft behavior \"path\"`, `mission \"path\"`, `system \"path\"`, `process \"path\"`, `knowledge \"path\"`, `voice <name>`, `ignore \"pattern\"`, `ignore from \"file\"` or `verify behavior { ... }`",
                 ));
             }
         };
@@ -1041,6 +1100,10 @@ pub fn load(manifest: Manifest) -> Result<Project, Diagnostic> {
         hasher.write_str(&loaded.entry.display);
         hasher.write_str(&loaded.source);
     }
+    let ignore = Ignore::new(&manifest.root, &manifest.ignores, always_tracked(&manifest))
+        .map_err(|failure| {
+            Diagnostic::new(&manifest_file, failure.span, failure.code, failure.message)
+        })?;
     Ok(Project {
         manifest,
         contract,
@@ -1049,7 +1112,22 @@ pub fn load(manifest: Manifest) -> Result<Project, Diagnostic> {
         structure,
         drafts,
         identity: hasher.finish(),
+        ignore,
     })
+}
+
+fn always_tracked(manifest: &Manifest) -> BTreeSet<String> {
+    let root = normalize(&manifest.root);
+    let memory = [&manifest.mission, &manifest.system, &manifest.process]
+        .into_iter()
+        .flatten()
+        .chain(&manifest.knowledge)
+        .map(|entry| entry.path.clone());
+    std::iter::once(manifest.path.clone())
+        .chain(manifest.entries.iter().map(|entry| entry.path.clone()))
+        .chain(memory)
+        .map(|path| relative(&root, &normalize(&path)))
+        .collect()
 }
 
 enum PendingDraft<'a> {
@@ -1335,10 +1413,15 @@ impl Default for Fnv {
     }
 }
 
-pub fn fingerprint(root: &Path, extra_files: &[PathBuf], excluded: &[PathBuf]) -> String {
+pub fn fingerprint(
+    root: &Path,
+    extra_files: &[PathBuf],
+    excluded: &[PathBuf],
+    ignore: &Ignore,
+) -> String {
     let mut hasher = Fnv::new();
     let excluded: Vec<PathBuf> = excluded.iter().map(|path| normalize(path)).collect();
-    walk(root, root, &excluded, &mut |visit| match visit {
+    walk(root, root, &excluded, ignore, &mut |visit| match visit {
         Visit::UnreadableDirectory(name) => {
             hasher.write_str("unreadable-directory");
             hasher.write_str(name);
@@ -1448,11 +1531,22 @@ impl Project {
     }
 
     pub fn fingerprint(&self, extra_files: &[PathBuf]) -> String {
-        fingerprint(&self.manifest.root, extra_files, &self.contract_files())
+        fingerprint(
+            &self.manifest.root,
+            extra_files,
+            &self.contract_files(),
+            &self.ignore,
+        )
     }
 }
 
-fn walk(root: &Path, directory: &Path, excluded: &[PathBuf], visit: &mut dyn FnMut(Visit<'_>)) {
+fn walk(
+    root: &Path,
+    directory: &Path,
+    excluded: &[PathBuf],
+    ignore: &Ignore,
+    visit: &mut dyn FnMut(Visit<'_>),
+) {
     let Ok(entries) = std::fs::read_dir(directory) else {
         visit(Visit::UnreadableDirectory(&relative(root, directory)));
         return;
@@ -1475,12 +1569,16 @@ fn walk(root: &Path, directory: &Path, excluded: &[PathBuf], visit: &mut dyn FnM
             {
                 continue;
             }
-            walk(root, &path, excluded, visit);
-        } else if kind.is_file() {
-            if excluded.contains(&normalize(&path)) {
+            if ignore.skips_directory(&relative(root, &path)) {
                 continue;
             }
-            visit(Visit::File(&relative(root, &path), &path));
+            walk(root, &path, excluded, ignore, visit);
+        } else if kind.is_file() {
+            let name = relative(root, &path);
+            if excluded.contains(&normalize(&path)) || ignore.skips_file(&name) {
+                continue;
+            }
+            visit(Visit::File(&name, &path));
         }
     }
 }
@@ -1490,9 +1588,9 @@ enum Visit<'a> {
     File(&'a str, &'a Path),
 }
 
-pub fn snapshot(root: &Path) -> BTreeMap<String, String> {
+pub fn snapshot(root: &Path, ignore: &Ignore) -> BTreeMap<String, String> {
     let mut digests = BTreeMap::new();
-    walk(root, root, &[], &mut |visit| {
+    walk(root, root, &[], ignore, &mut |visit| {
         if let Visit::File(name, path) = visit {
             let mut hasher = Fnv::new();
             hash_file(name, path, &mut hasher);

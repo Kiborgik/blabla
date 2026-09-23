@@ -1,0 +1,27 @@
+{
+  "materials": ["providers", "roles"],
+  "remove": ["contracts/behavior"],
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Polyglot"]}
+  ],
+  "after_arm": [
+    {"run": ["blabla", "task", "open", "repair-all-languages", "--role", "worker",
+             "--statement", "The structure checks of this project fail in every language it contains. Repair the sources so every rule passes; the contracts state the intended structure and stay as they are.",
+             "--scope", "rust", "--scope", "typescript", "--scope", "go", "--scope", "widget", "--scope", "c",
+             "--deliverable", "rust/src/store.rs", "--deliverable", "rust/src/model.rs",
+             "--deliverable", "typescript/store.ts", "--deliverable", "typescript/model.ts",
+             "--deliverable", "go/store/store.go", "--deliverable", "go/model/model.go",
+             "--deliverable", "widget/store/WidgetStore.java", "--deliverable", "widget/model/Widget.java",
+             "--deliverable", "c/store.c", "--deliverable", "c/model.c",
+             "--check", "blabla status"]}
+  ],
+  "observations": [
+    "challenge:repair-all-languages",
+    "status",
+    "check:contracts/rust.bla",
+    "check:contracts/typescript.bla",
+    "check:contracts/go.bla",
+    "check:contracts/java.bla",
+    "check:contracts/c.bla"
+  ]
+}

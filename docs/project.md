@@ -31,9 +31,11 @@ verify behavior {
 | `draft behavior "path"` / `draft structure "path"` | compiled by `check`, listed by `status`, never verified and never part of completion |
 | `mission "path"` | registers this project's mission memory, at most once; not a layer, never decides completion (see below) |
 | `system "path"` | registers this project's system memory, at most once; not a layer, never decides completion (see below) |
-| `process "path"` | registers this project's process memory, at most once; not a layer, never decides completion, advisory only (see below) |
+| `process "path"` | registers this project's process memory, at most once; not a layer, never decides completion (see below) |
 | `knowledge "path"` | registers one reusable knowledge pack file; repeatable, not a layer, never decides completion (see below) |
 | `voice <name>` | the diagnostic voice for human output, at most once: `neutral` (the default) or `blunt`; it changes no verdict, no exit code and no `--json` field (see below) |
+| `ignore "pattern"` | leaves the paths one gitignore-syntax pattern matches out of change tracking; repeatable (see below) |
+| `ignore from "file"` | leaves out every path the patterns listed in that file match, such as `.gitignore`; repeatable (see below) |
 | `verify behavior { ... }` | the one canonical behavior profile: `command` is required; `prepare`, `seed`, `cases`, `steps`, `timeout_ms`, `startup_ms` and `shrink_budget` are optional |
 
 ### The verification profile
@@ -51,11 +53,11 @@ does not belong inside a per-response timeout. `startup_ms` exists for the same 
 down: a process that boots slowly should not force `timeout_ms` up for the other eight thousand
 exchanges. Both enter the profile fingerprint, so changing either makes a recorded run stale.
 
-**Write preparation output under `.blabla/`.** `project::fingerprint` walks the whole tree except
-the directories in `project::SKIPPED_DIRECTORIES`, so a build artifact written anywhere else
-changes the implementation fingerprint after `finish` has recorded the run against it, and the next
-`status` reports STALE. BlaBla creates `.blabla/` before running `prepare` so a fresh clone needs no
-setup step.
+**Write preparation output under `.blabla/` or an ignored path.** `project::fingerprint` walks the
+whole tree except the directories in `project::SKIPPED_DIRECTORIES` and the paths `ignore` leaves
+out, so a build artifact written anywhere else changes the implementation fingerprint after `finish`
+has recorded the run against it, and the next `status` reports STALE. BlaBla creates `.blabla/`
+before running `prepare` so a fresh clone needs no setup step.
 
 ```text
 verify behavior {
@@ -74,6 +76,34 @@ and the exit code, the rule verdicts and the task transitions are untouched. Onl
 has a blunt rendering — an honest failure or a reported blocker never does, because those are not
 contradictions. A project that declares no voice gets the neutral one, and nothing can escalate it.
 `contracts/voice.bla` holds all of that to the real adjudication path.
+
+### Ignored paths
+
+BlaBla measures the working tree twice: the implementation fingerprint that makes a recorded run
+stale, and the snapshot a bounded task compares against to find what changed since it opened. Build
+outputs, caches and files a host writes into the project belong in neither.
+
+```text
+ignore from ".gitignore"
+ignore ".eval-artifacts"
+```
+
+`ignore from "file"` reads one gitignore file; `ignore "pattern"` adds one pattern of the same
+syntax, anchored to the manifest directory. Both repeat, the same declaration twice is
+`E_DUPLICATE_IGNORE`, and an `ignore` without a quoted pattern or file is `E_MANIFEST_IGNORE`. A listed file's patterns anchor to that file's own directory, as git reads
+them: blank lines and `#` comments are skipped, `!` re-includes, a trailing `/` matches directories
+only, a `/` at the start or in the middle anchors the pattern, `*`, `?`, `[...]` and `**` match as in
+git, the last matching pattern decides, and a file under an ignored directory cannot be re-included.
+Only the files the manifest names are read; nested `.gitignore` files are not discovered. A list
+file that cannot be read is `E_IGNORE_LIST_MISSING`, and one outside the project is
+`E_IGNORE_LIST_OUTSIDE`, never an empty list.
+
+What BlaBla's authority rests on is always tracked, whatever the patterns say: the manifest, every
+contract, every registered memory file and every ignore list. An edit to `.gitignore` is therefore
+itself a change a task sees, so a worker cannot hide its work by ignoring it. A path a rule leaves
+out can never be observed, so `task open`, `task check` and `task deliverable --add` refuse to
+declare an ignored deliverable or input and name the rule, rather than letting it read later as absent. The built-in
+directories in `project::SKIPPED_DIRECTORIES` stay left out with or without `ignore`.
 
 Paths resolve from the manifest directory. The group name is the file stem or the `as` alias; rule identities are `group::label`, so `core::restart` and `sealing::restart` coexist. `verify structure` is rejected because structure needs no profile. A second `mission`, `system` or `process` statement is `E_DUPLICATE_MISSION`, `E_DUPLICATE_SYSTEM` or `E_DUPLICATE_PROCESS`; the same knowledge path registered twice is `E_DUPLICATE_KNOWLEDGE`. `use mission`, `use system`, `use process` and `use knowledge` are all `E_UNSUPPORTED_LAYER`, because project memory is not a layer.
 
@@ -169,7 +199,7 @@ Each kind answers one question, and none of them repeats another's content.
 
 A role's `owns` is orchestration authority and has nothing to do with a `responsibility::<name>`.
 
-**A flow is the order the roles are meant to be used in.** `flow` carries only a `purpose`; its steps are separate `step` declarations naming the flow they belong to, and their order in the file is the flow's order. A step takes `flow`, `role` (every role that may carry it) and `statement`, plus an optional `command`. A flow that declares no step is invalid, and a step naming an undeclared flow or role makes the process memory invalid, with each cause reported separately. `explain flow::<name>` prints one line per step — its identity, its roles and its command, never its statement — and `explain step::<name>` carries the statement, the same asymmetry a pack has with its rulings. A `command` describes the intended loop; nothing checks that anyone ran it.
+**A flow is the order the roles are meant to be used in.** `flow` carries only a `purpose`; its steps are separate `step` declarations naming the flow they belong to, and their order in the file is the flow's order. A step takes `flow`, `role` (every role that may carry it) and `statement`, plus an optional `command`. A flow that declares no step is invalid, and a step naming an undeclared flow or role makes the process memory invalid, with each cause reported separately. `explain flow::<name>` prints one line per step — its identity, its roles and its command, never its statement — and `explain step::<name>` carries the statement, the same asymmetry a pack has with its rulings. A `command` names the command that carries the step.
 
 **Routing points into Knowledge and never out of it.** A system names the packs its work commonly needs; a role or a policy names the packs it is expected to consult:
 
@@ -183,7 +213,7 @@ The two field names carry different claims and are not collapsed into one: `know
 
 A `knowledge` or `consult` entry naming a pack no registered knowledge memory declares makes the **referring** memory `invalid`, and the message says which cause it is: no knowledge memory registered, or no pack of that name declared. There is no warning state — a routing pointer that resolves nowhere fails the way an unevaluable structure fact is ERROR rather than a satisfied `forbid`.
 
-**Mission is authoritative about intent, not a gate.** It says what the project is for and what decides a tradeoff, and a planner that finds the evidence points elsewhere is expected to say so. **Process is advisory**: BlaBla describes the intended authority and does not prevent an agent from bypassing it. **Knowledge is expertise, never permission to widen a task** — scope comes from the assignment and from `role::<name>`.
+**Mission is authoritative about intent, not a gate.** It says what the project is for and what decides a tradeoff, and a planner that finds the evidence points elsewhere is expected to say so. **Knowledge is expertise, never permission to widen a task** — scope comes from the assignment and from `role::<name>`.
 
 A project registers at most one mission file, one system file, one process file, and any number of knowledge files. Every knowledge file is parsed separately, so a diagnostic names the file it came from, and the packs then form one knowledge memory for the project.
 
@@ -192,7 +222,7 @@ A project registers at most one mission file, one system file, one process file,
 - Exactly **one `mission` declaration** per project; a second is an error naming the first. Ruling names are unique inside a pack; pack names are unique across every registered knowledge file. A pack that declares no ruling is invalid, because routing would point at nothing.
 - A **name must be identity-safe** — it starts with a letter or digit and continues with letters, digits, `_` or `-` — because it becomes part of a canonical identity. `purpose`, `statement`, `paths`, `verification` and `model` are ordinary text.
 - **`verification` and `model` are opaque strings.** BlaBla keeps no enum of verification tiers and no enum of models, and infers nothing about either. `model` records the topology a project chose, so an orchestrator does not silently substitute a different one.
-- **Process memory is advisory.** BlaBla describes the intended authority and workflow and does not prevent an agent from bypassing it. `status` prints `PROCESS  ADVISORY` and every role and policy view says so.
+- **Process memory describes the intended authority and workflow.** `status` lists its roles, and every role and policy view names what binds the role that carries the work.
 - **Registration is explicit.** A `mission.bla`, `system.bla`, `process.bla` or a `.bla` file under `knowledge/` that no statement registers is not read; `status` reports it as `unregistered` and names the statement that would register it. There is no JSON fallback: a registered path ending in `.json` is reported as unreadable with that reason.
 - **A knowledge path may point outside the project.** `knowledge "../shared-knowledge/engineering.bla"` is how one pack is reused across projects; there is no registry and nothing is fetched. A pack outside the manifest root is not walked by the implementation fingerprint and is not seen by a public-tree audit, so editing an in-root pack marks the behavior record STALE while editing an out-of-root one does not. Both are false STALEs at worst, which the project accepts, but the asymmetry is real.
 - `status` reports `state` as `present`, `missing` (registered, no file there), `unreadable`, `invalid` or `unregistered`.

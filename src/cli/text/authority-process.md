@@ -1,0 +1,1 @@
+The role's policies bind the work it carries: accept the assignment before changing anything, write only inside its scope, run only its declared check and record the real result, assess each lens it consults with task lens, run challenge, then hand back with task ready.

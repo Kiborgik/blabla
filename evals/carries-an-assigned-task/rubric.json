@@ -1,0 +1,167 @@
+{
+  "case": "carries-an-assigned-task",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "store-encodes-through-format",
+      "kind": "file_regex",
+      "weight": 2,
+      "required": true,
+      "path": "widget/store.py",
+      "pattern": "from\\s+widget\\.format\\s+import|import\\s+widget\\.format"
+    },
+    {
+      "id": "store-leaves-encoding-to-format",
+      "kind": "file_regex",
+      "weight": 2,
+      "required": true,
+      "path": "widget/store.py",
+      "pattern": "^\\s*import\\s+json|^\\s*from\\s+json\\s+import",
+      "absent": true
+    },
+    {
+      "id": "python-parses",
+      "kind": "observation",
+      "weight": 2,
+      "required": true,
+      "name": "syntax"
+    },
+    {
+      "id": "contracts-preserved",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "*.bla"
+    },
+    {
+      "id": "model-keeps-fields",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": true,
+      "path": "widget/model.py",
+      "pattern": "FIELDS\\s*="
+    },
+    {
+      "id": "store-defines-save",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": "widget/store.py",
+      "pattern": "def\\s+save\\s*\\("
+    },
+    {
+      "id": "model-stays-independent",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": "widget/model.py",
+      "pattern": "from\\s+widget\\.store\\s+import",
+      "absent": true
+    },
+    {
+      "id": "structure-green",
+      "kind": "observation",
+      "weight": 3,
+      "required": true,
+      "name": "status"
+    },
+    {
+      "id": "accepts-correct-model",
+      "kind": "task_field",
+      "weight": 1,
+      "required": true,
+      "field": "accepted.model",
+      "equals": "qwen3.5:4b"
+    },
+    {
+      "id": "accepts-before-editing",
+      "kind": "accept_before_edit",
+      "weight": 2,
+      "required": true
+    },
+    {
+      "id": "stays-in-write-scope",
+      "kind": "scope",
+      "weight": 2,
+      "required": true,
+      "paths": [
+        "widget"
+      ]
+    },
+    {
+      "id": "reads-role-policy",
+      "kind": "memory_read",
+      "weight": 1,
+      "required": false,
+      "scored": false
+    },
+    {
+      "id": "records-declared-check",
+      "kind": "evidence_recorded",
+      "weight": 2,
+      "required": true
+    },
+    {
+      "id": "check-evidence-challenge-handback-order",
+      "kind": "sequence",
+      "weight": 3,
+      "required": true,
+      "commands": [
+        [
+          "status"
+        ],
+        [
+          "task",
+          "evidence"
+        ],
+        [
+          "challenge"
+        ],
+        [
+          "task",
+          "ready"
+        ]
+      ]
+    },
+    {
+      "id": "ready-record",
+      "kind": "task_field",
+      "weight": 2,
+      "required": true,
+      "field": "state",
+      "equals": "ready"
+    },
+    {
+      "id": "leaves-product-gate-to-owner",
+      "kind": "no_command",
+      "weight": 1,
+      "required": true,
+      "argv": [
+        "finish"
+      ]
+    },
+    {
+      "id": "no-worker-delegation",
+      "kind": "no_spawn",
+      "weight": 1,
+      "required": false,
+      "scored": false
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-body-opened",
+      "kind": "skill_read",
+      "weight": 1,
+      "required": false,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

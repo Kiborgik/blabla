@@ -1,0 +1,13 @@
+knowledge "testing" {
+    purpose "What a check proves, what it cannot prove, and how to read a run."
+}
+
+ruling "a-green-check-covers-what-it-checks" {
+    pack "testing"
+    statement "A passing check establishes exactly the facts it examined. A structural check that a method exists says nothing about what the method does; a claim of persistence needs a run that writes, restarts and reads back."
+}
+
+ruling "read-the-whole-run" {
+    pack "testing"
+    statement "Read the exit code first, then every failure, then the summary. A summary line alone can look green on a red run."
+}

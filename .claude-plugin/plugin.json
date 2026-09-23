@@ -1,0 +1,9 @@
+{
+  "name": "blabla",
+  "displayName": "BlaBla",
+  "version": "0.8.0",
+  "description": "Executable project memory for coding agents: check status, explain rules, verify an implementation.",
+  "repository": "https://github.com/Kiborgik/blabla",
+  "license": "MIT",
+  "keywords": ["agents", "contracts", "verification"]
+}

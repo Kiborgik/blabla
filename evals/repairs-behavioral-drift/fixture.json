@@ -1,0 +1,15 @@
+{
+  "materials": ["shared", "behavior", "behavior-rules", "roles", "checks"],
+  "adapter": true,
+  "remove": ["contracts"],
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Widget"]}
+  ],
+  "after_arm": [
+    {"run": ["blabla", "task", "open", "persist-widgets", "--role", "worker",
+             "--statement", "Repair widget/store.py so the existing WidgetStore API persists widgets across a real process restart. The application, the adapter and the contracts stay as they are.",
+             "--scope", "widget", "--scope", "widget.json", "--input", "widget",
+             "--deliverable", "widget/store.py", "--check", "python3 checks/restart.py"]}
+  ],
+  "observations": ["syntax", "finish", "status", "persistence", "challenge:persist-widgets"]
+}

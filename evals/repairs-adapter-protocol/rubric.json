@@ -1,0 +1,120 @@
+{
+  "case": "repairs-adapter-protocol",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "accepts-before-editing",
+      "kind": "accept_before_edit",
+      "weight": 2,
+      "required": true
+    },
+    {
+      "id": "records-declared-check",
+      "kind": "evidence_recorded",
+      "weight": 2,
+      "required": true,
+      "path": ".blabla/tasks/fix-app-protocol.json"
+    },
+    {
+      "id": "ready-record",
+      "kind": "task_field",
+      "weight": 2,
+      "required": true,
+      "field": "state",
+      "equals": "ready",
+      "path": ".blabla/tasks/fix-app-protocol.json"
+    },
+    {
+      "id": "python-parses",
+      "kind": "observation",
+      "weight": 1,
+      "required": true,
+      "name": "syntax"
+    },
+    {
+      "id": "contracts-preserved",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "*.bla"
+    },
+    {
+      "id": "adapter-unchanged",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "adapters/*"
+    },
+    {
+      "id": "store-unchanged",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "widget/store.py"
+    },
+    {
+      "id": "app-unchanged",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": false,
+      "glob": "app.py"
+    },
+    {
+      "id": "log-writes-to-stderr",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": "widget/log.py",
+      "pattern": "stderr"
+    },
+    {
+      "id": "stays-in-scope",
+      "kind": "scope",
+      "weight": 2,
+      "required": true,
+      "paths": [
+        "widget",
+        "widget.json"
+      ]
+    },
+    {
+      "id": "leaves-product-gate-to-owner",
+      "kind": "no_command",
+      "weight": 1,
+      "required": true,
+      "argv": [
+        "finish"
+      ]
+    },
+    {
+      "id": "behavior-green",
+      "kind": "observation",
+      "weight": 3,
+      "required": true,
+      "name": "finish"
+    },
+    {
+      "id": "persists-across-processes",
+      "kind": "observation",
+      "weight": 1,
+      "required": false,
+      "name": "persistence"
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-body-opened",
+      "kind": "skill_read",
+      "weight": 1,
+      "required": false,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+type Widget {
+    id: int,
+    text: string
+}
+
+state widgets: [Widget]
+
+action add(text: string)
+action restart()
+
+when add {
+    expect "empty-add-noop":
+        input.text != "" or after.widgets == before.widgets
+    expect "add-count":
+        input.text == "" or count(after.widgets) == count(before.widgets) + 1
+    expect "added-widget":
+        input.text == "" or any(after.widgets, widget =>
+            widget.text == input.text and
+            not any(before.widgets, old => old.id == widget.id))
+    expect "add-preserves-existing":
+        all(before.widgets, old => any(after.widgets, widget => widget == old))
+}
+
+when restart {
+    expect "persistence": after.widgets == before.widgets
+}
+
+always "unique-ids" {
+    unique(widgets, widget => widget.id)
+}
+
+never "empty-text" {
+    any(widgets, widget => widget.text == "")
+}

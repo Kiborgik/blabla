@@ -1,0 +1,17 @@
+project Widget
+
+process "process.bla"
+system "system.bla"
+knowledge "knowledge/persistence.bla"
+
+use structure "structure.bla"
+use behavior "behavior.bla"
+
+verify behavior {
+    command ["python3", "app.py"]
+    seed 0
+    cases 4
+    steps 32
+    timeout_ms 1000
+    shrink_budget 256
+}

@@ -1,3 +1,4 @@
+use super::ignore::Ignore;
 use super::status::{
     CompletionState, Record, State, evaluate, explain_view, format_unix, primitive_view,
     status_view,
@@ -109,6 +110,29 @@ fn manifest_rejects_missing_header_unsupported_layers_and_bad_statements() {
     assert_eq!(unquoted.code, "E_MANIFEST_STATEMENT");
     let alias = parse_manifest(path, "project X\nuse behavior \"a.bla\" as").unwrap_err();
     assert_eq!(alias.code, "E_MANIFEST_STATEMENT");
+}
+
+#[test]
+fn ignore_declarations_parse_and_a_duplicate_bare_or_missing_one_is_refused() {
+    let temp = TempDir::new().unwrap();
+    let path = temp.path().join("project.bla");
+    let parsed = parse_manifest(
+        &path,
+        "project X\nignore \"dist/\"\nignore from \".gitignore\"\nignore \".gitignore\"\n",
+    )
+    .unwrap();
+    assert_eq!(parsed.ignores.len(), 3);
+    assert!(parsed.ignores[1].is_list());
+    assert!(!parsed.ignores[2].is_list());
+    let twice =
+        parse_manifest(&path, "project X\nignore \"dist/\"\nignore \"dist/\"\n").unwrap_err();
+    assert_eq!(twice.code, "E_DUPLICATE_IGNORE");
+    assert_eq!(twice.location.line, 3);
+    let bare = parse_manifest(&path, "project X\nignore from\n").unwrap_err();
+    assert_eq!(bare.code, "E_MANIFEST_IGNORE");
+    let missing = load(parsed).unwrap_err();
+    assert_eq!(missing.code, "E_IGNORE_LIST_MISSING");
+    assert_eq!(missing.location.line, 3);
 }
 
 #[test]
@@ -556,23 +580,26 @@ fn identity_follows_contract_text_and_fingerprint_follows_implementation_files()
     let first = project(root, manifest, &files);
     let again = project(root, manifest, &files);
     assert_eq!(first.identity, again.identity);
-    let before = fingerprint(root, &[], &[]);
-    assert_eq!(before, fingerprint(root, &[], &[]));
+    let before = fingerprint(root, &[], &[], &Ignore::default());
+    assert_eq!(before, fingerprint(root, &[], &[], &Ignore::default()));
     write(root, ".blabla/status.json", "{}");
     write(root, "target/debug/app.exe", "binary");
-    assert_eq!(before, fingerprint(root, &[], &[]));
+    assert_eq!(before, fingerprint(root, &[], &[], &Ignore::default()));
     write(root, "app/main.py", "print('v1')");
-    let with_app = fingerprint(root, &[], &[]);
+    let with_app = fingerprint(root, &[], &[], &Ignore::default());
     assert_ne!(before, with_app);
     write(root, "app/main.py", "print('v2')");
-    assert_ne!(with_app, fingerprint(root, &[], &[]));
+    assert_ne!(with_app, fingerprint(root, &[], &[], &Ignore::default()));
     let outside = TempDir::new().unwrap();
     write(outside.path(), "tool.py", "a");
     let extra = vec![outside.path().join("tool.py")];
-    let with_extra = fingerprint(root, &extra, &[]);
-    assert_ne!(with_extra, fingerprint(root, &[], &[]));
+    let with_extra = fingerprint(root, &extra, &[], &Ignore::default());
+    assert_ne!(with_extra, fingerprint(root, &[], &[], &Ignore::default()));
     write(outside.path(), "tool.py", "b");
-    assert_ne!(with_extra, fingerprint(root, &extra, &[]));
+    assert_ne!(
+        with_extra,
+        fingerprint(root, &extra, &[], &Ignore::default())
+    );
     write(
         root,
         "contracts/core.bla",

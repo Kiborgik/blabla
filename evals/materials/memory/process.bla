@@ -1,0 +1,37 @@
+role "orchestrator" {
+    purpose "Decide what the work is, divide it, integrate what comes back, and decide completion."
+    owns ["decomposition and assignment", "the manifest and the contracts", "every commit"]
+    verification "product"
+    model ["claude-fable-5-1", "opus-5"]
+}
+
+role "worker" {
+    purpose "Carry out one bounded task inside the write scope its orchestrator assigned."
+    owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
+    verification "focused"
+    model ["qwen3.5:4b", "qwen3.5:9b"]
+    consult ["persistence"]
+}
+
+policy "format-changes-are-migrations" {
+    statement "A change to the saved record format is a separate task owned by the store's orchestrator, never a side effect of another edit."
+    applies_to ["orchestrator", "worker"]
+    consult ["persistence"]
+}
+
+flow "development" {
+    purpose "One bounded change, from reading what the project already decided to handing the result back."
+}
+
+step "recover-context" {
+    flow "development"
+    role ["orchestrator", "worker"]
+    statement "Read the project's own memory before deciding anything about it."
+    command "blabla status"
+}
+
+step "implement" {
+    flow "development"
+    role ["worker"]
+    statement "Make the smallest correct edit inside the assigned write scope."
+}

@@ -2,7 +2,7 @@
 
 **Repository description (350 characters max):**
 
-Executable project memory for coding agents: compiled behavior and structure contracts that agents query with `blabla status`/`explain` and verify with `blabla finish`. Coverage-guided behavior verification with minimized counterexamples, static structure checks, GREEN/YELLOW/RED completion gate. Experimental alpha.
+Executable project memory for coding agents: compiled behavior and structure contracts that agents query with `blabla status`/`explain` and verify with `blabla finish`. Coverage-guided behavior verification with minimized counterexamples, static structure checks, GREEN/YELLOW/RED completion gate.
 
 **Topics:**
 
@@ -30,7 +30,7 @@ BlaBla — executable project memory for coding agents
 BEHAVIOR GREEN · STRUCTURE GREEN · OVERALL GREEN
 ```
 
-**About sidebar:** link the README quick start, `docs/research.md` and the release notes. Mark the release as a pre-release.
+**About sidebar:** link the README quick start, `docs/research.md` and the release notes.
 
 ## Repository
 

@@ -1580,7 +1580,7 @@ fn write_process_line(output: &mut impl Write, memory: Option<&ProcessStatus>) -
     match memory.state {
         "present" => writeln!(
             output,
-            "PROCESS    ADVISORY  {} roles  {} policies  {} flows  {} steps   (memory only; never part of completion; not enforced)",
+            "PROCESS    {} roles  {} policies  {} flows  {} steps   (memory only; never part of completion)",
             memory.roles.len(),
             memory.policies,
             memory.flows.len(),
@@ -1588,7 +1588,7 @@ fn write_process_line(output: &mut impl Write, memory: Option<&ProcessStatus>) -
         ),
         _ => writeln!(
             output,
-            "PROCESS    ADVISORY  {} is {}; no process memory is available (completion is unaffected)",
+            "PROCESS    {} is {}; no process memory is available (completion is unaffected)",
             memory.file, memory.state
         ),
     }
@@ -1762,10 +1762,36 @@ fn write_bounded_tasks(output: &mut impl Write, tasks: Option<&TaskStatus>) -> i
             task.id, task.state, task.role, task.deliverables, task.unresolved
         )?;
     }
+    for problem in &tasks.unreadable {
+        writeln!(
+            output,
+            "  {problem}   UNREADABLE; the record is not listed above"
+        )?;
+    }
     writeln!(
         output,
-        "  blabla challenge   hold this work against the evidence BlaBla already has and state one grounded challenge"
+        "  blabla task show <name>   the assignment: its write scope, deliverables, declared check and the routes your role takes next"
     )?;
+    if tasks.open > 0 {
+        writeln!(
+            output,
+            "  Project verification and task hand-backs are separate; {} bounded task{} remain unfinished",
+            tasks.open,
+            if tasks.open == 1 { "" } else { "s" }
+        )?;
+        if tasks.open > 1 {
+            writeln!(
+                output,
+                "  Multiple tasks are open; choose a task explicitly before challenging: blabla challenge <name>"
+            )?;
+        } else if let Some(task) = tasks.tasks.iter().find(|task| task.state != "CLOSED") {
+            let name = task.id.strip_prefix("task::").unwrap_or(&task.id);
+            writeln!(
+                output,
+                "  blabla challenge {name}   hold this task against the evidence BlaBla already has and state one grounded challenge"
+            )?;
+        }
+    }
     writeln!(output, "  {}", tasks.authority)
 }
 
@@ -1822,7 +1848,17 @@ fn write_status(
     let verification = verification_line(view);
     let closing = match view.completion.state {
         CompletionState::Green => {
-            "Every active layer is GREEN: completion allowed.".to_owned()
+            let task_note = tasks
+                .filter(|tasks| tasks.open > 0)
+                .map(|tasks| {
+                    format!(
+                        " Project verification is GREEN, but {} bounded task{} remain unfinished; GREEN does not close task obligations.",
+                        tasks.open,
+                        if tasks.open == 1 { "" } else { "s" }
+                    )
+                })
+                .unwrap_or_default();
+            format!("Every active layer is GREEN: completion allowed.{task_note}")
         }
         CompletionState::Yellow => format!(
             "YELLOW means NOT COMPLETE. Supply the missing witnesses, then {verification} until GREEN."

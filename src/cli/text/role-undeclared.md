@@ -1,0 +1,1 @@
+process memory declares no role::{{role}}, so the model cannot be checked against what the role permits. Register process memory in project.bla with process "process.bla", declare role "{{role}}" { model ["<id>"] } in that file, then retry; blabla guide memory shows the declaration shape and blabla explain role::{{role}} confirms it.

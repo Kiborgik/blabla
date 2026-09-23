@@ -1,0 +1,125 @@
+{
+  "case": "diagnoses-yellow-verification",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "accepts-before-editing",
+      "kind": "accept_before_edit",
+      "weight": 2,
+      "required": true
+    },
+    {
+      "id": "records-declared-check",
+      "kind": "evidence_recorded",
+      "weight": 2,
+      "required": true,
+      "path": ".blabla/tasks/diagnose-yellow.json"
+    },
+    {
+      "id": "ready-record",
+      "kind": "task_field",
+      "weight": 2,
+      "required": true,
+      "field": "state",
+      "equals": "ready",
+      "path": ".blabla/tasks/diagnose-yellow.json"
+    },
+    {
+      "id": "names-the-unexercised-rule",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": "REPORT.md",
+      "pattern": "archived-ids-unique"
+    },
+    {
+      "id": "states-the-verdict",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "REPORT.md",
+      "pattern": "\\bYELLOW\\b"
+    },
+    {
+      "id": "names-the-witness",
+      "kind": "file_regex",
+      "weight": 2,
+      "required": false,
+      "path": "REPORT.md",
+      "pattern": "(?i)at least two|two members|two archived|two or more"
+    },
+    {
+      "id": "reads-the-verdict",
+      "kind": "command",
+      "weight": 2,
+      "required": true,
+      "outcome": "any",
+      "argv_any": [
+        [
+          "finish"
+        ],
+        [
+          "status"
+        ],
+        [
+          "explain",
+          "behavior::archived-ids-unique"
+        ]
+      ]
+    },
+    {
+      "id": "contracts-preserved",
+      "kind": "unchanged",
+      "weight": 3,
+      "required": true,
+      "glob": "*.bla"
+    },
+    {
+      "id": "app-unchanged",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "app.py"
+    },
+    {
+      "id": "store-unchanged",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "widget/*"
+    },
+    {
+      "id": "writes-only-the-report",
+      "kind": "scope",
+      "weight": 2,
+      "required": true,
+      "paths": [
+        "REPORT.md"
+      ]
+    },
+    {
+      "id": "verification-still-yellow",
+      "kind": "observation",
+      "weight": 1,
+      "required": true,
+      "name": "status",
+      "exit": 5
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-body-opened",
+      "kind": "skill_read",
+      "weight": 1,
+      "required": false,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

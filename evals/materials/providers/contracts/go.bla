@@ -1,0 +1,12 @@
+module model  "go/model/model.go"
+module store  "go/store/store.go"
+module format "go/format/format.go"
+
+require "the-store-is-a-type":                  symbol store::Store
+require "state-survives-a-restart":             symbol store::Store.Save
+require "the-format-encodes":                   symbol format::Encode
+require "the-store-uses-the-model":             dependency store -> model
+require "the-store-encodes-through-the-format": dependency store -> format
+
+forbid "the-model-stays-below-the-store":       dependency model -> store
+forbid "the-format-stays-below-the-store":      dependency format -> store

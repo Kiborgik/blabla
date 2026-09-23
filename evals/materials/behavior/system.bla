@@ -1,0 +1,27 @@
+system "model" {
+    purpose "Define what a widget is: its identity and its fields, independent of how it is stored."
+    paths ["widget/model.py"]
+}
+
+system "store" {
+    purpose "Persist the widget list to disk and read it back at start, owning the record format on disk."
+    paths ["widget/store.py"]
+    knowledge ["persistence"]
+}
+
+responsibility "record-format" {
+    owner "store"
+    statement "The layout of the saved widget file: which keys each record carries and how the file is encoded."
+}
+
+responsibility "widget-fields" {
+    owner "model"
+    statement "The names and meaning of a widget's fields, listed once in the model."
+}
+
+seam "widget-records" {
+    between ["store", "model"]
+    value "Widget"
+    statement "The store reads and writes Widget values; the model never learns how they are stored."
+    moves_with ["store"]
+}

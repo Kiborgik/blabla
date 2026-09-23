@@ -1,0 +1,8 @@
+{
+  "materials": ["shared"],
+  "remove": ["contracts", "project.bla"],
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Widget"]}
+  ],
+  "observations": ["syntax", "persistence"]
+}

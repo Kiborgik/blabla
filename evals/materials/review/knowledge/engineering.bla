@@ -1,0 +1,13 @@
+knowledge "engineering" {
+    purpose "How a change is made small, correct and honest about what it does."
+}
+
+ruling "smallest-correct-change" {
+    pack "engineering"
+    statement "Change only what the task requires, and make that change complete. A diff that touches more than it needs hides the part that matters; a diff that touches less than it needs claims a result it does not have."
+}
+
+ruling "a-stub-is-not-an-implementation" {
+    pack "engineering"
+    statement "A function whose body returns a constant, passes, or does nothing is a placeholder. It may make a check pass; it does not carry out the obligation its name states, and a task delivered on a placeholder is not done."
+}

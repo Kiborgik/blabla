@@ -1,0 +1,9 @@
+project Polyglot
+
+process "process.bla"
+
+use structure "contracts/rust.bla"
+use structure "contracts/typescript.bla"
+use structure "contracts/go.bla"
+use structure "contracts/java.bla"
+use structure "contracts/c.bla"

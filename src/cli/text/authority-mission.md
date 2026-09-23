@@ -1,0 +1,1 @@
+Owner intent. Authoritative about what this project is for; never checked against the repository and never part of completion.

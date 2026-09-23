@@ -1,0 +1,1 @@
+Either the role accepts the assignment it is working on, with blabla task accept <name> --model <id>, or the change belongs to another task. An acceptance records that a role took the work through this CLI; it never proves the role read what it retrieved.

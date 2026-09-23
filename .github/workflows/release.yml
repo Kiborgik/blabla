@@ -79,6 +79,6 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           name: BlaBla ${{ steps.version.outputs.number }}
-          prerelease: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: dist/*
           body_path: .github/release-notes/notes-${{ github.ref_name }}.md

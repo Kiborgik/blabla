@@ -1,0 +1,11 @@
+module model "widget/model.py"
+module store "widget/store.py"
+
+require "a-widget-is-a-type":            symbol model::Widget
+require "the-model-names-its-fields":    symbol model::FIELDS
+require "the-store-is-a-type":           symbol store::WidgetStore
+require "state-is-read-back-at-start":   symbol store::WidgetStore.load
+require "state-survives-a-restart":      symbol store::WidgetStore.save
+require "the-store-uses-the-model":      dependency store -> model
+
+forbid "the-model-stays-below-the-store": dependency model -> store

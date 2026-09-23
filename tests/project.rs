@@ -501,7 +501,6 @@ fn init_creates_a_draft_project_idempotently_and_preserves_agents_md() {
         assert!(agents.contains(identity), "missing {identity}: {agents}");
     }
     assert!(agents.contains("blabla explain <identity>"), "{agents}");
-    assert!(agents.contains("ADVISORY"), "{agents}");
     assert!(agents.contains("blabla finish"), "{agents}");
     assert!(agents.contains("OVERALL GREEN"), "{agents}");
     assert!(agents.contains("YELLOW means NOT COMPLETE"), "{agents}");
@@ -867,6 +866,52 @@ fn finish_runs_the_canonical_profile_from_the_project_root_and_gates_completion(
     assert!(human.contains("STALE (profile changed"), "{human}");
     assert_eq!(finish_json(root).0, 0);
     assert_eq!(status_json(root).0, 0);
+}
+
+#[test]
+fn green_status_keeps_unfinished_tasks_separate_and_requires_an_explicit_choice() {
+    let temp = profiled_fixture(
+        &["python", "app.py", "persistent"],
+        "    seed 3\n    cases 1\n    steps 12\n",
+    );
+    let root = temp.path();
+    let (exit, finished) = finish_json(root);
+    assert_eq!(exit, 0, "{finished}");
+
+    for name in ["one", "two"] {
+        let output = run_in(
+            Some(root),
+            &args(&[
+                "task",
+                "open",
+                name,
+                "--role",
+                "worker",
+                "--statement",
+                "a bounded change",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.py",
+                "--check",
+                "cargo test --lib",
+                "--json",
+            ]),
+        );
+        assert_eq!(output.status.code(), Some(0));
+    }
+
+    let human = text(&run_in(Some(root), &args(&["status"])).stdout);
+    assert!(human.contains("Completion:  GREEN"), "{human}");
+    assert!(
+        human.contains("Project verification is GREEN, but 2 bounded tasks remain unfinished"),
+        "{human}"
+    );
+    assert!(
+        human.contains("choose a task explicitly before challenging"),
+        "{human}"
+    );
+    assert!(!human.contains("  blabla challenge\n"), "{human}");
 }
 
 #[test]

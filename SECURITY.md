@@ -12,4 +12,4 @@ Observations come from the application's adapter; an adapter that fabricates sta
 
 ## Reporting
 
-Report vulnerabilities privately to the repository owner through GitHub's private vulnerability reporting for this repository. Include the BlaBla version (`blabla --version`), the platform and a minimal contract or project that reproduces the problem. Expect an acknowledgement within a week; this is a volunteer alpha project without a fixed disclosure timeline.
+Report vulnerabilities privately to the repository owner through GitHub's private vulnerability reporting for this repository. Include the BlaBla version (`blabla --version`), the platform and a minimal contract or project that reproduces the problem. Expect an acknowledgement within a week; this is a volunteer project without a fixed disclosure timeline.

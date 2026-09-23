@@ -1,0 +1,13 @@
+knowledge "persistence" {
+    purpose "How a small application keeps state across restarts without losing or corrupting it. Reusable across projects and languages."
+}
+
+ruling "one-writer-owns-the-format" {
+    pack "persistence"
+    statement "Exactly one module decides the on-disk record format. Before changing the format, read every place that parses it, write the new reader first, and only then change the writer, so a file written by either version can still be read."
+}
+
+ruling "write-then-rename" {
+    pack "persistence"
+    statement "Write a new file beside the old one and rename it into place, so a crash mid-write leaves the previous complete file rather than a truncated one."
+}

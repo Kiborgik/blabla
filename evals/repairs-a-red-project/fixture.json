@@ -1,0 +1,15 @@
+{
+  "materials": ["shared", "structure", "structure-plus", "roles"],
+  "break_model": true,
+  "remove": ["contracts"],
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Widget"]}
+  ],
+  "after_arm": [
+    {"run": ["blabla", "task", "open", "repair-structure", "--role", "worker",
+             "--statement", "The structure checks of this project fail. Find what is wrong in the widget package and repair it in the Python sources without changing declared intent.",
+             "--scope", "widget", "--deliverable", "widget/model.py", "--deliverable", "widget/store.py",
+             "--check", "blabla status"]}
+  ],
+  "observations": ["syntax", "status", "challenge:repair-structure"]
+}

@@ -1,0 +1,1 @@
+BlaBla reads no meaning from source code. It cannot tell whether a branch is reachable, whether a name is the one you meant or whether a test asserts the thing it claims; a challenge about those never appears because it could not be grounded.

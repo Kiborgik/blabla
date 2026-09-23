@@ -1,0 +1,167 @@
+{
+  "case": "navigates-project-memory",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "accepts-before-editing",
+      "kind": "accept_before_edit",
+      "weight": 2,
+      "required": true
+    },
+    {
+      "id": "records-declared-check",
+      "kind": "evidence_recorded",
+      "weight": 2,
+      "required": true,
+      "path": ".blabla/tasks/answer-ownership.json"
+    },
+    {
+      "id": "ready-record",
+      "kind": "task_field",
+      "weight": 2,
+      "required": true,
+      "field": "state",
+      "equals": "ready",
+      "path": ".blabla/tasks/answer-ownership.json"
+    },
+    {
+      "id": "leaves-product-gate-to-owner",
+      "kind": "no_command",
+      "weight": 1,
+      "required": true,
+      "argv": [
+        "finish"
+      ]
+    },
+    {
+      "id": "names-the-owning-system",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": "ANSWER.md",
+      "pattern": "system::store\\b"
+    },
+    {
+      "id": "names-the-ruling",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": "ANSWER.md",
+      "pattern": "ruling::persistence::one-writer-owns-the-format"
+    },
+    {
+      "id": "finds-the-owner-by-any-route",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "ANSWER.md",
+      "pattern": "(?i)\\bstore\\b"
+    },
+    {
+      "id": "finds-the-ruling-by-any-route",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "ANSWER.md",
+      "pattern": "one-writer-owns-the-format"
+    },
+    {
+      "id": "reads-status",
+      "kind": "command",
+      "weight": 1,
+      "required": false,
+      "outcome": "any",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "opens-system-memory",
+      "kind": "command",
+      "weight": 2,
+      "required": false,
+      "argv_any": [
+        [
+          "explain",
+          "system::store"
+        ],
+        [
+          "explain",
+          "responsibility::record-format"
+        ],
+        [
+          "explain",
+          "seam::widget-records"
+        ]
+      ]
+    },
+    {
+      "id": "opens-knowledge-memory",
+      "kind": "command",
+      "weight": 2,
+      "required": false,
+      "argv_any": [
+        [
+          "explain",
+          "knowledge::persistence"
+        ],
+        [
+          "explain",
+          "ruling::persistence::one-writer-owns-the-format"
+        ]
+      ]
+    },
+    {
+      "id": "opens-mission-memory",
+      "kind": "command",
+      "weight": 1,
+      "required": false,
+      "argv_any": [
+        [
+          "explain",
+          "mission::widget"
+        ],
+        [
+          "explain",
+          "priority::one-format-at-a-time"
+        ],
+        [
+          "explain",
+          "priority::durable-over-fast"
+        ]
+      ]
+    },
+    {
+      "id": "memory-untouched",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "*.bla"
+    },
+    {
+      "id": "writes-only-the-answer",
+      "kind": "scope",
+      "weight": 2,
+      "required": true,
+      "paths": [
+        "ANSWER.md"
+      ]
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-body-opened",
+      "kind": "skill_read",
+      "weight": 1,
+      "required": false,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 pub const FILE_NAME: &str = "process.bla";
 
-pub const AUTHORITY: &str = "Process policies are advisory in this host. BlaBla describes the intended authority and workflow but does not prevent the agent from bypassing them.";
+pub const AUTHORITY: &str = include_str!("../cli/text/authority-process.md");
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Role {
@@ -53,7 +53,6 @@ pub struct ProcessMemory {
 pub struct ProcessStatus {
     pub file: String,
     pub state: &'static str,
-    pub enforcement: &'static str,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub problems: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -88,7 +87,6 @@ pub struct ProcessExplainView {
     pub flow: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
-    pub enforcement: &'static str,
     pub authority: &'static str,
 }
 
@@ -245,7 +243,6 @@ pub fn status(memory: &Memory<ProcessMemory>, file: &str) -> Option<ProcessStatu
     Some(ProcessStatus {
         file: file.to_owned(),
         state: memory.state(),
-        enforcement: "advisory",
         problems: memory.problems(),
         roles: memory
             .present()
@@ -321,7 +318,6 @@ pub fn explain(memory: &Memory<ProcessMemory>, query: &str) -> Option<ProcessExp
         steps: Vec::new(),
         flow: None,
         command: None,
-        enforcement: "advisory",
         authority: AUTHORITY,
     };
     if wanted.is_none_or(|kind| kind == "role")

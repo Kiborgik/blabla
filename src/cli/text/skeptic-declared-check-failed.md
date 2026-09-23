@@ -1,0 +1,1 @@
+Repair what the check reports and record the new result, or state why a failing result is the intended outcome. A result that ran is not a result that passed, and neither absence nor staleness describes this one.

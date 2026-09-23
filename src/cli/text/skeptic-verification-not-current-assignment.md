@@ -1,0 +1,1 @@
+Project-wide verification belongs to the orchestrator, not to this assignment: settle the assignment's own check, challenge it and hand it back; the orchestrator decides whether the project is complete.

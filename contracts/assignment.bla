@@ -14,6 +14,7 @@ state evidence_recorded: bool
 state evidence_current: bool
 state evidence_answers_the_declared_check: bool
 state readiness_supported: bool
+state challenge_current: bool
 state exception_approved: bool
 state breach_in_scope: bool
 state closed: bool
@@ -22,6 +23,7 @@ state findings: int
 
 action open_a_task()
 action resume_a_task_already_under_way()
+action resume_a_closed_task_after_a_concurrent_change()
 action open_a_task_whose_name_is_already_recorded()
 action record_a_finding()
 action widen_the_scope_to_cover_the_breach()
@@ -32,6 +34,7 @@ action approve_the_proposed_model()
 action change_a_deliverable()
 action record_a_lens_assessment()
 action mark_ready_for_review()
+action challenge_the_assignment()
 action accept_the_result()
 
 action record_a_check_result()
@@ -84,6 +87,12 @@ when resume_a_task_already_under_way {
     expect "a-resumed-hand-back-stands-unchallenged":
         after.phase != "ready" or count(after.standing) == 0
     expect "a-resumed-task-resolves-its-lenses": count(after.lenses) != 0
+}
+
+when resume_a_closed_task_after_a_concurrent_change {
+    expect "closed-history-retains-its-accepted-result": after.closed and after.result_accepted
+    expect "later-changes-remain-observable":
+        any(after.standing, s => s.class == "attribution-unknown")
 }
 
 when widen_the_scope_to_cover_the_breach {
@@ -141,17 +150,27 @@ when record_a_lens_assessment {
         after.verdicts == before.verdicts
 }
 
+when challenge_the_assignment {
+    expect "challenging-does-not-transition-the-assignment": after.phase == before.phase
+    expect "a-challenge-receipt-requires-supported-evidence":
+        not after.challenge_current or after.readiness_supported
+}
+
 when mark_ready_for_review {
+    expect "a-new-hand-back-has-current-evidence":
+        before.phase == "ready" or after.phase != "ready" or after.readiness_supported
+    expect "a-new-hand-back-has-an-explicit-current-challenge":
+        before.phase == "ready" or after.phase != "ready" or after.challenge_current
     expect "an-invalid-transition-changes-nothing":
         before.assignment_accepted or after.phase == before.phase
     expect "ready-for-review-is-not-result-acceptance":
         before.closed or not after.result_accepted
     expect "an-unassessed-lens-is-visible-at-hand-back":
-        after.phase != "ready" or
+        (after.phase != "accepted" and after.phase != "ready") or
         all(after.lenses, l => any(after.assessed, a => a.id == l.id)) or
         any(after.standing, s => s.class == "lens-unassessed")
     expect "unsupported-readiness-is-visible":
-        after.phase != "ready" or
+        (after.phase != "accepted" and after.phase != "ready") or
         after.readiness_supported or
         any(after.standing, s => s.class == "readiness-without-evidence") or
         any(after.standing, s => s.class == "evidence-superseded") or
@@ -234,7 +253,8 @@ when accept_the_result {
     expect "a-reconciled-hand-back-is-what-accepts-a-result":
         before.result_accepted or
         after.result_accepted ==
-            (before.phase == "ready" and count(before.standing) == 0)
+            (before.phase == "ready" and before.readiness_supported and
+                before.challenge_current and count(before.standing) == 0)
 }
 
 when reconcile_the_standing_challenges {

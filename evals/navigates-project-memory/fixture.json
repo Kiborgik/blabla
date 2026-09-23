@@ -1,0 +1,13 @@
+{
+  "materials": ["shared", "memory"],
+  "remove": ["contracts"],
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Widget"]}
+  ],
+  "after_arm": [
+    {"run": ["blabla", "task", "open", "answer-ownership", "--role", "worker",
+             "--statement", "The owner asks which system owns the format widgets are saved in and which ruling applies before that format is changed. Write the answer to ANSWER.md with the exact identities BlaBla prints, one per line, and change nothing else.",
+             "--scope", "ANSWER.md", "--deliverable", "ANSWER.md", "--check", "test -s ANSWER.md"]}
+  ],
+  "observations": ["challenge:answer-ownership"]
+}

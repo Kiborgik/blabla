@@ -98,24 +98,27 @@ normal path:
 5. **Accept the assignment.** `blabla task accept <name> --model <id>` before changing anything.
    Acceptance records that a role took the work through BlaBla and nothing about what it read.
 6. **Implement inside the scope.** Ordinary code, only in the paths the task names.
-7. **Run the declared check and record it.** `blabla task evidence <name> --exit <code> --tool <tool>`
-   after reading the whole run — not the whole gate, and never a summary line alone.
-8. **Challenge the account.** `blabla challenge <name>` before handing back.
-9. **Hand back.** `blabla task ready <name>`. A hand-back is not acceptance of the result.
+7. **Run the declared check and record it while the task is ACCEPTED.** `blabla task evidence <name> --exit <code> --tool <tool>`
+   after reading the whole run — not a summary line alone. Evidence is bound to the task tree and
+   only a current successful result can support READY.
+8. **Challenge the account.** `blabla challenge <name>` records or clears the explicit assignment
+   challenge receipt. Project-wide verification concerns remain orchestrator-owned.
+9. **Hand back.** `blabla task ready <name>` requires ACCEPTED ownership, current successful evidence
+   and that explicit challenge receipt. A READY task must be accepted again before edits or new evidence.
 10. **Independent review.** A reviewer reads the task and the diff in a context that never saw the
     work being done, records one assessment per lens the role consults with `blabla task lens`, and
     records defects with `blabla task finding`.
 11. **Integrate.** The orchestrator settles each finding against the repository and records what
     settled it with `blabla task resolve`.
-12. **Accept the result.** `blabla task close <name> --model <id>`, refused while a grounded
-    challenge stands.
+12. **Accept the result.** `blabla task close <name> --model <id>`, refused until the fresh task
+    evidence, receipt and project report satisfy the close prerequisites.
 13. **Decide completion.** `blabla finish`.
 
 In this repository that flow is `flow::development`, and `role::orchestrator`, `role::worker` and
 `role::reviewer` are the roles its steps name.
 
-Like the rest of Process this is **advisory**: BlaBla describes the loop and enforces no part of it.
-It does not schedule work and does not launch agents.
+Process describes the intended loop. Task transitions enforce the recorded prerequisites
+described below. BlaBla does not schedule work or launch agents.
 
 `challenge` and the reviewer are not the same thing. `challenge` is a deterministic check over
 recorded evidence and reads no meaning from source code. The reviewer is a role: it reads the diff,
@@ -125,14 +128,25 @@ forms judgements BlaBla cannot, and records them as findings. Neither decides co
 
 Two different questions, answered by different commands. `blabla finish` decides whether the
 **project** is complete: structure evaluated live, the canonical behavior campaign run, `OVERALL`
-GREEN or not. A task's transitions decide only whether one **handoff** is in order. Process prose
-stays advisory, but the implemented transitions do check selected recorded conditions: `ready`
-needs an acceptance on record, `close` needs a hand-back with no grounded challenge standing, and
-a closed task accepts no further amendment. That is the whole of the enforcement. Neither a clean
-task record nor `OVERALL GREEN` alone establishes everything: a record shows what was recorded
-rather than what was done, and GREEN is bounded by the campaign and the providers that produced it.
+GREEN or not. A task's transitions decide only whether one **handoff** is in order, and they enforce
+recorded prerequisites. Tasks render as
+`OPEN`, `ACCEPTED`, `BLOCKED`, `READY` or `CLOSED`. Evidence is accepted only in ACCEPTED; READY
+requires accepted ownership, current successful evidence and an explicit assignment challenge receipt
+tied to the task's own paths. An edit inside the write scope, the deliverables or the declared
+inputs, new evidence, findings or policy metadata invalidate that receipt; an edit anywhere else,
+including a path attributed to concurrent work, does not. A READY worker resumes by accepting before changing anything. CLOSE still requires fresh
+task evidence, a current receipt and the current project report. Neither a clean task record nor
+`OVERALL GREEN` alone establishes everything: a record shows what was recorded rather than what was
+done, and GREEN is bounded by the campaign and the providers that produced it.
 
 ## Bounded tasks
+
+Check evidence covers the write scope and deliverables by default. Use `--input PATH` on
+`task open` or `task check` to declare the actual check dependencies, including read dependencies
+outside the write scope; deliverables are always included. Directory inputs cover their descendants.
+Creating, deleting or changing an input invalidates evidence, including a path absent when checked.
+Declaring inputs is an orchestrator claim, not automatic dependency discovery. Omitting `--input`
+when correcting a check restores the scope default.
 
 A bounded task is the handoff record between an orchestrator and a worker. It is **machine state,
 not project memory**: BlaBla writes it under `.blabla/tasks/`, no manifest registers it, nothing
@@ -143,17 +157,24 @@ blabla task open <name> --role worker --statement "…" --scope src/cli --delive
 blabla task show <name>                 what this task may write and what it owes, then its routes
 blabla task accept <name> --model <id>  take the assignment; the model is compared exactly against what the role lists, and `blabla challenge <name>` reports a mismatch immediately rather than at hand-back
 blabla task evidence <name> --exit <code> --tool <tool>   the declared check's result, bound to the inputs it saw
+blabla task evidence <name> --run       for a check declared as a program and its arguments: BlaBla runs it from the project root without a shell and records the exit code it observed
 blabla task block <name> "…"            stop, and record why as a finding
+blabla task note <name> "…"             keep a note on the record; a note is not a finding and blocks nothing
 blabla task finding <name> "…"          something discovered and not yet settled
+blabla task addressed <name> <id> "…" --model <id>   what the carrying role did about a finding; an addressed finding blocks neither hand-back nor close, and resolving it stays the orchestrator's job
+blabla task lens <name> <lens> "…"      one assessment against one lens the role consults, named by its pack; each is recorded before hand-back
 blabla task ready <name>                hand back for review
-blabla task lens <name> <lens> "…"      one reviewer assessment against one lens the role consults, named by its pack
-blabla task resolve <name> <id> --evidence "…"
-blabla task check <name> "…"            declare the check a record opened without, or correct it
+blabla task resolve <name> <id> --evidence "…" --model <id>   what settled a finding; the orchestrator's decision
+blabla task attribute <name> <path>... --kind <task|concurrent|unknown> --model <id>   the orchestrator states where a changed path came from
+blabla task check <name> "…"            declare the check a record opened without, or correct it; --input <path>... names what it reads
+blabla task check <name> --argv <prog> <arg>...   the same check as a program and its arguments; --argv, like --check-argv on task open, takes every argument after it, so it goes last
+blabla task deliverable <name> --add <path>...   owe more
+blabla task deliverable <name> --remove <path> --reason "…" --model <id>   withdraw what the task owes; a directory withdraws every file owed under it
 blabla task scope <name> --add <path>   widen a scope that was declared too narrowly
 blabla task close <name> --model <id>   accept the result; refused while a grounded challenge stands
 ```
 
-A task moves `open → accepted → ready → closed`, with `blocked` reachable from `accepted` and
+A task moves `OPEN → ACCEPTED → READY → CLOSED`, with `BLOCKED` reachable from `ACCEPTED` and
 back. `blabla guide loop` prints the worker's routes in the order they are taken, generated from
 the same source as `task show`, so the two cannot drift apart.
 
@@ -167,8 +188,8 @@ A deliverable is measured per file, so a directory named as one becomes the file
 file that appeared since. The files it walks are the ones the implementation fingerprint walks, so
 build output and `.blabla` are never owed.
 
-A recorded finding outlives the context that found it. A finding with no resolution is evidence
-still outstanding, and `challenge` reports it while it stays that way. The evidence written into a
+A recorded finding outlives the context that found it. A finding with neither a resolution nor an
+addressed mark is evidence still outstanding, and `challenge` reports it while it stays that way. The evidence written into a
 resolution is the recording agent's claim about the repository, not BlaBla's verdict on it.
 
 ## Challenging the account of the work
@@ -179,26 +200,29 @@ blabla challenge
 
 `challenge` holds the current account of the work against evidence BlaBla already has and states
 **one** grounded challenge to reconcile — the strongest available — or says that nothing can be
-grounded. Run it before reporting a task done, before writing a review verdict and before the
-gate. Exit 0 when no challenge stands, 1 when one does.
+grounded. For a selected ACCEPTED task it records or clears the assignment challenge receipt; a
+project-only inspection remains nonmutating. Run it before reporting a task done, before writing a
+review verdict and before the gate. Without a task it exits 0 when no challenge stands and 1 when
+one does; with a task that is not closed it exits on the assignment check, 0 when the assignment is
+clear and 1 when it needs attention, because project-wide verification stays the orchestrator's.
 
 The evidence it may use, and nothing else:
 
 | Class | Grounded in |
 | --- | --- |
-| `unresolved-finding` | a finding recorded against an open task with no resolution |
+| `unresolved-finding` | a finding recorded against an open task with neither a resolution nor an addressed mark |
 | `deliverable-unchanged` | a declared deliverable absent, or byte-identical to the task's snapshot |
 | `scope-breach` | a file changed since the task opened that no declared scope covers |
 | `work-without-acceptance` | a file changed since the task opened while no role accepted the assignment |
 | `model-outside-role-policy` | the task was accepted on a model the role's declared choices do not list, with no owner ruling |
 | `exception-unresolved` | a model exception was proposed and no owner ruling answers it |
 | `declared-check-failed` | the most recent result for the declared check exited non-zero |
-| `readiness-without-evidence` | a hand-back with no result recorded for the declared check, or only results for other checks |
+| `readiness-without-evidence` | an accepted or handed-back task with no result recorded for the declared check, or only results for other checks |
 | `evidence-superseded` | the most recent result for the declared check ran against inputs that have since changed |
-| `lens-unassessed` | a hand-back with a lens the role consults carrying no assessment; a lens is one of the knowledge packs `role::<name>` lists under Consult, so `blabla task lens` takes the pack name and not a `ruling::<pack>::<name>` identity |
+| `lens-unassessed` | an accepted or handed-back task with a lens the role consults carrying no assessment; a lens is one of the knowledge packs `role::<name>` lists under Consult, so `blabla task lens` takes the pack name and not a `ruling::<pack>::<name>` identity |
 | `attribution-unknown` | a path changed since the task opened whose origin, this task or concurrent work, is not stated |
 | `vacuous-rule` | a structure rule the falsifier reports VACUOUS — a rule standing on absent ground |
-| `verification-not-current` | the completion state is not GREEN |
+| `verification-not-current` | project completion is not current; this remains an orchestrator-owned concern for a selected assignment challenge |
 
 One challenge is reported at a time, the strongest available; the classes it could not ground are
 listed with the evidence each lacked.
@@ -272,4 +296,8 @@ blabla init --agents
 blabla guide bootstrap
 ```
 
-`init --agents` writes a small managed `AGENTS.md` block and a portable skill under `.agents/skills/blabla/`.
+`init --agents` writes a small managed `AGENTS.md` block and a portable skill under `.agents/skills/blabla/` and `.claude/skills/blabla/`.
+
+The [agent integration smoke tests](../evals/README.md) exercise discovery and this workflow in
+Claude Code and Codex. Their [findings](../evals/findings.md) distinguish source fixes from observed
+agent behavior; these manual diagnostics are separate from the product completion gate.

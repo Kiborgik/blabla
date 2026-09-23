@@ -3,8 +3,8 @@
 **Executable, queryable project memory for coding agents.**
 
 [![CI](https://github.com/Kiborgik/blabla/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Kiborgik/blabla/actions/workflows/ci.yml)
-![status: experimental alpha](https://img.shields.io/badge/status-experimental%20alpha-orange)
-![version 0.7.0-alpha](https://img.shields.io/badge/version-0.7.0--alpha-blue)
+![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-yellow)
+![version 0.8.0](https://img.shields.io/badge/version-0.8.0-blue)
 ![license MIT](https://img.shields.io/badge/license-MIT-green)
 ![Rust stable](https://img.shields.io/badge/rust-stable-black)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -174,7 +174,7 @@ blabla explain ruling::testing::read-the-whole-run  one ruling, in full
 
 Surveying a pack costs one line per ruling; reading a ruling costs one more `explain`. An agent loads the entry it needs, not the file.
 
-Project memory is validated within itself, never against the repository, and never reaches `OVERALL`. A project that declares none of it is not thereby incomplete. Process is advisory: BlaBla describes the intended authority and does not enforce it.
+Project memory is validated within itself, never against the repository, and never reaches `OVERALL`. A project that declares none of it is not thereby incomplete. Process policies and flows are advisory: BlaBla describes the intended authority and does not enforce it. The task commands enforce the recorded hand-back and close prerequisites, the permitted models on `addressed`, `resolve`, `attribute` and `deliverable --remove`, and a few declaration rules: no ignored deliverable or input, no attribution of an unchanged path, no change to a closed record.
 
 `blabla guide memory` is the authoring procedure; `blabla check <file>.bla` validates a memory file while it is still being written. Full reference: [docs/project.md](docs/project.md).
 
@@ -191,7 +191,7 @@ Process declares that flow as ordered `flow` and `step` entries. It describes th
 
 A **bounded task** carries one change across a handoff: the paths it may write, the deliverables it owes, and the findings raised against it. Tasks live under `.blabla/tasks/` as transient machine state — not authored memory, not validated for truth, not part of completion.
 
-`blabla challenge` checks that recorded account against evidence BlaBla already holds and reports one concrete discrepancy, such as a deliverable that never changed or a finding left unresolved. It is a deterministic check, not a semantic code reviewer, and it does not change what `finish` decides or what it exits with.
+`blabla challenge` checks that recorded account against evidence BlaBla already holds and reports one concrete discrepancy, such as a deliverable that never changed or a finding left unresolved. For a selected ACCEPTED task it records or clears the explicit assignment challenge receipt; a project-only inspection remains nonmutating. It is a deterministic check, not a semantic code reviewer, and it does not change what `finish` decides or what it exits with.
 
 ```text
 blabla status
@@ -206,7 +206,7 @@ blabla task close <name> --model <id>    refused while a grounded challenge stan
 blabla finish
 ```
 
-`blabla task show <name>` prints those routes for one assignment, and `blabla guide loop` prints the same routes from the same source. Project verification and task acceptance are different questions: `finish` decides whether the project is complete, the task transitions decide only whether one handoff is in order, and neither a clean task record nor `OVERALL GREEN` alone establishes everything.
+`blabla task show <name>` prints those routes for one assignment, and `blabla guide loop` prints the same routes from the same source. Tasks render `OPEN`, `ACCEPTED`, `BLOCKED`, `READY` or `CLOSED`. Evidence is accepted only in ACCEPTED; READY requires current successful declared evidence plus an explicit assignment challenge receipt tied to the task's own paths. An edit inside the write scope, the deliverables or the declared inputs, new evidence, findings or policy metadata invalidate that receipt, so a READY worker accepts again before changing anything; an edit anywhere else, including a path attributed to concurrent work, leaves it standing. Project verification and task acceptance are different questions: `finish` decides whether the project is complete, while task transitions decide whether one handoff is ready for review.
 
 The classes it can report, and their limits: [docs/agent-workflow.md](docs/agent-workflow.md).
 
@@ -214,10 +214,10 @@ The classes it can report, and their limits: [docs/agent-workflow.md](docs/agent
 
 Requirements: stable Rust, plus Python 3.10+ on `PATH` if a structure contract names a `.py` module.
 
-Install the published prerelease. The explicit version is required because `0.7.0-alpha` is a prerelease:
+Install the published release:
 
 ```bash
-cargo install blabla --version 0.7.0-alpha
+cargo install blabla
 ```
 
 Or build from source:
@@ -232,7 +232,7 @@ The binary is `target/release/blabla` (`blabla.exe` on Windows).
 
 ```text
 $ blabla --version
-blabla 0.7.0-alpha
+blabla 0.8.0
 ```
 
 ### Try the Todo example
@@ -313,9 +313,30 @@ More detail: [architecture](docs/architecture.md) · [project](docs/project.md) 
 
 ## Experiments
 
-[docs/research.md](docs/research.md) records several: an earlier small-model diagnostic, whose lasting result was the GREEN/YELLOW distinction rather than a score; the rules a memory-utility comparison follows; and the handoff benchmark below, which is the headline comparison and carries stated limits.
+[docs/research.md](docs/research.md) records several: an earlier small-model diagnostic, whose lasting result was the GREEN/YELLOW distinction rather than a score; the rules a memory-utility comparison follows; and the historical handoff benchmark below, which carries stated limits.
 
-The original motivation was context and handoff drift, so I tested BlaBla on one synthetic project across four fresh Haiku sessions. All three conditions received the same underlying intent in different forms:
+The current Claude Code and Codex smoke suite is a separate diagnostic. Eleven cases use the
+same `evals/materials.py` builder and shared material: navigating project memory, repairing
+structure in Python, Rust, TypeScript, Go, Java and C, carrying an assignment and reporting one
+that cannot be done, repairing behavior from a recorded counterexample, diagnosing YELLOW,
+repairing an adapter protocol fault, and reviewing a hand-back. Orchestrator work is not given to
+the small models, so bootstrapping, recovery and project-wide falsification go unmeasured. The subjects are small local
+models, `qwen3.5:4b` as worker and `qwen3.5:9b` as reviewer, run through both hosts with and
+without BlaBla. Both hosts stage fresh source builds, capture fixture inputs outside the subject
+workspace, and use the same case contract and grading logic. It measures observed agent behavior
+per criterion, with the unmeasured capabilities named; it does not replace product gates or turn a
+campaign into a model ranking. See [evals/README.md](evals/README.md) for commands and limitations
+and [evals/findings.md](evals/findings.md) for what preparing the suite found.
+
+The two arms are with BlaBla and without BlaBla, on the same project: both carry the same
+`README.md` stating the project's rules in plain prose, as an ordinarily documented repository
+would. With BlaBla, the agent also has the manifest, the contracts, the task record, the
+onboarding block, the skill and the CLI; without it, the same job is stated in plain language and
+nothing of BlaBla is in the workspace or on the PATH. The comparison is made on the outcome checks both arms can face, and on time, tool
+actions and tokens; the BlaBla workflow checks are scored on the BlaBla side only. Cases that
+only exist with BlaBla, a hand-back, a review, a YELLOW diagnosis, have no control arm.
+
+The original motivation was context and handoff drift, so the historical benchmark tested one synthetic project across four fresh Haiku sessions. All three conditions received the same underlying intent in different forms:
 
 - **A:** growing full prose: requirements, architecture and recorded decisions
 - **B:** a maintained compact human summary
@@ -336,6 +357,10 @@ The important caveat: this is **one model, one synthetic project, one chain per 
 The benchmark also directly motivated the structure layer: one condition kept passing every runtime check while violating the requested persistence shape. Behavior alone could not see it.
 
 Methodology, prompts, scorers and results: [docs/research.md](docs/research.md) and [research/](research/).
+
+For active Claude Code and Codex integration smoke tests, see [evals/README.md](evals/README.md).
+These small local runs triage onboarding and workflow failures; their [findings](evals/findings.md)
+are separate from published research, and raw traces and workspaces stay out of Git.
 
 ## What BlaBla is not
 
@@ -366,8 +391,8 @@ It is a small executable boundary around the parts of project intent you choose 
 - no distributed/temporal verification
 - project memory is validated only within itself: it is never checked against the repository, never reaches `OVERALL`, and Process policies and flows are advisory rather than enforced
 - a challenge sees only what was recorded: an unopened task, an undeclared deliverable and an unwritten finding are all invisible to it
-- Unix process containment is implemented and untested here: the recorded containment tests are Windows-only
-- `0.7.0-alpha` is an experimental alpha with limited external testing; language, JSON and CLI APIs may still change
+- process containment is tested on Windows and Linux in CI; macOS is untested
+- BlaBla is pre-1.0 with limited external testing: a change to contract syntax, CLI options, JSON fields or exit codes ships only in a minor release and is listed under **Breaking** in `CHANGELOG.md`; a patch release never makes one
 
 ## Roadmap
 

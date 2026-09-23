@@ -1,0 +1,1 @@
+Record what the assessment was with blabla task lens, including that the lens does not apply, which is a complete answer. Recording an assessment says the question was asked; it never establishes that the design is correct.

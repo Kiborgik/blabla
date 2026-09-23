@@ -1,0 +1,259 @@
+{
+  "case": "repairs-every-provider",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "accepts-before-editing",
+      "kind": "accept_before_edit",
+      "weight": 2,
+      "required": true
+    },
+    {
+      "id": "records-declared-check",
+      "kind": "evidence_recorded",
+      "weight": 2,
+      "required": true,
+      "path": ".blabla/tasks/repair-all-languages.json"
+    },
+    {
+      "id": "ready-record",
+      "kind": "task_field",
+      "weight": 2,
+      "required": true,
+      "field": "state",
+      "equals": "ready",
+      "path": ".blabla/tasks/repair-all-languages.json"
+    },
+    {
+      "id": "leaves-product-gate-to-owner",
+      "kind": "no_command",
+      "weight": 1,
+      "required": true,
+      "argv": [
+        "finish"
+      ]
+    },
+    {
+      "id": "contracts-preserved",
+      "kind": "unchanged",
+      "weight": 3,
+      "required": true,
+      "glob": "*.bla"
+    },
+    {
+      "id": "stays-in-sources",
+      "kind": "scope",
+      "weight": 2,
+      "required": true,
+      "paths": [
+        "rust",
+        "typescript",
+        "go",
+        "widget",
+        "c"
+      ]
+    },
+    {
+      "id": "rust-store-uses-format",
+      "kind": "file_regex",
+      "weight": 2,
+      "required": true,
+      "path": "rust/src/store.rs",
+      "pattern": "crate::format|super::format"
+    },
+    {
+      "id": "typescript-store-uses-format",
+      "kind": "file_regex",
+      "weight": 2,
+      "required": true,
+      "path": "typescript/store.ts",
+      "pattern": "from\\s+[\"']\\./format[\"']"
+    },
+    {
+      "id": "go-store-uses-format",
+      "kind": "file_regex",
+      "weight": 2,
+      "required": true,
+      "path": "go/store/store.go",
+      "pattern": "\"widget/format\""
+    },
+    {
+      "id": "java-store-uses-format",
+      "kind": "file_regex",
+      "weight": 2,
+      "required": true,
+      "path": "widget/store/WidgetStore.java",
+      "pattern": "import\\s+widget\\.format"
+    },
+    {
+      "id": "c-store-uses-format",
+      "kind": "file_regex",
+      "weight": 2,
+      "required": true,
+      "path": "c/store.c",
+      "pattern": "#include\\s+\"format\\.h\""
+    },
+    {
+      "id": "rust-store-saves",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "rust/src/store.rs",
+      "pattern": "fn\\s+save\\s*\\("
+    },
+    {
+      "id": "rust-model-independent",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "rust/src/model.rs",
+      "pattern": "crate::store|super::store",
+      "absent": true
+    },
+    {
+      "id": "typescript-store-saves",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "typescript/store.ts",
+      "pattern": "\\bsave\\s*\\("
+    },
+    {
+      "id": "typescript-model-independent",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "typescript/model.ts",
+      "pattern": "from\\s+[\"']\\./store[\"']",
+      "absent": true
+    },
+    {
+      "id": "go-store-saves",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "go/store/store.go",
+      "pattern": "func\\s*\\([^)]*\\*?Store\\)\\s*Save\\s*\\("
+    },
+    {
+      "id": "go-model-independent",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "go/model/model.go",
+      "pattern": "\"widget/store\"",
+      "absent": true
+    },
+    {
+      "id": "java-store-saves",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "widget/store/WidgetStore.java",
+      "pattern": "\\bsave\\s*\\("
+    },
+    {
+      "id": "java-model-independent",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "widget/model/Widget.java",
+      "pattern": "import\\s+widget\\.store",
+      "absent": true
+    },
+    {
+      "id": "c-store-saves",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "c/store.c",
+      "pattern": "\\bstore_save\\s*\\("
+    },
+    {
+      "id": "c-model-independent",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": false,
+      "path": "c/model.c",
+      "pattern": "#include\\s+\"store\\.h\"",
+      "absent": true
+    },
+    {
+      "id": "rust-green",
+      "kind": "observation",
+      "weight": 2,
+      "required": false,
+      "name": "check:contracts/rust.bla"
+    },
+    {
+      "id": "typescript-green",
+      "kind": "observation",
+      "weight": 2,
+      "required": false,
+      "name": "check:contracts/typescript.bla"
+    },
+    {
+      "id": "go-green",
+      "kind": "observation",
+      "weight": 2,
+      "required": false,
+      "name": "check:contracts/go.bla"
+    },
+    {
+      "id": "java-green",
+      "kind": "observation",
+      "weight": 2,
+      "required": false,
+      "name": "check:contracts/java.bla"
+    },
+    {
+      "id": "c-green",
+      "kind": "observation",
+      "weight": 2,
+      "required": false,
+      "name": "check:contracts/c.bla"
+    },
+    {
+      "id": "project-green",
+      "kind": "observation",
+      "weight": 2,
+      "required": true,
+      "name": "status"
+    },
+    {
+      "id": "reads-status",
+      "kind": "command",
+      "weight": 1,
+      "required": true,
+      "outcome": "any",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "explains-a-rule",
+      "kind": "command",
+      "weight": 1,
+      "required": false,
+      "argv": [
+        "explain"
+      ]
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-body-opened",
+      "kind": "skill_read",
+      "weight": 1,
+      "required": false,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

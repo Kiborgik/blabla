@@ -153,7 +153,7 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
         name: Option<String>,
         #[arg(
             long,
-            help = "Also add the AGENTS.md block and .agents/skills/blabla/SKILL.md"
+            help = "Also add the AGENTS.md block and the skill under .agents/skills/blabla/ and .claude/skills/blabla/"
         )]
         agents: bool,
         #[arg(
@@ -177,7 +177,7 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
         action: TaskAction,
     },
     #[command(
-        about = "Hold the current work against the evidence BlaBla already has and state one grounded challenge to reconcile; reads only, decides nothing"
+        about = "Hold current work against recorded evidence; for an accepted task, record whether its hand-back prerequisites are clear"
     )]
     Challenge {
         #[arg(help = "Bounded task to challenge; default: the one open task")]
@@ -211,12 +211,37 @@ enum TaskAction {
         #[arg(
             long,
             value_name = "COMMAND",
+            conflicts_with = "check_argv",
             help = "The check that covers this task, run and recorded as its evidence"
         )]
         check: Option<String>,
+        #[arg(
+            long,
+            value_name = "PROG",
+            num_args = 0..,
+            allow_hyphen_values = true,
+            help = "Check as argv list: program and arguments"
+        )]
+        check_argv: Vec<String>,
+        #[arg(long, value_name = "PATH", num_args = 1.., help = "Check inputs; defaults to write scope. Deliverables are always included")]
+        input: Vec<String>,
     },
     #[command(about = "Record something discovered during the task that is not yet settled")]
     Finding { name: String, statement: String },
+    #[command(
+        about = "Say what the carrying role did about a finding; the orchestrator still resolves it"
+    )]
+    Addressed {
+        name: String,
+        id: usize,
+        statement: String,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The model carrying the task; must be one its role permits"
+        )]
+        model: String,
+    },
     #[command(about = "Record what settled a finding; the evidence is your claim, never BlaBla's")]
     Resolve {
         name: String,
@@ -226,7 +251,15 @@ enum TaskAction {
             help = "What settled it: a file, a line, a command and what it showed"
         )]
         evidence: String,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The orchestrator model settling it; must be one role::orchestrator permits"
+        )]
+        model: String,
     },
+    #[command(about = "Record a note on the task that is not unsettled work")]
+    Note { name: String, statement: String },
     #[command(
         about = "Widen a bounded task's write scope deliberately, when the scope was declared too narrowly"
     )]
@@ -286,33 +319,85 @@ enum TaskAction {
     #[command(
         about = "Declare the check that covers this task, or correct the one it declares; a result is bound to the check it answers"
     )]
-    Check { name: String, command: String },
+    Check {
+        name: String,
+        #[arg(conflicts_with = "argv")]
+        command: Option<String>,
+        #[arg(
+            long,
+            value_name = "PROG",
+            num_args = 0..,
+            allow_hyphen_values = true,
+            help = "Check as argv list: program and arguments"
+        )]
+        argv: Vec<String>,
+        #[arg(long, value_name = "PATH", num_args = 1.., help = "Check inputs; defaults to write scope. Deliverables are always included")]
+        input: Vec<String>,
+    },
     #[command(
-        about = "Add a deliverable the task owes; a record that lost one owes it again once it is named"
+        about = "Add or remove a deliverable the task owes; a record that lost one owes it again once it is named"
     )]
     Deliverable {
         name: String,
-        #[arg(long, value_name = "PATH", num_args = 1.., help = "Paths the task owes")]
+        #[arg(long, value_name = "PATH", num_args = 1.., help = "Paths to add to the task's deliverables")]
         add: Vec<String>,
+        #[arg(
+            long,
+            value_name = "PATH",
+            conflicts_with = "add",
+            help = "Path to remove from deliverables; a directory withdraws every file owed under it"
+        )]
+        remove: Option<String>,
+        #[arg(
+            long,
+            requires = "remove",
+            help = "Reason the deliverable was withdrawn"
+        )]
+        reason: Option<String>,
+        #[arg(
+            long,
+            value_name = "ID",
+            requires = "remove",
+            help = "The orchestrator model making this withdrawal"
+        )]
+        model: Option<String>,
     },
     #[command(
-        about = "Record the outcome of the task's declared check, bound to the deliverables it saw"
+        about = "Record the outcome of the task's declared check, bound to the inputs it saw: the write scope or declared inputs, plus the deliverables"
     )]
+    #[command(group(clap::ArgGroup::new("outcome").required(true).args(["exit", "run"])))]
     Evidence {
         name: String,
-        #[arg(long, help = "Exit code the check reported")]
-        exit: i32,
-        #[arg(long, help = "Tool that produced it, such as cargo or pytest")]
-        tool: String,
+        #[arg(long, requires = "tool", help = "Exit code the check reported")]
+        exit: Option<i32>,
+        #[arg(
+            long,
+            requires = "exit",
+            conflicts_with = "run",
+            help = "Tool that produced it, such as cargo or pytest"
+        )]
+        tool: Option<String>,
+        #[arg(
+            long,
+            help = "Execute the declared argv check and record what it reported"
+        )]
+        run: bool,
     },
     #[command(
         about = "State where a changed path came from: the task itself, concurrent work, or unknown"
     )]
     Attribute {
         name: String,
-        path: String,
+        #[arg(required = true, num_args = 1.., value_name = "PATH")]
+        paths: Vec<String>,
         #[arg(long, help = "task, concurrent or unknown")]
         kind: String,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The orchestrator model deciding the origin; must be one role::orchestrator permits"
+        )]
+        model: String,
     },
 }
 
@@ -801,6 +886,8 @@ fn execute(cli: Cli) -> i32 {
                     scope,
                     deliverable,
                     check,
+                    check_argv,
+                    input,
                 } => task::open(
                     &loaded,
                     blabla::project::task::Opening {
@@ -810,14 +897,32 @@ fn execute(cli: Cli) -> i32 {
                         scope,
                         deliverables: deliverable,
                         check,
+                        check_argv: if check_argv.is_empty() {
+                            None
+                        } else {
+                            Some(check_argv)
+                        },
+                        inputs: input,
                     },
                     json,
                 ),
                 TaskAction::Finding { name, statement } => {
                     task::finding(&loaded, &name, &statement, json)
                 }
-                TaskAction::Resolve { name, id, evidence } => {
-                    task::resolve(&loaded, &name, id, &evidence, json)
+                TaskAction::Addressed {
+                    name,
+                    id,
+                    statement,
+                    model,
+                } => task::addressed(&loaded, &name, id, &statement, &model, json),
+                TaskAction::Resolve {
+                    name,
+                    id,
+                    evidence,
+                    model,
+                } => task::resolve(&loaded, &name, id, &evidence, &model, json),
+                TaskAction::Note { name, statement } => {
+                    task::note(&loaded, &name, &statement, json)
                 }
                 TaskAction::Scope { name, add } => task::widen(&loaded, &name, add, json),
                 TaskAction::Close { name, model } => task::close(&loaded, &name, &model, json),
@@ -840,16 +945,50 @@ fn execute(cli: Cli) -> i32 {
                     model,
                     approval,
                 } => task::approve_model(&loaded, &name, &model, &approval, json),
-                TaskAction::Attribute { name, path, kind } => {
-                    task::attribute(&loaded, &name, &path, &kind, json)
+                TaskAction::Attribute {
+                    name,
+                    paths,
+                    kind,
+                    model,
+                } => task::attribute(&loaded, &name, &paths, &kind, &model, json),
+                TaskAction::Check {
+                    name,
+                    command,
+                    argv,
+                    input,
+                } => task::declare_check(&loaded, &name, command, argv, input, json),
+                TaskAction::Deliverable {
+                    name,
+                    add,
+                    remove,
+                    reason,
+                    model,
+                } => {
+                    if let Some(path) = remove {
+                        task::unowe(
+                            &loaded,
+                            &name,
+                            &path,
+                            reason.as_deref(),
+                            model.as_deref(),
+                            json,
+                        )
+                    } else {
+                        task::owe(&loaded, &name, add, json)
+                    }
                 }
-                TaskAction::Check { name, command } => {
-                    task::declare_check(&loaded, &name, &command, json)
-                }
-                TaskAction::Deliverable { name, add } => task::owe(&loaded, &name, add, json),
-                TaskAction::Evidence { name, exit, tool } => {
-                    task::evidence(&loaded, &name, exit, &tool, json)
-                }
+                TaskAction::Evidence {
+                    name,
+                    exit,
+                    tool,
+                    run,
+                } => match (run, exit, tool) {
+                    (true, _, _) => task::evidence_run(&loaded, &name, json),
+                    (false, Some(exit), Some(tool)) => {
+                        task::evidence(&loaded, &name, exit, &tool, json)
+                    }
+                    _ => 2,
+                },
             },
             Err(exit) => exit,
         },
@@ -1075,8 +1214,8 @@ fn check_file(file: &Path, json: bool) -> i32 {
         let mut output = io::stdout().lock();
         writeln!(
             output,
-            "OK\nstructure contract\n{} modules\n{} rules",
-            report.modules, report.rules
+            "{}\nstructure contract\n{} modules\n{} rules",
+            report.status.to_uppercase(), report.modules, report.rules
         )
         .and_then(|()| match (&report.project, &report.evaluated) {
             (Some(manifest), Some(evaluated)) => {
@@ -1175,7 +1314,7 @@ fn check_memory(file: &Path, source: &str, kind: &'static str, json: bool) -> i3
             if kind == "process" {
                 writeln!(
                     output,
-                    "\nProcess roles and policies are ADVISORY. BlaBla describes the intended authority and workflow and does not prevent an agent from bypassing them; a VALID file is a well-formed description, never an enforced one."
+                    "\nVALID means the file is well formed and every reference resolves; the roles, policies and flows it declares bind the role that carries the work."
                 )?;
             }
             if kind == "knowledge" {

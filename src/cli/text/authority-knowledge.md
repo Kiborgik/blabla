@@ -1,0 +1,1 @@
+Reusable expertise. Guidance for how to do the work well, never an instruction to widen your task: your scope comes from your assignment and from role::<name>. Never checked against the repository and never part of completion.

@@ -1,0 +1,12 @@
+module model  "typescript/model.ts"
+module store  "typescript/store.ts"
+module format "typescript/format.ts"
+
+require "the-store-is-a-type":                  symbol store::WidgetStore
+require "state-survives-a-restart":             symbol store::WidgetStore.save
+require "the-format-encodes":                   symbol format::encode
+require "the-store-uses-the-model":             dependency store -> model
+require "the-store-encodes-through-the-format": dependency store -> format
+
+forbid "the-model-stays-below-the-store":       dependency model -> store
+forbid "the-format-stays-below-the-store":      dependency format -> store

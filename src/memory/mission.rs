@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 pub const FILE_NAME: &str = "mission.bla";
 
-pub const AUTHORITY: &str = "Owner intent. Authoritative about what this project is for; never checked against the repository and never part of completion.";
+pub const AUTHORITY: &str = include_str!("../cli/text/authority-mission.md");
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Mission {

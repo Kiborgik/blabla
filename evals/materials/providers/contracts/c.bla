@@ -1,0 +1,16 @@
+module model       "c/model.c"
+module model_h     "c/model.h"
+module store       "c/store.h"
+module store_impl  "c/store.c"
+module format_h    "c/format.h"
+module format_impl "c/format.c"
+
+require "the-store-is-a-type":                  symbol store::Store
+require "the-store-declares-save":              symbol store::store_save
+require "state-survives-a-restart":             symbol store_impl::store_save
+require "the-format-encodes":                   symbol format_impl::format_encode
+require "the-store-uses-the-model":             dependency store -> model_h
+require "the-store-encodes-through-the-format": dependency store_impl -> format_h
+
+forbid "the-model-stays-below-the-store":       dependency model -> store
+forbid "the-format-stays-below-the-store":      dependency format_impl -> store
