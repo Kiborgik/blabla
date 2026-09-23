@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.8.0 (2026-09-22)
+
+The first release without the alpha label. From 0.8.0 on, a change to contract syntax, CLI options, JSON fields or exit codes ships only in a minor release (0.9, 0.10, …) and is listed under **Breaking**; a patch release (0.8.x) never makes one.
+
+### Breaking
+
+- `task attribute` is the orchestrator's: it requires `--model` naming a model `role::orchestrator` permits, records that model on the attribution, and is no longer among a worker's routes, so a worker cannot declare its own out-of-scope change concurrent. It refuses a path that has not changed since the task opened.
+- `task resolve` is the orchestrator's: it requires `--model` naming a model `role::orchestrator` permits and records that model on the resolution.
+- `task resolve`, `task attribute` and `task deliverable --remove` need process memory that declares `role "orchestrator"`, and `task addressed` needs the task's role declared; without it they exit 2 and the error names the files to add.
+- A finding's `resolution` in the task record and in `task show --json` is an object carrying `evidence` and, when recorded, `model`, where it was a string; records holding the old string still load.
+- A task mutation prints one line, the record's identity and state; only `task open` and `task show` print the whole record, and `--json` still writes the whole record.
+- READY requires current successful evidence and an explicit assignment challenge receipt tied to the task's own paths; `task close` checks both again, and a task that changed after hand-back is accepted again before any further work.
+- `task evidence` is refused unless the task is ACCEPTED, and a result binds the write scope, or the declared inputs, as well as the deliverables. Evidence `inputs` in the task record map each such path to a digest or `null`, where they held deliverable digests only.
+- A task left ACCEPTED or READY by 0.7 has no challenge receipt and evidence over its deliverables only, so it is accepted, evidenced and challenged again before `task ready` or `task close`.
+- `task accept` on an ACCEPTED task re-records the acceptance and clears the challenge receipt, where it was refused with exit 2.
+- `blabla challenge <name>` on a task that is not closed exits on its assignment check: 0 when the assignment is clear, 1 when it needs attention, so a project-wide challenge such as verification not current no longer fails it. On an ACCEPTED task it records the challenge receipt, and `--json` adds `assignment_clear`.
+- `declared-check-failed`, `readiness-without-evidence` and `lens-unassessed` ground on an ACCEPTED task as well as a READY one, so a role that consults knowledge packs records a `task lens` for each before `task ready`.
+- `status --json` reports a task's `state` as `OPEN`, `ACCEPTED`, `BLOCKED`, `READY` or `CLOSED`, where it was `OPEN` or `CLOSED`.
+- `status --json` and `explain --json` no longer carry the process `enforcement` field, and `status` prints `PROCESS` without `ADVISORY`.
+
+### Added
+
+- `project.bla` can leave paths out of change tracking: `ignore from ".gitignore"` reads a gitignore file and `ignore "pattern"` adds one pattern. Ignored paths leave the implementation fingerprint and the task snapshot; the manifest, contracts, registered memory and ignore lists stay tracked whatever the patterns say, and `task open`, `task check` and `task deliverable --add` refuse an ignored deliverable or input. The manifest errors are `E_MANIFEST_IGNORE`, `E_DUPLICATE_IGNORE`, `E_IGNORE_LIST_MISSING` and `E_IGNORE_LIST_OUTSIDE`; a missing or outside list file stops the project from loading.
+- `task note` keeps text on a record without adding unsettled work.
+- `task addressed <name> <id> "..." --model <id>` lets the carrying role say what it did about a finding; an addressed finding blocks neither hand-back nor `task close`, and resolving it stays the orchestrator's job.
+- `task open --check-argv` and `task check --argv` declare a check as a program and its arguments; a task declares that or a command, never both. `task evidence --run` runs it from the project root without a shell, timeout or process containment, keeps its output in `.blabla/scratch/<name>/evidence-<n>.log`, and records the exit code with `tool` `run`, `command` and `log`. `--check-argv` and `--argv` take every argument after them, so they go last.
+- `task open --input` and `task check --input` declare the check's inputs; they default to the write scope and always include the deliverables.
+- `task deliverable --remove <path> --reason "..." --model <id>` withdraws what the task owes as the orchestrator's decision, a directory withdrawing every file owed under it; the record keeps why, a path the task does not owe is refused, and `--remove` does not combine with `--add`.
+- `task attribute` takes several paths, and the attribution-unknown challenge lists every undeclared path.
+- `task accept` records the paths already changed since the record opened.
+
+### Changed
+
+- `task show` prints the routes for the task's current state, a worker's view never names `finish`, and the lens route is offered while the task is ACCEPTED.
+- The challenge attributes a changed path inside another open task's scope to that task.
+- `status` names the task records it cannot read, says GREEN does not close unfinished tasks, and with several open tasks asks for `blabla challenge <name>`.
+- `explain`, `check`, `guide` and the onboarding block say Process roles, policies and flows bind the role that carries the work instead of calling them advisory; the README states what BlaBla does and does not enforce.
+- The onboarding block's close says deciding project completion belongs to the orchestrator, never to a worker on a task.
+- The worker agent brief keeps discoveries in `task note` and reserves `task finding` for work the worker could not settle; the worker and reviewer briefs say the task record is written only by `task` commands; the reviewer brief names its own review task and the task under review and carries accept, evidence and hand-back.
+- A clear challenge on an accepted task names the hand-back, `blabla task ready <name>`, and while a task is in the worker's hands a stale project verification is left to the orchestrator rather than sending the worker to `blabla finish`; the attribution-unknown challenge tells a worker that changed a path itself to restore it or record why with `task block` and stop.
+- The generated skill's description fires on behavior and persistence wording.
+
+### Fixed
+
+- Fixed task state labels in task views, directory deliverables, shared check-input freshness, and the distinction between assignment hand-back and project verification.
+- Fixed generated skill YAML metadata, added assignment discovery wording, and routed task listings to `task show`.
+- A task's `state` decides whether it is open, so a stray `closed_unix` no longer closes an open task; a record written by 0.6, which carries no `state`, still reads as closed.
+- Standalone `blabla check <contract.bla>` prints the contract's status, `ERROR` or `RED`, on its first line where it always printed `OK`; exit codes and `--json` are unchanged.
+
+### Evaluation and tests
+
+- The agent integration smoke suite in `evals/` runs eleven cases through Claude Code and Codex CLI on small local models, with and without BlaBla on the same project, from one fixture builder, one case contract and one grader. It is a diagnostic, not a benchmark.
+- Agent evaluation: orchestrator-work cases leave the small-model suite; report-only tasks declare a check that can succeed; paired cases carry the same rules `README.md` in both arms; on Claude the builder creates the sandbox's protected paths before the task opens and the scaffold gives `$HOME` readable startup files.
+- Agent evaluation reports: the with/without comparison counts only the checks both arms face, where it had counted checks only the arm with BlaBla faces, such as leaving the contracts untouched; every check carries a plain description; the report shows each case as checks against runs with the reason for every miss; the overview lists what each run got wrong; the scorecard folds unmeasured items and absent cases; each run prints a readable result line.
+- Added an onboarding drift test and local evaluation evidence tests, including skill-control isolation and bounded artifact export.
+
+### Limitations
+
+- Behavior verification remains bounded; GREEN is not a correctness proof.
+- Adapter observations are trusted, and process guidance is not host-level enforcement.
+- Process containment is tested on Windows and Linux; macOS is untested.
+
 ## 0.7.0-alpha (2026-09-18)
 
 ### Added

@@ -1,0 +1,1 @@
+Proposing a model outside role policy is allowed and is not dispatching on it. The owner either approves the exception or refuses it; until then the proposal stands unresolved.

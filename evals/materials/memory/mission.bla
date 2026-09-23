@@ -1,0 +1,15 @@
+mission "widget" {
+    statement "Keep a small list of widgets that survives every restart of the application, so that nothing a user added is ever silently lost."
+    non_goals [
+        "Share widgets between machines or users.",
+        "Support more than one storage backend at a time."
+    ]
+}
+
+priority "durable-over-fast" {
+    statement "A slower save that reaches disk beats a faster one that may not. When a change makes saving quicker but less certain, the certain path wins."
+}
+
+priority "one-format-at-a-time" {
+    statement "The on-disk record format changes only as a deliberate migration owned by the store. Two readers with different ideas of the format is a defect, not a transition."
+}

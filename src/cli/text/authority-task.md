@@ -1,0 +1,1 @@
+A bounded task is the record of what an orchestrator decided, held against the working tree. It is machine state rather than project memory: it reaches no layer and never decides completion.

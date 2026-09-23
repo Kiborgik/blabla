@@ -1,0 +1,8 @@
+project Widget
+
+process "process.bla"
+knowledge "knowledge/reviewing.bla"
+knowledge "knowledge/engineering.bla"
+knowledge "knowledge/testing.bla"
+
+use structure "widget.bla"

@@ -1,12 +1,13 @@
+use super::ignore::Ignore;
+use super::snapshot;
 use super::status::RECORD_DIRECTORY;
-use super::{digest_of, snapshot};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub const TASK_DIRECTORY: &str = "tasks";
 
-pub const AUTHORITY: &str = "A bounded task is a record of what an orchestrator decided, held against the working tree. It is machine state rather than project memory: nothing in it is checked for truth, it reaches no layer, and it never decides completion.";
+pub const AUTHORITY: &str = include_str!("../cli/text/authority-task.md");
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Deliverable {
@@ -15,11 +16,51 @@ pub struct Deliverable {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "ResolutionRecord")]
+pub struct FindingResolution {
+    pub evidence: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ResolutionRecord {
+    Evidence(String),
+    Fields {
+        evidence: String,
+        #[serde(default)]
+        model: Option<String>,
+    },
+}
+
+impl From<ResolutionRecord> for FindingResolution {
+    fn from(record: ResolutionRecord) -> FindingResolution {
+        match record {
+            ResolutionRecord::Evidence(evidence) => FindingResolution {
+                evidence,
+                model: None,
+            },
+            ResolutionRecord::Fields { evidence, model } => FindingResolution { evidence, model },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Addressed {
+    pub model: String,
+    pub statement: String,
+    pub unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Finding {
     pub id: usize,
     pub statement: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resolution: Option<String>,
+    pub addressed: Option<Addressed>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<FindingResolution>,
 }
 
 pub const STATES: [&str; 5] = ["open", "accepted", "blocked", "ready", "closed"];
@@ -30,6 +71,8 @@ pub const SCRATCH_DIRECTORY: &str = "scratch";
 pub struct Acceptance {
     pub model: String,
     pub unix: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_at_acceptance: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,7 +98,23 @@ pub struct Evidence {
     pub tool: String,
     pub unix: u64,
     #[serde(default)]
-    pub inputs: BTreeMap<String, String>,
+    pub inputs: BTreeMap<String, Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChallengeReceipt {
+    pub fingerprint: String,
+    pub unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Note {
+    pub statement: String,
+    pub unix: u64,
 }
 
 pub const ATTRIBUTIONS: [&str; 3] = ["task", "concurrent", "unknown"];
@@ -66,6 +125,8 @@ pub struct Attribution {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -123,7 +184,43 @@ pub fn stale(evidence: &Evidence, tree: &BTreeMap<String, String>) -> bool {
     evidence
         .inputs
         .iter()
-        .any(|(path, digest)| tree.get(path) != Some(digest))
+        .any(|(path, digest)| observed_digest(tree, path) != *digest)
+}
+
+pub fn evidence_inputs(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> BTreeMap<String, Option<String>> {
+    let declared = if task.check_inputs.is_empty() {
+        &task.scope
+    } else {
+        &task.check_inputs
+    };
+    declared
+        .iter()
+        .chain(
+            task.deliverables
+                .iter()
+                .map(|deliverable| &deliverable.path),
+        )
+        .map(|path| (path.clone(), observed_digest(tree, path)))
+        .collect()
+}
+
+pub fn observed_digest(tree: &BTreeMap<String, String>, path: &str) -> Option<String> {
+    if let Some(digest) = tree.get(path) {
+        return Some(digest.clone());
+    }
+    let mut fingerprint = super::Fnv::new();
+    let mut found = false;
+    for (name, digest) in tree {
+        if covers(path, name) {
+            found = true;
+            fingerprint.write_str(name);
+            fingerprint.write_str(digest);
+        }
+    }
+    found.then(|| fingerprint.finish())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -149,7 +246,12 @@ pub fn readiness(task: &Task, tree: &BTreeMap<String, String>) -> Readiness {
     let recorded = !task.evidence.is_empty();
     let latest = latest_evidence(task);
     let answers_declared_check = latest.is_some_and(|entry| entry.exit == 0);
-    let current = latest.is_some_and(|entry| !stale(entry, tree));
+    let current = latest.is_some_and(|entry| {
+        !stale(entry, tree)
+            && evidence_inputs(task, tree)
+                .keys()
+                .all(|path| entry.inputs.contains_key(path))
+    });
     Readiness {
         recorded,
         current,
@@ -162,6 +264,7 @@ pub fn transition(from: &str, to: &str) -> bool {
     matches!(
         (from, to),
         ("open", "accepted")
+            | ("accepted", "accepted")
             | ("accepted", "blocked")
             | ("accepted", "ready")
             | ("blocked", "accepted")
@@ -171,23 +274,161 @@ pub fn transition(from: &str, to: &str) -> bool {
 }
 
 pub fn apply(task: &mut Task, to: &str) -> bool {
-    if !transition(&task.state, to) {
+    if to == "ready" || !transition(&task.state, to) {
         return false;
     }
     task.state = to.to_owned();
+    if matches!(to, "accepted" | "blocked") {
+        task.challenged = None;
+    }
     true
 }
 
-pub fn accept_result(task: &mut Task, standing: usize, model: &str, now_unix: u64) -> bool {
-    if standing != 0 || !apply(task, "closed") {
+fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String {
+    let mut record = task.clone();
+    record.challenged = None;
+    record.state.clear();
+    record.closed_unix = None;
+    record.result = None;
+    record.build = None;
+    for finding in &mut record.findings {
+        finding.resolution = None;
+    }
+    let mut fingerprint = super::Fnv::new();
+    fingerprint.write_str(&serde_json::to_string(&record).expect("task serializes"));
+    for (path, digest) in tree {
+        if receipt_covers(task, tree, path) {
+            fingerprint.write_str(path);
+            fingerprint.write_str(digest);
+        }
+    }
+    fingerprint.finish()
+}
+
+pub fn receipt_covers(task: &Task, tree: &BTreeMap<String, String>, path: &str) -> bool {
+    if attribute(task, tree, path) == ATTRIBUTIONS[1] {
+        return false;
+    }
+    task.in_scope(path)
+        || task.check_inputs.iter().any(|input| covers(input, path))
+        || task
+            .deliverables
+            .iter()
+            .any(|deliverable| covers(&deliverable.path, path))
+        || task
+            .attributions
+            .iter()
+            .any(|entry| covers(&entry.path, path))
+}
+
+pub fn handback(task: &Task, tree: &BTreeMap<String, String>) -> Result<(), &'static str> {
+    match task.state.as_str() {
+        "open" | "blocked" => return Err("accept"),
+        "ready" => return Err("review"),
+        "closed" => return Err("closed"),
+        "accepted" => {}
+        _ => return Err("invalid-state"),
+    }
+    if task.accepted.is_none() {
+        return Err("accept");
+    }
+    if !task.declares_check() {
+        return Err("declare-check");
+    }
+    if !readiness(task, tree).supported {
+        return Err("record-evidence");
+    }
+    if !challenge_current(task, tree) {
+        return Err("challenge");
+    }
+    Ok(())
+}
+
+pub fn challenge_current(task: &Task, tree: &BTreeMap<String, String>) -> bool {
+    task.challenged
+        .as_ref()
+        .is_some_and(|receipt| receipt.fingerprint == challenge_fingerprint(task, tree))
+}
+
+pub fn record_challenge(
+    task: &mut Task,
+    tree: &BTreeMap<String, String>,
+    blockers: usize,
+    unix: u64,
+) -> bool {
+    if task.state != "accepted" {
+        return false;
+    }
+    task.challenged = None;
+    if task.accepted.is_none()
+        || !task.declares_check()
+        || !readiness(task, tree).supported
+        || blockers != 0
+    {
+        return false;
+    }
+    task.challenged = Some(ChallengeReceipt {
+        fingerprint: challenge_fingerprint(task, tree),
+        unix,
+    });
+    true
+}
+
+pub fn mark_ready(
+    task: &mut Task,
+    tree: &BTreeMap<String, String>,
+    blockers: usize,
+) -> Result<(), &'static str> {
+    handback(task, tree)?;
+    if blockers != 0 {
+        return Err("resolve-challenge");
+    }
+    task.state = "ready".to_owned();
+    Ok(())
+}
+
+pub fn record_acceptance(task: &mut Task, tree: &BTreeMap<String, String>, model: &str, unix: u64) {
+    let changed_paths = changed(task, tree);
+    let changed_at_acceptance = if changed_paths.is_empty() {
+        None
+    } else {
+        Some(changed_paths.iter().map(|s| s.to_string()).collect())
+    };
+    task.accepted = Some(Acceptance {
+        model: model.to_owned(),
+        unix,
+        changed_at_acceptance,
+    });
+}
+
+pub fn accept_result(
+    task: &mut Task,
+    tree: &BTreeMap<String, String>,
+    standing: usize,
+    model: &str,
+    now_unix: u64,
+) -> bool {
+    if standing != 0
+        || !readiness(task, tree).supported
+        || !challenge_current(task, tree)
+        || !apply(task, "closed")
+    {
         return false;
     }
     task.result = Some(Acceptance {
         model: model.to_owned(),
         unix: now_unix,
+        changed_at_acceptance: None,
     });
     task.closed_unix = Some(now_unix);
     true
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RemovedDeliverable {
+    pub path: String,
+    pub reason: String,
+    pub unix: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -209,6 +450,10 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_argv: Option<Vec<String>>,
+    #[serde(default)]
+    pub check_inputs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accepted: Option<Acceptance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Acceptance>,
@@ -218,10 +463,16 @@ pub struct Task {
     pub exceptions: Vec<Exception>,
     #[serde(default)]
     pub evidence: Vec<Evidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub challenged: Option<ChallengeReceipt>,
     #[serde(default)]
     pub attributions: Vec<Attribution>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<String>,
+    #[serde(default)]
+    pub notes: Vec<Note>,
+    #[serde(default)]
+    pub removed_deliverables: Vec<RemovedDeliverable>,
 }
 
 fn open_state() -> String {
@@ -230,13 +481,22 @@ fn open_state() -> String {
 
 impl Task {
     pub fn open(&self) -> bool {
-        self.closed_unix.is_none()
+        self.state != "closed"
+    }
+
+    pub fn declares_check(&self) -> bool {
+        self.check.is_some() || self.check_argv.is_some()
     }
 
     pub fn unresolved(&self) -> impl Iterator<Item = &Finding> {
         self.findings
             .iter()
             .filter(|finding| finding.resolution.is_none())
+    }
+
+    pub fn blocking(&self) -> impl Iterator<Item = &Finding> {
+        self.unresolved()
+            .filter(|finding| finding.addressed.is_none())
     }
 
     pub fn next_finding_id(&self) -> usize {
@@ -280,15 +540,18 @@ pub struct Opening {
     pub scope: Vec<String>,
     pub deliverables: Vec<String>,
     pub check: Option<String>,
+    pub check_argv: Option<Vec<String>>,
+    pub inputs: Vec<String>,
 }
 
-pub fn record(root: &Path, opening: Opening, now_unix: u64) -> Task {
+pub fn record(root: &Path, ignore: &Ignore, opening: Opening, now_unix: u64) -> Task {
+    let tree = snapshot(root, ignore);
     let digests = opening
         .deliverables
         .iter()
-        .map(|path| digest_of(root, path))
+        .map(|path| observed_digest(&tree, path))
         .collect();
-    record_from(opening, now_unix, snapshot(root), digests)
+    record_from(opening, now_unix, tree, digests)
 }
 
 pub fn record_from(
@@ -317,13 +580,18 @@ pub fn record_from(
         opened_tree: tree,
         state: open_state(),
         check: opening.check,
+        check_argv: opening.check_argv,
+        check_inputs: opening.inputs,
         accepted: None,
         result: None,
         assessments: Vec::new(),
         exceptions: Vec::new(),
         evidence: Vec::new(),
+        challenged: None,
         attributions: Vec::new(),
         build: None,
+        notes: Vec::new(),
+        removed_deliverables: Vec::new(),
     }
 }
 
@@ -344,12 +612,18 @@ pub fn read(root: &Path, name: &str) -> Result<Option<Task>, String> {
     }
     let text = std::fs::read_to_string(&path)
         .map_err(|failure| format!("cannot read {}: {failure}", path.display()))?;
-    serde_json::from_str(&text)
-        .map(Some)
-        .map_err(|failure| format!("cannot parse {}: {failure}", path.display()))
+    let unparsable =
+        |failure: serde_json::Error| format!("cannot parse {}: {failure}", path.display());
+    let record: serde_json::Value = serde_json::from_str(&text).map_err(unparsable)?;
+    let stateless = record.get("state").is_none();
+    let mut task: Task = serde_json::from_value(record).map_err(unparsable)?;
+    if stateless && task.closed_unix.is_some() {
+        task.state = "closed".to_owned();
+    }
+    Ok(Some(task))
 }
 
-pub fn read_all(root: &Path) -> Vec<Task> {
+fn recorded_names(root: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(directory(root)) else {
         return Vec::new();
     };
@@ -367,8 +641,23 @@ pub fn read_all(root: &Path) -> Vec<Task> {
         .collect();
     names.sort();
     names
+}
+
+pub fn read_all(root: &Path) -> Vec<Task> {
+    recorded_names(root)
         .iter()
         .filter_map(|name| read(root, name).ok().flatten())
+        .collect()
+}
+
+pub fn unreadable(root: &Path) -> Vec<String> {
+    recorded_names(root)
+        .iter()
+        .filter_map(|name| {
+            read(root, name)
+                .err()
+                .map(|failure| format!("task::{name}   {failure}"))
+        })
         .collect()
 }
 
@@ -376,7 +665,7 @@ pub fn read_all(root: &Path) -> Vec<Task> {
 pub struct TaskSummary {
     pub id: String,
     pub role: String,
-    pub state: &'static str,
+    pub state: String,
     pub unresolved: usize,
     pub deliverables: usize,
 }
@@ -386,23 +675,27 @@ pub struct TaskStatus {
     pub directory: String,
     pub tasks: Vec<TaskSummary>,
     pub open: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unreadable: Vec<String>,
     pub authority: &'static str,
 }
 
 pub fn status(root: &Path) -> Option<TaskStatus> {
     let tasks = read_all(root);
-    if tasks.is_empty() {
+    let unreadable = unreadable(root);
+    if tasks.is_empty() && unreadable.is_empty() {
         return None;
     }
     Some(TaskStatus {
         directory: format!("{RECORD_DIRECTORY}/{TASK_DIRECTORY}"),
         open: tasks.iter().filter(|task| task.open()).count(),
+        unreadable,
         tasks: tasks
             .iter()
             .map(|task| TaskSummary {
                 id: format!("task::{}", task.name),
                 role: format!("role::{}", task.role),
-                state: if task.open() { "OPEN" } else { "CLOSED" },
+                state: task.state.to_ascii_uppercase(),
                 unresolved: task.unresolved().count(),
                 deliverables: task.deliverables.len(),
             })

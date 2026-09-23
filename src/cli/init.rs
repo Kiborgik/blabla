@@ -46,107 +46,14 @@ always \"unique-ids\" {
 }
 ";
 
-pub const AGENTS_SNIPPET: &str = "## BlaBla
+pub const AGENTS_SNIPPET: &str = include_str!("onboarding.md");
 
-BlaBla is executable project memory.
-`blabla` is a command-line tool on PATH; `blabla --help` lists its commands.
-
-Start with:
-  blabla status
-
-Inspect what status printed, by its canonical identity; never invent one:
-  contract::<group>  <group>::<label>  mission::<name>  priority::<name>
-  system::<name>  responsibility::<name>  seam::<name>  role::<name>  policy::<name>
-  flow::<name>  step::<name>  knowledge::<pack>  ruling::<pack>::<name>  runtime::<name>
-  blabla explain <identity>
-  blabla guide agent
-Process roles, policies and flows are ADVISORY; BlaBla does not enforce them, and a ruling is
-reusable expertise rather than permission to widen the task you were given.
-Delegating one bounded change, and challenging the account of it: blabla guide loop
-
-Before declaring work complete:
-  blabla finish
-
-Only OVERALL GREEN means completion.
-YELLOW means NOT COMPLETE.
-Do not weaken contracts to obtain GREEN.
-";
-
-const SKILL_HEAD: &str = "---
-name: blabla
-description: Use when a repository contains project.bla or .bla contracts. BlaBla is the project's executable memory: check status, explain rules, verify an implementation, author or change contracts.
----
-
-# BlaBla
-
-BlaBla turns behavioral and structural intent into executable contracts and reports GREEN, YELLOW or RED per layer.
-`project.bla` is the machine entry point; `blabla status` is the agent entry point.
-The contracts are the authority; this skill only teaches the workflow.
-
-## Implementation workflow
-
-1. `blabla status`: project name, BEHAVIOR / STRUCTURE / OVERALL state, per-contract summary, next rules, completion gate.
-2. `blabla explain <group>::<label>`: owning contract and line, the rule text, required witnesses and counterexample, or the observed structural fact.
-   Coarser identities open the level above: `contract::<group>` lists a contract's rules, `system::<name>` its responsibilities and seams.
-   Every identity is printed by the command before it; never construct one by guessing a separator.
-3. Implement.
-4. `blabla finish`: verifies structure, runs the project's canonical behavior verification and decides completion (exit 0 only for OVERALL GREEN).
-5. RED: repair using the minimized counterexample or the observed fact. YELLOW: supply the missing witness; NOT COMPLETE. OVERALL GREEN: done.
-
-Read a contract file only when `explain` is not enough. Never edit a `.bla` file to reach GREEN.
-`blabla run -- <application>` is a quick manual check; only `blabla finish` decides completion.
-
-## Contract authoring and bootstrap
-
-`blabla guide bootstrap` is the canonical procedure: source authority ordering, conflicts,
-unknowns, draft contracts (`draft behavior \"path\"` in `project.bla`), the skeptic pass and
-promotion to `use behavior` by a human.
-
-## Working under an assignment
-
-A project may hand you a bounded task instead of the whole repository. `blabla task show <name>` prints the assignment -- statement, role, write scope,
-deliverables, findings, declared check, scratch -- then the routes below, in the order they are taken: acceptance, the declared check and its evidence,
-a blocker, a finding, the challenge, the hand-back. That view is the authority, never this file.
-";
-
-const SKILL_TAIL: &str = "
-Acceptance records that a role took the work through BlaBla, not that it read what it retrieved. `blabla explain role::<name>` and its policies outrank
-any brief; a path outside the write scope is a finding, never a widening; a summary prints a passing count on a red run, so read the whole run before
-recording it. A hand-back is not acceptance: closing is the orchestrator's decision, and only `blabla finish` decides whether the project is complete.
-
-## Authoring project memory
-
-`blabla guide memory`: the declaration and registration shape for Mission, System, Process and
-Knowledge, and the check/register/explain loop. No memory state reaches OVERALL.
-
-## Changing intended behavior
-
-`blabla guide change`: the contract-author phase edits the rule first, then the
-implementation phase reaches GREEN.
-
-## Commands
-
-| Command | Purpose |
-| --- | --- |
-| `blabla status` | BEHAVIOR, STRUCTURE and OVERALL state with the completion gate, exit 0 only for OVERALL GREEN |
-| `blabla explain <group>::<label>` | one rule with evidence |
-| `blabla explain contract::<group>` | one contract: path, state and the canonical id of every rule |
-| `blabla explain mission::<name>` | why the project exists, the priorities that decide a tradeoff and the non-goals |
-| `blabla explain system::<name>` | one system: purpose, paths, the responsibilities it owns and its seams |
-| `blabla explain knowledge::<pack>` | one reusable knowledge pack and the id of every ruling in it |
-| `blabla explain flow::<name>` | the order the roles are meant to work in, one line per step |
-| `blabla task <action>` | record one bounded change; `show <name>` prints the routes your role takes next; `open`, `resolve` and `close` are the orchestrator's |
-| `blabla challenge` | one grounded challenge to the current account of the work; exit 1 when one stands |
-| `blabla finish` | structure check plus canonical behavior verification from project.bla; exit 0 only for OVERALL GREEN |
-| `blabla run -- <app>` | manual verification with explicit settings; records the result |
-| `blabla check` | compile the project, including drafts |
-| `blabla guide <topic>` | agent, bootstrap, change, memory, loop |
-";
+const SKILL_TEMPLATE: &str = include_str!("skill.md");
 
 pub fn skill() -> String {
-    format!(
-        "{SKILL_HEAD}{}{SKILL_TAIL}",
-        super::task::routes_text("<name>", Some("<the declared check>"))
+    SKILL_TEMPLATE.replace("\r\n", "\n").replace(
+        "{{routes}}",
+        &super::task::routes_text("<name>", Some("<the declared check>")),
     )
 }
 

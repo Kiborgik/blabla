@@ -1,0 +1,5 @@
+project Widget
+
+process "process.bla"
+
+use structure "widget.bla"

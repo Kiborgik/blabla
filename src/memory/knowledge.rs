@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 pub const DIRECTORY: &str = "knowledge";
 
-pub const AUTHORITY: &str = "Reusable expertise. Guidance for how to do the work well, never an instruction to widen your task: your scope comes from your assignment and from role::<name>. Never checked against the repository and never part of completion.";
+pub const AUTHORITY: &str = include_str!("../cli/text/authority-knowledge.md");
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Pack {

@@ -1,0 +1,16 @@
+{
+  "materials": ["shared", "structure", "structure-plus", "assignment"],
+  "break_model": true,
+  "remove": ["contracts"],
+  "model": "qwen3.5:4b",
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Widget"]}
+  ],
+  "after_arm": [
+    {"run": ["blabla", "task", "open", "fix-red-checks", "--role", "worker",
+             "--statement", "Repair the two failing structure rules without changing declared intent.",
+             "--scope", "widget", "--deliverable", "widget/store.py", "--deliverable", "widget/model.py",
+             "--check", "blabla status"]}
+  ],
+  "observations": ["syntax", "status", "challenge:fix-red-checks"]
+}

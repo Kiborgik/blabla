@@ -1,0 +1,28 @@
+{
+  "materials": ["shared", "structure", "review"],
+  "break_model": true,
+  "remove": ["contracts"],
+  "model": "qwen3.5:9b",
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Widget"]}
+  ],
+  "after_arm": [
+    {"run": ["blabla", "task", "open", "fix-red-checks", "--role", "worker",
+             "--statement", "Repair the two failing structure rules without changing declared intent, so that widgets survive a restart.",
+             "--scope", "widget", "--deliverable", "widget/store.py", "--deliverable", "widget/model.py",
+             "--check", "blabla status"]},
+    {"run": ["blabla", "task", "accept", "fix-red-checks", "--model", "qwen3.5:4b"]},
+    {"copy": "review-patch"},
+    {"run": ["blabla", "task", "evidence", "fix-red-checks", "--exit", "0", "--tool", "status"]},
+    {"run": ["blabla", "task", "lens", "fix-red-checks", "engineering",
+             "Removed the model's import of the store and added WidgetStore.save; both structure rules now pass."]},
+    {"run": ["blabla", "task", "lens", "fix-red-checks", "testing",
+             "blabla status is the declared check and reports STRUCTURE GREEN after the change."]},
+    {"run": ["blabla", "challenge", "fix-red-checks"]},
+    {"run": ["blabla", "task", "ready", "fix-red-checks"]},
+    {"run": ["blabla", "task", "open", "review-fix-red-checks", "--role", "reviewer",
+             "--statement", "Review the hand-back of fix-red-checks: hold the patch against the task statement and the contract, record one assessment per lens the reviewer role consults, and record every blocking defect as a finding on fix-red-checks with the file and line that show it.",
+             "--check", "blabla status"]}
+  ],
+  "observations": ["syntax", "status", "challenge:review-fix-red-checks"]
+}

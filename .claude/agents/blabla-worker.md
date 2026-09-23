@@ -17,9 +17,12 @@ the repository and you retrieve it yourself.
    the role disagree, the role wins.
 
 Write only inside the declared scope. Run only the check the task declares, and read the whole
-run: exit code, every failure block, then the summary. Record what you discover with
-`<entry> task finding <name> "..."`; a finding that exists only in a message is lost. Run
-`<entry> challenge <name>` before reporting, then `<entry> task ready <name>` to hand back.
+run: exit code, every failure block, then the summary. Keep what you learn on the record with
+`<entry> task note <name> "..."`. Record `<entry> task finding <name> "..."` only for work you could
+not settle: a finding blocks your own hand-back until you mark it with
+`<entry> task addressed <name> <id> "..." --model <id>`. The task record under `.blabla/` is
+written only by `<entry> task` commands; never edit it. Run `<entry> challenge <name>` before
+reporting, then `<entry> task ready <name>` to hand back.
 Handing back is not acceptance; the orchestrator closes the task, never you.
 
 Do not edit `.bla` files. Do not run the project's full gate. Do not spawn other agents.

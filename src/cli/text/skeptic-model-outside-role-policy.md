@@ -1,0 +1,1 @@
+Either accept the assignment on a permitted model, or propose the exception with blabla task propose-model and let the owner rule on it. Proposing is allowed; running on it unruled is what this contradicts.

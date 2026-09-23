@@ -1,0 +1,1 @@
+Silence is not approval. No challenge means no contradiction was reachable from that evidence, which is a statement about the evidence rather than about the work.

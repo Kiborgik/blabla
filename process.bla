@@ -2,7 +2,7 @@ role "orchestrator" {
     purpose "Decide what the work is, divide it, integrate what comes back, and decide completion."
     owns ["decomposition and worker assignment", "shared and hot files", "integration of every worker's result", "contract semantics and the manifest", "project-wide falsification", "the product gate and blabla finish", "every commit"]
     verification "product"
-    model ["opus-5", "claude-fable-5-1"]
+    model ["opus-5", "claude-fable-5-1", "gpt-6-astra"]
     consult ["engineering", "testing", "design"]
 }
 
@@ -10,7 +10,7 @@ role "worker" {
     purpose "Carry out one bounded task inside the write scope its orchestrator assigned."
     owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
     verification "focused"
-    model ["haiku-4.5", "qwen3.5:4b"]
+    model ["haiku-4.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna"]
     consult ["engineering", "testing"]
 }
 
@@ -18,7 +18,7 @@ role "reviewer" {
     purpose "Independently review one bounded worker patch and report the defects that block its integration."
     owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
     verification "focused"
-    model ["qwen3.5:4b", "opus-5"]
+    model ["qwen3.5:4b", "opus-5", "gpt-5.6-sol"]
     consult ["reviewing", "engineering", "testing", "design"]
 }
 
@@ -77,7 +77,7 @@ policy "worker-output-is-independently-reviewed" {
 }
 
 flow "development" {
-    purpose "One bounded change, from recovering what the project already decided through to the completion gate. The steps below are the order the roles and policies above are meant to be used in; each names the command that carries it, where a command exists. Advisory like the rest of Process: nothing here is enforced, and a step with no command is carried by judgment rather than by BlaBla."
+    purpose "One bounded change, from recovering what the project already decided through to the completion gate. The steps below are the order the roles and policies above are meant to be used in; each names the command that carries it, where a command exists. A step with no command is carried by judgment."
 }
 
 step "recover-context" {
@@ -138,7 +138,7 @@ step "challenge" {
 step "hand-back" {
     flow "development"
     role ["worker"]
-    statement "Mark the task ready for review once the declared check is recorded and no challenge stands. A hand-back is not acceptance of the result: closing the task is the orchestrator's decision, never the worker's."
+    statement "Mark the task ready for review once current successful evidence for the declared check is recorded, every lens the role consults carries an assessment, and blabla challenge <name> reports the assignment clear. A hand-back is not acceptance of the result: closing the task is the orchestrator's decision, never the worker's."
     command "blabla task ready <name>"
 }
 
@@ -160,7 +160,7 @@ step "integrate" {
     flow "development"
     role ["orchestrator"]
     statement "Take the finished work, settle every finding against the repository rather than against the worker's account of it, and record what settled each one. The evidence recorded is the agent's claim and never BlaBla's verdict."
-    command "blabla task resolve <name> <id> --evidence \"...\""
+    command "blabla task resolve <name> <id> --evidence \"...\" --model <id>"
 }
 
 step "accept-result" {

@@ -67,7 +67,7 @@ These are not preferences. A change that breaks one is a reversal, not a refinem
 - **The application's observations are trusted.** BlaBla is not a sandbox and cannot prove that an adapter exposes the real application. Fabricated observations defeat the boundary.
 - **Structure providers never execute project code.** The Python provider runs one isolated interpreter per verification with BlaBla's embedded `ast` extractor; the Rust provider parses with `syn` in-process. Neither imports, initialises nor evaluates anything from the project.
 - **Behavior verification is finite and heuristic.** A campaign is a bounded search, never a proof over all inputs.
-- **Process containment is verified on Windows only.** Job Objects and Unix process groups both exist in the implementation; only the Windows path has recorded tests. Unix execution remains unverified.
+- **Process containment is verified on Windows and Linux.** Windows uses Job Objects and Unix uses process groups; the lifecycle tests that stop a process tree run on both in CI. macOS remains unverified.
 - **The staleness fingerprint has a documented blind spot:** modules loaded from outside the manifest tree and not named on the command line are not covered.
 
 ## Architecture
@@ -78,7 +78,7 @@ These are not preferences. A change that breaks one is a reversal, not a refinem
 
 `process.bla`, registered by `process "process.bla"`, answers the other question: who is expected to do what while the project is being developed. It declares `role`, `policy`, `flow` and `step`. The roles are `role::orchestrator`, `role::worker` and `role::reviewer`; the policies bind them on write scope, integration and contract ownership, which verification each may run, independent review of a worker's patch, and the standing that agent reports have. `flow::development` orders those roles into the development loop, one `step` at a time, each naming the roles that may carry it and the command that runs it.
 
-**Process is advisory. BlaBla describes the intended authority and workflow and does not prevent an agent from bypassing it**, which is why `status` prints `PROCESS  ADVISORY` and every role, policy, flow and step view repeats it. Process memory is not a layer, takes no part in completion, and its `owns` entries are orchestration authority, unrelated to the `responsibility::<name>` identities of System memory.
+Process memory is not a layer, takes no part in completion, and its `owns` entries are orchestration authority, unrelated to the `responsibility::<name>` identities of System memory.
 
 `mission.bla`, registered by `mission "mission.bla"`, answers why any of it matters: one `mission` statement, the `priority` declarations that decide a tradeoff when two goods conflict, and the non-goals. It is authoritative about owner intent and is still not a layer — a planner that finds the evidence points elsewhere is expected to say so rather than comply.
 
@@ -92,9 +92,9 @@ All four are authored in BlaBla's own `.bla` syntax, because authored project me
 
 Authored memory says how the project is meant to work. A **bounded task** records one actual change in flight: the role carrying it, the paths it may write, the deliverables it owes, the findings raised against it, and a snapshot of the tree it opened against. It lives in `.blabla/tasks/<name>.json` beside the status record and the run marker — machine state, written by BlaBla, registered by no manifest, validated for truth by nothing, and reaching no layer.
 
-`blabla challenge` reads that record, the tree measured against its snapshot, the completion state and a falsification verdict, and reports at most one discrepancy it can ground in them. A class with no evidence behind it says which evidence it lacked rather than reporting that it found nothing. It is a deterministic check over recorded facts, not a code reviewer: it reads no meaning from source code, decides no correctness, and `finish` keeps its verdict and its exit code. Classes and limits: `docs/agent-workflow.md`.
+`blabla challenge` reads that record, the tree measured against its snapshot, the completion state and a falsification verdict, and reports at most one discrepancy it can ground in them. For a selected ACCEPTED task it records or clears the explicit assignment challenge receipt; a project-only inspection remains nonmutating. A class with no evidence behind it says which evidence it lacked rather than reporting that it found nothing. It is a deterministic check over recorded facts, not a code reviewer: it reads no meaning from source code, decides no correctness, and `finish` keeps its verdict and its exit code. Classes and limits: `docs/agent-workflow.md`.
 
-Project verification and task acceptance are different questions. `finish` decides whether the project is complete. A task's transitions decide only whether one handoff is in order, and they are the one place Process leaves prose: `ready` needs an acceptance on record, `close` is refused while a grounded challenge stands, and a closed task accepts no amendment. Everything else in Process stays advisory. Neither a clean task record nor `OVERALL GREEN` alone establishes everything: the record shows what was recorded rather than what was done, and GREEN is bounded by the campaign that produced it. The worker's routes through that lifecycle are printed by `task show` and by `guide loop` from one source, and `contracts/onboarding.bla` holds the entry to them.
+Project verification and task acceptance are different questions. `finish` decides whether the project is complete. Tasks render `OPEN`, `ACCEPTED`, `BLOCKED`, `READY` or `CLOSED`; evidence is accepted only in ACCEPTED, and READY requires current successful declared evidence plus an explicit assignment challenge receipt tied to the task's own paths. An edit inside the write scope, the deliverables or the declared inputs, new evidence, findings or policy metadata invalidate that receipt, so a READY worker accepts again before changing anything; an edit anywhere else, including a path attributed to concurrent work, leaves it standing. CLOSE still requires fresh task evidence, a current receipt and the current project report. Neither a clean task record nor `OVERALL GREEN` alone establishes everything: the record shows what was recorded rather than what was done, and GREEN is bounded by the campaign that produced it. The worker's routes through that lifecycle are printed by `task show` and by `guide loop` from one source, and `contracts/onboarding.bla` holds the entry to them.
 
 ## Agent workflow
 
@@ -188,7 +188,7 @@ Whether executable project memory actually reduces handoff cost, whether each me
 | `docs/architecture.md` | the current implementation map and its seams |
 | `mission.bla` | why the project exists, what decides a tradeoff and what it will not become; authoritative about intent, never a gate |
 | `system.bla` | the same map as queryable architectural memory, registered by `project.bla` and reachable through `status` and `explain` |
-| `process.bla` | who is expected to do what during development, and the authority boundaries between them; advisory, never enforced |
+| `process.bla` | who is expected to do what during development, and the authority boundaries between them |
 | `knowledge/` | reusable expertise packs and their rulings, routed to from System and Process, reusable in another project by path |
 | `docs/agent-workflow.md` | how an agent uses BlaBla |
 | `docs/research.md` | public research evidence |

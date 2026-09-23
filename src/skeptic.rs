@@ -4,12 +4,12 @@ use crate::structure::falsify::FalsifyReport;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-pub const AUTHORITY: &str = "A challenge is a question, never a verdict. It does not decide whether the work is correct, it grants no completion and withholds none, and blabla status and blabla finish remain the only authority over that.";
+pub const AUTHORITY: &str = include_str!("cli/text/skeptic-authority.md");
 
 pub const LIMITS: [&str; 3] = [
-    "Every challenge rests on evidence BlaBla already holds: the bounded task record, the working tree measured against it, and a rule verdict the falsifier produced. Nothing here is inferred from what an agent said it did.",
-    "Silence is not approval. No challenge means no contradiction was reachable from that evidence, which is a statement about the evidence rather than about the work.",
-    "BlaBla reads no meaning from source code. It cannot tell whether a branch is reachable, whether a name is the one you meant or whether a test asserts the thing it claims; a challenge about those never appears because it could not be grounded.",
+    include_str!("cli/text/skeptic-limit-evidence.md"),
+    include_str!("cli/text/skeptic-limit-silence.md"),
+    include_str!("cli/text/skeptic-limit-source.md"),
 ];
 
 pub const CLASSES: [&str; 13] = [
@@ -99,30 +99,55 @@ pub struct Evidence<'a> {
     pub completion_reason: &'a str,
     pub falsify: &'a dyn Fn() -> FalsifyReport,
     pub role: Option<&'a Resolution>,
+    pub other_tasks: &'a [Task],
 }
 
 const NO_TASK: &str = "no bounded task is open; blabla task open records one";
 const NOT_REACHED: &str = "a stronger challenge already stands, so this was not evaluated";
 
+fn path_in_other_task_scope(path: &str, current_task: &Task, other_tasks: &[Task]) -> bool {
+    other_tasks.iter().any(|other| {
+        other.name != current_task.name
+            && other.open()
+            && (other.in_scope(path)
+                || other
+                    .deliverables
+                    .iter()
+                    .any(|deliverable| task::covers(&deliverable.path, path)))
+    })
+}
+
 pub fn challenge(evidence: &Evidence<'_>) -> ChallengeReport {
     let mut outcomes: Vec<(&'static str, Result<Challenge, &'static str>)> = Vec::new();
-    type Grounding = fn(&Task, &BTreeMap<String, String>) -> Result<Challenge, &'static str>;
+    type Grounding = fn(&Task, &Evidence<'_>) -> Result<Challenge, &'static str>;
     let against_the_task: [(&'static str, Grounding); 9] = [
-        (CLASSES[12], declared_check_failed),
+        (CLASSES[12], |task, evidence| {
+            declared_check_failed(task, evidence.tree)
+        }),
         (CLASSES[0], |task, _| unresolved_finding(task)),
-        (CLASSES[1], deliverable_unchanged),
-        (CLASSES[2], scope_breach),
-        (CLASSES[5], work_without_acceptance),
+        (CLASSES[1], |task, evidence| {
+            deliverable_unchanged(task, evidence.tree)
+        }),
+        (CLASSES[2], |task, evidence| {
+            scope_breach(task, evidence.tree)
+        }),
+        (CLASSES[5], |task, evidence| {
+            work_without_acceptance(task, evidence.tree)
+        }),
         (CLASSES[7], |task, _| exception_unresolved(task)),
         (CLASSES[9], |task, _| readiness_without_evidence(task)),
-        (CLASSES[10], evidence_superseded),
-        (CLASSES[11], attribution_unknown),
+        (CLASSES[10], |task, evidence| {
+            evidence_superseded(task, evidence.tree)
+        }),
+        (CLASSES[11], |task, evidence| {
+            attribution_unknown(task, evidence.tree, evidence.other_tasks)
+        }),
     ];
     for (class, grounding) in against_the_task {
         outcomes.push((
             class,
             match evidence.task {
-                Some(task) => grounding(task, evidence.tree),
+                Some(task) => grounding(task, evidence),
                 None => Err(NO_TASK),
             },
         ));
@@ -152,7 +177,11 @@ pub fn challenge(evidence: &Evidence<'_>) -> ChallengeReport {
     ));
     outcomes.push((
         CLASSES[4],
-        verification_not_current(evidence.completion, evidence.completion_reason),
+        verification_not_current(
+            evidence.completion,
+            evidence.completion_reason,
+            evidence.task,
+        ),
     ));
 
     let mut grounded = Vec::new();
@@ -187,21 +216,22 @@ fn unresolved_finding(task: &Task) -> Result<Challenge, &'static str> {
     if task.findings.is_empty() {
         return Err("the task records no finding");
     }
-    let Some(finding) = task.unresolved().next() else {
-        return Err("every finding recorded on the task carries a resolution");
+    let Some(finding) = task.blocking().next() else {
+        return Err("every finding recorded on the task carries a resolution or an addressed mark");
     };
-    let outstanding = task.unresolved().count();
+    let outstanding = task.blocking().count();
     let mut evidence = vec![format!(
         "task {:?} finding {}: {}",
         task.name, finding.id, finding.statement
     )];
     if outstanding > 1 {
         evidence.push(format!(
-            "{outstanding} findings on this task carry no resolution"
+            "{outstanding} findings on this task carry neither a resolution nor an addressed mark"
         ));
     }
     evidence.push(
-        "recorded while the task was open; nothing since has stated what settles it".to_owned(),
+        "recorded while the task was open; nothing since has stated what was done about it"
+            .to_owned(),
     );
     Ok(Challenge {
         class: Class::UnresolvedFinding,
@@ -211,7 +241,7 @@ fn unresolved_finding(task: &Task) -> Result<Challenge, &'static str> {
         ),
         evidence,
         reconcile: format!(
-            "Settle it against the repository and record what settled it: blabla task resolve {} {} --evidence \"...\". If it no longer holds, say why in that evidence rather than dropping it.",
+            "Settle it against the repository and record what settled it: blabla task resolve {} {} --evidence \"...\" --model <id>. If it no longer holds, say why in that evidence rather than dropping it.",
             task.name, finding.id
         ),
     })
@@ -227,8 +257,8 @@ fn deliverable_unchanged(
     let mut untouched = Vec::new();
     let mut absent = Vec::new();
     for deliverable in &task.deliverables {
-        let current = tree.get(&deliverable.path);
-        match (&deliverable.opened_digest, current) {
+        let current = task::observed_digest(tree, &deliverable.path);
+        match (&deliverable.opened_digest, current.as_ref()) {
             (_, None) => absent.push(deliverable.path.as_str()),
             (Some(opened), Some(now)) if opened == now => untouched.push(deliverable.path.as_str()),
             _ => {}
@@ -275,7 +305,7 @@ fn deliverable_unchanged(
         class: Class::DeliverableUnchanged,
         statement: format!("I don't believe this task is complete. {subject}."),
         evidence,
-        reconcile: "Produce the deliverable, or state the evidence that it was already correct and needed no change; an untouched deliverable is the work a green check hides.".to_owned(),
+        reconcile: include_str!("cli/text/skeptic-deliverable-unchanged.md").to_owned(),
     })
 }
 
@@ -310,7 +340,7 @@ fn scope_breach(task: &Task, tree: &BTreeMap<String, String>) -> Result<Challeng
             "I don't believe this task stayed inside its write scope. {first} changed since it opened and no declared scope covers it."
         ),
         evidence,
-        reconcile: "Either the edit belongs to another task and should be reverted here, or the scope was wrong and the orchestrator widens it deliberately. BlaBla observes the breach; it does not prevent it.".to_owned(),
+        reconcile: include_str!("cli/text/skeptic-scope-breach.md").to_owned(),
     })
 }
 
@@ -346,6 +376,7 @@ fn vacuous_rule(report: &FalsifyReport) -> Result<Challenge, &'static str> {
 fn verification_not_current(
     state: CompletionState,
     reason: &str,
+    task: Option<&Task>,
 ) -> Result<Challenge, &'static str> {
     let subject = match state {
         CompletionState::Green => {
@@ -365,16 +396,21 @@ fn verification_not_current(
         CompletionState::StructureRed => "a structure rule is violated",
         CompletionState::StructureError => "structure could not be evaluated",
     };
+    let in_the_workers_hands =
+        task.is_some_and(|task| matches!(task.state.as_str(), "open" | "accepted" | "blocked"));
     Ok(Challenge {
         class: Class::VerificationNotCurrent,
-        statement: format!(
-            "I don't believe any completion claim about this tree yet: {subject}."
-        ),
+        statement: format!("I don't believe any completion claim about this tree yet: {subject}."),
         evidence: vec![
             format!("completion state: {}", state.word()),
             reason.to_owned(),
         ],
-        reconcile: "Run blabla finish and read its result before stating that the work is done; a claim of completion over a state BlaBla has not verified is the claim this project exists to block.".to_owned(),
+        reconcile: if in_the_workers_hands {
+            include_str!("cli/text/skeptic-verification-not-current-assignment.md")
+        } else {
+            include_str!("cli/text/skeptic-verification-not-current.md")
+        }
+        .to_owned(),
     })
 }
 
@@ -401,7 +437,7 @@ fn work_without_acceptance(
             format!("changed since the task opened: {first}"),
             "no acceptance is recorded on this task".to_owned(),
         ],
-        reconcile: "Either the role accepts the assignment it is working on, with blabla task accept <name> --model <id>, or the change belongs to another task. An acceptance records that a role took the work through this CLI; it never proves the role read what it retrieved.".to_owned(),
+        reconcile: include_str!("cli/text/skeptic-work-without-acceptance.md").to_owned(),
     })
 }
 
@@ -424,7 +460,7 @@ fn exception_unresolved(task: &Task) -> Result<Challenge, &'static str> {
             format!("reason given: {}", exception.reason),
             "approval: none recorded".to_owned(),
         ],
-        reconcile: "Proposing a model outside role policy is allowed and is not dispatching on it. The owner either approves the exception or refuses it; until then the proposal stands unresolved.".to_owned(),
+        reconcile: include_str!("cli/text/skeptic-exception-unresolved.md").to_owned(),
     })
 }
 
@@ -432,8 +468,8 @@ fn declared_check_failed(
     task: &Task,
     tree: &BTreeMap<String, String>,
 ) -> Result<Challenge, &'static str> {
-    if task.state != "ready" {
-        return Err("the task has not been handed back for review");
+    if !matches!(task.state.as_str(), "accepted" | "ready") {
+        return Err("the task is not accepted or handed back for review");
     }
     let Some(latest) = task::latest_evidence(task) else {
         return Err(
@@ -455,13 +491,13 @@ fn declared_check_failed(
             format!("exit: {}", latest.exit),
             format!("tool: {}", latest.tool),
         ],
-        reconcile: "Repair what the check reports and record the new result, or state why a failing result is the intended outcome. A result that ran is not a result that passed, and neither absence nor staleness describes this one.".to_owned(),
+        reconcile: include_str!("cli/text/skeptic-declared-check-failed.md").to_owned(),
     })
 }
 
 fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
-    if task.state != "ready" {
-        return Err("the task has not been handed back for review");
+    if !matches!(task.state.as_str(), "accepted" | "ready") {
+        return Err("the task is not accepted or handed back for review");
     }
     if task::latest_evidence(task).is_some() {
         return Err("a result for the declared check is recorded against this hand-back");
@@ -474,13 +510,13 @@ fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
         .collect();
     let (statement, observed) = if seen.is_empty() {
         (
-            "I don't believe this hand-back is supported. It is ready for review and no check result is recorded against it.".to_owned(),
+            "I don't believe this hand-back is supported. No check result is recorded against this assignment.".to_owned(),
             "evidence: none recorded".to_owned(),
         )
     } else {
         (
             format!(
-                "I don't believe this hand-back is supported. It is ready for review, and every result recorded against it answers a different check than {declared}."
+                "I don't believe this hand-back is supported. Every result recorded against this assignment answers a different check than {declared}."
             ),
             format!("evidence recorded, for: {}", seen.join(", ")),
         )
@@ -493,7 +529,7 @@ fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
             format!("declared check: {declared}"),
             observed,
         ],
-        reconcile: "Record the outcome of the task's declared check. A result for another check is not evidence about this one, missing evidence is not the same as a check that failed, and neither is the same as a claim in a message.".to_owned(),
+        reconcile: include_str!("cli/text/skeptic-readiness-without-evidence.md").to_owned(),
     })
 }
 
@@ -501,7 +537,8 @@ fn evidence_superseded(
     task: &Task,
     tree: &BTreeMap<String, String>,
 ) -> Result<Challenge, &'static str> {
-    let Some(evidence) = task::latest_evidence(task).filter(|entry| task::stale(entry, tree))
+    let Some(evidence) =
+        task::latest_evidence(task).filter(|_| !task::readiness(task, tree).current)
     else {
         return Err(
             "the most recent result for the declared check still matches the inputs it saw",
@@ -518,32 +555,46 @@ fn evidence_superseded(
             format!("exit: {}", evidence.exit),
             format!("inputs it saw: {}", evidence.inputs.len()),
         ],
-        reconcile: "Re-run the check and record the new outcome. Superseded evidence is not absent evidence and is not a false claim; it is a result whose inputs moved.".to_owned(),
+        reconcile: include_str!("cli/text/skeptic-evidence-superseded.md").to_owned(),
     })
 }
 
 fn attribution_unknown(
     task: &Task,
     tree: &BTreeMap<String, String>,
+    other_tasks: &[Task],
 ) -> Result<Challenge, &'static str> {
     let moved = task::changed(task, tree);
-    let Some(first) = moved
+    let undeclared: Vec<&str> = moved
         .iter()
-        .find(|path| task::attribute(task, tree, path) == task::ATTRIBUTIONS[2])
-    else {
+        .copied()
+        .filter(|path| {
+            task::attribute(task, tree, path) == task::ATTRIBUTIONS[2]
+                && !path_in_other_task_scope(path, task, other_tasks)
+        })
+        .collect();
+    let Some(first) = undeclared.first().copied() else {
         return Err("every change since the task opened is attributable");
     };
+    let mut evidence = vec![
+        format!("changed since the task opened: {first}"),
+        format!("write scope: {}", task.scope.join(", ")),
+        "no declaration covers it".to_owned(),
+    ];
+    if undeclared.len() > 1 {
+        evidence.push(format!(
+            "{} changed paths carry no declaration: {}",
+            undeclared.len(),
+            undeclared.join(", ")
+        ));
+    }
     Ok(Challenge {
         class: Class::AttributionUnknown,
         statement: format!(
             "I cannot attribute {first}. It changed since this task opened, it is outside the task's scope, and nothing declares who changed it."
         ),
-        evidence: vec![
-            format!("changed since the task opened: {first}"),
-            format!("write scope: {}", task.scope.join(", ")),
-            "no declaration covers it".to_owned(),
-        ],
-        reconcile: "Declare it as a concurrent change if it was yours, or widen the scope if it belongs to this task. Unknown attribution is a question to reconcile; it is not evidence that the worker wrote it.".to_owned(),
+        evidence,
+        reconcile: include_str!("cli/text/skeptic-attribution-unknown.md").to_owned(),
     })
 }
 
@@ -581,13 +632,13 @@ fn model_outside_role_policy(
             format!("role::{} permits: {}", task.role, role.models.join(", ")),
             "no approved exception covers it".to_owned(),
         ],
-        reconcile: "Either accept the assignment on a permitted model, or propose the exception with blabla task propose-model and let the owner rule on it. Proposing is allowed; running on it unruled is what this contradicts.".to_owned(),
+        reconcile: include_str!("cli/text/skeptic-model-outside-role-policy.md").to_owned(),
     })
 }
 
 fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, &'static str> {
-    if task.state != "ready" {
-        return Err("the task has not been handed back for review");
+    if !matches!(task.state.as_str(), "accepted" | "ready") {
+        return Err("the task is not accepted or handed back for review");
     }
     let Some(role) = role else {
         return Err("no role memory is registered, so no lens is expected");
@@ -609,6 +660,6 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
             format!("role::{} consults: {}", task.role, role.lenses.join(", ")),
             format!("assessments recorded: {}", task.assessments.len()),
         ],
-        reconcile: "Record what the assessment was with blabla task lens, including that the lens does not apply, which is a complete answer. Recording an assessment says the question was asked; it never establishes that the design is correct.".to_owned(),
+        reconcile: include_str!("cli/text/skeptic-lens-unassessed.md").to_owned(),
     })
 }

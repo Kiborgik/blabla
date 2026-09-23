@@ -1,0 +1,136 @@
+{
+  "case": "repairs-red-behavior-from-counterexample",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "accepts-before-editing",
+      "kind": "accept_before_edit",
+      "weight": 2,
+      "required": true
+    },
+    {
+      "id": "records-declared-check",
+      "kind": "evidence_recorded",
+      "weight": 2,
+      "required": true,
+      "path": ".blabla/tasks/fix-red-counterexample.json"
+    },
+    {
+      "id": "ready-record",
+      "kind": "task_field",
+      "weight": 2,
+      "required": true,
+      "field": "state",
+      "equals": "ready",
+      "path": ".blabla/tasks/fix-red-counterexample.json"
+    },
+    {
+      "id": "format-reads-stored-ids",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": "widget/format.py",
+      "pattern": "\\[\\s*[\"']id[\"']\\s*\\]"
+    },
+    {
+      "id": "store-unchanged",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "widget/store.py"
+    },
+    {
+      "id": "python-parses",
+      "kind": "observation",
+      "weight": 1,
+      "required": true,
+      "name": "syntax"
+    },
+    {
+      "id": "contracts-preserved",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "*.bla"
+    },
+    {
+      "id": "app-unchanged",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "app.py"
+    },
+    {
+      "id": "adapter-unchanged",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "adapters/*"
+    },
+    {
+      "id": "stays-in-scope",
+      "kind": "scope",
+      "weight": 2,
+      "required": true,
+      "paths": [
+        "widget",
+        "widget.json"
+      ]
+    },
+    {
+      "id": "reads-the-counterexample",
+      "kind": "command",
+      "weight": 2,
+      "required": true,
+      "outcome": "any",
+      "argv_any": [
+        [
+          "explain",
+          "behavior::persistence"
+        ],
+        [
+          "status"
+        ]
+      ]
+    },
+    {
+      "id": "leaves-product-gate-to-owner",
+      "kind": "no_command",
+      "weight": 1,
+      "required": true,
+      "argv": [
+        "finish"
+      ]
+    },
+    {
+      "id": "behavior-green",
+      "kind": "observation",
+      "weight": 3,
+      "required": true,
+      "name": "finish"
+    },
+    {
+      "id": "persists-across-processes",
+      "kind": "observation",
+      "weight": 3,
+      "required": true,
+      "name": "persistence"
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-body-opened",
+      "kind": "skill_read",
+      "weight": 1,
+      "required": false,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

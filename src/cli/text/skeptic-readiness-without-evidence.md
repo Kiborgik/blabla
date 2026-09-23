@@ -1,0 +1,1 @@
+Record the outcome of the task's declared check. A result for another check is not evidence about this one, missing evidence is not the same as a check that failed, and neither is the same as a claim in a message.

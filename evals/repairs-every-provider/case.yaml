@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: repairs-every-provider
+tags: [structure]
+context:
+  scaffold_script: fixture.sh

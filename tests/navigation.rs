@@ -134,13 +134,13 @@ fn an_all_green_project_still_offers_a_coarse_identity_for_every_kind() {
 }
 
 #[test]
-fn a_role_identity_opens_the_policies_that_bind_it_and_stays_advisory() {
+fn a_role_identity_opens_the_policies_that_bind_it() {
     let temp = project();
     let (view, code) = json_of(&temp, &["explain", "role::worker", "--json"]);
     assert_eq!(code, 0);
     assert_eq!(view["id"], "role::worker");
     assert_eq!(view["kind"], "role");
-    assert_eq!(view["enforcement"], "advisory");
+    assert!(view.get("enforcement").is_none(), "{view}");
     assert_eq!(view["verification"], "focused");
     assert_eq!(view["model"], serde_json::json!(["qwen3.5:4b"]));
 
@@ -158,7 +158,7 @@ fn a_role_identity_opens_the_policies_that_bind_it_and_stays_advisory() {
 
     let (policy, _) = json_of(&temp, &["explain", policy_id, "--json"]);
     assert_eq!(policy["kind"], "policy");
-    assert_eq!(policy["enforcement"], "advisory");
+    assert!(policy.get("enforcement").is_none(), "{policy}");
     for role in policy["applies_to"].as_array().unwrap() {
         assert_eq!(resolves(&temp, role.as_str().unwrap()), 0);
     }

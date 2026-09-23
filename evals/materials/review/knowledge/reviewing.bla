@@ -1,0 +1,18 @@
+knowledge "reviewing" {
+    purpose "Interrogating a change someone else has finished: what counts as evidence, how a task is accounted for, where a defect survives a green check, and which findings block."
+}
+
+ruling "read-the-patch-not-the-report" {
+    pack "reviewing"
+    statement "The change itself is the evidence. What its author says they did is a claim about the change, and a claim is the thing under review rather than support for it. A check reported as passing tells you the check passed and nothing about whether it covered the obligation."
+}
+
+ruling "a-symbol-is-not-a-behavior" {
+    pack "reviewing"
+    statement "A structural rule that requires a symbol is satisfied by the symbol existing. Whether the function behind it does what its name promises is a separate question the review must answer by reading its body: a save that writes nothing satisfies the rule and fails the task."
+}
+
+ruling "blocking-is-correctness-not-taste" {
+    pack "reviewing"
+    statement "A finding blocks when it leaves the change wrong, incomplete, or claiming something untrue. Naming, arrangement and anything that would merely be tidier is a suggestion and is labelled as one."
+}

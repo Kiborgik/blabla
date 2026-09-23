@@ -1,0 +1,75 @@
+role "orchestrator" {
+    purpose "Decide what the work is, divide it, integrate what comes back, and decide completion."
+    owns ["decomposition and assignment", "the manifest and the contracts", "every commit"]
+    verification "product"
+    model ["claude-fable-5-1", "opus-5"]
+}
+
+role "worker" {
+    purpose "Carry out one bounded task inside the write scope its orchestrator assigned."
+    owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
+    verification "focused"
+    model ["qwen3.5:9b", "qwen3.5:4b", "haiku-4.5"]
+    consult ["engineering", "testing"]
+}
+
+role "reviewer" {
+    purpose "Independently review one bounded worker patch and report the defects that block its integration."
+    owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
+    verification "focused"
+    model ["qwen3.5:9b", "opus-5"]
+    consult ["reviewing", "engineering", "testing"]
+}
+
+policy "contracts-are-orchestrator-owned" {
+    statement "A worker never edits a contract or the manifest to make its own task pass; changing declared intent is a separate authoring act."
+    applies_to ["worker", "reviewer"]
+}
+
+policy "workers-do-not-spawn" {
+    statement "A worker does not start further agents. If its task turns out to need division, it reports that instead."
+    applies_to ["worker", "reviewer"]
+}
+
+policy "verification-ownership" {
+    statement "A worker runs only the check its assignment declares and records what it reported. The product gate and blabla finish belong to the orchestrator."
+    applies_to ["worker", "reviewer"]
+}
+
+policy "worker-output-is-independently-reviewed" {
+    statement "A bounded worker's patch is reviewed in a context that never saw the work being done. The reviewer reads the original task and the whole diff, accounts for every deliverable, records one assessment against each lens the role consults, and records every blocking defect as a finding on the worker's task with file and line evidence. It never edits the patch, never resolves a finding and never runs the product gate; resolving and closing belong to the orchestrator."
+    applies_to ["reviewer"]
+    consult ["reviewing"]
+}
+
+flow "development" {
+    purpose "One bounded change, from assignment through independent review to the orchestrator's integration."
+}
+
+step "accept" {
+    flow "development"
+    role ["worker", "reviewer"]
+    statement "Take the assignment through BlaBla before doing anything else."
+    command "blabla task accept <name> --model <id>"
+}
+
+step "review" {
+    flow "development"
+    role ["reviewer"]
+    statement "Read the worker's task and the whole diff, hold the patch against the task and the contract, and record one assessment per lens the role consults."
+    command "blabla task lens <name> <lens> \"...\""
+}
+
+step "report-findings" {
+    flow "development"
+    role ["reviewer"]
+    statement "Record every blocking defect as a finding on the worker's task, with the file and line that show it."
+    command "blabla task finding <name> \"...\""
+}
+
+step "hand-back" {
+    flow "development"
+    role ["worker", "reviewer"]
+    statement "Record the declared check, challenge, and mark the task ready; closing it is the orchestrator's decision."
+    command "blabla task ready <name>"
+}

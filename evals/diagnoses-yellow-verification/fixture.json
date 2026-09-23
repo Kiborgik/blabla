@@ -1,0 +1,15 @@
+{
+  "materials": ["shared", "behavior", "store-persisting", "yellow", "roles"],
+  "adapter": true,
+  "remove": ["contracts"],
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Widget"]}
+  ],
+  "after_arm": [
+    {"run": ["blabla", "finish"], "exit": 5},
+    {"run": ["blabla", "task", "open", "diagnose-yellow", "--role", "worker",
+             "--statement", "The canonical verification of this project is YELLOW. Write REPORT.md naming the rule that is not exercised and the witness it needs, and say whether the application or the contract is the right place to supply it. The contract, the application and the store stay as they are.",
+             "--scope", "REPORT.md", "--deliverable", "REPORT.md", "--check", "test -s REPORT.md"]}
+  ],
+  "observations": ["status", "challenge:diagnose-yellow"]
+}

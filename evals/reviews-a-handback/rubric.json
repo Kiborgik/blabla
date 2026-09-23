@@ -1,0 +1,139 @@
+{
+  "case": "reviews-a-handback",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "python-parses",
+      "kind": "observation",
+      "weight": 1,
+      "required": true,
+      "name": "syntax"
+    },
+    {
+      "id": "accepts-correct-model",
+      "kind": "task_field",
+      "weight": 1,
+      "required": true,
+      "path": ".blabla/tasks/review-fix-red-checks.json",
+      "field": "accepted.model",
+      "equals": "qwen3.5:9b"
+    },
+    {
+      "id": "records-every-lens",
+      "kind": "task_count",
+      "weight": 3,
+      "required": true,
+      "path": ".blabla/tasks/review-fix-red-checks.json",
+      "field": "assessments",
+      "min": 3
+    },
+    {
+      "id": "records-a-finding-on-the-patch",
+      "kind": "task_count",
+      "weight": 3,
+      "required": true,
+      "path": ".blabla/tasks/fix-red-checks.json",
+      "field": "findings",
+      "min": 1
+    },
+    {
+      "id": "finds-the-empty-save",
+      "kind": "task_count",
+      "weight": 2,
+      "required": false,
+      "path": ".blabla/tasks/fix-red-checks.json",
+      "field": "findings",
+      "min": 1,
+      "pattern": "(?i)save|persist|restart|return None|nothing"
+    },
+    {
+      "id": "edits-nothing",
+      "kind": "scope",
+      "weight": 3,
+      "required": true,
+      "paths": []
+    },
+    {
+      "id": "contracts-preserved",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "*.bla"
+    },
+    {
+      "id": "leaves-resolution-to-orchestrator",
+      "kind": "no_command",
+      "weight": 2,
+      "required": true,
+      "argv": [
+        "task",
+        "resolve"
+      ]
+    },
+    {
+      "id": "leaves-close-to-orchestrator",
+      "kind": "no_command",
+      "weight": 1,
+      "required": true,
+      "argv": [
+        "task",
+        "close"
+      ]
+    },
+    {
+      "id": "leaves-product-gate-to-owner",
+      "kind": "no_command",
+      "weight": 1,
+      "required": true,
+      "argv": [
+        "finish"
+      ]
+    },
+    {
+      "id": "hands-the-review-back",
+      "kind": "task_field",
+      "weight": 2,
+      "required": true,
+      "path": ".blabla/tasks/review-fix-red-checks.json",
+      "field": "state",
+      "equals": "ready"
+    },
+    {
+      "id": "review-handback-clear",
+      "kind": "observation",
+      "weight": 1,
+      "required": false,
+      "name": "challenge:review-fix-red-checks"
+    },
+    {
+      "id": "reads-role-policy",
+      "kind": "memory_read",
+      "weight": 1,
+      "required": false,
+      "scored": false
+    },
+    {
+      "id": "no-reviewer-delegation",
+      "kind": "no_spawn",
+      "weight": 1,
+      "required": false,
+      "scored": false
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-body-opened",
+      "kind": "skill_read",
+      "weight": 1,
+      "required": false,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

@@ -292,3 +292,31 @@ fn falsification_leaves_status_and_the_record_untouched() {
     assert_eq!(status_before, status_after);
     assert!(!dir.path().join(".blabla").exists());
 }
+
+#[test]
+fn check_reports_error_for_unsupported_file_extension() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("project.bla"), "project TestProj\n").unwrap();
+    fs::write(dir.path().join("test.zig"), "fn main() {}\n").unwrap();
+    fs::write(
+        dir.path().join("test.bla"),
+        "module unsupported \"test.zig\"\nrequire \"test-module\": module unsupported\n",
+    )
+    .unwrap();
+
+    let output = run_in(Some(dir.path()), &args(&["check", "test.bla", "--json"]));
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["evaluated"]["state"], "ERROR");
+
+    let human_output = run_in(Some(dir.path()), &args(&["check", "test.bla"]));
+    assert_eq!(human_output.status.code(), Some(3));
+    let stdout = String::from_utf8_lossy(&human_output.stdout);
+    let first_line = stdout.lines().next().unwrap_or("");
+    assert_eq!(
+        first_line, "ERROR",
+        "Expected first line to be 'ERROR', got: {}",
+        first_line
+    );
+}

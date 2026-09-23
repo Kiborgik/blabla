@@ -1,0 +1,1 @@
+Architectural memory. Not verified against the repository and never part of completion.

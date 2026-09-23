@@ -1,0 +1,1 @@
+Produce the deliverable, or state the evidence that it was already correct and needed no change; an untouched deliverable is the work a green check hides.

@@ -1,0 +1,1 @@
+A challenge is a question, never a verdict. It does not decide whether the work is correct, it grants no completion and withholds none, and blabla status and blabla finish remain the only authority over that.

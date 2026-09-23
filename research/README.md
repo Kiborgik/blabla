@@ -1,5 +1,8 @@
 # Research package
 
+Active agent integration diagnostics and unresolved findings live in [evals/](../evals/README.md).
+This directory holds curated evidence for published claims; raw local runs stay in ignored `artifacts/`.
+
 Curated, auditable material behind the results quoted in `docs/research.md`. Everything here is a copy of the frozen benchmark inputs and outputs; nothing was re-run for publication. Raw session transcripts and run directories (hundreds of megabytes, containing absolute local paths) are not published; `haiku-handoff/methodology.md` describes how they were produced and they can be released separately after sanitisation.
 
 ```text

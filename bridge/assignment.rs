@@ -1,6 +1,7 @@
 use blabla::project::status::CompletionState;
 use blabla::project::task::{
-    self, Acceptance, Assessment, Attribution, Evidence, Exception, Finding, Task,
+    self, Acceptance, Assessment, Attribution, Evidence, Exception, Finding, FindingResolution,
+    Task,
 };
 use blabla::skeptic::{self, Evidence as Grounds};
 use blabla::structure::falsify::FalsifyReport;
@@ -40,6 +41,8 @@ fn opening(role: &str, revision: usize) -> task::Opening {
         scope: vec!["src".to_owned()],
         deliverables: vec![DELIVERABLE.to_owned()],
         check: Some(DECLARED_CHECK.to_owned()),
+        check_argv: None,
+        inputs: vec![SHARED_INPUT.to_owned()],
     }
 }
 
@@ -70,13 +73,18 @@ impl Assignment {
                 opened_tree: BTreeMap::new(),
                 state: "open".to_owned(),
                 check: None,
+                check_argv: None,
+                check_inputs: Vec::new(),
                 accepted: None,
                 result: None,
                 assessments: Vec::new(),
                 exceptions: Vec::new(),
                 evidence: Vec::new(),
+                challenged: None,
                 attributions: Vec::new(),
                 build: None,
+                notes: Vec::new(),
+                removed_deliverables: Vec::new(),
             },
             tree: BTreeMap::new(),
             resolution: task::Resolution {
@@ -95,18 +103,37 @@ impl Assignment {
     fn resume(&mut self) {
         self.open();
         self.accept_on(PERMITTED);
+        self.bump(DELIVERABLE, "deliverable");
+        self.reconcile();
         if self.opened.is_multiple_of(2) {
             return;
         }
-        self.bump(DELIVERABLE, "deliverable");
-        self.reconcile();
-        task::apply(&mut self.task, "ready");
+        let blockers = self.assignment_blockers();
+        let _ = task::mark_ready(&mut self.task, &self.tree, blockers);
     }
 
     fn open_again(&mut self) {
         if task::replaceable(Some(&self.task)) {
             self.open();
         }
+    }
+
+    fn closed_after_change(&mut self) {
+        self.open();
+        self.accept_on(PERMITTED);
+        self.bump(DELIVERABLE, "deliverable");
+        self.reconcile();
+        let blockers = self.assignment_blockers();
+        task::mark_ready(&mut self.task, &self.tree, blockers).expect("reconciled handback");
+        let standing = self.standing().len();
+        assert!(task::accept_result(
+            &mut self.task,
+            &self.tree,
+            standing,
+            PERMITTED,
+            4
+        ));
+        self.bump(OUTSIDE_SCOPE, "later-concurrent-change");
     }
 
     fn open(&mut self) {
@@ -138,6 +165,7 @@ impl Assignment {
             self.task.accepted = Some(Acceptance {
                 model: model.to_owned(),
                 unix: 1,
+                changed_at_acceptance: None,
             });
         }
     }
@@ -153,10 +181,9 @@ impl Assignment {
             tree: digest("tree"),
             tool: "cargo".to_owned(),
             unix: 2,
-            inputs: BTreeMap::from([
-                (DELIVERABLE.to_owned(), self.tree[DELIVERABLE].clone()),
-                (SHARED_INPUT.to_owned(), self.tree[SHARED_INPUT].clone()),
-            ]),
+            inputs: task::evidence_inputs(&self.task, &self.tree),
+            command: None,
+            log: None,
         });
     }
 
@@ -216,9 +243,12 @@ impl Assignment {
                 path,
                 kind: task::ATTRIBUTIONS[1].to_owned(),
                 digest,
+                model: None,
             });
         }
         self.record_evidence(DECLARED_CHECK);
+        let blockers = self.assignment_blockers();
+        task::record_challenge(&mut self.task, &self.tree, blockers, 3);
     }
 
     pub fn report(&self) -> skeptic::ChallengeReport {
@@ -236,6 +266,7 @@ impl Assignment {
                 rules: Vec::new(),
             },
             role: Some(&self.resolution),
+            other_tasks: &[],
         })
     }
 
@@ -247,11 +278,18 @@ impl Assignment {
             .collect()
     }
 
+    fn assignment_blockers(&self) -> usize {
+        self.standing()
+            .iter()
+            .filter(|class| !matches!(class.as_str(), "verification-not-current" | "vacuous-rule"))
+            .count()
+    }
+
     fn live(&self) -> bool {
         self.task.closed_unix.is_none()
     }
 
-    const RECORDS: [&'static str; 13] = [
+    const RECORDS: [&'static str; 14] = [
         "accept_with_a_permitted_model",
         "accept_with_an_outside_policy_model",
         "propose_an_outside_policy_model",
@@ -259,6 +297,7 @@ impl Assignment {
         "record_a_lens_assessment",
         "record_a_finding",
         "mark_ready_for_review",
+        "challenge_the_assignment",
         "accept_the_result",
         "record_a_check_result",
         "record_a_failing_check_result",
@@ -275,13 +314,18 @@ impl Assignment {
         match action {
             "open_a_task" => self.open(),
             "resume_a_task_already_under_way" => self.resume(),
+            "resume_a_closed_task_after_a_concurrent_change" => self.closed_after_change(),
             "open_a_task_whose_name_is_already_recorded" => self.open_again(),
             "record_a_finding" => {
                 let id = self.task.next_finding_id();
                 self.task.findings.push(Finding {
                     id,
                     statement: "a probe finding".to_owned(),
-                    resolution: Some("settled inside the task".to_owned()),
+                    addressed: None,
+                    resolution: Some(FindingResolution {
+                        evidence: "settled inside the task".to_owned(),
+                        model: None,
+                    }),
                 });
             }
             "widen_the_scope_to_cover_the_breach" => {
@@ -324,11 +368,16 @@ impl Assignment {
                 });
             }
             "mark_ready_for_review" => {
-                task::apply(&mut self.task, "ready");
+                let blockers = self.assignment_blockers();
+                let _ = task::mark_ready(&mut self.task, &self.tree, blockers);
+            }
+            "challenge_the_assignment" => {
+                let blockers = self.assignment_blockers();
+                task::record_challenge(&mut self.task, &self.tree, blockers, 3);
             }
             "accept_the_result" => {
                 let standing = self.standing().len();
-                task::accept_result(&mut self.task, standing, PERMITTED, 4);
+                task::accept_result(&mut self.task, &self.tree, standing, PERMITTED, 4);
             }
             "record_a_check_result" => self.record_evidence(DECLARED_CHECK),
             "record_a_failing_check_result" => self.record_result(DECLARED_CHECK, 101),
@@ -349,6 +398,7 @@ impl Assignment {
                         path: OUTSIDE_SCOPE.to_owned(),
                         kind: task::ATTRIBUTIONS[1].to_owned(),
                         digest: self.tree.get(OUTSIDE_SCOPE).cloned(),
+                        model: None,
                     });
                 }
             }
@@ -363,6 +413,7 @@ impl Assignment {
                         path: BREACHED.to_owned(),
                         kind: task::ATTRIBUTIONS[0].to_owned(),
                         digest: self.tree.get(BREACHED).cloned(),
+                        model: None,
                     });
                 }
             }
@@ -390,11 +441,49 @@ impl Assignment {
             "evidence_current": readiness.current,
             "evidence_answers_the_declared_check": readiness.answers_declared_check,
             "readiness_supported": readiness.supported,
+            "challenge_current": task::challenge_current(&self.task, &self.tree),
             "exception_approved": self.task.exceptions.iter().any(|entry| entry.approval.is_some()),
             "breach_in_scope": self.task.in_scope(BREACHED),
             "deliverables": self.task.deliverables.len(),
             "findings": self.task.findings.len(),
             "closed": !self.live(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resumed_work_exercises_both_guarded_handback_and_result_acceptance() {
+        let mut assignment = Assignment::new();
+        assignment.call("resume_a_task_already_under_way");
+        assert_eq!(assignment.observe()["phase"], "accepted");
+        assignment.call("mark_ready_for_review");
+        assert_eq!(assignment.observe()["phase"], "ready");
+        assignment.call("accept_the_result");
+        assert_eq!(assignment.observe()["closed"], true);
+        assignment.call("resume_a_task_already_under_way");
+        assert_eq!(assignment.observe()["phase"], "ready");
+        assignment.call("change_the_source_after_a_check");
+        assignment.call("accept_the_result");
+        assert_eq!(assignment.observe()["closed"], false);
+    }
+
+    #[test]
+    fn closed_history_reports_later_changes_without_absorbing_a_scope_breach() {
+        let mut assignment = Assignment::new();
+        assignment.call("resume_a_closed_task_after_a_concurrent_change");
+        let observed = assignment.observe();
+        assert_eq!(observed["closed"], true);
+        assert_eq!(observed["result_accepted"], true);
+        let standing = observed["standing"].as_array().unwrap();
+        assert!(
+            standing
+                .iter()
+                .any(|item| item["class"] == "attribution-unknown")
+        );
+        assert!(!standing.iter().any(|item| item["class"] == "scope-breach"));
     }
 }

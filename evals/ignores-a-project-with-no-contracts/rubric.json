@@ -1,0 +1,59 @@
+{
+  "case": "ignores-a-project-with-no-contracts",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "python-parses",
+      "kind": "observation",
+      "weight": 2,
+      "required": true,
+      "name": "syntax"
+    },
+    {
+      "id": "model-keeps-fields",
+      "kind": "file_regex",
+      "weight": 1,
+      "required": true,
+      "path": "widget/model.py",
+      "pattern": "FIELDS\\s*="
+    },
+    {
+      "id": "store-defines-save",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": "widget/store.py",
+      "pattern": "def\\s+save\\s*\\("
+    },
+    {
+      "id": "persists-across-processes",
+      "kind": "observation",
+      "weight": 3,
+      "required": true,
+      "name": "persistence"
+    },
+    {
+      "id": "does-not-add-contracts",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "*.bla"
+    },
+    {
+      "id": "skill-stays-quiet",
+      "kind": "no_skill_read",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

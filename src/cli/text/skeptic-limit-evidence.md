@@ -1,0 +1,1 @@
+Every challenge rests on evidence BlaBla already holds: the bounded task record, the working tree measured against it, and a rule verdict the falsifier produced. Nothing here is inferred from what an agent said it did.

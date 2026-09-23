@@ -1,0 +1,6 @@
+project Widget
+
+mission "mission.bla"
+system "system.bla"
+process "process.bla"
+knowledge "knowledge/persistence.bla"

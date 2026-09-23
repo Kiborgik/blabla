@@ -1,0 +1,12 @@
+module model  "rust/src/model.rs"
+module store  "rust/src/store.rs"
+module format "rust/src/format.rs"
+
+require "the-store-is-a-type":                  symbol store::Store
+require "state-survives-a-restart":             symbol store::Store.save
+require "the-format-encodes":                   symbol format::encode
+require "the-store-uses-the-model":             dependency store -> model
+require "the-store-encodes-through-the-format": dependency store -> format
+
+forbid "the-model-stays-below-the-store":       dependency model -> store
+forbid "the-format-stays-below-the-store":      dependency format -> store

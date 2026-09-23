@@ -6,8 +6,7 @@ use std::collections::BTreeMap;
 
 pub const FILE_NAME: &str = "system.bla";
 
-pub const AUTHORITY: &str =
-    "Architectural memory. Not verified against the repository and never part of completion.";
+pub const AUTHORITY: &str = include_str!("../cli/text/authority-system.md");
 
 #[derive(Clone, Debug, Serialize)]
 pub struct System {

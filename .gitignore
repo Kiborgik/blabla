@@ -16,3 +16,7 @@ __pycache__/
 /todos.jsonl
 *.log
 /release/
+/evals/results/
+.env
+.env.*
+!.env.example

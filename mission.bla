@@ -4,7 +4,7 @@ mission "blabla" {
         "Replace frontier models. Product thinking, architecture, planning, broad expertise, constructive pushback and hard integration are where a strong model earns its cost; BlaBla exists so that reasoning is not spent again on work a bounded worker can carry out.",
         "Become a general-purpose language, an agent orchestrator, a BDD framework or a theorem prover. One current contract language and one current API, with no versioned schemas, no migrations and no compatibility branches.",
         "Let the presence of project memory decide completion. Mission, System, Process and Knowledge do not participate in OVERALL merely because they are registered, and a project that declares none of them is not thereby incomplete.",
-        "Claim enforcement BlaBla does not have. A policy is described as enforced only while an actual trusted enforcement mechanism is active; wherever none is active, every surface says advisory.",
+        "Claim enforcement BlaBla does not have. A policy is described as enforced only while an actual trusted enforcement mechanism is active.",
         "Prove anything. A behavior campaign is a bounded, heuristic search and structure evaluation reads only what a provider can establish statically; neither is a proof over all inputs."
     ]
 }

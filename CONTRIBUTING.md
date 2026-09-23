@@ -1,6 +1,6 @@
 # Contributing
 
-BlaBla is an experimental alpha. Issues that report a false GREEN, a nondeterministic campaign, a provider that executes project code, or a benchmark flaw are the most valuable contributions.
+BlaBla is pre-1.0: a change to contract syntax, CLI options, JSON fields or exit codes ships only in a minor release and is listed under **Breaking** in `CHANGELOG.md`, and a patch release never makes one. Issues that report a false GREEN, a nondeterministic campaign, a provider that executes project code, or a benchmark flaw are the most valuable contributions.
 
 ## Development setup
 

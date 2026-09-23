@@ -1,0 +1,1532 @@
+{
+  "purpose": "Grade observed agent use and outcomes around BlaBla capabilities; do not equate fixture outcomes with product implementation correctness.",
+  "control": "With BlaBla: manifest, contracts, task record, onboarding, skill and CLI present. Without BlaBla: none of it, the same job in plain language from the case's prompt-without.md; a case with no such prompt exists only with BlaBla. Criteria that need BlaBla are not applicable without it.",
+  "scoring": {
+    "source": "Frozen per-case criterion weights and statuses",
+    "unknown": "Earned points are a lower bound; unknown points are shown separately, never passed.",
+    "untested": "No score without a purposeful fixture opportunity. Unmeasured capabilities stay visible.",
+    "overlap": "System, capability and actor-behavior views overlap. Never sum the axes into a combined score.",
+    "scope": "Current points summarize only referenced observations. Every declared missing probe prevents claiming complete system coverage."
+  },
+  "systems": [
+    {
+      "id": "cli",
+      "title": "CLI and agent surfaces",
+      "authority": "system::cli"
+    },
+    {
+      "id": "project",
+      "title": "Project state and completion",
+      "authority": "system::project"
+    },
+    {
+      "id": "skeptic",
+      "title": "Evidence-grounded challenge",
+      "authority": "system::skeptic"
+    },
+    {
+      "id": "behavior-contract",
+      "title": "Typed behavior intent",
+      "authority": "system::behavior-contract"
+    },
+    {
+      "id": "behavior-verify",
+      "title": "Behavioral verification",
+      "authority": "system::behavior-verify"
+    },
+    {
+      "id": "adapter",
+      "title": "Application trust boundary",
+      "authority": "system::adapter"
+    },
+    {
+      "id": "memory",
+      "title": "Authored project memory",
+      "authority": "system::memory"
+    },
+    {
+      "id": "structure-eval",
+      "title": "Structure rule evaluation",
+      "authority": "system::structure-eval"
+    },
+    {
+      "id": "structure-providers",
+      "title": "Source inspection",
+      "authority": "system::structure-providers"
+    },
+    {
+      "id": "structure-harness",
+      "title": "Shared parser harness",
+      "authority": "system::structure-harness"
+    },
+    {
+      "id": "voice",
+      "title": "Diagnostic voice",
+      "authority": "system::voice"
+    },
+    {
+      "id": "report",
+      "title": "Result and diagnostics",
+      "authority": "system::report"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "cli.project-discovery-status",
+      "title": "Discover nearest/explicit project and read layered status",
+      "system": "cli",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "agent-verifies-project"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "reads-status"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "reads-status"
+        }
+      ],
+      "missing": [
+        "No nested discovery or --project opportunity; status is always run from the project root."
+      ]
+    },
+    {
+      "id": "cli.identity-navigation",
+      "title": "Follow canonical identities through status and explain",
+      "system": "cli",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "navigates-project-memory",
+          "criterion": "opens-system-memory"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "opens-knowledge-memory"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "opens-mission-memory"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "explains-a-rule"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "explains-a-rule"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "reads-the-counterexample"
+        }
+      ],
+      "missing": [
+        "Flow, step and runtime-primitive identities have no purposeful opportunity."
+      ]
+    },
+    {
+      "id": "cli.guides-runtime-help",
+      "title": "Use agent/change/memory/loop guides and runtime help",
+      "system": "cli",
+      "scope": "public-agent",
+      "checks": [],
+      "missing": [
+        "Unmeasured; no fixture asks the agent to recover procedure or runtime semantics from a guide."
+      ]
+    },
+    {
+      "id": "cli.bootstrap-agent-entry",
+      "title": "init, --agents, managed onboarding and portable skill",
+      "system": "cli",
+      "scope": "public-agent",
+      "checks": [],
+      "missing": [
+        "Unmeasured: bootstrapping is orchestrator work, and its case left the local small-model suite by the owner's ruling of 2026-09-22 that small models are not given orchestrator work.",
+        "Second-init idempotence and the byte-stable skill are product facts covered by product tests, not agent points."
+      ]
+    },
+    {
+      "id": "project.manifest-layers-profile",
+      "title": "Compose use/draft contracts, aliases and canonical profile",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-every-provider",
+          "criterion": "project-green"
+        }
+      ],
+      "missing": [
+        "Partial. A generated draft manifest and a five-contract manifest are read; draft promotion, aliasing and invalid-manifest diagnosis have no opportunity."
+      ]
+    },
+    {
+      "id": "project.completion-gate",
+      "title": "Distinguish layer state from OVERALL completion and run canonical finish",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "leaves-product-gate-to-owner"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "agent-verifies-project"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "reads-the-verdict"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "verification-still-yellow"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "project-green"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "structure-stays-green"
+        }
+      ],
+      "missing": [
+        "No-profile and noncanonical-run decisions have no opportunity."
+      ]
+    },
+    {
+      "id": "project.staleness-run-recovery",
+      "title": "Detect stale records and VERIFYING/INTERRUPTED recovery",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [],
+      "missing": [
+        "Unmeasured: recovering an interrupted verification runs finish, which is orchestrator work; its case left the local small-model suite by the owner's ruling of 2026-09-22.",
+        "A record made stale by an implementation or profile change, and a live VERIFYING marker, have no opportunity."
+      ]
+    },
+    {
+      "id": "project.task-record-discovery",
+      "title": "Open/show/list persistent task records and recorded state labels",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "ready-record"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "hands-the-review-back"
+        }
+      ],
+      "missing": [
+        "Fixtures preopen every task; an agent opening a task, and BLOCKED or CLOSED rendering, have no opportunity."
+      ]
+    },
+    {
+      "id": "project.task-acceptance-model",
+      "title": "Accept before work and apply role model policy",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "accepts-before-editing"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "accepts-correct-model"
+        }
+      ],
+      "missing": [
+        "Outside-policy refusal, reacceptance and model-exception recovery have no opportunity."
+      ]
+    },
+    {
+      "id": "project.task-scope-deliverables-attribution",
+      "title": "Enforce scope, observe deliverables and reconcile origin",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "stays-in-write-scope"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "stays-in-write-scope"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "edits-nothing"
+        }
+      ],
+      "missing": [
+        "Concurrent attribution, unknown origin and a withdrawn deliverable have no opportunity."
+      ]
+    },
+    {
+      "id": "project.task-evidence-freshness",
+      "title": "Bind declared-check evidence to explicit/default inputs",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "records-declared-check"
+        }
+      ],
+      "missing": [
+        "Partial. Current final record is checked; failed, different-check, stale, absent/new input and post-evidence edits are unmeasured."
+      ]
+    },
+    {
+      "id": "project.task-handback-closure",
+      "title": "Challenge receipt, READY, reacceptance, close and result history",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "check-evidence-challenge-handback-order"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "ready-record"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "leaves-product-gate-to-owner"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "hands-the-review-back"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "review-handback-clear"
+        }
+      ],
+      "missing": [
+        "Close, receipt invalidation, reacceptance and closed history are orchestrator work with no agent opportunity."
+      ]
+    },
+    {
+      "id": "project.task-review-records",
+      "title": "Blockers, findings, resolutions and lens assessments",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "reviews-a-handback",
+          "criterion": "records-every-lens"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "records-a-finding-on-the-patch"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "finds-the-empty-save"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "leaves-resolution-to-orchestrator"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "leaves-close-to-orchestrator"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "reports-the-contradiction"
+        }
+      ],
+      "missing": [
+        "Resolution is orchestrator work with no agent opportunity."
+      ]
+    },
+    {
+      "id": "project.task-model-exceptions",
+      "title": "Propose/approve exceptions and gate closure on them",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [],
+      "missing": [
+        "Unmeasured. Optional commands must not fail an agent until a fixture intentionally requires an exception decision."
+      ]
+    },
+    {
+      "id": "skeptic.challenge-account",
+      "title": "Ground one contradiction and expose ungrounded classes",
+      "system": "skeptic",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "check-evidence-challenge-handback-order"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "review-handback-clear"
+        }
+      ],
+      "missing": [
+        "Individual classes, precedence and evidence text are not point-checked."
+      ]
+    },
+    {
+      "id": "skeptic.assignment-vs-project",
+      "title": "Clear a bounded hand-back while preserving project-wide verification ownership",
+      "system": "skeptic",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "check-evidence-challenge-handback-order"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "ready-record"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "leaves-product-gate-to-owner"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "review-handback-clear"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "leaves-product-gate-to-owner"
+        }
+      ],
+      "missing": [
+        "No point for assignment clearance beside a stale project status."
+      ]
+    },
+    {
+      "id": "behavior-contract.typed-language",
+      "title": "Author typed state/actions/rules/expressions",
+      "system": "behavior-contract",
+      "scope": "public-agent",
+      "checks": [],
+      "missing": [
+        "No case asks an agent to author a contract; every behavior case supplies one and forbids editing it."
+      ]
+    },
+    {
+      "id": "behavior-contract.diagnostics",
+      "title": "Reject invalid types, fields, layers and runtime collisions",
+      "system": "behavior-contract",
+      "scope": "public-agent",
+      "checks": [],
+      "missing": [
+        "Unmeasured; no contract-authoring or diagnostic-repair opportunity."
+      ]
+    },
+    {
+      "id": "behavior-verify.campaign-green",
+      "title": "Run a finite campaign and interpret GREEN",
+      "system": "behavior-verify",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "behavior-green"
+        }
+      ],
+      "missing": [
+        "One persistence contract shape across every behavior case."
+      ]
+    },
+    {
+      "id": "behavior-verify.coverage-yellow",
+      "title": "Interpret YELLOW and supply the named witness",
+      "system": "behavior-verify",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "reads-the-verdict"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "names-the-unexercised-rule"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "states-the-verdict"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "names-the-witness"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "verification-still-yellow"
+        }
+      ],
+      "missing": [
+        "Supplying the witness is deliberately not asked; the case measures the diagnosis and the refusal to weaken."
+      ]
+    },
+    {
+      "id": "behavior-verify.counterexample-shrink-replay",
+      "title": "Use RED counterexamples, shrinking and seed replay",
+      "system": "behavior-verify",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "reads-the-counterexample"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "stays-in-scope"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "behavior-green"
+        }
+      ],
+      "missing": [
+        "Seed replay by the agent is not point-checked; the retained record and its minimal trace are what the case supplies."
+      ]
+    },
+    {
+      "id": "adapter.jsonl-protocol",
+      "title": "Implement reset/call/observe correlation and adapter errors",
+      "system": "adapter",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "stays-in-scope"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "adapter-unchanged"
+        }
+      ],
+      "missing": [
+        "Id correlation and structured adapter errors are carried by the canonical adapter; the agent point is stdout discipline only."
+      ]
+    },
+    {
+      "id": "adapter.restart-persistence-isolation",
+      "title": "Trusted restart, durable cwd and case isolation",
+      "system": "adapter",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "app-unchanged"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "adapter-unchanged"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "persists-across-processes"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "persists-across-processes"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "persists-across-processes"
+        }
+      ],
+      "missing": [
+        "Reset isolation and two-case separation are not isolated as points."
+      ]
+    },
+    {
+      "id": "adapter.prepare-startup-timeout-containment",
+      "title": "Prepare once, separate startup/response limits and contain process trees",
+      "system": "adapter",
+      "scope": "public-agent",
+      "checks": [],
+      "missing": [
+        "Unmeasured. These are agent-relevant when diagnosing application startup, but need a fixture that creates the opportunity."
+      ]
+    },
+    {
+      "id": "memory.mission-intent",
+      "title": "Retrieve mission, priorities and non-goals",
+      "system": "memory",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "navigates-project-memory",
+          "criterion": "opens-mission-memory"
+        }
+      ],
+      "missing": [
+        "No tradeoff decision rests on a priority; the point is retrieval only."
+      ]
+    },
+    {
+      "id": "memory.system-ownership",
+      "title": "Retrieve systems, responsibilities, seams and routed packs",
+      "system": "memory",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "navigates-project-memory",
+          "criterion": "opens-system-memory"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "names-the-owning-system"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "finds-the-owner-by-any-route"
+        }
+      ],
+      "missing": [
+        "No moves-with decision."
+      ]
+    },
+    {
+      "id": "memory.process-workflow",
+      "title": "Retrieve roles, policies, flow and steps",
+      "system": "memory",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "reads-role-policy"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "reads-role-policy"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "reads-role-policy"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "records-every-lens"
+        }
+      ],
+      "missing": [
+        "Flow and step lookups have no opportunity; the lens count is the one role-driven decision."
+      ]
+    },
+    {
+      "id": "memory.knowledge-rulings",
+      "title": "Survey packs and open applicable rulings",
+      "system": "memory",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "navigates-project-memory",
+          "criterion": "opens-knowledge-memory"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "names-the-ruling"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "finds-the-ruling-by-any-route"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "records-every-lens"
+        }
+      ],
+      "missing": [
+        "A lens row shows a pack was consulted; whether its rulings were applied is judged only through the finding it produced."
+      ]
+    },
+    {
+      "id": "structure-eval.fact-rules",
+      "title": "Use module/symbol/dependency/contains/maps facts",
+      "system": "structure-eval",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "model-keeps-fields"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "store-defines-save"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "model-stays-independent"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "model-keeps-fields"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "store-defines-save"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "model-stays-independent"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "project-green"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "structure-stays-green"
+        }
+      ],
+      "missing": [
+        "Values and maps facts are not distinguished; every case repairs symbol and dependency rules."
+      ]
+    },
+    {
+      "id": "structure-eval.red-error-explain",
+      "title": "Distinguish RED from ERROR and read observed evidence",
+      "system": "structure-eval",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "agent-verifies-project"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "explains-a-rule"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "explains-a-rule"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "structure-eval.falsification",
+      "title": "Use check --falsify and interpret FALSIFIABLE/VACUOUS/UNEVALUABLE",
+      "system": "structure-eval",
+      "scope": "public-agent",
+      "checks": [],
+      "missing": [
+        "Unmeasured: project-wide falsification is orchestrator work; its case left the local small-model suite by the owner's ruling of 2026-09-22.",
+        "UNEVALUABLE is not point-checked apart from the ERROR rows it accompanies."
+      ]
+    },
+    {
+      "id": "structure-providers.python",
+      "title": "Inspect Python modules",
+      "system": "structure-providers",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "structure-stays-green"
+        }
+      ],
+      "missing": [
+        "Literal associations, unreadable values and provider failure have no opportunity."
+      ]
+    },
+    {
+      "id": "structure-providers.rust",
+      "title": "Inspect Rust modules",
+      "system": "structure-providers",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-every-provider",
+          "criterion": "rust-green"
+        }
+      ],
+      "missing": [
+        "Symbol and dependency rules only; values and unresolved routes have no opportunity."
+      ]
+    },
+    {
+      "id": "structure-providers.typescript-js",
+      "title": "Inspect TS/TSX/JS/JSX/MJS/CJS modules",
+      "system": "structure-providers",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-every-provider",
+          "criterion": "typescript-green"
+        }
+      ],
+      "missing": [
+        "TypeScript only; the JavaScript extensions and dynamic imports have no opportunity."
+      ]
+    },
+    {
+      "id": "structure-providers.go",
+      "title": "Inspect Go modules",
+      "system": "structure-providers",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-every-provider",
+          "criterion": "go-green"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "structure-providers.java",
+      "title": "Inspect Java modules",
+      "system": "structure-providers",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-every-provider",
+          "criterion": "java-green"
+        }
+      ],
+      "missing": [
+        "Wildcard imports and same-package unknowns have no opportunity."
+      ]
+    },
+    {
+      "id": "structure-providers.c-cpp",
+      "title": "Inspect C and C++ modules/header routes",
+      "system": "structure-providers",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "repairs-every-provider",
+          "criterion": "c-green"
+        }
+      ],
+      "missing": [
+        "C only, through header routes; the C++ grammar and unresolvable includes have no opportunity."
+      ]
+    },
+    {
+      "id": "structure-harness.tristate-bounded-unknown",
+      "title": "Preserve found/absent/unknown and scope uncertainty",
+      "system": "structure-harness",
+      "scope": "internal-correctness",
+      "checks": [],
+      "missing": [
+        "Unmeasured: the only case reporting ERROR, unknown and unsupported-language verdicts ran project-wide falsification, orchestrator work that left the local small-model suite by the owner's ruling of 2026-09-22."
+      ]
+    },
+    {
+      "id": "voice.diagnostic-selection",
+      "title": "Neutral/blunt wording without verdict drift",
+      "system": "voice",
+      "scope": "public-agent + internal-correctness",
+      "checks": [],
+      "missing": [
+        "Unmeasured. No purposeful owner-choice fixture; absence should not penalize ordinary repair cases."
+      ]
+    },
+    {
+      "id": "report.shared-surfaces",
+      "title": "Consistent human/JSON state, exit codes, progress and diagnostics",
+      "system": "report",
+      "scope": "internal-correctness",
+      "checks": [],
+      "missing": [
+        "Partial internal use, no agent point. No same-result human/JSON equivalence, progress stream or diagnostic-location criterion."
+      ]
+    }
+  ],
+  "behaviors": [
+    {
+      "id": "behavior.skill-offered",
+      "title": "Host offers the BlaBla skill in the with condition",
+      "scope": "host-integration",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "ignores-a-project-with-no-contracts",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "skill-offered"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.skill-read",
+      "title": "Agent explicitly opens the skill body",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "skill-body-opened"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.skill-quiet-negative",
+      "title": "Skill stays quiet with no BlaBla project",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "ignores-a-project-with-no-contracts",
+          "criterion": "skill-stays-quiet"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.accept-before-edit",
+      "title": "Agent accepts assigned work before writing",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "accepts-before-editing"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.policy-lookup",
+      "title": "Agent reads its role/process authority",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "reads-role-policy"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "reads-role-policy"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "reads-role-policy"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.preserve-authority",
+      "title": "Agent leaves contracts/app/adapter protected surfaces intact",
+      "scope": "agent-integrity",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "ignores-a-project-with-no-contracts",
+          "criterion": "does-not-add-contracts"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "app-unchanged"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "adapter-unchanged"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "memory-untouched"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "app-unchanged"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "adapter-unchanged"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "app-unchanged"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "store-unchanged"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "adapter-unchanged"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "store-unchanged"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "contracts-preserved"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.stay-in-scope",
+      "title": "Agent changes only allowed paths",
+      "scope": "agent-integrity",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "stays-in-write-scope"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "only-store-changed"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "writes-only-the-answer"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "stays-in-sources"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "stays-in-write-scope"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "stays-in-scope"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "writes-only-the-report"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "stays-in-scope"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "edits-nothing"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.verify-with-right-owner",
+      "title": "Agent runs project verification when owned and leaves it to owner when assigned",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "leaves-product-gate-to-owner"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "agent-verifies-project"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "leaves-product-gate-to-owner"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "leaves-product-gate-to-owner"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "leaves-product-gate-to-owner"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "leaves-product-gate-to-owner"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "leaves-product-gate-to-owner"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.complete-handback-order",
+      "title": "Status/check evidence/challenge/READY occur in order",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "records-declared-check"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "check-evidence-challenge-handback-order"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "ready-record"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.no-worker-delegation",
+      "title": "Worker does not delegate",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "no-worker-delegation"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "no-worker-delegation"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "no-reviewer-delegation"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.reports-instead-of-complying",
+      "title": "Agent reports a contradiction or a missing witness instead of forcing a green",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "reports-the-contradiction"
+        },
+        {
+          "case": "reports-an-impossible-assignment",
+          "criterion": "structure-stays-green"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "names-the-unexercised-rule"
+        },
+        {
+          "case": "diagnoses-yellow-verification",
+          "criterion": "verification-still-yellow"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.independent-review",
+      "title": "Reviewer records lenses and findings without editing or resolving",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "reviews-a-handback",
+          "criterion": "records-every-lens"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "records-a-finding-on-the-patch"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "finds-the-empty-save"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "edits-nothing"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "leaves-resolution-to-orchestrator"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "hands-the-review-back"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.truthful-final-claim",
+      "title": "Final answer agrees with task/project state",
+      "scope": "agent",
+      "checks": [],
+      "missing": [
+        "Unmeasured; task state is checked, final narrative truth is not."
+      ]
+    },
+    {
+      "id": "behavior.case-outcome",
+      "title": "Requested application repair is actually correct",
+      "scope": "task outcome",
+      "checks": [
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "python-parses"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "model-keeps-fields"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "store-defines-save"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "model-stays-independent"
+        },
+        {
+          "case": "carries-an-assigned-task",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "ignores-a-project-with-no-contracts",
+          "criterion": "python-parses"
+        },
+        {
+          "case": "ignores-a-project-with-no-contracts",
+          "criterion": "model-keeps-fields"
+        },
+        {
+          "case": "ignores-a-project-with-no-contracts",
+          "criterion": "store-defines-save"
+        },
+        {
+          "case": "ignores-a-project-with-no-contracts",
+          "criterion": "persists-across-processes"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "python-parses"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "model-keeps-fields"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "store-defines-save"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "model-stays-independent"
+        },
+        {
+          "case": "repairs-a-red-project",
+          "criterion": "structure-green"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "python-parses"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "model-keeps-fields"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "store-defines-save"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-behavioral-drift",
+          "criterion": "persists-across-processes"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "names-the-owning-system"
+        },
+        {
+          "case": "navigates-project-memory",
+          "criterion": "names-the-ruling"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "rust-green"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "typescript-green"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "go-green"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "java-green"
+        },
+        {
+          "case": "repairs-every-provider",
+          "criterion": "c-green"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "repairs-red-behavior-from-counterexample",
+          "criterion": "persists-across-processes"
+        },
+        {
+          "case": "repairs-adapter-protocol",
+          "criterion": "behavior-green"
+        },
+        {
+          "case": "reviews-a-handback",
+          "criterion": "finds-the-empty-save"
+        }
+      ],
+      "missing": []
+    }
+  ],
+  "skipped": [
+    {
+      "capability": "voice.diagnostic-selection",
+      "reason": "An owner's wording choice; no agent point exists."
+    },
+    {
+      "capability": "report.shared-surfaces",
+      "reason": "Internal consistency of human and JSON output; product tests, no agent point."
+    },
+    {
+      "capability": "adapter.prepare-startup-timeout-containment",
+      "reason": "Needs a slow-starting application and a startup budget; no natural agent fixture on this material."
+    },
+    {
+      "capability": "project.task-model-exceptions",
+      "reason": "A fixture forcing an exception decision would be contrived; the exception routes are product-tested."
+    },
+    {
+      "capability": "behavior.truthful-final-claim",
+      "reason": "Judging a final narrative against task state needs prose judgement; no deterministic criterion kind."
+    },
+    {
+      "capability": "behavior-contract.typed-language and behavior-contract.diagnostics",
+      "reason": "Every case supplies its contract and forbids editing it; contract authoring is a separate campaign."
+    },
+    {
+      "capability": "cli.guides-runtime-help",
+      "reason": "No fixture needs a guide to be recovered; a guide read is observed only incidentally."
+    }
+  ]
+}
