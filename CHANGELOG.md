@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.9.0 (2026-09-24)
+
+Version 0.9 is built for an orchestrator running small workers. A worker states how sure it is and stops when it is not sure enough, the orchestrator asks the questions it doubts, every record made under an orchestrator model while a worker holds the task is shown and challenged, and the owner's goals are judged against the rules they name.
+
+### Breaking
+
+- A registered structure contract that declares no rule is refused with `E_NO_RULES`, as a behavior contract without an action is refused with `E_NO_ACTIONS`. It used to report 0/0 rules GREEN and let the project be GREEN while it verified nothing.
+- `task close` is refused while a record made under an orchestrator model during a worker's carry is unconfirmed; the orchestrator confirms it with `task confirm` after hand-back, and the carrying worker cannot.
+- `task accept` and `task decide` are refused on a task BLOCKED by a decision below the role's floor until the orchestrator answers it.
+- `blabla challenge` with no task selected judges every goal marked done and exits 1 with `goal-outcome-unmet` when one of its expectations does not hold.
+- `blabla run FILE` inside a project takes its timeout and startup from the project's `verify behavior` profile when `--timeout-ms` and `--startup-ms` are omitted; an explicit `--timeout-ms` also sets the startup timeout.
+- The challenge receipt no longer covers notes, answers, orchestrator records or concurrent attributions, so a task handed back by 0.8 is challenged again before `task ready` or `task close`.
+
+### Added
+
+- Model aliases in process memory: `alias "<host id>" { model "<name>" }` lets a role list accept the id a host reports for a model it already permits, with no exception.
+- Decisions: `task decide <name> "<question>" --pick <option> --confidence <0-100> --model <id>` records an uncertain call. A role may declare `block_below "<0-100>"`; a decision below it blocks the task at once, and only `task answer` from the orchestrator settles it. Nothing is deferred. `explain role::<name>` shows the floor and, per model, how many answered decisions held against the confidence stated.
+- Questions: `task ask <name> "<question>" [--options a,b] [--floor <n>] --model <id>` lets the orchestrator ask a typed question; the worker picks it with `task decide <name> --on <id>`, a pick below the question's floor blocks the task, and `task ready` is refused while a question has no pick (`question-unpicked`).
+- Attestation: every orchestrator verb records the model it was given and whether a worker carried the task; `task show` lists records made during a carry, and `orchestrator-record-during-carry` stands until `task confirm`. `BLA_BLA.md` states that a task record and every `--model` on it are attestations.
+- Goals: `goal "goals.bla"` in `project.bla` registers owner objectives that serve mission priorities and name the rules or contracts that must hold. `status` and `explain goal::<name>` judge each expectation as held, not held, unverified or unresolved; `status` Next points at an active goal that holds; `task open --goal` records the goal a task serves. Goals never decide completion.
+- `task evidence --run` prints the last lines of a failing check's log.
+- `contracts/seams.bla`, `contracts/lifecycle.bla`, `contracts/decisions.bla` and `contracts/attestation.bla` are active in this repository, `contracts/questions.bla` runs as its own campaign in the product gate, and `goals.bla` holds its goals.
+
+### Fixed
+
+- On Linux a restarted or finished application leaves no orphaned descendant behind: the runtime becomes a child subreaper and reaps the process group after the direct child.
+- A worker's hand-back survives reconciliation: a note, an answer or a concurrent attribution no longer breaks its receipt, and a closed task keeps accounting for the paths it changed while they stay as it left them.
+- `task evidence --run` reloads the record after its check, so a note or attribution recorded while the check ran is kept, and a task blocked or closed meanwhile takes no evidence.
+- `task addressed` accepts the accepted model when an approved exception names it, and an empty model list allows any model again.
+- A deliverable added after a task opened is owed from the task's opening state.
+- `finish` never judges goals and says so instead of printing a reason that could be false.
+
+### Evaluation and tests
+
+- `experiments/claude_eval.py --driver direct` runs each subject with `claude -p` in a prepared workspace, with the host's settings, hooks and `CLAUDE_*` variables kept away from it, where `claude plugin eval` could not start its sandbox in a container. `--backend anthropic --model-set haiku` runs the cases on Haiku, and the staged process memory declares Haiku's host id as an alias.
+- New cases `stops-on-an-unknowable-call`, `stays-inside-a-narrow-scope` and `picks-an-asked-question`. A test grades every case's untouched fixture with a do-nothing trace, and every task criterion must read a task its fixture opens.
+- A first Haiku pass over thirteen cases, one run per arm: with BlaBla six of the seven paired cases passed every required check, without it three. Every failure was traced; see `evals/findings.md`.
+
+### Limitations
+
+- `--model` is still a claim BlaBla records and cannot prove; a model permitted as both worker and orchestrator can answer its own blocking decision.
+- The self-hosting campaign runs every behavior contract in one model with a fixed seed and picks actions without steering toward unwitnessed rules. Registering `contracts/questions.bla` there left two assignment rules unwitnessed at every profile tried (64 cases, 1024 steps, another seed), so it runs as its own campaign until the campaign steers.
+- Reported by workers this round and not yet changed: challenge wording after a clear assignment, the declared check missing from `task show`, a way to withdraw a task, lens assessments that carry over to a new worker, and scopes that two unclosed tasks can share.
+
 ## 0.8.0 (2026-09-22)
 
 The first release without the alpha label. From 0.8.0 on, a change to contract syntax, CLI options, JSON fields or exit codes ships only in a minor release (0.9, 0.10, …) and is listed under **Breaking**; a patch release (0.8.x) never makes one.

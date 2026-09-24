@@ -197,6 +197,16 @@ fn assign_within(temp: &TempDir, scope: &str, deliverable: &str) {
     );
 }
 
+fn confirm(temp: &TempDir) {
+    assert_eq!(
+        run(
+            temp,
+            &["task", "confirm", "one", "--model", "opus", "--json"]
+        ),
+        0
+    );
+}
+
 fn record_success(temp: &TempDir) {
     assert_eq!(
         run(
@@ -441,6 +451,7 @@ fn a_finding_on_a_closed_task_is_history_rather_than_an_open_challenge() {
     );
     assert_eq!(run(&temp, &["challenge", "one", "--json"]), 0);
     assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
+    confirm(&temp);
     let (standing, _) = json_of(&temp, &["challenge", "one", "--json"]);
     assert_eq!(
         run(
@@ -905,6 +916,9 @@ fn the_entry_names_the_route_that_carries_each_step_and_the_lifecycle_takes_them
         "when <the check the assignment declares> exits 0 that is --exit 0 --tool check",
         "blabla challenge <name>",
         "blabla task ready <name>",
+        "blabla task ask <name> \"<question>\" --model <id>",
+        "--on <question-id>",
+        "blabla task confirm <name> --model <id>",
         "blabla task close <name> --model <id>",
     ] {
         assert!(
@@ -1095,6 +1109,7 @@ fn human_task_views_render_recorded_states_and_ready_waits_for_review() {
     let ready = stdout_of(&temp, &["task", "show", "one"]);
     assert!(ready.contains("task::one   READY"), "{ready}");
     assert!(ready.contains("await orchestrator review"), "{ready}");
+    confirm(&temp);
 
     assert_eq!(
         run(
@@ -1298,9 +1313,15 @@ fn a_task_opened_with_no_check_can_be_given_one_and_then_reach_a_closed_record()
         0
     );
     let (settled, code) = json_of(&temp, &["challenge", "one", "--json"]);
-    assert!(settled["challenge"].is_null(), "{settled}");
+    assert_eq!(
+        settled["grounded"],
+        serde_json::json!(["orchestrator-record-during-carry"]),
+        "{settled}"
+    );
+    assert_eq!(settled["assignment_clear"], true, "{settled}");
     assert_eq!(code, 0);
     assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
+    confirm(&temp);
     assert_eq!(
         run(
             &temp,
@@ -1378,12 +1399,26 @@ fn a_directory_deliverable_is_the_files_under_it_and_a_later_add_picks_up_new_on
         ),
         0
     );
+    let show_after_add = stdout_of(&temp, &["task", "show", "one"]);
+    assert!(
+        show_after_add.contains("src/added.rs"),
+        "adding the directory again must owe the file that appeared in it: {show_after_add}"
+    );
     let (again, code) = json_of(&temp, &["challenge", "one", "--json"]);
     assert_eq!(
-        again["challenge"]["class"], "deliverable-unchanged",
-        "adding the directory again must owe the file that appeared in it: {again}"
+        again["challenge"]["class"], "evidence-superseded",
+        "the owed file is a new check input: {again}"
     );
     assert_eq!(code, 1);
+    record_success(&temp);
+    let (after_record, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(
+        after_record["grounded"],
+        serde_json::json!(["orchestrator-record-during-carry"]),
+        "the orchestrator's deliverable --add is all that stands: {after_record}"
+    );
+    assert_eq!(after_record["assignment_clear"], true, "{after_record}");
+    assert_eq!(code, 0);
 }
 
 #[test]

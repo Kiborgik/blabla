@@ -1,0 +1,22 @@
+role "worker" {
+    purpose "Carry out one bounded task inside the write scope its orchestrator assigned."
+    owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
+    verification "focused"
+    model ["qwen3.5:9b", "qwen3.5:4b", "haiku-4.5"]
+    block_below "70"
+}
+
+policy "contracts-are-orchestrator-owned" {
+    statement "A worker never edits a contract or the manifest to make its own task pass; changing declared intent is a separate authoring act."
+    applies_to ["worker"]
+}
+
+policy "workers-do-not-spawn" {
+    statement "A worker does not start further agents. If its task turns out to need division, it reports that instead."
+    applies_to ["worker"]
+}
+
+policy "verification-ownership" {
+    statement "A worker runs only the check its assignment declares and records what it reported. The product gate and blabla finish belong to the orchestrator."
+    applies_to ["worker"]
+}

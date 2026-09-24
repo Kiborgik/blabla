@@ -1,0 +1,34 @@
+goal "workers-stop-instead-of-guessing" {
+    serves ["bounded-workers-free-planners", "truthful-over-convenient"]
+    statement "A worker's call below its role's floor stops the task until the orchestrator answers it."
+    expect ["contract::decisions"]
+    state "done"
+}
+
+goal "orchestrator-records-are-attested" {
+    serves ["truthful-over-convenient"]
+    statement "A record made under an orchestrator model while a worker carries the task stands until the orchestrator confirms it."
+    expect ["contract::attestation"]
+    state "done"
+}
+
+goal "the-orchestrator-asks-what-it-doubts" {
+    serves ["steering-cost-over-token-cost", "bounded-workers-free-planners"]
+    statement "A question the orchestrator asks gets the worker's pick with a stated confidence before the task can be handed back."
+    expect ["contract::questions"]
+    state "active"
+}
+
+goal "no-process-outlives-its-run" {
+    serves ["truthful-over-convenient"]
+    statement "A restarted or finished application leaves no descendant process behind."
+    expect ["lifecycle::a-restart-leaves-no-descendant-behind", "lifecycle::a-finish-leaves-no-descendant-behind"]
+    state "done"
+}
+
+goal "hand-backs-survive-concurrent-work" {
+    serves ["bounded-workers-free-planners"]
+    statement "A worker's hand-back holds while other tasks and the orchestrator change the tree around it."
+    expect ["assignment::reconciling-concurrent-work-keeps-the-challenge-receipt", "assignment::a-closed-concurrent-task-still-accounts-for-its-change", "assignment::a-note-keeps-the-challenge-receipt"]
+    state "done"
+}

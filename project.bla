@@ -3,6 +3,7 @@ project blabla
 mission "mission.bla"
 system "system.bla"
 process "process.bla"
+goal "goals.bla"
 
 knowledge "knowledge/engineering.bla"
 knowledge "knowledge/testing.bla"
@@ -19,10 +20,16 @@ use structure "contracts/rust.bla"
 use structure "contracts/providers.bla"
 use structure "contracts/workflow.bla"
 use structure "contracts/onboarding.bla"
+use structure "contracts/seams.bla"
 
 use behavior "contracts/evaluator.bla"
 use behavior "contracts/assignment.bla"
 use behavior "contracts/voice.bla"
+
+use behavior "contracts/lifecycle.bla"
+use behavior "contracts/goals.bla"
+use behavior "contracts/decisions.bla"
+use behavior "contracts/attestation.bla"
 
 ignore from ".gitignore"
 
@@ -30,7 +37,7 @@ verify behavior {
     command ["target/debug/examples/structure-adapter"]
     seed 0
     cases 32
-    steps 256
+    steps 512
     timeout_ms 5000
     shrink_budget 256
 }

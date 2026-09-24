@@ -63,6 +63,404 @@ pub struct Finding {
     pub resolution: Option<FindingResolution>,
 }
 
+pub const DECISION_KINDS: [&str; 2] = ["yes-no", "choice"];
+
+pub const YES_NO: [&str; 2] = ["yes", "no"];
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Answer {
+    pub pick: String,
+    pub model: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Decision {
+    pub id: usize,
+    pub question: String,
+    pub kind: String,
+    pub options: Vec<String>,
+    pub pick: String,
+    pub confidence: u8,
+    pub model: String,
+    pub floor: u8,
+    pub below_floor: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<Answer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<String>,
+}
+
+impl Decision {
+    pub fn unanswered_below_floor(&self) -> bool {
+        self.below_floor && self.answer.is_none()
+    }
+
+    pub fn overruled(&self) -> bool {
+        self.answer
+            .as_ref()
+            .is_some_and(|answer| answer.pick != self.pick)
+    }
+}
+
+pub struct Question {
+    pub question: String,
+    pub options: Vec<String>,
+    pub pick: String,
+    pub confidence: i64,
+    pub model: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskedQuestion {
+    pub id: String,
+    pub question: String,
+    pub kind: String,
+    pub options: Vec<String>,
+    pub floor: u8,
+    pub model: String,
+}
+
+pub struct Ask {
+    pub question: String,
+    pub options: Vec<String>,
+    pub floor: Option<i64>,
+    pub model: String,
+}
+
+pub struct Pick {
+    pub on: String,
+    pub pick: String,
+    pub confidence: i64,
+    pub model: String,
+}
+
+pub fn unanswered_decision(task: &Task) -> Option<&Decision> {
+    task.decisions
+        .iter()
+        .find(|decision| decision.unanswered_below_floor())
+}
+
+pub fn picked_by<'a>(task: &'a Task, id: &str) -> Option<&'a Decision> {
+    task.decisions
+        .iter()
+        .find(|decision| decision.on.as_deref() == Some(id))
+}
+
+pub fn floor_owner(task: &Task, decision: &Decision) -> String {
+    let asked = decision
+        .on
+        .as_deref()
+        .and_then(|id| task.questions.iter().find(|asked| asked.id == id));
+    match asked {
+        Some(asked) if asked.floor == decision.floor => format!("question {}", asked.id),
+        _ => format!("role::{}", task.role),
+    }
+}
+
+fn percentage(value: i64) -> Option<u8> {
+    u8::try_from(value).ok().filter(|value| *value <= 100)
+}
+
+fn typed(options: Vec<String>) -> Result<(&'static str, Vec<String>), String> {
+    let (kind, options) = if options.is_empty() {
+        (DECISION_KINDS[0], YES_NO.map(str::to_owned).to_vec())
+    } else {
+        (DECISION_KINDS[1], options)
+    };
+    let mut distinct = options.clone();
+    distinct.sort();
+    distinct.dedup();
+    if distinct.len() != options.len()
+        || options.len() < 2
+        || options.iter().any(|option| option.trim().is_empty())
+    {
+        return Err(format!(
+            "the options {:?} must be at least two different, non-empty choices",
+            options.join(",")
+        ));
+    }
+    Ok((kind, options))
+}
+
+pub fn ask<'a>(
+    task: &'a mut Task,
+    asked: Ask,
+    role_floor: u8,
+    orchestrator: &[String],
+) -> Result<&'a AskedQuestion, String> {
+    if !task.open() {
+        return Err(format!(
+            "task {:?} is CLOSED; a question is asked of a task that is not closed",
+            task.name
+        ));
+    }
+    if !orchestrator.is_empty() && !orchestrator.contains(&asked.model) {
+        return Err(format!(
+            "model {:?} is not in role::orchestrator's permitted list: {}; only the orchestrator asks, and the carrying role picks with task decide --on",
+            asked.model,
+            orchestrator.join(", ")
+        ));
+    }
+    if asked.question.trim().is_empty() {
+        return Err("the question is empty; state the call you doubt".to_owned());
+    }
+    let (kind, options) = typed(asked.options)?;
+    let floor = match asked.floor {
+        None => role_floor,
+        Some(stated) => {
+            let Some(floor) = percentage(stated) else {
+                return Err(format!(
+                    "floor {stated} is outside 0..100; state it as a whole-number percentage"
+                ));
+            };
+            if floor < role_floor {
+                return Err(format!(
+                    "floor {floor}% is below role::{}'s floor of {role_floor}%; a question can raise the floor its pick is measured against, never lower it",
+                    task.role
+                ));
+            }
+            floor
+        }
+    };
+    task.questions.push(AskedQuestion {
+        id: format!("q{}", task.questions.len() + 1),
+        question: asked.question,
+        kind: kind.to_owned(),
+        options,
+        floor,
+        model: asked.model,
+    });
+    Ok(task.questions.last().expect("a question was just asked"))
+}
+
+pub fn pick(task: &mut Task, given: Pick, role_floor: u8) -> Result<&Decision, String> {
+    let name = &task.name;
+    let Some(asked) = task.questions.iter().find(|asked| asked.id == given.on) else {
+        return Err(format!(
+            "task {name:?} records no question {:?}; blabla task show {name} lists the questions the orchestrator asked",
+            given.on
+        ));
+    };
+    if let Some(decision) = picked_by(task, &asked.id) {
+        return Err(format!(
+            "question {} is already picked by decision {}: {} at {}%; a question is picked once, and the orchestrator reviews the pick with blabla task answer {name} {}",
+            asked.id, decision.id, decision.pick, decision.confidence, decision.id
+        ));
+    }
+    let question = Question {
+        question: asked.question.clone(),
+        options: if asked.kind == DECISION_KINDS[0] {
+            Vec::new()
+        } else {
+            asked.options.clone()
+        },
+        pick: given.pick,
+        confidence: given.confidence,
+        model: given.model,
+    };
+    let floor = asked.floor.max(role_floor);
+    let on = asked.id.clone();
+    record_decision(task, question, floor, Some(on))
+}
+
+pub fn decide(task: &mut Task, asked: Question, floor: u8) -> Result<&Decision, String> {
+    record_decision(task, asked, floor, None)
+}
+
+fn record_decision(
+    task: &mut Task,
+    asked: Question,
+    floor: u8,
+    on: Option<String>,
+) -> Result<&Decision, String> {
+    if let Some(blocking) = unanswered_decision(task) {
+        return Err(format!(
+            "task {:?} is BLOCKED on decision {}: {}; a blocked task takes no decision until the orchestrator answers it",
+            task.name, blocking.id, blocking.question
+        ));
+    }
+    if task.state != "accepted" || task.accepted.is_none() {
+        return Err(format!(
+            "task {:?} is {}; a decision is recorded once the task is accepted",
+            task.name,
+            task.state.to_ascii_uppercase()
+        ));
+    }
+    if asked.question.trim().is_empty() {
+        return Err("the question is empty; state the call you are unsure of".to_owned());
+    }
+    let (kind, options) = typed(asked.options)?;
+    if !options.contains(&asked.pick) {
+        return Err(format!(
+            "pick {:?} is not one of the options: {}",
+            asked.pick,
+            options.join(", ")
+        ));
+    }
+    let Some(confidence) = percentage(asked.confidence) else {
+        return Err(format!(
+            "confidence {} is outside 0..100; state it as a whole-number percentage",
+            asked.confidence
+        ));
+    };
+    let id = task
+        .decisions
+        .iter()
+        .map(|decision| decision.id)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    task.decisions.push(Decision {
+        id,
+        question: asked.question,
+        kind: kind.to_owned(),
+        options,
+        pick: asked.pick,
+        confidence,
+        model: asked.model,
+        floor,
+        below_floor: confidence < floor,
+        answer: None,
+        on,
+    });
+    if confidence < floor {
+        apply(task, "blocked");
+    }
+    Ok(task.decisions.last().expect("a decision was just recorded"))
+}
+
+pub fn answer(task: &mut Task, id: usize, given: Answer) -> Result<&Decision, String> {
+    let name = task.name.clone();
+    let Some(decision) = task.decisions.iter_mut().find(|decision| decision.id == id) else {
+        return Err(format!("task {name:?} records no decision {id}"));
+    };
+    if !decision.options.contains(&given.pick) {
+        return Err(format!(
+            "pick {:?} is not one of decision {id}'s options: {}",
+            given.pick,
+            decision.options.join(", ")
+        ));
+    }
+    if given.reason.trim().is_empty() {
+        return Err(format!(
+            "an answer to decision {id} needs a reason; the worker reads it before carrying on"
+        ));
+    }
+    decision.answer = Some(given);
+    Ok(decision)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Confirmation {
+    pub model: String,
+    pub unix: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrchestratorRecord {
+    pub verb: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub unix: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carried_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed: Option<Confirmation>,
+}
+
+impl OrchestratorRecord {
+    pub fn during_carry(&self) -> bool {
+        self.carried_by.is_some()
+    }
+
+    pub fn unconfirmed(&self) -> bool {
+        self.during_carry() && self.confirmed.is_none()
+    }
+}
+
+pub fn carrier(task: &Task) -> Option<&str> {
+    if task.state != "accepted" {
+        return None;
+    }
+    task.accepted
+        .as_ref()
+        .map(|acceptance| acceptance.model.as_str())
+}
+
+pub fn attest(task: &mut Task, verb: &str, model: Option<&str>, unix: u64) {
+    let carried_by = carrier(task).map(str::to_owned);
+    task.orchestrator_records.push(OrchestratorRecord {
+        verb: verb.to_owned(),
+        model: model.map(str::to_owned),
+        unix,
+        carried_by,
+        confirmed: None,
+    });
+}
+
+pub fn confirm(task: &mut Task, model: &str, unix: u64) -> Result<usize, String> {
+    if let Some(carrier) = carrier(task) {
+        return Err(format!(
+            "task {:?} is carried by {carrier}, and the carrying role cannot confirm records from its own carry; the orchestrator confirms them after {carrier} hands the task back with task ready or task block",
+            task.name
+        ));
+    }
+    let mut confirmed = 0;
+    for record in task
+        .orchestrator_records
+        .iter_mut()
+        .filter(|record| record.unconfirmed())
+    {
+        record.confirmed = Some(Confirmation {
+            model: model.to_owned(),
+            unix,
+        });
+        confirmed += 1;
+    }
+    Ok(confirmed)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Calibration {
+    pub model: String,
+    pub answered: usize,
+    pub held: usize,
+    pub overruled: usize,
+    pub mean_confidence: u8,
+    pub asked: usize,
+}
+
+pub fn calibration(tasks: &[Task], model_named_by: impl Fn(&str) -> String) -> Vec<Calibration> {
+    let mut models: BTreeMap<String, (usize, usize, u64, usize)> = BTreeMap::new();
+    for decision in tasks.iter().flat_map(|task| &task.decisions) {
+        if decision.answer.is_none() {
+            continue;
+        }
+        let entry = models.entry(model_named_by(&decision.model)).or_default();
+        entry.0 += 1;
+        if !decision.overruled() {
+            entry.1 += 1;
+        }
+        entry.2 += u64::from(decision.confidence);
+        if decision.on.is_some() {
+            entry.3 += 1;
+        }
+    }
+    models
+        .into_iter()
+        .map(|(model, (answered, held, stated, asked))| Calibration {
+            model,
+            answered,
+            held,
+            overruled: answered - held,
+            mean_confidence: u8::try_from((stated + answered as u64 / 2) / answered as u64)
+                .unwrap_or(100),
+            asked,
+        })
+        .collect()
+}
+
 pub const STATES: [&str; 5] = ["open", "accepted", "blocked", "ready", "closed"];
 
 pub const SCRATCH_DIRECTORY: &str = "scratch";
@@ -274,7 +672,10 @@ pub fn transition(from: &str, to: &str) -> bool {
 }
 
 pub fn apply(task: &mut Task, to: &str) -> bool {
-    if to == "ready" || !transition(&task.state, to) {
+    if to == "ready"
+        || !transition(&task.state, to)
+        || (to == "accepted" && unanswered_decision(task).is_some())
+    {
         return false;
     }
     task.state = to.to_owned();
@@ -294,6 +695,14 @@ fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String
     for finding in &mut record.findings {
         finding.resolution = None;
     }
+    for decision in &mut record.decisions {
+        decision.answer = None;
+    }
+    record.notes.clear();
+    record.orchestrator_records.clear();
+    record
+        .attributions
+        .retain(|attr| attr.kind != ATTRIBUTIONS[1]);
     let mut fingerprint = super::Fnv::new();
     fingerprint.write_str(&serde_json::to_string(&record).expect("task serializes"));
     for (path, digest) in tree {
@@ -322,6 +731,9 @@ pub fn receipt_covers(task: &Task, tree: &BTreeMap<String, String>, path: &str) 
 }
 
 pub fn handback(task: &Task, tree: &BTreeMap<String, String>) -> Result<(), &'static str> {
+    if task.open() && unanswered_decision(task).is_some() {
+        return Err("await-answer");
+    }
     match task.state.as_str() {
         "open" | "blocked" => return Err("accept"),
         "ready" => return Err("review"),
@@ -331,6 +743,9 @@ pub fn handback(task: &Task, tree: &BTreeMap<String, String>) -> Result<(), &'st
     }
     if task.accepted.is_none() {
         return Err("accept");
+    }
+    if task.unpicked().next().is_some() {
+        return Err("pick-question");
     }
     if !task.declares_check() {
         return Err("declare-check");
@@ -421,6 +836,15 @@ pub fn accept_result(
         changed_at_acceptance: None,
     });
     task.closed_unix = Some(now_unix);
+    let paths_changed: Vec<String> = changed(task, tree)
+        .into_iter()
+        .map(|s| s.to_owned())
+        .collect();
+    for path in paths_changed {
+        if let Some(digest) = observed_digest(tree, &path) {
+            task.closed_paths.insert(path, digest);
+        }
+    }
     true
 }
 
@@ -473,10 +897,55 @@ pub struct Task {
     pub notes: Vec<Note>,
     #[serde(default)]
     pub removed_deliverables: Vec<RemovedDeliverable>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub closed_paths: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<AskedQuestion>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decisions: Vec<Decision>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub orchestrator_records: Vec<OrchestratorRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<String>,
 }
 
 fn open_state() -> String {
     STATES[0].to_owned()
+}
+
+impl Default for Task {
+    fn default() -> Task {
+        Task {
+            name: String::new(),
+            role: String::new(),
+            statement: String::new(),
+            scope: Vec::new(),
+            deliverables: Vec::new(),
+            findings: Vec::new(),
+            opened_unix: 0,
+            closed_unix: None,
+            opened_tree: BTreeMap::new(),
+            state: open_state(),
+            check: None,
+            check_argv: None,
+            check_inputs: Vec::new(),
+            accepted: None,
+            result: None,
+            assessments: Vec::new(),
+            exceptions: Vec::new(),
+            evidence: Vec::new(),
+            challenged: None,
+            attributions: Vec::new(),
+            build: None,
+            notes: Vec::new(),
+            removed_deliverables: Vec::new(),
+            closed_paths: BTreeMap::new(),
+            questions: Vec::new(),
+            decisions: Vec::new(),
+            orchestrator_records: Vec::new(),
+            goal: None,
+        }
+    }
 }
 
 impl Task {
@@ -511,6 +980,24 @@ impl Task {
     pub fn in_scope(&self, path: &str) -> bool {
         self.scope.iter().any(|allowed| covers(allowed, path))
     }
+
+    pub fn recorded_during_carry(&self) -> impl Iterator<Item = &OrchestratorRecord> {
+        self.orchestrator_records
+            .iter()
+            .filter(|record| record.during_carry())
+    }
+
+    pub fn unconfirmed_during_carry(&self) -> impl Iterator<Item = &OrchestratorRecord> {
+        self.orchestrator_records
+            .iter()
+            .filter(|record| record.unconfirmed())
+    }
+
+    pub fn unpicked(&self) -> impl Iterator<Item = &AskedQuestion> {
+        self.questions
+            .iter()
+            .filter(|asked| picked_by(self, &asked.id).is_none())
+    }
 }
 
 pub fn replaceable(existing: Option<&Task>) -> bool {
@@ -533,6 +1020,7 @@ pub fn path_of(root: &Path, name: &str) -> PathBuf {
     directory(root).join(format!("{name}.json"))
 }
 
+#[derive(Default)]
 pub struct Opening {
     pub name: String,
     pub role: String,
@@ -542,6 +1030,7 @@ pub struct Opening {
     pub check: Option<String>,
     pub check_argv: Option<Vec<String>>,
     pub inputs: Vec<String>,
+    pub goal: Option<String>,
 }
 
 pub fn record(root: &Path, ignore: &Ignore, opening: Opening, now_unix: u64) -> Task {
@@ -574,24 +1063,13 @@ pub fn record_from(
                 path,
             })
             .collect(),
-        findings: Vec::new(),
         opened_unix: now_unix,
-        closed_unix: None,
         opened_tree: tree,
-        state: open_state(),
         check: opening.check,
         check_argv: opening.check_argv,
         check_inputs: opening.inputs,
-        accepted: None,
-        result: None,
-        assessments: Vec::new(),
-        exceptions: Vec::new(),
-        evidence: Vec::new(),
-        challenged: None,
-        attributions: Vec::new(),
-        build: None,
-        notes: Vec::new(),
-        removed_deliverables: Vec::new(),
+        goal: opening.goal,
+        ..Task::default()
     }
 }
 
@@ -680,6 +1158,23 @@ pub struct TaskStatus {
     pub authority: &'static str,
 }
 
+pub fn can_address_finding(task: &Task, model: &str, permitted: &[String]) -> bool {
+    if permitted.is_empty() || permitted.iter().any(|entry| entry == model) {
+        return true;
+    }
+    task.accepted
+        .as_ref()
+        .is_some_and(|accepted| accepted.model == model)
+        && task
+            .exceptions
+            .iter()
+            .any(|exception| exception.model == model && exception.approval.is_some())
+}
+
+pub fn apply_evidence(task: &mut Task, evidence: Evidence) {
+    task.evidence.push(evidence);
+}
+
 pub fn status(root: &Path) -> Option<TaskStatus> {
     let tasks = read_all(root);
     let unreadable = unreadable(root);
@@ -719,4 +1214,143 @@ pub fn changed<'a>(task: &'a Task, current: &'a BTreeMap<String, String>) -> Vec
     moved.sort_unstable();
     moved.dedup();
     moved
+}
+
+pub fn owe_path(task: &mut Task, path: String) {
+    task.removed_deliverables
+        .retain(|removed| removed.path != path);
+    if task
+        .deliverables
+        .iter()
+        .any(|deliverable| deliverable.path == path)
+    {
+        return;
+    }
+    let opened_digest = observed_digest(&task.opened_tree, &path);
+    task.deliverables.push(Deliverable {
+        opened_digest,
+        path,
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_without_closed_paths_serializes_without_field() {
+        let task = Task {
+            name: "test-task".to_owned(),
+            role: "worker".to_owned(),
+            statement: "test statement".to_owned(),
+            scope: vec!["src/".to_owned()],
+            opened_unix: 1234567890,
+            ..Default::default()
+        };
+
+        let serialized = serde_json::to_string(&task).expect("task serializes");
+        assert!(!serialized.contains("closed_paths"));
+
+        let deserialized: Task = serde_json::from_str(&serialized).expect("task deserializes");
+        assert_eq!(deserialized.name, task.name);
+        assert!(deserialized.closed_paths.is_empty());
+    }
+
+    #[test]
+    fn a_record_written_before_attestation_reads_with_nothing_to_confirm() {
+        let mut task: Task = serde_json::from_value(serde_json::json!({
+            "name": "legacy",
+            "role": "worker",
+            "statement": "written before orchestrator records existed",
+            "scope": ["src"],
+            "deliverables": [],
+            "opened_unix": 1,
+            "state": "ready",
+            "accepted": { "model": "small", "unix": 2 }
+        }))
+        .expect("a record without orchestrator_records parses");
+        assert!(task.orchestrator_records.is_empty());
+        assert_eq!(confirm(&mut task, "opus", 3), Ok(0));
+        assert!(
+            !serde_json::to_string(&task)
+                .expect("task serializes")
+                .contains("orchestrator_records")
+        );
+        let bare: OrchestratorRecord =
+            serde_json::from_value(serde_json::json!({ "verb": "scope", "unix": 4 }))
+                .expect("a record without carried_by or confirmed parses");
+        assert!(!bare.during_carry());
+        assert!(!bare.unconfirmed());
+    }
+
+    #[test]
+    fn a_default_task_is_open_and_holds_nothing() {
+        assert_eq!(
+            serde_json::to_value(Task::default()).expect("task serializes"),
+            serde_json::json!({
+                "name": "",
+                "role": "",
+                "statement": "",
+                "scope": [],
+                "deliverables": [],
+                "findings": [],
+                "opened_unix": 0,
+                "opened_tree": {},
+                "state": "open",
+                "check_inputs": [],
+                "assessments": [],
+                "exceptions": [],
+                "evidence": [],
+                "attributions": [],
+                "notes": [],
+                "removed_deliverables": []
+            })
+        );
+    }
+
+    #[test]
+    fn every_opening_field_reaches_the_recorded_task() {
+        let task = record_from(
+            Opening {
+                name: "work".to_owned(),
+                role: "worker".to_owned(),
+                statement: "repair".to_owned(),
+                scope: vec!["src".to_owned()],
+                deliverables: vec!["src/a.rs".to_owned()],
+                check: Some("check".to_owned()),
+                check_argv: Some(vec!["cargo".to_owned(), "test".to_owned()]),
+                inputs: vec!["shared".to_owned()],
+                goal: Some("ship".to_owned()),
+            },
+            7,
+            BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),
+            vec![Some("old".to_owned())],
+        );
+        assert_eq!(
+            serde_json::to_value(&task).expect("task serializes"),
+            serde_json::json!({
+                "name": "work",
+                "role": "worker",
+                "statement": "repair",
+                "scope": ["src"],
+                "deliverables": [{ "path": "src/a.rs", "opened_digest": "old" }],
+                "findings": [],
+                "opened_unix": 7,
+                "opened_tree": { "src/a.rs": "old" },
+                "state": "open",
+                "check": "check",
+                "check_argv": ["cargo", "test"],
+                "check_inputs": ["shared"],
+                "assessments": [],
+                "exceptions": [],
+                "evidence": [],
+                "attributions": [],
+                "notes": [],
+                "removed_deliverables": [],
+                "goal": "ship"
+            })
+        );
+        let opening = Opening::default();
+        assert!(opening.name.is_empty() && opening.check.is_none() && opening.goal.is_none());
+    }
 }

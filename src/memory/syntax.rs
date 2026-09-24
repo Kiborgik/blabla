@@ -43,6 +43,7 @@ pub const SYSTEM_KEYWORDS: &[&str] = &["system", "responsibility", "seam"];
 pub const PROCESS_KEYWORDS: &[&str] = &["role", "policy", "flow", "step"];
 pub const MISSION_KEYWORDS: &[&str] = &["mission", "priority"];
 pub const KNOWLEDGE_KEYWORDS: &[&str] = &["knowledge", "ruling"];
+pub const GOAL_KEYWORDS: &[&str] = &["goal"];
 
 pub fn kind(file: &str, source: &str) -> Option<&'static str> {
     let tokens = Lexer::new(file, source).lex().ok()?;
@@ -55,6 +56,7 @@ pub fn kind(file: &str, source: &str) -> Option<&'static str> {
         ("process", PROCESS_KEYWORDS),
         ("mission", MISSION_KEYWORDS),
         ("knowledge", KNOWLEDGE_KEYWORDS),
+        ("goal", GOAL_KEYWORDS),
     ]
     .into_iter()
     .find(|(_, keywords)| keywords.contains(&first))
@@ -92,7 +94,7 @@ impl Parser<'_> {
             return Err(self.error(
                 start.span,
                 "E_MEMORY_SYNTAX",
-                "expected a declaration keyword such as `mission`, `priority`, `knowledge`, `ruling`, `system`, `responsibility`, `seam`, `role`, `policy`, `flow` or `step`",
+                "expected a declaration keyword such as `mission`, `priority`, `knowledge`, `ruling`, `system`, `responsibility`, `seam`, `role`, `policy`, `flow`, `step` or `goal`",
             ));
         };
         let keyword = keyword.clone();

@@ -5,18 +5,19 @@ use super::{
 };
 use blabla::application::AppConfig;
 use blabla::diagnostic::{Diagnostic, Location, Span};
+use blabla::memory::goal::{GoalExplainView, GoalMemory, GoalStatus, Outcome};
 use blabla::memory::knowledge::{KnowledgeExplainView, KnowledgeMemory, KnowledgeStatus};
 use blabla::memory::mission::{MissionExplainView, MissionMemory, MissionStatus};
 use blabla::memory::process::{ProcessExplainView, ProcessMemory, ProcessStatus};
 use blabla::memory::system::{SystemExplainView, SystemMemory, SystemStatus};
-use blabla::memory::{self, Memory, knowledge, mission, process, routing, system};
+use blabla::memory::{self, Memory, goal, knowledge, mission, process, routing, system};
 use blabla::project::runstate::{
     Classification, Marker, new_run_id, profile_identity, read_marker, remove_marker, write_marker,
 };
 use blabla::project::status::{
-    CompletionState, ExplainView, FINISH_COMMAND, PrimitiveView, Record, State, StatusView,
-    StructureExplainView, apply_run_state, evaluate, explain_structure, explain_view, now_unix,
-    primitive_view, read_record, status_view, write_record,
+    CompletionState, Evaluation, ExplainView, FINISH_COMMAND, PrimitiveView, Record, State,
+    StatusView, StructureExplainView, apply_run_state, evaluate, explain_structure, explain_view,
+    now_unix, primitive_view, read_record, status_view, verdict, write_record,
 };
 use blabla::project::task::{self, TaskStatus};
 use blabla::project::{self, Layer, Project, ResolvedCommand};
@@ -64,6 +65,8 @@ struct StatusWithMemory<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     knowledge_memory: Option<KnowledgeStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    goal_memory: Option<GoalStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     bounded_tasks: Option<TaskStatus>,
     capabilities: CapabilityReport,
 }
@@ -74,6 +77,7 @@ pub(super) struct MemoryViews {
     system: Option<SystemStatus>,
     process: Option<ProcessStatus>,
     knowledge: Option<KnowledgeStatus>,
+    goal: Option<GoalStatus>,
 }
 
 struct Memories {
@@ -85,15 +89,18 @@ struct Memories {
     process_file: String,
     knowledge: Memory<KnowledgeMemory>,
     knowledge_files: Vec<String>,
+    goal: Memory<GoalMemory>,
+    goal_file: String,
 }
 
 impl Memories {
-    fn views(&self) -> MemoryViews {
+    fn views(&self, goals: &[Outcome]) -> MemoryViews {
         MemoryViews {
             mission: mission::status(&self.mission, &self.mission_file),
             system: system::status(&self.system, &self.system_file),
             process: process::status(&self.process, &self.process_file),
             knowledge: knowledge::status(&self.knowledge, &self.knowledge_files),
+            goal: goal::status(&self.goal, &self.goal_file, goals),
         }
     }
 }
@@ -157,6 +164,20 @@ fn memories(project: &Project) -> Memories {
             process::FILE_NAME.to_owned(),
         ),
     };
+    let (goal_memory, goal_file) = match &project.manifest.goal {
+        Some(entry) => (
+            memory::read(&entry.path, &entry.display, goal::build, goal::validate),
+            entry.display.clone(),
+        ),
+        None => (
+            memory::unregistered(root, goal::FILE_NAME, "goal"),
+            goal::FILE_NAME.to_owned(),
+        ),
+    };
+    let goal_serving = goal_memory
+        .present()
+        .map(|memory| goal::serving_problems(memory, &mission_memory))
+        .unwrap_or_default();
     let system_routing = system_memory
         .present()
         .map(|memory| routing::system_problems(memory, &knowledge_memory))
@@ -174,6 +195,8 @@ fn memories(project: &Project) -> Memories {
         process_file,
         knowledge: knowledge_memory,
         knowledge_files,
+        goal: goal_memory.with_problems(goal_serving),
+        goal_file,
     }
 }
 
@@ -183,14 +206,92 @@ fn identities(project: &Project, query: &str) -> Vec<String> {
     names.extend(knowledge::canonical(&loaded.knowledge, query));
     names.extend(system::canonical(&loaded.system, query));
     names.extend(process::canonical(&loaded.process, query));
+    names.extend(goal::canonical(&loaded.goal, query));
     names
+}
+
+fn judged(
+    memory: &Memory<GoalMemory>,
+    project: &Project,
+    evaluation: &Evaluation,
+    view: &StatusView,
+) -> Vec<Outcome> {
+    goal::outcomes(memory, |identity| {
+        verdict(project, evaluation, view, identity)
+    })
+}
+
+pub(super) fn goal_outcomes(
+    project: &Project,
+    evaluation: &Evaluation,
+    view: &StatusView,
+) -> Result<Vec<Outcome>, &'static str> {
+    let memory = memories(project).goal;
+    match blabla::skeptic::unjudged_goals(&memory) {
+        Some(reason) => Err(reason),
+        None => Ok(judged(&memory, project, evaluation, view)),
+    }
+}
+
+pub(super) fn undeclared_goal(project: &Project, name: &str) -> Option<String> {
+    let loaded = memories(project);
+    let reason = match &loaded.goal {
+        Memory::Present(declared) => {
+            let names: Vec<&str> = declared
+                .goals
+                .iter()
+                .map(|goal| goal.name.as_str())
+                .collect();
+            if names.contains(&name) {
+                return None;
+            }
+            if names.is_empty() {
+                format!("{} declares no goal", loaded.goal_file)
+            } else {
+                format!("declared goals are {}", names.join(", "))
+            }
+        }
+        Memory::Unregistered => {
+            "no goal memory is registered, so no goal is declared until `goal \"path\"` registers one".to_owned()
+        }
+        other => format!(
+            "the goal memory {} is {}, so no goal is declared; blabla status names its problems",
+            loaded.goal_file,
+            other.state()
+        ),
+    };
+    Some(format!("goal {name:?} is not declared; {reason}"))
+}
+
+fn explain_goal(
+    project: &Project,
+    memory: &Memory<GoalMemory>,
+    id: &str,
+) -> Option<GoalExplainView> {
+    let name = id.strip_prefix("goal::")?;
+    let evaluation = evaluate_with_run_state(project);
+    let structure = project.verify_structure();
+    let view = status_view(project, &evaluation, &structure);
+    let serving = task::read_all(&project.manifest.root)
+        .into_iter()
+        .filter(|task| task.goal.as_deref() == Some(name))
+        .map(|task| (task.name, task.state))
+        .collect();
+    goal::explain(
+        memory,
+        id,
+        &judged(memory, project, &evaluation, &view),
+        serving,
+    )
 }
 
 pub(super) fn status(project: &Project, json: bool) -> i32 {
     let evaluation = evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let view = status_view(project, &evaluation, &structure);
-    let views = memories(project).views();
+    let loaded = memories(project);
+    let goals = judged(&loaded.goal, project, &evaluation, &view);
+    let views = loaded.views(&goals);
     let tasks = task::status(&project.manifest.root);
     let capabilities = CapabilityReport::of(&project.manifest.root);
     let result = if json {
@@ -200,6 +301,7 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             system_memory: views.system,
             process_memory: views.process,
             knowledge_memory: views.knowledge,
+            goal_memory: views.goal,
             bounded_tasks: tasks,
             capabilities,
         })
@@ -235,14 +337,24 @@ pub(super) fn explain(project: &Project, query: &str, json: bool) -> i32 {
                 } else {
                     write_system_explain(&view)
                 }
+            } else if let Some(view) = explain_goal(project, &loaded.goal, &id) {
+                if json {
+                    write_json(&view)
+                } else {
+                    write_goal_explain(&view)
+                }
             } else {
                 let Some(view) = process::explain(&loaded.process, &id) else {
                     unreachable!("resolve matched a memory identity")
                 };
+                let calibration = role_calibration(project, &loaded.process, &view);
                 if json {
-                    write_json(&view)
+                    write_json(&CalibratedExplainView {
+                        view: &view,
+                        calibration,
+                    })
                 } else {
-                    write_process_explain(&view)
+                    write_process_explain(&view, &calibration)
                 }
             };
             return if result.is_ok() { 0 } else { 4 };
@@ -418,7 +530,40 @@ fn write_structure_explain(view: &StructureExplainView) -> io::Result<()> {
     )
 }
 
-fn write_process_explain(view: &ProcessExplainView) -> io::Result<()> {
+#[derive(Serialize)]
+struct CalibratedExplainView<'a> {
+    #[serde(flatten)]
+    view: &'a ProcessExplainView,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    calibration: Vec<task::Calibration>,
+}
+
+fn role_calibration(
+    project: &Project,
+    memory: &Memory<ProcessMemory>,
+    view: &ProcessExplainView,
+) -> Vec<task::Calibration> {
+    let Some(role) = view
+        .id
+        .strip_prefix("role::")
+        .filter(|_| view.kind == "role")
+    else {
+        return Vec::new();
+    };
+    let carried: Vec<task::Task> = task::read_all(&project.manifest.root)
+        .into_iter()
+        .filter(|recorded| recorded.role == role)
+        .collect();
+    task::calibration(&carried, |model| match memory.present() {
+        Some(memory) => process::model_named_by(memory, model),
+        None => model.to_owned(),
+    })
+}
+
+fn write_process_explain(
+    view: &ProcessExplainView,
+    calibration: &[task::Calibration],
+) -> io::Result<()> {
     let mut output = io::stdout().lock();
     writeln!(
         output,
@@ -458,6 +603,21 @@ Verification:
 Model choices:
   {}",
             view.model.join("  ")
+        )?;
+    }
+    if let Some(floor) = view.block_below {
+        writeln!(
+            output,
+            "
+Blocks below:
+  {floor}%   {}",
+            if floor == 0 {
+                "nothing blocks; every decision a worker records stands".to_owned()
+            } else {
+                format!(
+                    "a decision recorded with less than {floor}% confidence blocks the task until the orchestrator answers it"
+                )
+            }
         )?;
     }
     if let Some(flow) = &view.flow {
@@ -534,6 +694,24 @@ Consult:
             view.consult.join("  ")
         )?;
     }
+    if !calibration.is_empty() {
+        writeln!(
+            output,
+            "
+Calibration, from every task this role carried, closed or not:"
+        )?;
+        for model in calibration {
+            writeln!(
+                output,
+                "  {}  {} answered  {} held  mean confidence {}  {} on asked questions",
+                model.model, model.answered, model.held, model.mean_confidence, model.asked
+            )?;
+        }
+        writeln!(
+            output,
+            "  held means the orchestrator's answer kept the pick; on asked questions counts the answered picks on a question the orchestrator asked with task ask; calibration is a record, never a gate"
+        )?;
+    }
     writeln!(
         output,
         "
@@ -600,6 +778,42 @@ fn write_mission_explain(view: &MissionExplainView) -> io::Result<()> {
         for non_goal in &view.non_goals {
             writeln!(output, "  {non_goal}")?;
         }
+    }
+    writeln!(output, "\n{}", view.authority)
+}
+
+fn write_goal_explain(view: &GoalExplainView) -> io::Result<()> {
+    let mut output = io::stdout().lock();
+    writeln!(
+        output,
+        "{}\nKind: {}\nState: {}",
+        view.id, view.kind, view.state
+    )?;
+    writeln!(output, "\nStatement:\n  {}", view.statement)?;
+    if !view.serves.is_empty() {
+        writeln!(output, "\nServes:")?;
+        for priority in &view.serves {
+            writeln!(output, "  {priority}")?;
+        }
+    }
+    if !view.serving_tasks.is_empty() {
+        writeln!(output, "\nServing tasks:")?;
+        for (name, state) in &view.serving_tasks {
+            writeln!(output, "  task::{name}   {state}")?;
+        }
+    }
+    writeln!(
+        output,
+        "\nExpectations ({} of {} held, judged against the current project view):",
+        view.outcome.held, view.outcome.expected
+    )?;
+    for expectation in &view.outcome.expectations {
+        writeln!(
+            output,
+            "  {:<10}  {}",
+            expectation.verdict.word(),
+            expectation.identity
+        )?;
     }
     writeln!(output, "\n{}", view.authority)
 }
@@ -1566,6 +1780,81 @@ fn write_knowledge_memory(
     writeln!(output, "  {}", memory.authority)
 }
 
+fn write_goal_line(output: &mut impl Write, memory: Option<&GoalStatus>) -> io::Result<()> {
+    let Some(memory) = memory else {
+        return Ok(());
+    };
+    match memory.state {
+        "present" => writeln!(
+            output,
+            "GOALS      {} active  {} done   (memory only; never part of completion)",
+            memory.active.len(),
+            memory.done
+        ),
+        _ => writeln!(
+            output,
+            "GOALS      {} is {}; no objectives are available (completion is unaffected)",
+            memory.file, memory.state
+        ),
+    }
+}
+
+fn write_goal_memory(output: &mut impl Write, memory: Option<&GoalStatus>) -> io::Result<()> {
+    let Some(memory) = memory else {
+        return Ok(());
+    };
+    writeln!(output, "\nGoal memory ({}):", memory.file)?;
+    if memory.state != "present" {
+        for problem in &memory.problems {
+            writeln!(output, "  {problem}")?;
+        }
+        return writeln!(
+            output,
+            "  {}\n  Fix the file or remove the registration; nothing about completion depends on it.",
+            memory.authority
+        );
+    }
+    let width = memory
+        .active
+        .iter()
+        .map(|outcome| outcome.goal.len())
+        .max()
+        .unwrap_or(0);
+    for outcome in &memory.active {
+        writeln!(
+            output,
+            "  {:<width$}  {}/{} held",
+            outcome.goal, outcome.held, outcome.expected
+        )?;
+    }
+    if let Some(first) = memory.active.first() {
+        writeln!(
+            output,
+            "  blabla explain {}   its statement, the priorities it serves and the verdict on each expectation",
+            first.goal
+        )?;
+    }
+    writeln!(output, "  {}", memory.authority)
+}
+
+fn write_goals_to_close(output: &mut impl Write, memory: Option<&GoalStatus>) -> io::Result<()> {
+    let Some(memory) = memory else {
+        return Ok(());
+    };
+    for outcome in memory
+        .active
+        .iter()
+        .filter(|outcome| outcome.ready_to_close())
+    {
+        writeln!(
+            output,
+            "  blabla explain {}   every expectation holds; set its state to \"done\" in {}",
+            outcome.goal, memory.file
+        )?;
+    }
+    Ok(())
+}
+
 fn files(names: &[String]) -> String {
     if names.is_empty() {
         return knowledge::DIRECTORY.to_owned();
@@ -1687,6 +1976,15 @@ pub(super) fn write_next(
     views: &MemoryViews,
 ) -> io::Result<()> {
     writeln!(output, "\nNext:")?;
+    write_next_steps(output, view, views)?;
+    write_goals_to_close(output, views.goal.as_ref())
+}
+
+fn write_next_steps(
+    output: &mut impl Write,
+    view: &StatusView,
+    views: &MemoryViews,
+) -> io::Result<()> {
     if view.completion.allowed {
         writeln!(
             output,
@@ -1813,6 +2111,7 @@ fn write_status(
     write_system_line(&mut output, views.system.as_ref())?;
     write_process_line(&mut output, views.process.as_ref())?;
     write_knowledge_line(&mut output, views.knowledge.as_ref())?;
+    write_goal_line(&mut output, views.goal.as_ref())?;
     if let Some(failure) = &view.record_error {
         writeln!(output, "Recorded run unreadable: {failure}")?;
     }
@@ -1821,6 +2120,7 @@ fn write_status(
     write_system_memory(&mut output, views.system.as_ref())?;
     write_process_memory(&mut output, views.process.as_ref())?;
     write_knowledge_memory(&mut output, views.knowledge.as_ref())?;
+    write_goal_memory(&mut output, views.goal.as_ref())?;
     write_bounded_tasks(&mut output, tasks)?;
     capabilities.write(&mut output)?;
     write_structure_issues(&mut output, view)?;

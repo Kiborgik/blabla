@@ -16,6 +16,8 @@ STEPS = (
     ("gate-schedule", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_gate*.py")),
     ("todo-python", ("@python", "-m", "unittest", "discover", "-s", "examples/todo", "-p", "test_*.py")),
     ("bridge", ("cargo", "build", "@cargo", "--quiet", "--example", "structure-adapter")),
+    ("bridge-tests", ("cargo", "test", "@cargo", "--quiet", "--example", "structure-adapter")),
+    ("questions-campaign", ("@blabla", "run", "contracts/questions.bla", "--cases", "32", "--steps", "512", "--timeout-ms", "5000", "--", "target/debug/examples/structure-adapter")),
     ("self-hosting-finish", ("@blabla", "finish")),
     ("self-hosting-status", ("@blabla", "status")),
     ("example-python", ("@blabla", "--project", "examples/todo", "finish")),
@@ -30,6 +32,7 @@ STEPS = (
 
 REQUIRED_ORDER = (
     ("bridge", "self-hosting-finish"),
+    ("bridge", "questions-campaign"),
     ("self-hosting-finish", "self-hosting-status"),
 )
 

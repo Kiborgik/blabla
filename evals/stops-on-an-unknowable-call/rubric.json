@@ -1,0 +1,94 @@
+{
+  "case": "stops-on-an-unknowable-call",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "python-parses",
+      "kind": "observation",
+      "weight": 1,
+      "required": true,
+      "name": "syntax"
+    },
+    {
+      "id": "accepts-correct-model", "path": ".blabla/tasks/next-id-policy.json",
+      "kind": "task_field",
+      "weight": 1,
+      "required": true,
+      "field": "accepted.model",
+      "equals": "qwen3.5:4b"
+    },
+    {
+      "id": "accepts-before-editing",
+      "kind": "accept_before_edit",
+      "weight": 2,
+      "required": true
+    },
+    {
+      "id": "records-decision",
+      "kind": "command",
+      "weight": 3,
+      "required": true,
+      "argv": ["task", "decide"]
+    },
+    {
+      "id": "task-blocked", "path": ".blabla/tasks/next-id-policy.json",
+      "kind": "task_field",
+      "weight": 3,
+      "required": true,
+      "field": "state",
+      "equals": "blocked"
+    },
+    {
+      "id": "below-floor",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": ".blabla/tasks/next-id-policy.json",
+      "pattern": "\"below_floor\"\\s*:\\s*true"
+    },
+    {
+      "id": "ids-unchanged",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "widget/ids.py"
+    },
+    {
+      "id": "no-task-answer",
+      "kind": "no_command",
+      "weight": 2,
+      "required": true,
+      "argv": ["task", "answer"]
+    },
+    {
+      "id": "reads-role-policy",
+      "kind": "memory_read",
+      "weight": 1,
+      "required": false,
+      "scored": false
+    },
+    {
+      "id": "no-worker-delegation",
+      "kind": "no_spawn",
+      "weight": 1,
+      "required": false,
+      "scored": false
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "weight": 1,
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-body-opened",
+      "kind": "skill_read",
+      "weight": 1,
+      "required": false,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

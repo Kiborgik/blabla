@@ -1,0 +1,1 @@
+Owner objectives. Each expectation is judged on demand against the current project view and never recorded; a goal never decides completion.

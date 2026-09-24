@@ -296,7 +296,7 @@ def evaluate(criterion, normalized, workspace, before, after, observations):
             blocked = [call for call in actions if call.get('harness_blocked')]
             if criterion['field'] == 'state' and criterion['equals'] == 'ready' and actual != 'ready' and blocked:
                 return verdict('pass', 'Hand-back refused only for paths the evaluator planted; counted as ready', refs(blocked))
-            return decide(actual == criterion['equals'], f'{criterion["field"]} = {actual!r}', [target.relative_to(workspace).as_posix()])
+            return decide(actual in criterion.get('equals_any', [criterion['equals']]), f'{criterion["field"]} = {actual!r}', [target.relative_to(workspace).as_posix()])
         if kind == 'task_count':
             rows = field(task, criterion['field'])
             rows = rows if isinstance(rows, list) else []

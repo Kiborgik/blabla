@@ -17,8 +17,7 @@ fn accepted() -> (task::Task, BTreeMap<String, String>) {
             scope: vec!["src".to_owned()],
             deliverables: vec!["src/a.rs".to_owned()],
             check: Some("check".to_owned()),
-            check_argv: None,
-            inputs: Vec::new(),
+            ..Default::default()
         },
         0,
         BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),
@@ -174,8 +173,7 @@ fn acceptance_records_changed_paths_when_tree_differs_from_open_state() {
             scope: vec!["src".to_owned()],
             deliverables: vec!["src/a.rs".to_owned()],
             check: Some("check".to_owned()),
-            check_argv: None,
-            inputs: Vec::new(),
+            ..Default::default()
         },
         0,
         BTreeMap::from([
@@ -211,8 +209,7 @@ fn acceptance_records_none_when_tree_unchanged_from_open_state() {
             scope: vec!["src".to_owned()],
             deliverables: vec!["src/a.rs".to_owned()],
             check: Some("check".to_owned()),
-            check_argv: None,
-            inputs: Vec::new(),
+            ..Default::default()
         },
         0,
         BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),
@@ -237,8 +234,7 @@ fn acceptance_field_serializes_correctly_in_json() {
             scope: vec!["src".to_owned()],
             deliverables: vec!["src/a.rs".to_owned()],
             check: Some("check".to_owned()),
-            check_argv: None,
-            inputs: Vec::new(),
+            ..Default::default()
         },
         0,
         BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),
@@ -1004,6 +1000,84 @@ fn open_and_accept(temp: &TempDir, deliverable: &str) {
     );
 }
 
+#[test]
+fn edited_file_added_as_deliverable_does_not_trigger_unchanged_challenge() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "edit-test",
+                "--role",
+                "worker",
+                "--statement",
+                "edit a file then add it",
+                "--scope",
+                "src",
+                "--check",
+                "cargo test",
+                "--json",
+            ],
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 42 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "deliverable",
+                "edit-test",
+                "--add",
+                "src/thing.rs",
+                "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "edit-test", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "edit-test",
+                "--exit",
+                "0",
+                "--tool",
+                "t",
+                "--json"
+            ],
+        ),
+        0
+    );
+    let (view, _) = cli_json(&temp, &["challenge", "edit-test", "--json"]);
+    let grounded = view["grounded"]
+        .as_array()
+        .expect("grounded should be an array");
+    assert!(
+        !grounded
+            .iter()
+            .any(|v| v.as_str() == Some("deliverable-unchanged")),
+        "edited file added as deliverable should not trigger deliverable-unchanged challenge: {view:?}"
+    );
+}
+
 fn grounded(temp: &TempDir) -> Vec<String> {
     let (view, _) = cli_json(temp, &["challenge", "test-task", "--json"]);
     view["grounded"]
@@ -1508,4 +1582,462 @@ fn settling_a_finding_needs_process_memory_that_declares_the_orchestrator() {
     .unwrap();
     std::fs::write(root.join("process.bla"), process).unwrap();
     assert_eq!(resolve(), 0);
+}
+
+#[test]
+fn failing_evidence_displays_log_path_and_last_lines() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+
+    let blabla_path = env!("CARGO");
+    cli_run(
+        &temp,
+        &[
+            "task",
+            "open",
+            "failing-run",
+            "--role",
+            "worker",
+            "--statement",
+            "test failing --run evidence display",
+            "--scope",
+            "src",
+            "--deliverable",
+            "src/thing.rs",
+            "--check-argv",
+            blabla_path,
+            "nonexistent-subcommand",
+        ],
+    );
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "failing-run", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "failing-run", "--run"]),
+        0
+    );
+
+    let output = run_in(Some(temp.path()), &args(&["task", "show", "failing-run"]));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        stdout.contains("Exit code:"),
+        "Output should contain exit code heading: {}",
+        stdout
+    );
+
+    assert!(
+        stdout.contains("Log: .blabla/scratch/failing-run/evidence-1.log"),
+        "Output should contain log path: {}",
+        stdout
+    );
+
+    assert!(
+        stdout.contains("non-empty lines")
+            || stdout.contains("could not read")
+            || stdout.contains("empty"),
+        "Output should mention log lines: {}",
+        stdout
+    );
+}
+
+#[test]
+fn passing_evidence_does_not_display_log_lines() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+
+    let blabla_path = env!("CARGO");
+    cli_run(
+        &temp,
+        &[
+            "task",
+            "open",
+            "passing-run",
+            "--role",
+            "worker",
+            "--statement",
+            "test passing --run evidence display",
+            "--scope",
+            "src",
+            "--deliverable",
+            "src/thing.rs",
+            "--check-argv",
+            blabla_path,
+            "--help",
+        ],
+    );
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "passing-run", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "passing-run", "--run"]),
+        0
+    );
+
+    let output = run_in(Some(temp.path()), &args(&["task", "show", "passing-run"]));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        !stdout.contains("Exit code:"),
+        "Output should NOT contain exit code section for passing evidence: {}",
+        stdout
+    );
+}
+
+#[test]
+fn failing_evidence_log_readable_from_subdirectory() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+
+    let blabla_path = env!("CARGO");
+    cli_run(
+        &temp,
+        &[
+            "task",
+            "open",
+            "subdir-test",
+            "--role",
+            "worker",
+            "--statement",
+            "test failing evidence from subdirectory",
+            "--scope",
+            "src",
+            "--deliverable",
+            "src/thing.rs",
+            "--check-argv",
+            blabla_path,
+            "nonexistent-subcommand",
+        ],
+    );
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "subdir-test", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "subdir-test", "--run"]),
+        0
+    );
+
+    let subdir = temp.path().join("subdir");
+    std::fs::create_dir(&subdir).unwrap();
+
+    let output = run_in(Some(&subdir), &args(&["task", "show", "subdir-test"]));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    assert!(
+        stdout.contains("Exit code:"),
+        "Output should contain exit code heading when run from subdirectory: {}",
+        stdout
+    );
+
+    assert!(
+        stdout.contains("Log: .blabla/scratch/subdir-test/evidence-1.log"),
+        "Output should contain log path when run from subdirectory: {}",
+        stdout
+    );
+
+    assert!(
+        stdout.contains("non-empty lines")
+            || stdout.contains("could not read")
+            || stdout.contains("empty"),
+        "Output should mention log lines when run from subdirectory: {}",
+        stdout
+    );
+}
+
+fn open_with_argv_check(temp: &TempDir, name: &str, argv: &[&str]) {
+    let mut arguments = vec![
+        "task",
+        "open",
+        name,
+        "--role",
+        "worker",
+        "--statement",
+        "a check that touches its own record",
+        "--scope",
+        "src",
+        "--deliverable",
+        "src/thing.rs",
+        "--check-argv",
+    ];
+    arguments.extend_from_slice(argv);
+    assert_eq!(cli_run(temp, &arguments), 0);
+    assert_eq!(
+        cli_run(temp, &["task", "accept", name, "--model", "qwen3.5:4b"]),
+        0
+    );
+}
+
+#[test]
+fn a_note_the_check_itself_records_survives_evidence_run() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let blabla = env!("CARGO_BIN_EXE_blabla");
+    open_with_argv_check(
+        &temp,
+        "note-during-check",
+        &[
+            blabla,
+            "task",
+            "note",
+            "note-during-check",
+            "recorded while the check ran",
+        ],
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "note-during-check", "--run"]),
+        0
+    );
+
+    let (view, code) = cli_json(&temp, &["task", "show", "note-during-check", "--json"]);
+    assert_eq!(code, 0, "{view}");
+    let notes: Vec<&str> = view["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|note| note["statement"].as_str())
+        .collect();
+    assert_eq!(notes, vec!["recorded while the check ran"], "{view}");
+    let evidence = view["task"]["evidence"].as_array().unwrap();
+    assert_eq!(evidence.len(), 1, "{view}");
+    assert_eq!(evidence[0]["exit"], 0, "{view}");
+    assert_eq!(evidence[0]["tool"], "run", "{view}");
+}
+
+#[test]
+fn evidence_run_records_nothing_when_its_check_moves_the_task_out_of_accepted() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let blabla = env!("CARGO_BIN_EXE_blabla");
+    open_with_argv_check(
+        &temp,
+        "block-during-check",
+        &[
+            blabla,
+            "task",
+            "block",
+            "block-during-check",
+            "blocked while the check ran",
+        ],
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "block-during-check", "--run"]),
+        2
+    );
+
+    let (view, _) = cli_json(&temp, &["task", "show", "block-during-check", "--json"]);
+    assert_eq!(view["task"]["state"], "blocked", "{view}");
+    assert!(
+        view["task"]["evidence"]
+            .as_array()
+            .is_none_or(|entries| entries.is_empty()),
+        "{view}"
+    );
+}
+
+fn with_exception(model: &str, approved: bool) -> task::Exception {
+    task::Exception {
+        model: model.to_owned(),
+        reason: "design heavy".to_owned(),
+        approval: approved.then(|| "owner approved".to_owned()),
+    }
+}
+
+#[test]
+fn a_model_outside_the_list_addresses_only_when_accepted_and_approved() {
+    let permitted = vec!["qwen3.5:4b".to_owned()];
+    let (mut task, _) = accepted();
+    assert!(task::can_address_finding(&task, "qwen3.5:4b", &permitted));
+    assert!(!task::can_address_finding(&task, "small", &permitted));
+    task.exceptions.push(with_exception("small", false));
+    assert!(!task::can_address_finding(&task, "small", &permitted));
+    task.exceptions.push(with_exception("other", true));
+    assert!(!task::can_address_finding(&task, "other", &permitted));
+    assert!(!task::can_address_finding(&task, "small", &permitted));
+    task.exceptions.push(with_exception("small", true));
+    assert!(task::can_address_finding(&task, "small", &permitted));
+    task.accepted = None;
+    assert!(!task::can_address_finding(&task, "small", &permitted));
+}
+
+#[test]
+fn a_role_without_a_model_list_lets_any_model_address() {
+    let (task, _) = accepted();
+    assert!(task::can_address_finding(&task, "anything", &[]));
+    assert!(task::can_address_finding(&task, "small", &[]));
+}
+
+fn address(temp: &TempDir, model: &str) -> i32 {
+    cli_run(
+        temp,
+        &[
+            "task",
+            "addressed",
+            "test-task",
+            "1",
+            "fixed at src/thing.rs",
+            "--model",
+            model,
+            "--json",
+        ],
+    )
+}
+
+fn addressed_model(temp: &TempDir) -> serde_json::Value {
+    let (view, _) = cli_json(temp, &["task", "show", "test-task", "--json"]);
+    view["task"]["findings"][0]["addressed"]["model"].clone()
+}
+
+#[test]
+fn an_approved_model_the_task_was_not_accepted_on_may_not_address() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", "test-task", "defect", "--json"]),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "propose-model",
+                "test-task",
+                "claude-sonnet-4",
+                "--reason",
+                "design heavy",
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "approve-model",
+                "test-task",
+                "claude-sonnet-4",
+                "--approval",
+                "owner approved",
+            ],
+        ),
+        0
+    );
+    assert_eq!(address(&temp, "claude-sonnet-4"), 2);
+    assert!(addressed_model(&temp).is_null());
+    assert!(grounded(&temp).contains(&"unresolved-finding".to_owned()));
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "accept",
+                "test-task",
+                "--model",
+                "claude-sonnet-4",
+                "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(address(&temp, "claude-sonnet-4"), 0);
+    assert_eq!(addressed_model(&temp), "claude-sonnet-4");
+}
+
+#[test]
+fn an_accepted_model_without_an_approved_exception_may_not_address() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "accept",
+                "test-task",
+                "--model",
+                "gpt-4-turbo",
+                "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", "test-task", "defect", "--json"]),
+        0
+    );
+    assert_eq!(address(&temp, "gpt-4-turbo"), 2);
+    assert!(addressed_model(&temp).is_null());
+    assert!(grounded(&temp).contains(&"unresolved-finding".to_owned()));
+}
+
+#[test]
+fn a_worker_role_without_a_model_list_lets_any_model_address_its_finding() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let process = std::fs::read_to_string(temp.path().join("process.bla"))
+        .unwrap()
+        .replace("    model \"qwen3.5:4b\"\n", "");
+    std::fs::write(temp.path().join("process.bla"), process).unwrap();
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", "test-task", "defect", "--json"]),
+        0
+    );
+    assert_eq!(address(&temp, "any-model"), 0);
+    assert_eq!(addressed_model(&temp), "any-model");
+}
+
+#[test]
+fn a_closed_task_refuses_an_address_and_a_run() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", "test-task", "defect", "--json"]),
+        0
+    );
+    let path = temp.path().join(".blabla/tasks/test-task.json");
+    let mut record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let fields = record.as_object_mut().unwrap();
+    fields.insert("state".to_owned(), serde_json::json!("closed"));
+    fields.insert("closed_unix".to_owned(), serde_json::json!(1234567890u64));
+    fields.insert(
+        "check_argv".to_owned(),
+        serde_json::json!([env!("CARGO_BIN_EXE_blabla"), "--help"]),
+    );
+    fields.remove("check");
+    let before = serde_json::to_string_pretty(&record).unwrap();
+    std::fs::write(&path, &before).unwrap();
+
+    assert_eq!(address(&temp, "qwen3.5:4b"), 2);
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "test-task", "--run", "--json"]),
+        2
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
 }
