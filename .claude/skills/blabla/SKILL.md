@@ -6,12 +6,11 @@ description: "Use when a repository contains project.bla or .bla contracts to ve
 # BlaBla
 
 BlaBla turns behavioral and structural intent into executable contracts and reports GREEN, YELLOW or RED per layer.
-`project.bla` is the machine entry point; `blabla status` is the agent entry point; the contracts are the authority.
+`project.bla` is the machine entry point; `blabla status` is the agent entry point; the contracts are the authority. This skill runs nothing; every blabla command is run in the shell.
 
 ## Working under an assignment
 
-A project may hand you a bounded task instead of the whole repository. `blabla task show <name>` prints the assignment -- statement, role, write scope,
-deliverables, findings, declared check, scratch -- then the routes below, in the order they are taken. That view is the authority, never this file.
+A project may hand you a bounded task instead of the whole repository. `blabla task show <name>` prints the assignment -- statement, role, write scope, deliverables, findings, declared check, scratch -- then the routes below, in the order they are taken. That view is the authority, never this file.
 
   blabla task accept <name> --model <id>   take the assignment before changing anything; unaccepted work is challenged as work done outside BlaBla
 
@@ -23,6 +22,7 @@ Declared check:
   blabla task note <name> "..."   keep a note on the record; a note is not a finding and blocks nothing
   blabla task finding <name> "..."   record unsettled work; it blocks hand-back until it is addressed or resolved
   blabla task addressed <name> <id> "..." --model <id>   say what you did about a finding; the orchestrator still resolves it
+  blabla task decide <name> "<question>" --pick <option> --confidence <0-100> --model <id>   a call you are not sure of (a cause, a name, a behavior the statement leaves open) is asked, not guessed; --options a,b,c for a choice; --on <question-id> in place of the question picks one the orchestrator asked. BLOCKS THE TASK means stop now and do not act on your pick until the orchestrator answers
   blabla task lens <name> <pack> "..."   one assessment against one lens the role consults
   blabla challenge <name>   ask BlaBla for one contradiction grounded in the record and tree; no challenge is recorded until the command runs
   blabla task ready <name>   hand back for review; closing it is the orchestrator's, never yours
@@ -72,7 +72,7 @@ implementation phase reaches GREEN.
 | `blabla explain system::<name>` | one system: purpose, paths, the responsibilities it owns and its seams |
 | `blabla explain knowledge::<pack>` | one reusable knowledge pack and the id of every ruling in it |
 | `blabla explain flow::<name>` | the order the roles are meant to work in, one line per step |
-| `blabla task <action>` | record one bounded change; `show <name>` prints the routes your role takes next; `open`, `resolve`, `attribute`, `deliverable --remove` and `close` are the orchestrator's |
+| `blabla task <action>` | record one bounded change; `show <name>` prints the routes your role takes next; `open`, `ask`, `resolve`, `attribute`, `deliverable --remove`, `confirm` and `close` are the orchestrator's; a question it asks is picked with `task decide <name> --on <id>` before hand-back; every `--model` is an attestation, not proof |
 | `blabla challenge` | one grounded challenge to the current account of the work; without a task, exit 1 when one stands; with a task that is not closed, exit 0 when its assignment check is clear and 1 otherwise |
 | `blabla finish` | structure check plus canonical behavior verification from project.bla; exit 0 only for OVERALL GREEN |
 | `blabla run -- <app>` | manual verification with explicit settings; records the result |

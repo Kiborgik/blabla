@@ -11,9 +11,9 @@ import tempfile
 import time
 
 from agent_eval_common import (ROOT, base_environment, build_product, endpoint_url,
-                               export_campaign, has_control, model_details, observe_run, prompt_path,
-                               read_prompt, resolve_model, run_process, snapshot, stage_materials,
-                               subject_environment)
+                               export_campaign, get_model_set, has_control, model_details, observe_run,
+                               prompt_path, read_prompt, resolve_model, rewrite_staged_materials,
+                               run_process, snapshot, stage_materials, subject_environment)
 from collect_claude_eval import sandbox_paths
 from grade_agent_eval import failed_run, grade_directory, run_summary, write_reports
 
@@ -70,20 +70,70 @@ def collect_run(native, run, case_name, arm, expected_binary):
     (run / 'subject-after.json').write_text(json.dumps(snapshot(run / 'workspace'), indent=2))
 
 
-def run_case(case, arm, index, campaign, env, claude, model, prepare_only):
+DIRECT_TOOLS = 'Bash,Write,Edit,Read,Glob,Grep,Skill'
+
+
+def direct_environment(env, arm):
+    return {key: value for key, value in subject_environment(env, arm).items()
+            if not key.startswith(('CLAUDE_', 'CLAUDECODE'))}
+
+
+def direct_command(claude, model):
+    return [claude, '-p', '--model', model, '--output-format', 'stream-json', '--verbose',
+            '--setting-sources', 'project', '--tools', DIRECT_TOOLS, '--allowedTools', DIRECT_TOOLS]
+
+
+def prepare_workspace(case, run, env, arm):
+    workspace = run / 'workspace'
+    workspace.mkdir()
+    subprocess.run(['bash', str(case / 'fixture.sh')], cwd=workspace,
+                   env=dict(env, BLABLA_EVAL_ARM=arm), check=True, capture_output=True, text=True)
+    (run / 'before.json').write_text(json.dumps(snapshot(workspace), indent=2))
+    return workspace
+
+
+def conclude_run(run, case, env, arm, started, driver, **exits):
+    observe_run(run, case, env, arm)
+    result = grade_directory(case, run, 'claude', arm)
+    offered = next((json.loads(line).get('skills') for line in (run / 'trace.jsonl').read_text().splitlines()
+                    if json.loads(line).get('subtype') == 'init'), None)
+    if offered is None or any(name.split(':')[-1] == 'blabla' for name in offered) != (arm == 'with'):
+        raise RuntimeError(f'{driver} skill catalog does not match the selected condition')
+    result.update(seconds=time.monotonic() - started, **exits)
+    (run / 'summary.json').write_text(json.dumps(result, indent=2))
+    print(run_summary(result), flush=True)
+    return result
+
+
+def run_direct(case, arm, run, campaign, env, claude, model, timeout):
+    workspace = prepare_workspace(case, run, env, arm)
+    shutil.copytree(workspace, run / 'before-workspace')
+    if arm == 'with':
+        skill = workspace / '.claude/skills/blabla/SKILL.md'
+        skill.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(campaign / 'materials/.claude/skills/blabla/SKILL.md', skill)
+    command = direct_command(claude, model)
+    (run / 'command.json').write_text(json.dumps(command, indent=2))
+    started = time.monotonic()
+    with (run / 'prompt.txt').open('rb') as prompt:
+        exit_code = run_process(command, workspace, direct_environment(env, arm),
+                                run / 'trace.jsonl', run / 'stderr.txt', timeout, prompt)
+    (run / 'subject-after.json').write_text(json.dumps(snapshot(workspace), indent=2))
+    return conclude_run(run, case, env, arm, started, 'Direct', direct_exit=exit_code)
+
+
+def run_case(case, arm, index, campaign, env, claude, model, prepare_only, driver):
     run = campaign / arm / f'run-{index}'
     run.mkdir(parents=True)
     prompt, timeout = read_prompt(prompt_path(case, arm).read_text())
     (run / 'prompt.txt').write_text(prompt)
     (run / 'capabilities.json').write_text(json.dumps({'spawn_available': False}))
     if prepare_only:
-        workspace = run / 'workspace'
-        workspace.mkdir()
-        subprocess.run(['bash', str(case / 'fixture.sh')], cwd=workspace,
-                       env=dict(env, BLABLA_EVAL_ARM=arm), check=True, capture_output=True, text=True)
-        (run / 'before.json').write_text(json.dumps(snapshot(workspace), indent=2))
+        prepare_workspace(case, run, env, arm)
         (run / 'summary.json').write_text(json.dumps({'execution': 'prepared', 'inference': False}))
         return None
+    if driver == 'direct':
+        return run_direct(case, arm, run, campaign, env, claude, model, timeout)
     native = campaign / 'native' / arm / f'run-{index}'
     shutil.copytree(campaign / 'materials', native)
     if arm == 'with':
@@ -102,16 +152,7 @@ def run_case(case, arm, index, campaign, env, claude, model, prepare_only):
     if not (native / 'results/aggregate-result.json').exists():
         raise RuntimeError(f'Native evaluator exited {exit_code} without a report; see {run}')
     collect_run(native, run, case.name, arm, env['BLABLA_EVAL_EXPECTED_SHA256'])
-    observe_run(run, case, env, arm)
-    result = grade_directory(case, run, 'claude', arm)
-    offered = next((json.loads(line).get('skills') for line in (run / 'trace.jsonl').read_text().splitlines()
-                    if json.loads(line).get('subtype') == 'init'), None)
-    if offered is None or any(name.split(':')[-1] == 'blabla' for name in offered) != (arm == 'with'):
-        raise RuntimeError('Native skill catalog does not match the selected condition')
-    result.update(seconds=time.monotonic() - started, native_exit=exit_code)
-    (run / 'summary.json').write_text(json.dumps(result, indent=2))
-    print(run_summary(result), flush=True)
-    return result
+    return conclude_run(run, case, env, arm, started, 'Native', native_exit=exit_code)
 
 
 def main():
@@ -121,13 +162,37 @@ def main():
     parser.add_argument('--runs', type=int, default=3)
     parser.add_argument('--arm', choices=('with', 'without', 'both'), default='both')
     parser.add_argument('--model')
+    parser.add_argument('--backend', choices=('ollama', 'anthropic'), default='ollama',
+                        help='Backend to use for model inference')
+    parser.add_argument('--model-set', help='Model set name to use for mapping models (required with --backend anthropic)')
     parser.add_argument('--endpoint', default=os.environ.get('ANTHROPIC_BASE_URL'))
     parser.add_argument('--claude', default='claude')
+    parser.add_argument('--driver', choices=('plugin', 'direct'), default='plugin',
+                        help='Driver to use for evaluation')
     parser.add_argument('--prepare-only', action='store_true')
     arguments = parser.parse_args()
     if sys.platform != 'linux' or arguments.runs < 1:
         parser.error('Use Linux/WSL and a positive run count')
-    arguments.model = resolve_model(parser, ROOT / 'evals' / arguments.case, arguments.model)
+
+    if arguments.model_set and arguments.backend != 'anthropic':
+        parser.error('--model-set can only be used with --backend anthropic')
+    if arguments.backend == 'anthropic' and not arguments.model_set:
+        parser.error('--model-set is required when using --backend anthropic')
+
+    case_dir = ROOT / 'evals' / arguments.case
+    if arguments.model_set:
+        try:
+            model_set = get_model_set(arguments.model_set)
+        except ValueError as e:
+            parser.error(str(e))
+        declared_model = resolve_model(parser, case_dir, arguments.model)
+        if declared_model not in model_set:
+            parser.error(f'Model {declared_model} not in model set {arguments.model_set}')
+        api_model = model_set[declared_model]['api_id']
+    else:
+        arguments.model = resolve_model(parser, case_dir, arguments.model)
+        api_model = arguments.model
+
     claude = shutil.which(arguments.claude)
     if claude is None:
         parser.error('Native Linux Claude is missing')
@@ -141,15 +206,27 @@ def main():
         shutil.copy2(binary, executable)
         try:
             inputs = stage_materials(campaign / 'materials')
+
+            if arguments.model_set:
+                rewrite_staged_materials(campaign / 'materials', arguments.model_set)
+
             env = base_environment(executable)
-            endpoint = endpoint_url(arguments.endpoint)
-            env.update(ANTHROPIC_BASE_URL=endpoint, ANTHROPIC_AUTH_TOKEN='ollama')
+
+            if arguments.backend == 'anthropic':
+                pass
+            else:
+                endpoint = endpoint_url(arguments.endpoint)
+                env.update(ANTHROPIC_BASE_URL=endpoint, ANTHROPIC_AUTH_TOKEN='ollama')
+
             metadata = {'host': 'claude', 'case': arguments.case, 'runs_per_arm': arguments.runs,
-                        'arm': arguments.arm, 'model': arguments.model, 'prepare_only': arguments.prepare_only,
-                        'claude_version': subprocess.check_output([claude, '--version'], text=True).strip(),
+                        'arm': arguments.arm, 'model': api_model, 'prepare_only': arguments.prepare_only,
+                        'driver': arguments.driver, 'backend': arguments.backend, 'claude_version': subprocess.check_output([claude, '--version'], text=True).strip(),
                         'blabla_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'inputs': inputs,
                         'runner_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
-            if not arguments.prepare_only:
+            if arguments.model_set:
+                metadata['model_set'] = arguments.model_set
+            if not arguments.prepare_only and arguments.backend == 'ollama':
+                endpoint = endpoint_url(arguments.endpoint)
                 metadata.update(model_details(endpoint, arguments.model))
             (campaign / 'metadata.json').write_text(json.dumps(metadata, indent=2))
             for index in range(1, arguments.runs + 1):
@@ -163,7 +240,7 @@ def main():
                         continue
                     print(f'{arm}: run {index}/{arguments.runs}', flush=True)
                     try:
-                        result = run_case(case, arm, index, campaign, env, claude, arguments.model, arguments.prepare_only)
+                        result = run_case(case, arm, index, campaign, env, claude, api_model, arguments.prepare_only, arguments.driver)
                     except Exception as failure:
                         result = failed_run(case, campaign / arm / f'run-{index}', 'claude', arm, failure)
                         results.append(result)

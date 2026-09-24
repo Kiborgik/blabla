@@ -13,6 +13,10 @@ ROOT = Path(__file__).resolve().parent.parent
 BUILDER = ROOT / "evals/materials.py"
 SKILL = ROOT / ".claude/skills/blabla/SKILL.md"
 BUILT = ROOT / "target" / "debug"
+STARTING_STATE = {
+    "stops-on-an-unknowable-call": {"rules": 13, "red": set(), "block_below": 70},
+    "stays-inside-a-narrow-scope": {"rules": 13, "red": {"widget::the-store-encodes-nothing-itself"}, "block_below": 0},
+}
 
 
 def working_tree_environment(**overrides):
@@ -345,6 +349,86 @@ class EvalMaterialsTests(unittest.TestCase):
         self.assertIn("freshly built BlaBla", result.stderr)
         self.assertFalse(destination.exists())
 
+    def test_every_case_fixture_builds_and_fails_on_empty_work(self):
+        from grade_agent_eval import grade_directory
+        for case_path in sorted((ROOT / "evals").glob("*/rubric.json")):
+            case_name = case_path.parent.name
+            temporary, destination = self.build(case_name, "with")
+            self.addCleanup(temporary.cleanup)
+            fixture = json.loads((case_path.parent / "fixture.json").read_text(encoding="utf-8"))
+            if "contracts" not in fixture.get("remove", []):
+                self.assertTrue((destination / "project.bla").is_file(), f"{case_name}: project.bla missing")
+            self.assertTrue((destination / "AGENTS.md").is_file(), f"{case_name}: AGENTS.md missing")
+
+            run = destination.parent / "grading-run"
+            run.mkdir(parents=True, exist_ok=True)
+            trace_file = run / "trace.jsonl"
+            trace_file.write_text('{"type": "turn.completed"}\n', encoding="utf-8")
+            (run / "workspace").mkdir(parents=True, exist_ok=True)
+            shutil.copytree(destination, run / "workspace", dirs_exist_ok=True)
+            (run / "before.json").write_text('{}', encoding="utf-8")
+
+            result = grade_directory(case_path.parent, run, "codex", "with")
+            passed = result.get("passed", False)
+            self.assertFalse(passed, f"{case_name}: untouched workspace should not pass")
+
+    def blabla_json(self, destination, *arguments):
+        environment = working_tree_environment()
+        executable = shutil.which("blabla", path=environment["PATH"])
+        completed = subprocess.run([executable, *arguments, "--json"], cwd=destination, env=environment,
+                                   capture_output=True, text=True)
+        return completed.returncode, json.loads(completed.stdout)
+
+    def test_the_decision_and_scope_cases_start_from_the_rules_and_floor_they_measure(self):
+        for case, expected in STARTING_STATE.items():
+            with self.subTest(case=case):
+                _, destination = self.build(case, "with")
+                exit_code, status = self.blabla_json(destination, "status")
+                rules = {rule["id"]: rule["status"] for rule in status["structure"]["rules"]}
+                self.assertEqual(len(rules), expected["rules"])
+                self.assertEqual({rule: state for rule, state in rules.items() if state != "green"},
+                                 {rule: "red" for rule in expected["red"]})
+                self.assertEqual(exit_code, 1 if expected["red"] else 0)
+                self.assertEqual(status["process_memory"]["state"], "present")
+                _, role = self.blabla_json(destination, "explain", "role::worker")
+                self.assertEqual(role["block_below"], expected["block_below"])
+
+
+    def test_every_task_criterion_reads_a_task_its_fixture_opens(self):
+        for rubric_path in sorted((ROOT / "evals").glob("*/rubric.json")):
+            case = rubric_path.parent
+            fixture = json.loads((case / "fixture.json").read_text(encoding="utf-8"))
+            opened = {step["run"][3] for step in fixture.get("before_arm", []) + fixture.get("after_arm", [])
+                      if step.get("run", [])[:3] == ["blabla", "task", "open"]}
+            for criterion in json.loads(rubric_path.read_text(encoding="utf-8"))["criteria"]:
+                if criterion["kind"] in ("task_field", "task_count", "evidence_recorded"):
+                    with self.subTest(case=case.name, criterion=criterion["id"]):
+                        self.assertIn(Path(criterion.get("path", ".blabla/tasks/fix-red-checks.json")).stem, opened)
+
+    def test_a_worker_accepting_under_the_host_model_id_stays_inside_role_policy(self):
+        sys.path.insert(0, str(ROOT / "experiments"))
+        import agent_eval_common
+        temporary = TestDirectory()
+        self.addCleanup(temporary.cleanup)
+        staged = temporary.path / "materials" / "evals" / "materials" / "assignment"
+        shutil.copytree(ROOT / "evals" / "materials" / "assignment", staged)
+        agent_eval_common.rewrite_staged_materials(temporary.path / "materials", "haiku")
+        project = temporary.path / "project"
+        project.mkdir()
+        shutil.copyfile(staged / "process.bla", project / "process.bla")
+        (project / "project.bla").write_text('project Probe\n\nprocess "process.bla"\n', encoding="utf-8")
+        (project / "app.py").write_text("", encoding="utf-8")
+
+        def blabla(*arguments):
+            return subprocess.run(["blabla", *arguments], cwd=project, env=working_tree_environment(),
+                                  capture_output=True, text=True)
+
+        opened = blabla("task", "open", "probe", "--role", "worker", "--statement", "Probe.", "--scope", "app.py", "--check", "true")
+        self.assertEqual(opened.returncode, 0, opened.stderr)
+        accepted = blabla("task", "accept", "probe", "--model", "claude-haiku-4-5-20251001")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        report = json.loads(blabla("challenge", "probe", "--json").stdout)
+        self.assertNotIn("model-outside-role-policy", report["grounded"])
 
 if __name__ == "__main__":
     unittest.main()

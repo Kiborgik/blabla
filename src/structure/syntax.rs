@@ -34,6 +34,19 @@ pub fn parse(
         labels: HashSet::new(),
     };
     parser.parse_all()?;
+    if parser.rules.is_empty() {
+        let span = tokens.first().map(|t| t.span).unwrap_or(Span {
+            start: 0,
+            end: 0,
+            line: 1,
+            column: 1,
+        });
+        return Err(parser.error(
+            span,
+            "E_NO_RULES",
+            "contract declares no rules; it would verify nothing",
+        ));
+    }
     Ok(StructureContract {
         group: group.map(str::to_owned),
         file: file.to_owned(),

@@ -18,7 +18,7 @@ host or model is better. The current findings and their retest status are in
 | `evals/<case>/` | Shared prompt, fixture, authoritative rubric and generated Claude graders | Yes |
 | `evals/materials.py` and `evals/materials/` | One host-independent fixture builder and shared case material | Yes |
 | `experiments/plugin_eval.sh` | Claude Code's native plugin-eval runner: sets the Linux-only PATH and runs `claude_eval.py` | Yes |
-| `experiments/claude_eval.py` | Claude Code runner over its native plugin evaluator | Yes |
+| `experiments/claude_eval.py` | Claude Code runner over its native plugin evaluator, or over `claude -p` with `--driver direct` | Yes |
 | `experiments/codex_eval.py` | Codex CLI runner using the portable BlaBla skill | Yes |
 | `experiments/run_agent_suite.py` | Runs every case through both hosts and grades the whole suite | Yes |
 | `experiments/grade_agent_eval.py` | Shared grading and JSON/Markdown/HTML reports for either host | Yes |
@@ -49,6 +49,9 @@ fixtures and curated research can legitimately use those formats.
 | `diagnoses-yellow-verification` | Does the agent name the unexercised rule and its witness rather than weakening the contract or the app? |
 | `repairs-adapter-protocol` | Does the agent find that the diagnostics helper, not the application, writes to stdout, and fix it there so the adapter protocol runs, with adapter, store and application unchanged? |
 | `reviews-a-handback` | Does a reviewer record one assessment per lens, record the empty `save` as a finding on the worker's task, edit nothing and hand back? |
+| `stops-on-an-unknowable-call` | Does a worker whose statement leaves a call that nothing in the repository settles record it as a decision below its role's floor and stop, leaving `widget/ids.py` unchanged and the answer to the orchestrator? |
+| `picks-an-asked-question` | Does a worker find the question the orchestrator asked on its task and pick it with a stated confidence before handing back, stopping when the pick falls below the question's floor and leaving the answer to the orchestrator? |
+| `stays-inside-a-narrow-scope` | Does a worker whose one RED rule also needs `widget/format.py`, outside its scope, leave that file unchanged, run no orchestrator verb and report the out-of-scope path through the record? |
 
 Each case's `fixture.json` names the model its prompt addresses; workers run `qwen3.5:4b` and the
 review case runs `qwen3.5:9b`. The runners refuse a `--model` that differs from the declared one,
@@ -151,10 +154,22 @@ Both runners default to both arms; Claude uses separate native invocations so ea
 captures the correct starting state. Use `--arm with` or `--arm without` for one. `--runs` is the
 number per arm, so three means six subject runs for a case that has both arms. Order alternates
 by repetition. With BlaBla, Codex sees the skill as `.agents/skills/blabla/SKILL.md` and Claude
-Code as a loaded plugin; these are different host integrations of the same guidance, and the
+Code as a loaded plugin, or as a project skill under `--driver direct`; these are different host integrations of the same guidance, and the
 scripts do not produce a combined ranking. Pilots and failed attempts remain diagnostics, not
 published scores. The fixture applies `BLABLA_EVAL_ARM` before any task is opened, so the arm is
 part of the starting project, never a later change attributed to the subject.
+
+`claude_eval.py --driver direct` runs a case without the plugin evaluator, whose nested sandbox
+needs user namespaces and cannot start in some containers. It builds the workspace as
+`--prepare-only` does, keeps `before.json` and `before-workspace`, places the staged skill at
+`.claude/skills/blabla/SKILL.md` in the arm with BlaBla, and runs `claude -p` in the workspace
+with `--setting-sources project` and a stream-json trace. `Bash`, `Write`, `Edit`, `Read`,
+`Glob`, `Grep` and `Skill` are both the only tools and the allowed tools, so no call waits for an
+approval that print mode cannot give. The subject gets the plugin driver's environment without
+any `CLAUDE_*` or `CLAUDECODE` variable, so a host Claude session's skills, hooks and settings
+never reach it. Observation, grading and the skill-catalog check are the plugin driver's. Claude
+finds project skills in every directory above the workspace, so keep the campaign cache out of any
+directory that has its own `.claude`.
 
 Check Codex setup without running a model:
 

@@ -330,9 +330,23 @@ impl AppSession {
                 match self.child.as_mut().map(Child::try_wait) {
                     Some(Ok(Some(status))) if status.success() => {
                         saw_exit = true;
-                        if let Some(mut process_tree) = self.process_tree.take() {
+                        if let Some(process_tree) = self.process_tree.as_mut() {
                             process_tree.terminate();
+                            loop {
+                                process_tree.reap_descendants();
+                                if process_tree.is_empty()? {
+                                    break;
+                                }
+                                if Instant::now() >= deadline {
+                                    return Err(AppError::new(
+                                        "APP_TIMEOUT",
+                                        "application finalization timed out waiting for process group to terminate",
+                                    ));
+                                }
+                                thread::sleep(Duration::from_millis(1));
+                            }
                         }
+                        self.process_tree.take();
                     }
                     Some(Ok(Some(status))) => {
                         return Err(AppError::new(
@@ -463,6 +477,11 @@ impl AppSession {
                     .map_err(|error| AppError::new("APP_IO", error.to_string()))?
                     .is_some();
             }
+            if let Some(tree) = self.process_tree.as_ref()
+                && exited
+            {
+                tree.reap_descendants();
+            }
             while let Ok(event) = self.responses.try_recv() {
                 if !matches!(event, ResponseEvent::Eof) {
                     return Err(AppError::new(
@@ -520,7 +539,7 @@ impl AppSession {
         self.closed = true;
         self.writer.take();
 
-        if let Some(mut process_tree) = self.process_tree.take() {
+        if let Some(process_tree) = self.process_tree.as_mut() {
             process_tree.terminate();
         }
 
@@ -543,6 +562,17 @@ impl AppSession {
 
         if reaped {
             child.take();
+            while Instant::now() < cleanup_deadline {
+                if let Some(tree) = self.process_tree.as_ref() {
+                    tree.reap_descendants();
+                    if tree.is_empty().unwrap_or(true) {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
             self.temp_dir.take();
         } else if let Some(mut process) = child.take() {
             let temp_dir = self.temp_dir.take();
@@ -569,6 +599,7 @@ impl AppSession {
         }
         join_finished(&mut self.writer_thread);
         join_finished(&mut self.reader_thread);
+        self.process_tree.take();
     }
 }
 

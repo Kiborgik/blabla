@@ -104,12 +104,16 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
         steps: usize,
         #[arg(long, default_value_t = MAX_SHRINK_ATTEMPTS, value_parser = bounded_shrink_count, help = "Candidate shrink replays (0..256); zero keeps confirmation only")]
         shrink_budget: usize,
-        #[arg(long, default_value_t = DEFAULT_TIMEOUT_MS, value_parser = clap::value_parser!(u64).range(1..=5000))]
-        timeout_ms: u64,
+        #[arg(
+            long,
+            value_parser = clap::value_parser!(u64).range(1..=5000),
+            help = "Allowance for one request and its response; defaults to 1000 ms, or the project profile's timeout_ms if given a contract FILE inside a project"
+        )]
+        timeout_ms: Option<u64>,
         #[arg(
             long,
             value_parser = clap::value_parser!(u64).range(1..=60000),
-            help = "Allowance for the first exchange after each process start; defaults to timeout_ms"
+            help = "Allowance for the first exchange after each process start; defaults to timeout_ms, or the project profile's startup_ms if given a contract FILE inside a project"
         )]
         startup_ms: Option<u64>,
         #[arg(last = true, required = true, num_args = 1.., help = "Application executable and arguments; in a project, relative paths resolve against the working directory")]
@@ -225,6 +229,8 @@ enum TaskAction {
         check_argv: Vec<String>,
         #[arg(long, value_name = "PATH", num_args = 1.., help = "Check inputs; defaults to write scope. Deliverables are always included")]
         input: Vec<String>,
+        #[arg(long, help = "The declared goal this task serves")]
+        goal: Option<String>,
     },
     #[command(about = "Record something discovered during the task that is not yet settled")]
     Finding { name: String, statement: String },
@@ -255,6 +261,96 @@ enum TaskAction {
             long,
             value_name = "ID",
             help = "The orchestrator model settling it; must be one role::orchestrator permits"
+        )]
+        model: String,
+    },
+    #[command(
+        about = "Ask the carrying role a typed question it must pick before hand-back; the pick is measured against the question's floor, which is never below the role's"
+    )]
+    Ask {
+        name: String,
+        question: String,
+        #[arg(
+            long,
+            value_name = "A,B,C",
+            help = "The options of a choice, comma-separated; without it the question is yes-no"
+        )]
+        options: Vec<String>,
+        #[arg(
+            long,
+            allow_negative_numbers = true,
+            help = "The confidence a pick needs to stand, 0-100 and not below the carrying role's block_below; default: the role's floor"
+        )]
+        floor: Option<i64>,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The orchestrator model asking; must be one role::orchestrator permits"
+        )]
+        model: String,
+    },
+    #[command(
+        about = "Ask a call you are not sure of as a typed question with the option you would pick and how sure you are, or pick a question the orchestrator asked with --on; below the floor the task is BLOCKED until the orchestrator answers"
+    )]
+    Decide {
+        name: String,
+        question: Option<String>,
+        #[arg(
+            long,
+            value_name = "QUESTION-ID",
+            help = "Pick the question the orchestrator asked under this id; its text and options come from the question"
+        )]
+        on: Option<String>,
+        #[arg(
+            long,
+            help = "The option you would pick: yes or no, or one of --options"
+        )]
+        pick: String,
+        #[arg(
+            long,
+            allow_negative_numbers = true,
+            help = "How sure you are of the pick, as a whole-number percentage 0-100"
+        )]
+        confidence: i64,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The model carrying the task; must be one its role permits"
+        )]
+        model: String,
+        #[arg(
+            long,
+            value_name = "A,B,C",
+            help = "The options of a choice, comma-separated; without it the question is yes-no"
+        )]
+        options: Vec<String>,
+    },
+    #[command(
+        about = "Answer a decision: settle one below the floor or review one that stood; a different pick overrules it. The worker resumes with task accept"
+    )]
+    Answer {
+        name: String,
+        id: usize,
+        #[arg(long, help = "The option the orchestrator picks")]
+        pick: String,
+        #[arg(long, help = "Why, in words the worker acts on")]
+        reason: String,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The orchestrator model answering; must be one role::orchestrator permits"
+        )]
+        model: String,
+    },
+    #[command(
+        about = "After hand-back, confirm every record made under an orchestrator model while a worker carried the task; refused while the task is carried, the list is kept and --model stays an attestation, not proof"
+    )]
+    Confirm {
+        name: String,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The orchestrator model confirming; must be one role::orchestrator permits"
         )]
         model: String,
     },
@@ -888,6 +984,7 @@ fn execute(cli: Cli) -> i32 {
                     check,
                     check_argv,
                     input,
+                    goal,
                 } => task::open(
                     &loaded,
                     blabla::project::task::Opening {
@@ -903,6 +1000,7 @@ fn execute(cli: Cli) -> i32 {
                             Some(check_argv)
                         },
                         inputs: input,
+                        goal,
                     },
                     json,
                 ),
@@ -921,6 +1019,62 @@ fn execute(cli: Cli) -> i32 {
                     evidence,
                     model,
                 } => task::resolve(&loaded, &name, id, &evidence, &model, json),
+                TaskAction::Ask {
+                    name,
+                    question,
+                    options,
+                    floor,
+                    model,
+                } => task::ask(
+                    &loaded,
+                    &name,
+                    blabla::project::task::Ask {
+                        question,
+                        options,
+                        floor,
+                        model,
+                    },
+                    json,
+                ),
+                TaskAction::Decide {
+                    name,
+                    question,
+                    on,
+                    pick,
+                    confidence,
+                    model,
+                    options,
+                } => task::decide(
+                    &loaded,
+                    &name,
+                    task::Asked {
+                        question,
+                        on,
+                        pick,
+                        confidence,
+                        model,
+                        options,
+                    },
+                    json,
+                ),
+                TaskAction::Answer {
+                    name,
+                    id,
+                    pick,
+                    reason,
+                    model,
+                } => task::answer(
+                    &loaded,
+                    &name,
+                    id,
+                    blabla::project::task::Answer {
+                        pick,
+                        model,
+                        reason,
+                    },
+                    json,
+                ),
+                TaskAction::Confirm { name, model } => task::confirm(&loaded, &name, &model, json),
                 TaskAction::Note { name, statement } => {
                     task::note(&loaded, &name, &statement, json)
                 }
@@ -1043,7 +1197,7 @@ fn execute(cli: Cli) -> i32 {
                     Ok(project) => project::run(
                         &project,
                         options,
-                        timeout_ms,
+                        timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS),
                         &application,
                         json,
                         cli.verbose,
@@ -1056,6 +1210,29 @@ fn execute(cli: Cli) -> i32 {
                         Ok(contract) => contract,
                         Err(exit) => return exit,
                     };
+                    let (profile_timeout_ms, profile_startup_ms) = (|| {
+                        let manifest_path = blabla::project::locate(explicit, &cwd).ok()?;
+                        let manifest = blabla::project::read_manifest(&manifest_path).ok()?;
+                        let profile = manifest.profile.as_ref()?;
+                        let timeout = Some(profile.timeout_ms);
+                        let startup = Some(profile.startup());
+                        Some((timeout, startup))
+                    })()
+                    .unwrap_or((None, None));
+
+                    let resolved_timeout_ms = timeout_ms
+                        .or(profile_timeout_ms)
+                        .unwrap_or(DEFAULT_TIMEOUT_MS);
+
+                    let resolved_startup_ms = startup_ms
+                        .or_else(|| {
+                            if timeout_ms.is_some() {
+                                Some(resolved_timeout_ms)
+                            } else {
+                                profile_startup_ms
+                            }
+                        })
+                        .unwrap_or(resolved_timeout_ms);
                     let mut executable = PathBuf::from(&application[0]);
                     if executable.is_relative() && executable.components().count() > 1 {
                         executable = cwd.join(executable);
@@ -1063,9 +1240,9 @@ fn execute(cli: Cli) -> i32 {
                     let config = AppConfig::launched(
                         executable,
                         application[1..].to_vec(),
-                        Duration::from_millis(timeout_ms),
+                        Duration::from_millis(resolved_timeout_ms),
                     )
-                    .booting_within(Duration::from_millis(startup_ms.unwrap_or(timeout_ms)));
+                    .booting_within(Duration::from_millis(resolved_startup_ms));
                     match verify::run(&contract, &options, || runtime::AppSession::spawn(&config)) {
                         Ok(report) => emit_run(
                             report,
@@ -1074,7 +1251,7 @@ fn execute(cli: Cli) -> i32 {
                                 verbose: cli.verbose,
                                 voice: blabla::voice::Voice::default(),
                             },
-                            timeout_ms,
+                            resolved_timeout_ms,
                             None,
                             false,
                             None,
@@ -1283,6 +1460,10 @@ fn check_memory(file: &Path, source: &str, kind: &'static str, json: bool) -> i3
             Ok(built) => blabla::memory::knowledge::validate(&built),
             Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
         },
+        "goal" => match blabla::memory::goal::build(&blocks) {
+            Ok(built) => blabla::memory::goal::validate(&built),
+            Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
+        },
         _ => match blabla::memory::process::build(&blocks) {
             Ok(built) => blabla::memory::process::validate(&built),
             Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
@@ -1315,6 +1496,12 @@ fn check_memory(file: &Path, source: &str, kind: &'static str, json: bool) -> i3
                 writeln!(
                     output,
                     "\nVALID means the file is well formed and every reference resolves; the roles, policies and flows it declares bind the role that carries the work."
+                )?;
+            }
+            if kind == "goal" {
+                writeln!(
+                    output,
+                    "\nThis check reads the goals alone: it cannot see whether each `serves` names a declared priority or whether an expectation holds, which `blabla status` and `blabla explain goal::<name>` report against the registered project."
                 )?;
             }
             if kind == "knowledge" {

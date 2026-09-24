@@ -1,0 +1,15 @@
+{
+  "materials": ["shared", "structure", "structure-plus", "assignment", "case2-structure"],
+  "remove": ["contracts"],
+  "model": "qwen3.5:4b",
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Widget"]}
+  ],
+  "after_arm": [
+    {"run": ["blabla", "task", "open", "fix-store-encoding", "--role", "worker",
+             "--statement", "Repair the failing structure rule without changing declared intent.",
+             "--scope", "widget/store.py", "--deliverable", "widget/store.py",
+             "--check", "blabla status"]}
+  ],
+  "observations": ["syntax", "status", "challenge:fix-store-encoding"]
+}

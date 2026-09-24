@@ -1,7 +1,7 @@
 use blabla::project::status::CompletionState;
 use blabla::project::task::{
     self, Acceptance, Assessment, Attribution, Evidence, Exception, Finding, FindingResolution,
-    Task,
+    Note, Task,
 };
 use blabla::skeptic::{self, Evidence as Grounds};
 use blabla::structure::falsify::FalsifyReport;
@@ -9,8 +9,20 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 const PERMITTED: &str = "haiku-4.5";
+const ALIAS: &str = "haiku45-host-id";
 const OUTSIDE_POLICY: &str = "sonnet-4";
+const UNAPPROVED_MODEL: &str = "gpt-4-turbo";
 const DECLARED_CHECK: &str = "cargo test --lib structure";
+
+const PROCESS_TEXT: &str = r#"
+role "worker" {
+    purpose "carry out one bounded task"
+    model ["haiku-4.5", "gpt-5.6-luna"]
+    consult ["testing"]
+}
+
+alias "haiku45-host-id" { model "haiku-4.5" }
+"#;
 const OTHER_CHECK: &str = "cargo test --doc";
 const DELIVERABLE: &str = "src/deliverable.rs";
 const SHARED_INPUT: &str = "src/shared.rs";
@@ -18,6 +30,7 @@ const UNRELATED: &str = "src/notes.md";
 const OUTSIDE_SCOPE: &str = "other/elsewhere.rs";
 const BREACHED: &str = "other/worker.rs";
 const UNKNOWN: &str = "other/unknown.rs";
+const CONCURRENT_PATH: &str = "other/concurrent.rs";
 
 pub struct Assignment {
     task: Task,
@@ -25,6 +38,9 @@ pub struct Assignment {
     resolution: task::Resolution,
     revision: u64,
     opened: usize,
+    other_tasks: Vec<Task>,
+    late_deliverable_reads_unchanged: Option<bool>,
+    address_refused: bool,
 }
 
 fn digest(seed: &str) -> String {
@@ -41,8 +57,8 @@ fn opening(role: &str, revision: usize) -> task::Opening {
         scope: vec!["src".to_owned()],
         deliverables: vec![DELIVERABLE.to_owned()],
         check: Some(DECLARED_CHECK.to_owned()),
-        check_argv: None,
         inputs: vec![SHARED_INPUT.to_owned()],
+        ..Default::default()
     }
 }
 
@@ -64,27 +80,7 @@ impl Assignment {
             task: Task {
                 name: "probe".to_owned(),
                 role: "worker".to_owned(),
-                statement: String::new(),
-                scope: Vec::new(),
-                deliverables: Vec::new(),
-                findings: Vec::new(),
-                opened_unix: 0,
-                closed_unix: None,
-                opened_tree: BTreeMap::new(),
-                state: "open".to_owned(),
-                check: None,
-                check_argv: None,
-                check_inputs: Vec::new(),
-                accepted: None,
-                result: None,
-                assessments: Vec::new(),
-                exceptions: Vec::new(),
-                evidence: Vec::new(),
-                challenged: None,
-                attributions: Vec::new(),
-                build: None,
-                notes: Vec::new(),
-                removed_deliverables: Vec::new(),
+                ..Default::default()
             },
             tree: BTreeMap::new(),
             resolution: task::Resolution {
@@ -95,6 +91,9 @@ impl Assignment {
             },
             revision: 0,
             opened: 2,
+            other_tasks: Vec::new(),
+            late_deliverable_reads_unchanged: None,
+            address_refused: false,
         };
         assignment.open();
         assignment
@@ -138,6 +137,7 @@ impl Assignment {
 
     fn open(&mut self) {
         self.opened += 1;
+        self.address_refused = false;
         let role = ROLES[self.opened % ROLES.len()];
         let opening = opening(role, self.opened);
         self.tree = BTreeMap::from([
@@ -151,9 +151,13 @@ impl Assignment {
             self.tree.clone(),
             vec![Some(digest("deliverable-0"))],
         );
+        let blocks = blabla::memory::syntax::parse("process.bla", PROCESS_TEXT)
+            .expect("process text parses");
+        let process = blabla::memory::process::build(&blocks).expect("process builds");
+        let permitted = blabla::memory::process::permitted_models(&process, "worker");
         self.resolution = task::resolve(
             &self.task,
-            &[PERMITTED.to_owned(), "qwen3.5:4b".to_owned()],
+            &permitted,
             &lenses_for(role),
             "focused",
             &[("contract::probe".to_owned(), vec![DELIVERABLE.to_owned()])],
@@ -266,7 +270,7 @@ impl Assignment {
                 rules: Vec::new(),
             },
             role: Some(&self.resolution),
-            other_tasks: &[],
+            other_tasks: &self.other_tasks,
         })
     }
 
@@ -289,7 +293,76 @@ impl Assignment {
         self.task.closed_unix.is_none()
     }
 
-    const RECORDS: [&'static str; 14] = [
+    fn create_concurrent_task_and_close(&mut self) {
+        self.revision += 1;
+        let revision = self.revision;
+        let concurrent_name = format!("concurrent-{}", revision);
+
+        let opened_tree_before_bump = self.tree.clone();
+        self.bump(CONCURRENT_PATH, "concurrent");
+
+        let mut concurrent_task = Task {
+            name: concurrent_name,
+            role: "orchestrator".to_owned(),
+            statement: "a concurrent task".to_owned(),
+            scope: vec!["other".to_owned()],
+            deliverables: vec![task::Deliverable {
+                path: CONCURRENT_PATH.to_owned(),
+                opened_digest: opened_tree_before_bump.get(CONCURRENT_PATH).cloned(),
+            }],
+            opened_unix: 1,
+            opened_tree: opened_tree_before_bump.clone(),
+            state: "closed".to_owned(),
+            check: Some(DECLARED_CHECK.to_owned()),
+            check_inputs: vec!["other".to_owned()],
+            accepted: Some(Acceptance {
+                model: PERMITTED.to_owned(),
+                unix: 1,
+                changed_at_acceptance: None,
+            }),
+            challenged: Some(task::ChallengeReceipt {
+                fingerprint: "concurrent-receipt".to_owned(),
+                unix: 3,
+            }),
+            attributions: vec![Attribution {
+                path: CONCURRENT_PATH.to_owned(),
+                kind: task::ATTRIBUTIONS[0].to_owned(),
+                digest: Some(digest(&format!("concurrent-{}", revision))),
+                model: None,
+            }],
+            ..Default::default()
+        };
+
+        let evidence_inputs = task::evidence_inputs(&concurrent_task, &self.tree);
+
+        concurrent_task.evidence = vec![Evidence {
+            check: DECLARED_CHECK.to_owned(),
+            exit: 0,
+            tree: digest("tree"),
+            tool: "cargo".to_owned(),
+            unix: 2,
+            inputs: evidence_inputs,
+            command: None,
+            log: None,
+        }];
+
+        concurrent_task.closed_unix = Some(4);
+        if let Some(path_digest) = self.tree.get(CONCURRENT_PATH) {
+            concurrent_task
+                .closed_paths
+                .insert(CONCURRENT_PATH.to_owned(), path_digest.clone());
+        }
+        self.other_tasks.push(concurrent_task);
+    }
+
+    fn change_concurrent_task_path_again(&mut self) {
+        if self.other_tasks.is_empty() {
+            self.create_concurrent_task_and_close();
+        }
+        self.bump(CONCURRENT_PATH, "concurrent");
+    }
+
+    const RECORDS: [&'static str; 21] = [
         "accept_with_a_permitted_model",
         "accept_with_an_outside_policy_model",
         "propose_an_outside_policy_model",
@@ -304,6 +377,13 @@ impl Assignment {
         "record_a_result_for_a_different_check",
         "reconcile_the_standing_challenges",
         "widen_the_scope_to_cover_the_breach",
+        "the_orchestrator_notes_the_task",
+        "a_concurrent_task_delivers_and_closes",
+        "a_closed_concurrent_tasks_path_changes_again",
+        "owe_a_path_changed_since_the_opening",
+        "address_a_finding_under_an_approved_exception",
+        "address_a_finding_with_an_unapproved_outside_model",
+        "note_the_task_while_its_check_runs",
     ];
 
     pub fn call(&mut self, action: &str) -> bool {
@@ -334,6 +414,7 @@ impl Assignment {
                 }
             }
             "accept_with_a_permitted_model" => self.accept_on(PERMITTED),
+            "accept_with_an_alias_of_a_permitted_model" => self.accept_on(ALIAS),
             "accept_with_an_outside_policy_model" => self.accept_on(OUTSIDE_POLICY),
             "propose_an_outside_policy_model" => self.task.exceptions.push(Exception {
                 model: OUTSIDE_POLICY.to_owned(),
@@ -417,9 +498,91 @@ impl Assignment {
                     });
                 }
             }
+            "the_orchestrator_notes_the_task" => {
+                self.task.notes.push(Note {
+                    statement: "orchestrator note".to_owned(),
+                    unix: 5,
+                });
+            }
+            "a_concurrent_task_delivers_and_closes" => {
+                self.create_concurrent_task_and_close();
+            }
+            "a_closed_concurrent_tasks_path_changes_again" => {
+                self.change_concurrent_task_path_again();
+            }
+            "owe_a_path_changed_since_the_opening" => {
+                self.bump(SHARED_INPUT, "later");
+                self.late_deliverable_reads_unchanged =
+                    Some(self.owe_a_path_changed_since_the_opening(SHARED_INPUT));
+            }
+            "address_a_finding_under_an_approved_exception" => {
+                self.accept_on(OUTSIDE_POLICY);
+                for exception in &mut self.task.exceptions {
+                    exception.approval = Some("owner approved".to_owned());
+                }
+                self.address_a_finding(OUTSIDE_POLICY, 6);
+            }
+            "address_a_finding_with_an_unapproved_outside_model" => {
+                self.accept_on(UNAPPROVED_MODEL);
+                self.address_a_finding(UNAPPROVED_MODEL, 7);
+            }
+            "note_the_task_while_its_check_runs" => {
+                let copy = self.task.clone();
+                self.task.notes.push(Note {
+                    statement: "note added during check".to_owned(),
+                    unix: 8,
+                });
+                task::apply_evidence(
+                    &mut self.task,
+                    Evidence {
+                        check: DECLARED_CHECK.to_owned(),
+                        exit: 0,
+                        tree: "tree".to_owned(),
+                        tool: "test".to_owned(),
+                        unix: 9,
+                        inputs: task::evidence_inputs(&copy, &self.tree),
+                        command: None,
+                        log: None,
+                    },
+                );
+            }
             _ => return false,
         }
         true
+    }
+
+    fn address_a_finding(&mut self, model: &str, unix: u64) {
+        if self.task.findings.is_empty() {
+            let id = self.task.next_finding_id();
+            self.task.findings.push(Finding {
+                id,
+                statement: "finding to address".to_owned(),
+                addressed: None,
+                resolution: None,
+            });
+        }
+        let allowed = task::can_address_finding(&self.task, model, &self.resolution.models);
+        self.address_refused = !allowed;
+        if !allowed {
+            return;
+        }
+        if let Some(finding) = self.task.findings.first_mut() {
+            finding.addressed = Some(task::Addressed {
+                model: model.to_owned(),
+                statement: format!("addressed by {model}"),
+                unix,
+            });
+        }
+        self.task.challenged = None;
+    }
+
+    pub fn owe_a_path_changed_since_the_opening(&mut self, path: &str) -> bool {
+        task::owe_path(&mut self.task, path.to_owned());
+        let deliverable = self.task.deliverables.iter().find(|d| d.path == path);
+        match deliverable {
+            None => true,
+            Some(d) => d.opened_digest == task::observed_digest(&self.tree, path),
+        }
     }
 
     pub fn observe(&self) -> Value {
@@ -447,6 +610,9 @@ impl Assignment {
             "deliverables": self.task.deliverables.len(),
             "findings": self.task.findings.len(),
             "closed": !self.live(),
+            "late_deliverable_reads_unchanged": self.late_deliverable_reads_unchanged.unwrap_or(false),
+            "address_refused": self.address_refused,
+            "notes": self.task.notes.len(),
         })
     }
 }
@@ -485,5 +651,53 @@ mod tests {
                 .any(|item| item["class"] == "attribution-unknown")
         );
         assert!(!standing.iter().any(|item| item["class"] == "scope-breach"));
+    }
+
+    #[test]
+    fn a_closed_task_takes_no_address_and_no_note() {
+        let mut assignment = Assignment::new();
+        assignment.call("resume_a_closed_task_after_a_concurrent_change");
+        assert_eq!(assignment.observe()["closed"], true);
+        let before = serde_json::to_value(&assignment.task).unwrap();
+        for action in [
+            "address_a_finding_under_an_approved_exception",
+            "address_a_finding_with_an_unapproved_outside_model",
+            "note_the_task_while_its_check_runs",
+        ] {
+            assert!(assignment.call(action));
+            assert_eq!(serde_json::to_value(&assignment.task).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn an_approved_model_the_task_was_not_accepted_on_is_refused() {
+        let mut assignment = Assignment::new();
+        assignment.call("accept_with_a_permitted_model");
+        assignment.call("propose_an_outside_policy_model");
+        assignment.call("approve_the_proposed_model");
+        assignment.address_a_finding(OUTSIDE_POLICY, 6);
+        assert_eq!(assignment.observe()["exception_approved"], true);
+        assert_eq!(assignment.observe()["address_refused"], true);
+        assert!(assignment.task.findings[0].addressed.is_none());
+        assignment.call("address_a_finding_under_an_approved_exception");
+        assert_eq!(assignment.observe()["address_refused"], false);
+        assert!(assignment.task.findings[0].addressed.is_some());
+    }
+
+    #[test]
+    fn a_refused_address_leaves_the_finding_standing() {
+        let mut assignment = Assignment::new();
+        assignment.call("accept_with_a_permitted_model");
+        assignment.call("address_a_finding_with_an_unapproved_outside_model");
+        let observed = assignment.observe();
+        assert_eq!(observed["address_refused"], true);
+        assert!(assignment.task.findings[0].addressed.is_none());
+        assert!(
+            observed["standing"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["class"] == "unresolved-finding")
+        );
     }
 }

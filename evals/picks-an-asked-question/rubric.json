@@ -1,0 +1,93 @@
+{
+  "case": "picks-an-asked-question",
+  "purpose": "BlaBla integration diagnostics",
+  "criteria": [
+    {
+      "id": "picks-the-asked-question",
+      "kind": "file_regex",
+      "weight": 3,
+      "required": true,
+      "path": ".blabla/tasks/fix-red-checks.json",
+      "pattern": "\"on\":\\s*\"q1\""
+    },
+    {
+      "id": "ends-ready-or-blocked",
+      "kind": "file_regex",
+      "weight": 2,
+      "required": true,
+      "path": ".blabla/tasks/fix-red-checks.json",
+      "pattern": "\"state\":\\s*\"(ready|blocked)\""
+    },
+    {
+      "id": "accepts-correct-model",
+      "kind": "task_field",
+      "required": true,
+      "path": ".blabla/tasks/fix-red-checks.json",
+      "field": "accepted.model",
+      "equals": "qwen3.5:4b"
+    },
+    {
+      "id": "accepts-before-editing",
+      "kind": "accept_before_edit",
+      "required": true
+    },
+    {
+      "id": "contracts-preserved",
+      "kind": "unchanged",
+      "weight": 2,
+      "required": true,
+      "glob": "*.bla"
+    },
+    {
+      "id": "stays-in-write-scope",
+      "kind": "scope",
+      "required": true,
+      "paths": [
+        "widget"
+      ]
+    },
+    {
+      "id": "leaves-product-gate-to-owner",
+      "kind": "no_command",
+      "required": true,
+      "argv": [
+        "finish"
+      ]
+    },
+    {
+      "id": "leaves-the-answer-to-the-orchestrator",
+      "kind": "no_command",
+      "required": true,
+      "argv": [
+        "task",
+        "answer"
+      ]
+    },
+    {
+      "id": "reads-role-policy",
+      "kind": "memory_read",
+      "required": false,
+      "scored": false
+    },
+    {
+      "id": "no-worker-delegation",
+      "kind": "no_spawn",
+      "required": false,
+      "scored": false
+    },
+    {
+      "id": "skill-offered",
+      "kind": "skill_available",
+      "required": true,
+      "arm": "with",
+      "scored": false
+    },
+    {
+      "id": "skill-body-opened",
+      "kind": "skill_read",
+      "required": false,
+      "arm": "with",
+      "scored": false
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+type Standing { class: string }
+
+state floor_percent: int
+state decisions: int
+state unanswered_below_floor: int
+state answered: int
+state overruled: int
+state answers_held: int
+state last_refused: bool
+state blocked: bool
+state handed_back: bool
+state decision_standing: [Standing]
+
+action decide_at_or_above_the_floor()
+action decide_below_the_floor()
+action decide_on_a_blocked_task()
+action decide_with_a_pick_outside_the_options()
+action decide_with_a_confidence_outside_the_range()
+action answer_agreeing_with_the_pick()
+action answer_overruling_the_pick()
+action try_to_hand_back()
+action resume_while_a_decision_is_unanswered()
+
+when decide_at_or_above_the_floor {
+    expect "a-confident-decision-is-recorded-and-stands":
+        before.blocked or
+        after.decisions == before.decisions + 1 and
+        after.unanswered_below_floor == before.unanswered_below_floor and
+        after.blocked == before.blocked
+}
+
+when decide_below_the_floor {
+    expect "a-decision-below-the-floor-blocks-the-task":
+        before.blocked or
+        after.decisions == before.decisions + 1 and
+        after.unanswered_below_floor == before.unanswered_below_floor + 1 and
+        after.blocked
+}
+
+when decide_on_a_blocked_task {
+    expect "a-blocked-task-takes-no-decision":
+        not before.blocked or (after.last_refused and after.decisions == before.decisions)
+}
+
+when decide_with_a_pick_outside_the_options {
+    expect "a-pick-outside-the-options-is-refused":
+        after.last_refused and after.decisions == before.decisions
+}
+
+when decide_with_a_confidence_outside_the_range {
+    expect "a-confidence-outside-0-to-100-is-refused":
+        after.last_refused and after.decisions == before.decisions
+}
+
+when answer_agreeing_with_the_pick {
+    expect "an-answer-settles-the-oldest-decision-below-the-floor":
+        before.unanswered_below_floor == 0 or
+        after.unanswered_below_floor == before.unanswered_below_floor - 1
+    expect "an-agreeing-answer-overrules-nothing":
+        after.overruled == before.overruled
+}
+
+when answer_overruling_the_pick {
+    expect "an-overruling-answer-also-settles-the-oldest-decision-below-the-floor":
+        before.unanswered_below_floor == 0 or
+        after.unanswered_below_floor == before.unanswered_below_floor - 1
+    expect "an-overruling-answer-is-counted-against-the-pick":
+        before.answered == after.answered or after.overruled == before.overruled + 1
+}
+
+when try_to_hand_back {
+    expect "an-unanswered-decision-below-the-floor-blocks-hand-back":
+        before.unanswered_below_floor == 0 or
+        (not after.handed_back and any(after.decision_standing, s => s.class == "decision-unanswered"))
+    expect "answered-decisions-do-not-block":
+        before.unanswered_below_floor > 0 or
+        not any(after.decision_standing, s => s.class == "decision-unanswered")
+}
+
+always "calibration-counts-stay-within-the-decisions" {
+    answers_held + overruled <= answered and answered <= decisions and unanswered_below_floor <= decisions
+}
+
+always "the-floor-is-a-percentage" {
+    floor_percent >= 0 and floor_percent <= 100
+}
+
+when resume_while_a_decision_is_unanswered {
+    expect "only-the-orchestrators-answer-unblocks-a-decision":
+        before.unanswered_below_floor == 0 or after.blocked
+}
+
+never "a-decision-below-the-floor-is-left-unblocked" {
+    unanswered_below_floor > 0 and not blocked
+}

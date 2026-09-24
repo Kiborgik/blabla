@@ -1,6 +1,7 @@
 use super::runstate::{Classification, Marker, classify, profile_identity};
 use super::{Layer, Lookup, Profile, Project, Rule};
 use crate::diagnostic::{Diagnostic, Location};
+use crate::memory::goal::Verdict;
 use crate::report::{Call, CoverageStatus, RunStatus};
 use crate::runtime::primitives::{self, Fact};
 use crate::structure::{LayerStatus, RuleResult, RuleStatus, StructureReport};
@@ -733,22 +734,68 @@ fn run_state_of(evaluation: &Evaluation) -> Option<State> {
         })
 }
 
+fn current_report(evaluation: &Evaluation) -> (Option<&RecordedReport>, State) {
+    match run_state_of(evaluation) {
+        Some(state) => (None, state),
+        None if evaluation.stale => (None, State::Stale),
+        None => (evaluation.report.as_ref(), State::Unverified),
+    }
+}
+
+pub fn state_verdict(state: State) -> Verdict {
+    match state {
+        State::Green => Verdict::Held,
+        State::Red | State::Yellow => Verdict::NotHeld,
+        State::Unverified
+        | State::Stale
+        | State::Verifying
+        | State::Interrupted
+        | State::NoActiveContracts => Verdict::Unverified,
+    }
+}
+
+pub fn structure_verdict(status: RuleStatus) -> Verdict {
+    match status {
+        RuleStatus::Green => Verdict::Held,
+        RuleStatus::Red | RuleStatus::Error => Verdict::NotHeld,
+    }
+}
+
+pub fn verdict(
+    project: &Project,
+    evaluation: &Evaluation,
+    view: &StatusView,
+    identity: &str,
+) -> Verdict {
+    if let Some(name) = identity.strip_prefix("contract::") {
+        return match view.groups.iter().find(|group| group.name == name) {
+            None => Verdict::Unresolved,
+            Some(group) => match group.structure {
+                Some(LayerStatus::Green) => Verdict::Held,
+                Some(_) => Verdict::NotHeld,
+                None => state_verdict(group.state.unwrap_or(view.state)),
+            },
+        };
+    }
+    if let Some(result) = view.structure.result(identity) {
+        return structure_verdict(result.status);
+    }
+    match project.rules.iter().find(|rule| rule.id == identity) {
+        Some(rule) => {
+            let (usable, fallback) = current_report(evaluation);
+            state_verdict(rule_view(rule, usable, fallback).state)
+        }
+        None => Verdict::Unresolved,
+    }
+}
+
 pub fn status_view(
     project: &Project,
     evaluation: &Evaluation,
     structure: &StructureReport,
 ) -> StatusView {
     let run_state = run_state_of(evaluation);
-    let usable = if evaluation.stale || run_state.is_some() {
-        None
-    } else {
-        evaluation.report.as_ref()
-    };
-    let fallback = match run_state {
-        Some(state) => state,
-        None if evaluation.stale => State::Stale,
-        None => State::Unverified,
-    };
+    let (usable, fallback) = current_report(evaluation);
     let rule_views: Vec<RuleView> = project
         .rules
         .iter()
@@ -1007,17 +1054,7 @@ pub fn explain_view(
     evaluation: &Evaluation,
     query: &str,
 ) -> Result<ExplainView, Diagnostic> {
-    let run_state = run_state_of(evaluation);
-    let usable = if evaluation.stale || run_state.is_some() {
-        None
-    } else {
-        evaluation.report.as_ref()
-    };
-    let fallback = match run_state {
-        Some(state) => state,
-        None if evaluation.stale => State::Stale,
-        None => State::Unverified,
-    };
+    let (usable, fallback) = current_report(evaluation);
     let subject = match project.lookup(query)? {
         Lookup::Contract(group) => {
             unreachable!("the contract view is rendered before {}", group.name)

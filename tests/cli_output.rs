@@ -37,7 +37,7 @@ fn failure_output(flags: &[&str]) -> std::process::Output {
 
 #[test]
 fn json_failure_exposes_original_and_minimized_lengths_and_sequence() {
-    let output = failure_output(&["--json"]);
+    let output = failure_output(&["--json", "--timeout-ms", "1000"]);
     assert_eq!(output.status.code(), Some(1));
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["property"], "persistence");

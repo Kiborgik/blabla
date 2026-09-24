@@ -1,6 +1,7 @@
 use crate::diagnostic::Diagnostic;
 use std::path::Path;
 
+pub mod goal;
 pub mod knowledge;
 pub mod mission;
 pub mod process;

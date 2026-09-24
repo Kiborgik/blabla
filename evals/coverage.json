@@ -260,6 +260,14 @@
         {
           "case": "reviews-a-handback",
           "criterion": "hands-the-review-back"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "accepts-correct-model"
         }
       ],
       "missing": [
@@ -287,6 +295,22 @@
         {
           "case": "reviews-a-handback",
           "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "accepts-before-editing"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "accepts-correct-model"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "accepts-before-editing"
         }
       ],
       "missing": [
@@ -314,6 +338,14 @@
         {
           "case": "reviews-a-handback",
           "criterion": "edits-nothing"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "stays-in-scope"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "format-unchanged"
         }
       ],
       "missing": [
@@ -409,6 +441,79 @@
       "checks": [],
       "missing": [
         "Unmeasured. Optional commands must not fail an agent until a fixture intentionally requires an exception decision."
+      ]
+    },
+    {
+      "id": "project.task-decisions",
+      "title": "Block a task on a low-confidence decision until the orchestrator answers",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "records-decision"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "task-blocked"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "below-floor"
+        }
+      ],
+      "missing": [
+        "An answered decision, a decision at or above the floor and per-model calibration have no opportunity; answering is orchestrator work."
+      ]
+    },
+    {
+      "id": "project.task-questions",
+      "title": "Hold a task until the worker picks each question the orchestrator asked",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "picks-the-asked-question"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "ends-ready-or-blocked"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "leaves-the-answer-to-the-orchestrator"
+        }
+      ],
+      "missing": [
+        "An asked question whose pick falls below its floor, measured end to end with the orchestrator's answer and the worker resuming"
+      ]
+    },
+    {
+      "id": "project.task-attestation",
+      "title": "List orchestrator records made while a worker carries the task until the orchestrator confirms them",
+      "system": "project",
+      "scope": "public-agent",
+      "checks": [
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-scope"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-resolve"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-close"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-orchestrator-records"
+        }
+      ],
+      "missing": [
+        "The case checks only that the carrying worker runs no orchestrator verb and leaves no orchestrator record on its task; a listed record, its confirmation and the refused close have no opportunity."
       ]
     },
     {
@@ -697,6 +802,14 @@
         {
           "case": "reviews-a-handback",
           "criterion": "records-every-lens"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "reads-role-policy"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "reads-role-policy"
         }
       ],
       "missing": [
@@ -1001,6 +1114,18 @@
         {
           "case": "reviews-a-handback",
           "criterion": "skill-offered"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "skill-offered"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "skill-offered"
         }
       ],
       "missing": []
@@ -1049,6 +1174,18 @@
         {
           "case": "reviews-a-handback",
           "criterion": "skill-body-opened"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "skill-body-opened"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "skill-body-opened"
         }
       ],
       "missing": []
@@ -1073,6 +1210,18 @@
         {
           "case": "carries-an-assigned-task",
           "criterion": "accepts-before-editing"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "accepts-before-editing"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "accepts-before-editing"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "accepts-before-editing"
         }
       ],
       "missing": []
@@ -1092,6 +1241,18 @@
         },
         {
           "case": "reviews-a-handback",
+          "criterion": "reads-role-policy"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "reads-role-policy"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "reads-role-policy"
+        },
+        {
+          "case": "picks-an-asked-question",
           "criterion": "reads-role-policy"
         }
       ],
@@ -1177,6 +1338,54 @@
         {
           "case": "reviews-a-handback",
           "criterion": "contracts-preserved"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-scope"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-resolve"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-close"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "no-task-answer"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-check"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-deliverable"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-attribute"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-confirm"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-answer"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-task-approve-model"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "contracts-preserved"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "leaves-the-answer-to-the-orchestrator"
         }
       ],
       "missing": []
@@ -1221,6 +1430,14 @@
         {
           "case": "reviews-a-handback",
           "criterion": "edits-nothing"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "stays-in-scope"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "stays-in-write-scope"
         }
       ],
       "missing": []
@@ -1256,6 +1473,10 @@
         },
         {
           "case": "repairs-adapter-protocol",
+          "criterion": "leaves-product-gate-to-owner"
+        },
+        {
+          "case": "picks-an-asked-question",
           "criterion": "leaves-product-gate-to-owner"
         }
       ],
@@ -1301,6 +1522,18 @@
         {
           "case": "reviews-a-handback",
           "criterion": "no-reviewer-delegation"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "no-worker-delegation"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "no-worker-delegation"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "no-worker-delegation"
         }
       ],
       "missing": []
@@ -1325,6 +1558,10 @@
         {
           "case": "diagnoses-yellow-verification",
           "criterion": "verification-still-yellow"
+        },
+        {
+          "case": "stays-inside-a-narrow-scope",
+          "criterion": "reports-issue"
         }
       ],
       "missing": []
@@ -1494,6 +1731,26 @@
         {
           "case": "reviews-a-handback",
           "criterion": "finds-the-empty-save"
+        }
+      ],
+      "missing": []
+    },
+    {
+      "id": "behavior.asks-instead-of-guessing",
+      "title": "Agent records an unknowable call as a decision and stops instead of guessing",
+      "scope": "agent",
+      "checks": [
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "ids-unchanged"
+        },
+        {
+          "case": "stops-on-an-unknowable-call",
+          "criterion": "task-blocked"
+        },
+        {
+          "case": "picks-an-asked-question",
+          "criterion": "picks-the-asked-question"
         }
       ],
       "missing": []

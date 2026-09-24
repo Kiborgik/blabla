@@ -7,7 +7,7 @@
   ],
   "after_arm": [
     {"run": ["blabla", "task", "open", "drop-model-import", "--role", "worker",
-             "--statement", "Make widget/store.py self-contained: remove its import of widget.model and keep its behavior.",
+             "--statement", "Make widget/store.py self-contained: it may not import widget.model in any form, type-checking imports included, and it keeps its behavior.",
              "--scope", "widget", "--deliverable", "widget/store.py", "--check", "blabla status"]}
   ],
   "observations": ["syntax", "status", "challenge:drop-model-import"]

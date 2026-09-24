@@ -68,6 +68,7 @@ These are not preferences. A change that breaks one is a reversal, not a refinem
 - **Structure providers never execute project code.** The Python provider runs one isolated interpreter per verification with BlaBla's embedded `ast` extractor; the Rust provider parses with `syn` in-process. Neither imports, initialises nor evaluates anything from the project.
 - **Behavior verification is finite and heuristic.** A campaign is a bounded search, never a proof over all inputs.
 - **Process containment is verified on Windows and Linux.** Windows uses Job Objects and Unix uses process groups; the lifecycle tests that stop a process tree run on both in CI. macOS remains unverified.
+- **A task record and every `--model` on it are attestations.** BlaBla records the model a caller names and cannot prove who ran a command, and a caller who edits `.blabla/tasks/` by hand can rewrite any field, state included. What it does instead: an orchestrator record made while a worker carries the task stands as a challenge and keeps the task from closing until the orchestrator confirms it after hand-back. Records made before any worker accepts the task are not marked.
 - **The staleness fingerprint has a documented blind spot:** modules loaded from outside the manifest tree and not named on the command line are not covered.
 
 ## Architecture

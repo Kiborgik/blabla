@@ -97,7 +97,13 @@ normal path:
    `blabla task show <name>`, which prints the routes below in the order they are taken.
 5. **Accept the assignment.** `blabla task accept <name> --model <id>` before changing anything.
    Acceptance records that a role took the work through BlaBla and nothing about what it read.
-6. **Implement inside the scope.** Ordinary code, only in the paths the task names.
+6. **Implement inside the scope.** Ordinary code, only in the paths the task names. When a call
+   is yours to make and you are not sure of it, ask it with `blabla task decide` instead of
+   guessing; see [Asking instead of guessing](#asking-instead-of-guessing). When `task show`
+   lists a question under **Questions from the orchestrator** with no pick, its first route line
+   says to pick it: do that before anything else with `blabla task decide <name> --on <id>`,
+   because `task ready` is refused until every question has a pick; see
+   [Questions from the orchestrator](#questions-from-the-orchestrator).
 7. **Run the declared check and record it while the task is ACCEPTED.** `blabla task evidence <name> --exit <code> --tool <tool>`
    after reading the whole run — not a summary line alone. Evidence is bound to the task tree and
    only a current successful result can support READY.
@@ -111,7 +117,9 @@ normal path:
 11. **Integrate.** The orchestrator settles each finding against the repository and records what
     settled it with `blabla task resolve`.
 12. **Accept the result.** `blabla task close <name> --model <id>`, refused until the fresh task
-    evidence, receipt and project report satisfy the close prerequisites.
+    evidence, receipt and project report satisfy the close prerequisites and every record made
+    under an orchestrator model while the worker carried the task is confirmed; see
+    [What --model attests](#what---model-attests).
 13. **Decide completion.** `blabla finish`.
 
 In this repository that flow is `flow::development`, and `role::orchestrator`, `role::worker` and
@@ -154,6 +162,7 @@ validates it for truth, and no state of it reaches `OVERALL`.
 
 ```text
 blabla task open <name> --role worker --statement "…" --scope src/cli --deliverable tests/cli.rs --check "…"
+blabla task open <name> … --goal <name>   record the declared goal the task serves; task show prints Serves goal::<name>
 blabla task show <name>                 what this task may write and what it owes, then its routes
 blabla task accept <name> --model <id>  take the assignment; the model is compared exactly against what the role lists, and `blabla challenge <name>` reports a mismatch immediately rather than at hand-back
 blabla task evidence <name> --exit <code> --tool <tool>   the declared check's result, bound to the inputs it saw
@@ -162,6 +171,10 @@ blabla task block <name> "…"            stop, and record why as a finding
 blabla task note <name> "…"             keep a note on the record; a note is not a finding and blocks nothing
 blabla task finding <name> "…"          something discovered and not yet settled
 blabla task addressed <name> <id> "…" --model <id>   what the carrying role did about a finding; an addressed finding blocks neither hand-back nor close, and resolving it stays the orchestrator's job
+blabla task decide <name> "<question>" --pick <option> --confidence <0-100> --model <id> [--options a,b,c]   ask a call you are not sure of; below the role's floor it blocks the task until the orchestrator answers
+blabla task ask <name> "<question>" [--options a,b,c] [--floor <0-100>] --model <id>   the orchestrator asks the carrying role a call it doubts; hand-back is refused until it has a pick
+blabla task decide <name> --on <question-id> --pick <option> --confidence <0-100> --model <id>   pick a question the orchestrator asked; below the question's floor it blocks the task until the orchestrator answers
+blabla task answer <name> <id> --pick <option> --reason "…" --model <id>   the orchestrator answers a decision below the floor or reviews one that stood; the worker then resumes with task accept
 blabla task lens <name> <lens> "…"      one assessment against one lens the role consults, named by its pack; each is recorded before hand-back
 blabla task ready <name>                hand back for review
 blabla task resolve <name> <id> --evidence "…" --model <id>   what settled a finding; the orchestrator's decision
@@ -171,6 +184,7 @@ blabla task check <name> --argv <prog> <arg>...   the same check as a program an
 blabla task deliverable <name> --add <path>...   owe more
 blabla task deliverable <name> --remove <path> --reason "…" --model <id>   withdraw what the task owes; a directory withdraws every file owed under it
 blabla task scope <name> --add <path>   widen a scope that was declared too narrowly
+blabla task confirm <name> --model <id>   after hand-back, confirm every record made under an orchestrator model while a worker carried the task; refused while it is carried; the list is kept
 blabla task close <name> --model <id>   accept the result; refused while a grounded challenge stands
 ```
 
@@ -191,6 +205,122 @@ build output and `.blabla` are never owed.
 A recorded finding outlives the context that found it. A finding with neither a resolution nor an
 addressed mark is evidence still outstanding, and `challenge` reports it while it stays that way. The evidence written into a
 resolution is the recording agent's claim about the repository, not BlaBla's verdict on it.
+
+## What --model attests
+
+`--model <id>` is an attestation, not proof. On every verb that takes it, BlaBla records the model
+the caller says it is and cannot check the claim: a worker that types the orchestrator's model into
+`task resolve` leaves a record identical to one the orchestrator made. BlaBla challenges the case
+where that matters most, an orchestrator-only record made while a worker holds the task.
+
+A task is carried from the carrying role's `task accept` until its `task ready` or `task block`,
+that is, while it is ACCEPTED. The orchestrator-only verbs that write the task are `task resolve`,
+`task attribute`, `task scope`, `task check`, `task deliverable --add` and `--remove`,
+`task approve-model`, `task answer` and `task ask`. Each one stores the model it was given, the time, and the
+model that carried the task if one did; `task scope`, `task check`, `task deliverable --add` and
+`task approve-model` take no `--model`, so their records name none. For a record made while a worker
+carries the task, BlaBla:
+
+- lists it in `task show <name>` under "Recorded under an orchestrator model while <model> carried
+  the task", with its verb, its model and whether it is confirmed;
+- grounds the `orchestrator-record-during-carry` challenge while it is unconfirmed;
+- does not refuse `task ready`, because the carrying role cannot clear it;
+- refuses `task close` until the orchestrator confirms it.
+
+After hand-back the orchestrator reviews each listed record and confirms it with `blabla task
+confirm <name> --model <id>`, which is gated like `task resolve`, or undoes it. `task confirm` is
+refused with exit 2 while the task is carried, naming the carrier, so the role that holds the task
+cannot clear a record from its own carry by typing the orchestrator's model. Undoing a change does
+not remove its record: after undoing what it did not make, the orchestrator still confirms before
+close. A confirmation covers every record from a carry made so far and keeps the list; a later
+record stands until it is confirmed too. A confirmation is itself an attestation under a second `--model`,
+not proof of who made either. A record made while nobody carries the task, OPEN, BLOCKED or READY,
+stays in the task record that `task show <name> --json` prints, is not listed and grounds nothing.
+
+## Asking instead of guessing
+
+A worker meets calls the statement leaves open: which of two causes explains a failure, what a
+flag should be named, whether an edge case is in scope. Stating one with confidence and building
+on it is how a small model goes wrong without anyone noticing. `task decide` turns the call into a
+typed question with the pick and a stated confidence, on the record:
+
+```text
+blabla task decide fix-cache "Is the stale read caused by the cache?" --pick yes --confidence 55 --model haiku-4.5
+blabla task decide fix-cache "Which lock guards the entry?" --options read,write,none --pick write --confidence 80 --model haiku-4.5
+```
+
+Without `--options` the question is yes-no and the pick is `yes` or `no`; with `--options` the pick
+is one of them. A pick outside the options, or a confidence outside 0..100, is refused with exit 2
+and nothing is recorded. Only the carrying role decides, once the task is accepted, with a model its
+role permits, the same check `task addressed` makes.
+
+The role's `block_below` is the floor. The command prints one of two outcomes:
+
+- **STANDS**: the confidence is at or above the floor. Act on the pick. The orchestrator may still
+  review it.
+- **BLOCKS THE TASK**: the confidence is below the floor, so the call is the orchestrator's. The
+  decision is recorded and the task is BLOCKED on it in the same step. Stop now and do not act on
+  the pick.
+
+Only the orchestrator's answer settles a decision below the floor. It answers with `blabla task
+answer <name> <id> --pick <option> --reason "…" --model <id>`, which is gated like `task resolve`.
+An answer settles a decision below the floor or reviews one that stood, and a pick that differs
+from the worker's overrules it. Answering does not unblock the task: the worker reads the answer in
+`task show <name>` and resumes with `blabla task accept <name> --model <id>`, which is refused, with
+the question named, while a decision below the floor has no answer. Until then `task ready` is
+refused and the `decision-unanswered` challenge stands. An answer does not invalidate a challenge
+receipt, so a READY task can be reviewed without being handed back again. A BLOCKED task takes no
+decision: `task decide` on it is refused with exit 2, records nothing and names the decision that
+blocks it.
+
+`task show <name>` lists every decision under **Decisions**, headed by the floor the carrying role
+declares: its kind and options, the pick and confidence, STANDS or BLOCKS THE TASK, and the answer if
+there is one. `blabla explain role::<name>` prints the floor and, from every task record that role
+carried, closed or not, one calibration line per model with answered decisions:
+
+```text
+haiku-4.5  12 answered  7 held  mean confidence 84  3 on asked questions
+```
+
+`held` counts answers that kept the pick, and `on asked questions` counts the answered picks made
+on a question the orchestrator asked. The line shows how well a model's stated confidence matches
+what the orchestrator decided. It is a record, like a task: it reaches no layer and never decides
+completion.
+
+### Questions from the orchestrator
+
+The floor stops a worker acting on a low-confidence call it chose to record, but an overconfident
+worker never records one. The orchestrator knows which calls it doubts, such as a cause, a fix or
+whether a failure is this task's, and asks them as typed questions:
+
+```text
+blabla task ask fix-cache "Is the failing test this task's?" --floor 90 --model opus-5
+blabla task ask fix-cache "Which lock guards the entry?" --options read,write,none --model opus-5
+```
+
+`task ask` is gated like `task resolve`: a model role::orchestrator does not permit is refused with
+exit 2 and nothing is recorded, and like every orchestrator verb it is attested; see
+[What --model attests](#what---model-attests). Without `--options` the question is yes-no. It gets
+the id `q1`, `q2` and so on. `--floor` is the confidence a pick needs to stand: without it the
+question uses the carrying role's `block_below`, and a floor outside 0..100 or below the role's is
+refused with exit 2, so a question can raise the floor but never lower it. Asking is allowed on any
+task that is not closed and never changes its state.
+
+The worker picks with `blabla task decide <name> --on <id> --pick <option> --confidence <0-100>
+--model <id>`. The question text and options come from the question, so passing a question text or
+`--options` as well is refused. The pick is a decision linked to the question, measured against the
+question's floor, or the role's if the role's is higher, and it follows every rule above: a pick
+outside the options or a confidence outside 0..100 is refused, a BLOCKED task takes no pick, and
+below the floor the task is BLOCKED at once until the orchestrator answers. A question is picked
+once; a second pick is refused with exit 2 and names the decision that picked it.
+
+`task show <name>` lists the questions under **Questions from the orchestrator**, before
+**Decisions**, unpicked first, each with its floor and either its pick or the exact command to pick
+it. While a question has no pick, the first route line says to pick it before anything else,
+`task ready` is refused and the `question-unpicked` challenge stands with the question's id, text
+and options as its evidence and that command as its reconcile text. A question asked after
+hand-back stands against the READY task too, so the worker resumes with `task accept` and picks it.
+A pick is a decision, so it counts in calibration like any other.
 
 ## Challenging the account of the work
 
@@ -217,12 +347,16 @@ The evidence it may use, and nothing else:
 | `model-outside-role-policy` | the task was accepted on a model the role's declared choices do not list, with no owner ruling |
 | `exception-unresolved` | a model exception was proposed and no owner ruling answers it |
 | `declared-check-failed` | the most recent result for the declared check exited non-zero |
+| `decision-unanswered` | a decision recorded below its floor, the role's `block_below` or an asked question's, that has no answer from the orchestrator |
+| `question-unpicked` | a question the orchestrator asked with `task ask` that has no pick from the carrying role; `task ready` is refused while it stands |
+| `orchestrator-record-during-carry` | a record made under an orchestrator model while a worker carried the task that the orchestrator has not confirmed; it does not refuse `task ready`, and `task close` is refused while it stands |
 | `readiness-without-evidence` | an accepted or handed-back task with no result recorded for the declared check, or only results for other checks |
 | `evidence-superseded` | the most recent result for the declared check ran against inputs that have since changed |
 | `lens-unassessed` | an accepted or handed-back task with a lens the role consults carrying no assessment; a lens is one of the knowledge packs `role::<name>` lists under Consult, so `blabla task lens` takes the pack name and not a `ruling::<pack>::<name>` identity |
 | `attribution-unknown` | a path changed since the task opened whose origin, this task or concurrent work, is not stated |
 | `vacuous-rule` | a structure rule the falsifier reports VACUOUS — a rule standing on absent ground |
 | `verification-not-current` | project completion is not current; this remains an orchestrator-owned concern for a selected assignment challenge |
+| `goal-outcome-unmet` | with no bounded task selected, a goal in state `done` has an expectation that is not held in the current project view; `finish` never raises it |
 
 One challenge is reported at a time, the strongest available; the classes it could not ground are
 listed with the evidence each lacked.

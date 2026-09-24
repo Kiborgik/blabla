@@ -1,11 +1,11 @@
 system "cli" {
     purpose "Parse arguments, choose a command, and render every human and JSON surface."
-    paths ["src/main.rs", "src/cli/mod.rs", "src/cli/project.rs", "src/cli/guide.rs", "src/cli/init.rs", "src/cli/heartbeat.rs", "src/cli/task.rs"]
+    paths ["src/main.rs", "src/cli/mod.rs", "src/cli/project.rs", "src/cli/guide.rs", "src/cli/init.rs", "src/cli/heartbeat.rs", "src/cli/task.rs", "src/cli/recovery.rs"]
 }
 
 system "project" {
     purpose "Compose a manifest's contracts into one project, fingerprint the implementation, and decide staleness and completion."
-    paths ["src/project/mod.rs", "src/project/status.rs", "src/project/runstate.rs", "src/project/task.rs"]
+    paths ["src/project/mod.rs", "src/project/status.rs", "src/project/runstate.rs", "src/project/task.rs", "src/project/ignore.rs"]
     knowledge ["testing"]
 }
 
@@ -32,8 +32,8 @@ system "adapter" {
 }
 
 system "memory" {
-    purpose "Parse authored Mission, Knowledge, System and Process memory, validate it within project memory, and answer identity queries about it."
-    paths ["src/memory/mod.rs", "src/memory/syntax.rs", "src/memory/system.rs", "src/memory/process.rs", "src/memory/mission.rs", "src/memory/knowledge.rs", "src/memory/routing.rs"]
+    purpose "Parse authored Mission, Knowledge, System, Process and Goal memory, validate it within project memory, and answer identity queries about it."
+    paths ["src/memory/mod.rs", "src/memory/syntax.rs", "src/memory/system.rs", "src/memory/process.rs", "src/memory/mission.rs", "src/memory/knowledge.rs", "src/memory/routing.rs", "src/memory/goal.rs"]
     knowledge ["engineering"]
 }
 
