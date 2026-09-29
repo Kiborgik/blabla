@@ -16,6 +16,13 @@ pub struct Role {
     pub verification: Option<String>,
     pub model: Vec<String>,
     pub consult: Vec<String>,
+    pub block_below: i64,
+}
+
+impl Role {
+    pub fn floor(&self) -> u8 {
+        u8::try_from(self.block_below.clamp(0, 100)).unwrap_or(0)
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -41,12 +48,19 @@ pub struct Step {
     pub command: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct Alias {
+    pub name: String,
+    pub model: String,
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct ProcessMemory {
     pub roles: Vec<Role>,
     pub policies: Vec<Policy>,
     pub flows: Vec<Flow>,
     pub steps: Vec<Step>,
+    pub aliases: Vec<Alias>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -75,6 +89,8 @@ pub struct ProcessExplainView {
     pub verification: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub model: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_below: Option<i64>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub policies: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -91,7 +107,7 @@ pub struct ProcessExplainView {
 }
 
 pub fn build(blocks: &[Block]) -> Result<ProcessMemory, Diagnostic> {
-    expect_keywords(blocks, &["role", "policy", "flow", "step"])?;
+    expect_keywords(blocks, &["role", "policy", "flow", "step", "alias"])?;
     let mut memory = ProcessMemory::default();
     for block in blocks {
         match block.keyword.as_str() {
@@ -99,9 +115,22 @@ pub fn build(blocks: &[Block]) -> Result<ProcessMemory, Diagnostic> {
                 expect_fields(
                     block,
                     &["purpose"],
-                    &["owns", "verification", "model", "consult"],
+                    &["owns", "verification", "model", "consult", "block_below"],
                 )?;
                 safe_references(block.field("consult"))?;
+                let block_below = match block.field("block_below") {
+                    None => 0,
+                    Some(field) => text(block, "block_below")?.trim().parse().map_err(|_| {
+                        Diagnostic {
+                            location: field.location.clone(),
+                            code: "E_MEMORY_FIELD".into(),
+                            message: format!(
+                                "`block_below` in `role {:?}` takes a whole-number percentage such as \"70\"",
+                                block.name
+                            ),
+                        }
+                    })?,
+                };
                 memory.roles.push(Role {
                     name: block.name.clone(),
                     purpose: text(block, "purpose")?,
@@ -112,6 +141,7 @@ pub fn build(blocks: &[Block]) -> Result<ProcessMemory, Diagnostic> {
                         .transpose()?,
                     model: list(block, "model"),
                     consult: list(block, "consult"),
+                    block_below,
                 });
             }
             "flow" => {
@@ -134,6 +164,13 @@ pub fn build(blocks: &[Block]) -> Result<ProcessMemory, Diagnostic> {
                         .field("command")
                         .map(|_| text(block, "command"))
                         .transpose()?,
+                });
+            }
+            "alias" => {
+                expect_fields(block, &["model"], &[])?;
+                memory.aliases.push(Alias {
+                    name: block.name.clone(),
+                    model: text(block, "model")?.to_owned(),
                 });
             }
             _ => {
@@ -179,11 +216,25 @@ pub fn validate(memory: &ProcessMemory) -> Vec<String> {
             .iter()
             .map(|step| (step.name.as_str(), "a step")),
     );
+    declared.extend(
+        memory
+            .aliases
+            .iter()
+            .map(|alias| (alias.name.as_str(), "an alias")),
+    );
     let mut seen: BTreeMap<&str, &'static str> = BTreeMap::new();
     for (name, kind) in declared {
         if let Some(previous) = seen.insert(name, kind) {
             problems.push(format!(
                 "the name {name:?} is declared twice, as {previous} and as {kind}; every name must resolve to one entry"
+            ));
+        }
+    }
+    for role in &memory.roles {
+        if !(0..=100).contains(&role.block_below) {
+            problems.push(format!(
+                "role {:?} declares block_below {}, outside 0..100; it is the percentage of stated confidence below which a decision blocks the task until the orchestrator answers it",
+                role.name, role.block_below
             ));
         }
     }
@@ -233,6 +284,18 @@ pub fn validate(memory: &ProcessMemory) -> Vec<String> {
             ));
         }
     }
+    for alias in &memory.aliases {
+        if !memory
+            .roles
+            .iter()
+            .any(|role| role.model.iter().any(|m| m == &alias.model))
+        {
+            problems.push(format!(
+                "alias {:?} declares model {:?}, which no role lists; an alias must stand for a model in a role's permitted list",
+                alias.name, alias.model
+            ));
+        }
+    }
     problems
 }
 
@@ -276,6 +339,32 @@ pub fn status(memory: &Memory<ProcessMemory>, file: &str) -> Option<ProcessStatu
     })
 }
 
+pub fn permitted_models(memory: &ProcessMemory, role_name: &str) -> Vec<String> {
+    let role = match memory.roles.iter().find(|r| r.name == role_name) {
+        Some(r) => r,
+        None => return Vec::new(),
+    };
+    let mut result = Vec::new();
+    for model in &role.model {
+        result.push(model.clone());
+        for alias in &memory.aliases {
+            if alias.model == *model {
+                result.push(alias.name.clone());
+            }
+        }
+    }
+    result
+}
+
+pub fn model_named_by(memory: &ProcessMemory, model: &str) -> String {
+    memory
+        .aliases
+        .iter()
+        .find(|alias| alias.name == model)
+        .map_or(model, |alias| alias.model.as_str())
+        .to_owned()
+}
+
 pub fn canonical(memory: &Memory<ProcessMemory>, query: &str) -> Vec<String> {
     let Some(memory) = memory.present() else {
         return Vec::new();
@@ -312,6 +401,7 @@ pub fn explain(memory: &Memory<ProcessMemory>, query: &str) -> Option<ProcessExp
         owns: Vec::new(),
         verification: None,
         model: Vec::new(),
+        block_below: None,
         policies: Vec::new(),
         applies_to: Vec::new(),
         consult: Vec::new(),
@@ -323,12 +413,30 @@ pub fn explain(memory: &Memory<ProcessMemory>, query: &str) -> Option<ProcessExp
     if wanted.is_none_or(|kind| kind == "role")
         && let Some(role) = memory.roles.iter().find(|role| role.name == name)
     {
+        let models = role
+            .model
+            .iter()
+            .map(|model| {
+                let aliases_for_model: Vec<_> = memory
+                    .aliases
+                    .iter()
+                    .filter(|alias| &alias.model == model)
+                    .map(|alias| alias.name.clone())
+                    .collect();
+                if aliases_for_model.is_empty() {
+                    model.clone()
+                } else {
+                    format!("{}  (aliases: {})", model, aliases_for_model.join(", "))
+                }
+            })
+            .collect();
         return Some(ProcessExplainView {
             id: format!("role::{}", role.name),
             statement: role.purpose.clone(),
             owns: role.owns.clone(),
             verification: role.verification.clone(),
-            model: role.model.clone(),
+            model: models,
+            block_below: Some(role.block_below),
             policies: memory
                 .policies
                 .iter()

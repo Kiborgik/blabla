@@ -27,7 +27,7 @@ impl Voice {
     }
 }
 
-pub const BLUNT: [(&str, &str); 13] = [
+pub const BLUNT: [(&str, &str); 17] = [
     (
         "declared-check-failed",
         "This is not fucking ready. Fix the check or record the actual blocker.",
@@ -80,6 +80,22 @@ pub const BLUNT: [(&str, &str); 13] = [
         "attribution-unknown",
         "A change appeared that nobody claimed. Attribute it before handing back.",
     ),
+    (
+        "decision-unanswered",
+        "You were not sure, so it is not your call. Stop instead of fucking guessing.",
+    ),
+    (
+        "orchestrator-record-during-carry",
+        "Anyone can type an orchestrator's --model. A claim is not fucking proof; confirm the record or undo it.",
+    ),
+    (
+        "question-unpicked",
+        "You were asked a straight question. Pick an answer and say how sure you are; silence is not a fucking answer.",
+    ),
+    (
+        "goal-outcome-unmet",
+        "That goal is marked done, but the expectations it carries are not all held. Set it back to active or make every one GREEN.",
+    ),
 ];
 
 pub fn contradiction(voice: Voice, class: &str, neutral: &str) -> String {
@@ -107,16 +123,20 @@ mod tests {
 
     #[test]
     fn every_challenge_class_has_exactly_one_blunt_rendering() {
+        use crate::skeptic::GOAL_CLASSES;
         let mut named: Vec<&str> = BLUNT.iter().map(|(name, _)| *name).collect();
         named.sort();
         let mut classes: Vec<&str> = CLASSES.to_vec();
+        classes.extend_from_slice(&GOAL_CLASSES);
         classes.sort();
         assert_eq!(named, classes);
     }
 
     #[test]
     fn the_neutral_voice_never_speaks_bluntly() {
-        for class in CLASSES {
+        use crate::skeptic::GOAL_CLASSES;
+        let all_classes: Vec<&str> = CLASSES.iter().chain(GOAL_CLASSES.iter()).copied().collect();
+        for class in all_classes {
             let rendered = contradiction(Voice::Neutral, class, "the declared check failed");
             assert_eq!(rendered, "the declared check failed");
             assert!(!speaks_bluntly(&rendered));
@@ -125,7 +145,9 @@ mod tests {
 
     #[test]
     fn a_blunt_rendering_carries_the_whole_neutral_statement() {
-        for class in CLASSES {
+        use crate::skeptic::GOAL_CLASSES;
+        let all_classes: Vec<&str> = CLASSES.iter().chain(GOAL_CLASSES.iter()).copied().collect();
+        for class in all_classes {
             let neutral = format!("the evidence for {class} is what it is");
             let rendered = contradiction(Voice::Blunt, class, &neutral);
             assert!(keeps_the_neutral_statement(&neutral, &rendered));

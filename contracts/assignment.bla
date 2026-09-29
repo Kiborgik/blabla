@@ -20,6 +20,9 @@ state breach_in_scope: bool
 state closed: bool
 state deliverables: int
 state findings: int
+state late_deliverable_reads_unchanged: bool
+state address_refused: bool
+state notes: int
 
 action open_a_task()
 action resume_a_task_already_under_way()
@@ -29,9 +32,14 @@ action record_a_finding()
 action widen_the_scope_to_cover_the_breach()
 action accept_with_a_permitted_model()
 action accept_with_an_outside_policy_model()
+action accept_with_an_alias_of_a_permitted_model()
 action propose_an_outside_policy_model()
 action approve_the_proposed_model()
 action change_a_deliverable()
+action owe_a_path_changed_since_the_opening()
+action address_a_finding_under_an_approved_exception()
+action address_a_finding_with_an_unapproved_outside_model()
+action note_the_task_while_its_check_runs()
 action record_a_lens_assessment()
 action mark_ready_for_review()
 action challenge_the_assignment()
@@ -40,6 +48,9 @@ action accept_the_result()
 action record_a_check_result()
 action change_the_source_after_a_check()
 action a_concurrent_orchestrator_change_lands()
+action the_orchestrator_notes_the_task()
+action a_concurrent_task_delivers_and_closes()
+action a_closed_concurrent_tasks_path_changes_again()
 action a_change_of_unknown_origin_appears()
 action the_worker_writes_outside_its_scope()
 action an_unrelated_file_changes()
@@ -111,6 +122,13 @@ when accept_with_a_permitted_model {
         before.closed or not after.result_accepted
 }
 
+when accept_with_an_alias_of_a_permitted_model {
+    expect "an-owner-declared-alias-counts-as-the-model-it-stands-for":
+        before.closed or not any(after.standing, s => s.class == "model-outside-role-policy")
+    expect "an-alias-needs-no-exception":
+        before.closed or not after.exception_approved or before.exception_approved
+}
+
 when accept_with_an_outside_policy_model {
     expect "an-outside-policy-model-is-visible-unless-the-owner-ruled":
         before.closed or
@@ -137,6 +155,26 @@ when change_a_deliverable {
         any(after.standing, s => s.class == "work-without-acceptance")
     expect "a-changed-deliverable-is-no-longer-an-unchanged-one":
         not any(after.standing, s => s.class == "deliverable-unchanged")
+}
+
+when owe_a_path_changed_since_the_opening {
+    expect "a-deliverable-owed-late-is-measured-from-the-opening":
+        before.closed or not after.late_deliverable_reads_unchanged
+}
+
+when address_a_finding_under_an_approved_exception {
+    expect "an-owner-approved-model-may-address-its-findings":
+        before.closed or not after.exception_approved or not after.address_refused
+}
+
+when address_a_finding_with_an_unapproved_outside_model {
+    expect "an-unapproved-outside-model-may-not-address-findings":
+        before.closed or after.exception_approved or after.address_refused
+}
+
+when note_the_task_while_its_check_runs {
+    expect "a-record-made-while-the-check-runs-survives-it":
+        before.closed or after.notes == before.notes + 1
 }
 
 when record_a_lens_assessment {
@@ -217,6 +255,27 @@ when a_concurrent_orchestrator_change_lands {
         before.closed or
         any(before.standing, s => s.class == "attribution-unknown") or
         not any(after.standing, s => s.class == "attribution-unknown")
+    expect "reconciling-concurrent-work-keeps-the-challenge-receipt":
+        before.closed or not before.challenge_current or after.challenge_current
+}
+
+when the_orchestrator_notes_the_task {
+    expect "a-note-keeps-the-challenge-receipt":
+        before.closed or not before.challenge_current or after.challenge_current
+    expect "a-note-grounds-no-challenge":
+        after.standing == before.standing
+}
+
+when a_concurrent_task_delivers_and_closes {
+    expect "a-closed-concurrent-task-still-accounts-for-its-change":
+        before.closed or
+        any(before.standing, s => s.class == "attribution-unknown") or
+        not any(after.standing, s => s.class == "attribution-unknown")
+}
+
+when a_closed_concurrent_tasks_path_changes_again {
+    expect "a-later-change-to-a-closed-tasks-path-is-unknown":
+        before.closed or any(after.standing, s => s.class == "attribution-unknown")
 }
 
 when a_change_of_unknown_origin_appears {

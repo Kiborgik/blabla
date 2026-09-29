@@ -66,8 +66,42 @@ responsibility "carry-facts" {
 const PROCESS: &str = r#"
 role "worker" {
     purpose "carry out one bounded task"
+    model ["haiku-4.5", "gpt-5.6-luna"]
     consult ["testing"]
 }
+
+policy "focused-checks" {
+    statement "run the checks that cover the change"
+    applies_to ["worker"]
+    consult ["testing"]
+}
+"#;
+
+const PROCESS_WITH_ALIAS: &str = r#"
+role "worker" {
+    purpose "carry out one bounded task"
+    model ["haiku-4.5", "gpt-5.6-luna"]
+    consult ["testing"]
+}
+
+alias "haiku45-host-id" { model "haiku-4.5" }
+
+policy "focused-checks" {
+    statement "run the checks that cover the change"
+    applies_to ["worker"]
+    consult ["testing"]
+}
+"#;
+
+const PROCESS_WITH_MULTIPLE_ALIASES_FOR_ONE_MODEL: &str = r#"
+role "worker" {
+    purpose "carry out one bounded task"
+    model ["haiku-4.5", "gpt-5.6-luna"]
+    consult ["testing"]
+}
+
+alias "haiku45-host-id" { model "haiku-4.5" }
+alias "haiku45-primary" { model "haiku-4.5" }
 
 policy "focused-checks" {
     statement "run the checks that cover the change"
@@ -488,4 +522,83 @@ fn a_pack_file_is_checked_on_its_own_while_it_is_authored() {
     let view: Value = serde_json::from_str(&String::from_utf8(checked.stdout).unwrap()).unwrap();
     assert_eq!(view["status"], "valid");
     assert_eq!(view["memory"], "mission");
+}
+
+#[test]
+fn an_alias_for_a_permitted_model_is_valid() {
+    let with_alias = PROCESS.replace(
+        "}\n\npolicy",
+        "}\n\nalias \"test-alias\" { model \"haiku-4.5\" }\n\npolicy",
+    );
+    let temp = built(Files {
+        process: &with_alias,
+        ..Files::default()
+    });
+    let (view, code) = json_of(&temp, &["status", "--json"]);
+    assert_eq!(view["process_memory"]["state"], "present");
+    assert_eq!(code, 0);
+}
+
+#[test]
+fn an_alias_naming_an_unlisted_model_is_invalid() {
+    let broken = PROCESS.replace(
+        "}\n\npolicy",
+        "}\n\nalias \"bad-alias\" { model \"nonexistent-model\" }\n\npolicy",
+    );
+    let temp = built(Files {
+        process: &broken,
+        ..Files::default()
+    });
+    let (view, _) = json_of(&temp, &["status", "--json"]);
+    assert_eq!(view["process_memory"]["state"], "invalid");
+    let problems = view["process_memory"]["problems"].as_array().unwrap();
+    assert!(problems.iter().any(|p| {
+        p.as_str().unwrap().contains("bad-alias")
+            && p.as_str().unwrap().contains("nonexistent-model")
+    }));
+}
+
+#[test]
+fn permitted_models_includes_both_model_and_aliases() {
+    let blocks =
+        blabla::memory::syntax::parse("process.bla", PROCESS_WITH_ALIAS).expect("process parses");
+    let process = blabla::memory::process::build(&blocks).expect("process builds");
+    let permitted = blabla::memory::process::permitted_models(&process, "worker");
+    assert_eq!(permitted.len(), 3);
+    assert!(permitted.contains(&"haiku-4.5".to_owned()));
+    assert!(permitted.contains(&"haiku45-host-id".to_owned()));
+    assert!(permitted.contains(&"gpt-5.6-luna".to_owned()));
+}
+
+#[test]
+fn permitted_models_includes_all_aliases_for_a_model() {
+    let blocks =
+        blabla::memory::syntax::parse("process.bla", PROCESS_WITH_MULTIPLE_ALIASES_FOR_ONE_MODEL)
+            .expect("process parses");
+    let process = blabla::memory::process::build(&blocks).expect("process builds");
+    let permitted = blabla::memory::process::permitted_models(&process, "worker");
+    assert_eq!(permitted.len(), 4);
+    assert!(permitted.contains(&"haiku-4.5".to_owned()));
+    assert!(permitted.contains(&"haiku45-host-id".to_owned()));
+    assert!(permitted.contains(&"haiku45-primary".to_owned()));
+    assert!(permitted.contains(&"gpt-5.6-luna".to_owned()));
+}
+
+#[test]
+fn explain_role_shows_all_aliases_for_a_model() {
+    let temp = built(Files {
+        process: PROCESS_WITH_MULTIPLE_ALIASES_FOR_ONE_MODEL,
+        ..Files::default()
+    });
+    let (view, code) = json_of(&temp, &["explain", "role::worker", "--json"]);
+    assert_eq!(code, 0);
+    let model_strings = view["model"].as_array().unwrap();
+    assert_eq!(model_strings.len(), 2);
+    let haiku_entry = model_strings
+        .iter()
+        .find(|m| m.as_str().unwrap().contains("haiku-4.5"))
+        .unwrap();
+    let haiku_str = haiku_entry.as_str().unwrap();
+    assert!(haiku_str.contains("haiku45-host-id"));
+    assert!(haiku_str.contains("haiku45-primary"));
 }

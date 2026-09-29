@@ -33,6 +33,7 @@ verify behavior {
 | `system "path"` | registers this project's system memory, at most once; not a layer, never decides completion (see below) |
 | `process "path"` | registers this project's process memory, at most once; not a layer, never decides completion (see below) |
 | `knowledge "path"` | registers one reusable knowledge pack file; repeatable, not a layer, never decides completion (see below) |
+| `goal "path"` | registers this project's goal memory, at most once; one file holds every goal; not a layer, never decides completion (see below) |
 | `voice <name>` | the diagnostic voice for human output, at most once: `neutral` (the default) or `blunt`; it changes no verdict, no exit code and no `--json` field (see below) |
 | `ignore "pattern"` | leaves the paths one gitignore-syntax pattern matches out of change tracking; repeatable (see below) |
 | `ignore from "file"` | leaves out every path the patterns listed in that file match, such as `.gitignore`; repeatable (see below) |
@@ -44,8 +45,8 @@ verify behavior {
 | --- | --- |
 | `command ["program", "argument", ...]` | the application launch; relative path-like elements resolve against the manifest directory |
 | `prepare ["program", "argument", ...]` | run once, before the command is resolved and before any process is spawned, in the manifest directory; a non-zero exit is a preparation error naming the command, its code and its output, never a behavior RED |
-| `timeout_ms` | the allowance for one request and its response, at most 5000 |
-| `startup_ms` | the allowance for the FIRST exchange after each process start, at most 60000; defaults to `timeout_ms` |
+| `timeout_ms` | the allowance for one request and its response, at most 5000; blabla run <contract.bla> inside the project uses it when --timeout-ms is not passed |
+| `startup_ms` | the allowance for the FIRST exchange after each process start, at most 60000; defaults to `timeout_ms`; blabla run <contract.bla> inside the project uses it when neither --timeout-ms nor --startup-ms is passed |
 | `seed`, `cases`, `steps`, `shrink_budget` | the campaign shape; they default to the `run` defaults |
 
 `prepare` exists because a compiled application must be built before it is launched, and a build
@@ -107,7 +108,7 @@ directories in `project::SKIPPED_DIRECTORIES` stay left out with or without `ign
 
 Paths resolve from the manifest directory. The group name is the file stem or the `as` alias; rule identities are `group::label`, so `core::restart` and `sealing::restart` coexist. `verify structure` is rejected because structure needs no profile. A second `mission`, `system` or `process` statement is `E_DUPLICATE_MISSION`, `E_DUPLICATE_SYSTEM` or `E_DUPLICATE_PROCESS`; the same knowledge path registered twice is `E_DUPLICATE_KNOWLEDGE`. `use mission`, `use system`, `use process` and `use knowledge` are all `E_UNSUPPORTED_LAYER`, because project memory is not a layer.
 
-A group may not be named `contract`, `mission`, `priority`, `knowledge`, `ruling`, `system`, `responsibility`, `seam`, `role`, `policy`, `flow`, `step`, `runtime` or `task` (`E_RESERVED_GROUP`): each of those prefixes names a kind of canonical identity, so a group of that name would make `seam::x` mean two things. Use `as <name>` to give such a contract another group.
+A group may not be named `contract`, `mission`, `priority`, `knowledge`, `ruling`, `system`, `responsibility`, `seam`, `role`, `policy`, `flow`, `step`, `runtime`, `task` or `goal` (`E_RESERVED_GROUP`): each of those prefixes names a kind of canonical identity, so a group of that name would make `seam::x` mean two things. Use `as <name>` to give such a contract another group.
 
 ## Canonical identities
 
@@ -129,16 +130,17 @@ Every object BlaBla can explain has exactly one identity, and the command that d
 | `flow::<name>` | the development loop: one line per step, in order |
 | `step::<name>` | one step, the flow it belongs to, the roles that carry it and its command |
 | `runtime::<name>` | one BlaBla-controlled runtime primitive |
+| `goal::<name>` | one goal: its statement, the priorities it serves and the verdict on each expectation |
 
 `ruling::<pack>::<name>` is the one identity with three segments, and it carries its pack deliberately: two reusable packs written by different authors may both declare `smallest-correct-change`, and a consuming project that registers both must not become invalid over a name collision neither author could have foreseen. Ruling names are unique inside a pack and free to repeat between packs.
 
-`blabla status` lists every `contract::<group>`, `mission::<name>`, `knowledge::<pack>`, `system::<name>` and `role::<name>` the project has, including when every rule is GREEN, so `status` → coarse identity → `explain` → finer identity → `explain` reaches any rule, priority, ruling, responsibility, seam or policy without guessing a separator.
+`blabla status` lists every `contract::<group>`, `mission::<name>`, `knowledge::<pack>`, `system::<name>` and `role::<name>` the project has, and every active `goal::<name>`, including when every rule is GREEN, so `status` → coarse identity → `explain` → finer identity → `explain` reaches any rule, priority, ruling, responsibility, seam or policy without guessing a separator.
 
 A name that is not one of these is a convenience, not an identity: a unique rule label still resolves, a group name alone answers with `blabla explain contract::<group>` (`E_COARSE_IDENTITY`), an ambiguous name answers with the canonical commands it matched (`E_AMBIGUOUS_RULE`), and a name that matches in more than one namespace is refused rather than resolved to one of them (`E_AMBIGUOUS_IDENTITY`).
 
 ## Project memory
 
-`mission "path"`, `system "path"`, `process "path"` and `knowledge "path"` register authored project memory. All four are written in BlaBla's own `.bla` syntax: a declaration keyword, a quoted name and a brace block of fields.
+`mission "path"`, `system "path"`, `process "path"`, `knowledge "path"` and `goal "path"` register authored project memory. All five are written in BlaBla's own `.bla` syntax: a declaration keyword, a quoted name and a brace block of fields.
 
 ```text
 mission "blabla" {
@@ -174,7 +176,10 @@ role "worker" {
     owns ["the smallest correct edit inside its write scope"]
     verification "focused"
     model "qwen3.5:4b"
+    block_below "70"
 }
+
+alias "haiku-fast" { model "haiku-4.5" }
 
 policy "explicit-write-scope" { statement "…"  applies_to ["worker"] }
 
@@ -186,6 +191,13 @@ step "assign" {
     statement "Record the bounded task before the work starts."
     command "blabla task open <name> --role worker --scope <path> --deliverable <path>"
 }
+
+goal "executable-goals" {
+    serves ["truthful-over-convenient"]
+    statement "An objective states which rules have to hold before it counts as reached."
+    expect ["contract::goals", "rust::challenge-entry"]
+    state "active"
+}
 ```
 
 Each kind answers one question, and none of them repeats another's content.
@@ -194,10 +206,25 @@ Each kind answers one question, and none of them repeats another's content.
 | --- | --- | --- |
 | Mission | `mission`, `priority` | why this matters to the project and the owner |
 | System | `system`, `responsibility`, `seam` | what part of the project is being touched |
-| Process | `role`, `policy`, `flow`, `step` | who is expected to do what, in what order, and when knowledge is consulted |
+| Process | `role`, `policy`, `flow`, `step`, `alias` | who is expected to do what, in what order, and when knowledge is consulted |
 | Knowledge | `knowledge`, `ruling` | the expertise itself, reusable across projects |
+| Goal | `goal` | which rules have to hold before an objective counts as reached |
 
 A role's `owns` is orchestration authority and has nothing to do with a `responsibility::<name>`.
+
+**Aliases provide owner-declared names for permitted models.** An `alias` declares an alternative name that stands for a specific model listed in a role's `model` field. When a worker accepts a task with an alias, the acceptance counts as if the underlying model was used, with no exception required. An alias whose model no role declares makes process memory invalid.
+
+```text
+alias "haiku-fast" { model "haiku-4.5" }
+```
+
+`explain role::<name>` shows each alias beside the model it stands for.
+
+**A role may declare `block_below`, the floor for a worker's decisions.** It is a whole-number percentage, quoted like every memory value. A decision the carrying role records with `blabla task decide` at a stated confidence below it blocks the task in the same step: the call is the orchestrator's, who answers it with `blabla task answer`, and the task can neither be resumed with `task accept` nor handed back until then. Without the field the floor is 0 and nothing blocks. A value outside 0..100 makes process memory invalid with the role named; a value that is not a whole number makes it unreadable. A decision keeps the floor it was measured against, so changing the field later does not change a recorded decision. The orchestrator can raise the floor for one call by asking it with `blabla task ask <name> "<question>" --floor <0-100>`; a question's floor below the role's is refused, and the worker's pick with `task decide <name> --on <id>` is measured against the higher of the two. `explain role::<name>` prints the floor and, per model, how many of that role's answered decisions the orchestrator's answer kept and how many were picks on a question the orchestrator asked.
+
+```text
+role "worker" { …  block_below "70" }
+```
 
 **A flow is the order the roles are meant to be used in.** `flow` carries only a `purpose`; its steps are separate `step` declarations naming the flow they belong to, and their order in the file is the flow's order. A step takes `flow`, `role` (every role that may carry it) and `statement`, plus an optional `command`. A flow that declares no step is invalid, and a step naming an undeclared flow or role makes the process memory invalid, with each cause reported separately. `explain flow::<name>` prints one line per step — its identity, its roles and its command, never its statement — and `explain step::<name>` carries the statement, the same asymmetry a pack has with its rulings. A `command` names the command that carries the step.
 
@@ -213,17 +240,38 @@ The two field names carry different claims and are not collapsed into one: `know
 
 A `knowledge` or `consult` entry naming a pack no registered knowledge memory declares makes the **referring** memory `invalid`, and the message says which cause it is: no knowledge memory registered, or no pack of that name declared. There is no warning state — a routing pointer that resolves nowhere fails the way an unevaluable structure fact is ERROR rather than a satisfied `forbid`.
 
+**A goal is an objective with executable expectations.** `goal` takes `statement`, `expect` and `state`, plus an optional `serves`:
+
+- `serves` names priorities declared by the registered mission memory. With no mission registered, `serves` must stay empty; a name no priority declares, or a mission memory that is missing, unreadable or invalid, makes the goal memory `invalid` with the cause named.
+- `expect` lists canonical identities, `contract::<group>` or `<group>::<label>`. Validation checks only that form; whether the identity exists is decided when the goal is evaluated. An empty `expect` makes the goal memory `invalid` with the goal named: a goal that waits on nothing would hold with nothing checked, and could be marked `done` without ever being challenged.
+- `state` is `active`, `done` or `dropped`. Any other word makes the goal memory `invalid`, and so does a goal name declared twice.
+
+A goal is evaluated each time it is shown and the result is never recorded. Each expectation gets one verdict from the current project view:
+
+| Verdict | When |
+| --- | --- |
+| `held` | the rule or contract is GREEN |
+| `not-held` | it is RED, YELLOW or ERROR |
+| `unverified` | it is a behavior rule or contract and the recorded run is STALE, UNVERIFIED, VERIFYING or INTERRUPTED |
+| `unresolved` | no rule or contract has that identity |
+
+An expectation is held only by a current verdict, never by a stale record. `status` prints `GOALS  <n> active  <m> done` and, under goal memory, each active `goal::<name>` with how many of its expectations are held. `explain goal::<name>` gives the statement, the priorities served and each expectation with its verdict. When every expectation of an active goal is held, `status` lists it under `Next:` as ready to be set to `done`. A goal in state `done` with an expectation that is not held grounds the project-wide challenge `goal-outcome-unmet`, raised when no bounded task is selected; an `active` or `dropped` goal never grounds it, and `finish` never raises it, so its standing challenge is the same with or without goals. `status`, `explain` and `challenge` judge goals from the same loaded goal memory against the same project view, run state included; when the registered goal memory is missing, unreadable or invalid, no goal is judged, and `challenge` says so with the memory's state. `blabla::memory::goal::outcome(goal, lookup)` is the pure function behind every one of these views: `lookup` returns the verdict for one identity, so the behavior contract `contracts/goals.bla` drives it without a project on disk.
+
+`blabla task open <name> … --goal <name>` records the goal a bounded task serves. A name the goal memory does not declare is refused with exit 2 and the declared goals named; a goal memory that is not `present` declares none. `task show` prints `Serves goal::<name>`, and `explain goal::<name>` lists each task whose record names that goal, with the task's state. A task record without a goal reads as before.
+
+Editing the goal file changes the implementation fingerprint the way editing any in-root memory file does, so marking a goal `done` leaves the recorded run STALE, and each behavior expectation is `unverified` until `blabla finish` runs again.
+
 **Mission is authoritative about intent, not a gate.** It says what the project is for and what decides a tradeoff, and a planner that finds the evidence points elsewhere is expected to say so. **Knowledge is expertise, never permission to widen a task** — scope comes from the assignment and from `role::<name>`.
 
-A project registers at most one mission file, one system file, one process file, and any number of knowledge files. Every knowledge file is parsed separately, so a diagnostic names the file it came from, and the packs then form one knowledge memory for the project.
+A project registers at most one mission file, one system file, one process file, one goal file, and any number of knowledge files. Every knowledge file is parsed separately, so a diagnostic names the file it came from, and the packs then form one knowledge memory for the project.
 
 - None is **a layer**. `OVERALL` is decided by the active completion layers alone, and no state of any project memory — unregistered, missing, unreadable or invalid — changes it.
-- Each is **validated within project memory**: syntax, required and unknown fields, duplicate fields, identity-safe names, and references (a responsibility owner and each seam side name a declared system; each `applies_to` names a declared role; each `ruling` names a declared pack; each `knowledge` and `consult` entry names a registered pack). **Project memory is never checked against the repository** — that half is what keeps it out of completion and out of a false RED. An unknown declaration or field is an error, never ignored.
+- Each is **validated within project memory**: syntax, required and unknown fields, duplicate fields, identity-safe names, and references (a responsibility owner and each seam side name a declared system; each `applies_to` names a declared role; each `ruling` names a declared pack; each `knowledge` and `consult` entry names a registered pack; each goal's `serves` names a declared priority). **Project memory is never checked against the repository** — that half is what keeps it out of completion and out of a false RED. A goal's expectations are judged against the project's rules when it is shown, and that verdict never makes the goal memory invalid. An unknown declaration or field is an error, never ignored.
 - Exactly **one `mission` declaration** per project; a second is an error naming the first. Ruling names are unique inside a pack; pack names are unique across every registered knowledge file. A pack that declares no ruling is invalid, because routing would point at nothing.
 - A **name must be identity-safe** — it starts with a letter or digit and continues with letters, digits, `_` or `-` — because it becomes part of a canonical identity. `purpose`, `statement`, `paths`, `verification` and `model` are ordinary text.
 - **`verification` and `model` are opaque strings.** BlaBla keeps no enum of verification tiers and no enum of models, and infers nothing about either. `model` records the topology a project chose, so an orchestrator does not silently substitute a different one.
 - **Process memory describes the intended authority and workflow.** `status` lists its roles, and every role and policy view names what binds the role that carries the work.
-- **Registration is explicit.** A `mission.bla`, `system.bla`, `process.bla` or a `.bla` file under `knowledge/` that no statement registers is not read; `status` reports it as `unregistered` and names the statement that would register it. There is no JSON fallback: a registered path ending in `.json` is reported as unreadable with that reason.
+- **Registration is explicit.** A `mission.bla`, `system.bla`, `process.bla`, `goals.bla` or a `.bla` file under `knowledge/` that no statement registers is not read; `status` reports it as `unregistered` and names the statement that would register it. There is no JSON fallback: a registered path ending in `.json` is reported as unreadable with that reason.
 - **A knowledge path may point outside the project.** `knowledge "../shared-knowledge/engineering.bla"` is how one pack is reused across projects; there is no registry and nothing is fetched. A pack outside the manifest root is not walked by the implementation fingerprint and is not seen by a public-tree audit, so editing an in-root pack marks the behavior record STALE while editing an out-of-root one does not. Both are false STALEs at worst, which the project accepts, but the asymmetry is real.
 - `status` reports `state` as `present`, `missing` (registered, no file there), `unreadable`, `invalid` or `unregistered`.
 - `blabla check <file.bla>` validates a memory file while it is being authored and reports **VALID** or **INVALID**. It is not a completion signal and implies no enforcement; `status` and `finish` remain the authority over the project.

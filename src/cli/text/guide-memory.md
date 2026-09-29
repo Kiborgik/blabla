@@ -1,12 +1,13 @@
 AUTHORING PROJECT MEMORY
 
 Contracts say what must remain true. Project memory says the rest of what an agent would
-otherwise be told by hand. Four kinds, each answering one question, none repeating another.
+otherwise be told by hand. Five kinds, each answering one question, none repeating another.
 
   Mission    mission, priority               why the project exists, what decides a tradeoff
   System     system, responsibility, seam    what part is being touched and who owns it
   Process    role, policy, flow, step        who is expected to do what, and in what order
   Knowledge  knowledge, ruling               reusable expertise, portable between projects
+  Goal       goal                            which rules have to hold before an objective is reached
 
 Declaration shape:
 
@@ -25,12 +26,15 @@ Declaration shape:
   knowledge "engineering" { purpose "..." }
   ruling "smallest-correct-change" { pack "engineering" statement "..." }
 
-Registration in project.bla, one mission, one system, one process, any number of knowledge:
+  goal "executable-goals" { serves ["truthful-over-convenient"] statement "..." expect ["contract::goals"] state "active" }
+
+Registration in project.bla, one mission, one system, one process, one goal file, any number of knowledge:
 
   mission "mission.bla"
   system "system.bla"
   process "process.bla"
   knowledge "knowledge/engineering.bla"
+  goal "goals.bla"
 
 A flow declares the order its roles are meant to work in; its steps are separate declarations
 naming the flow they belong to, and their declaration order is the flow's order. A step names

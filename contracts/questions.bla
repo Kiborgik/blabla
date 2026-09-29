@@ -1,0 +1,77 @@
+type Standing { class: string }
+
+state role_floor: int
+state questions_asked: int
+state questions_unpicked: int
+state ask_refused: bool
+state pick_refused: bool
+state asked_task_blocked: bool
+state asked_task_handed_back: bool
+state question_standing: [Standing]
+
+action ask_a_question_as_the_orchestrator()
+action ask_a_question_as_a_worker()
+action ask_with_a_floor_below_the_roles_floor()
+action pick_at_or_above_the_questions_floor()
+action pick_between_the_roles_floor_and_the_questions_floor()
+action pick_a_question_already_picked()
+action try_to_hand_back_the_asked_task()
+action answer_the_blocking_pick_and_resume()
+
+when ask_a_question_as_the_orchestrator {
+    expect "an-asked-question-waits-for-the-workers-pick":
+        after.questions_asked == before.questions_asked + 1 and
+        after.questions_unpicked == before.questions_unpicked + 1
+    expect "asking-does-not-block-the-task":
+        after.asked_task_blocked == before.asked_task_blocked
+}
+
+when ask_a_question_as_a_worker {
+    expect "only-the-orchestrator-asks":
+        after.ask_refused and after.questions_asked == before.questions_asked
+}
+
+when ask_with_a_floor_below_the_roles_floor {
+    expect "a-question-cannot-lower-the-roles-floor":
+        after.ask_refused and after.questions_asked == before.questions_asked
+}
+
+when pick_at_or_above_the_questions_floor {
+    expect "a-confident-pick-settles-the-question-and-stands":
+        before.questions_unpicked == 0 or before.asked_task_blocked or
+        (after.questions_unpicked == before.questions_unpicked - 1 and not after.asked_task_blocked)
+}
+
+when pick_between_the_roles_floor_and_the_questions_floor {
+    expect "a-pick-below-the-questions-own-floor-blocks-the-task":
+        before.questions_unpicked == 0 or before.asked_task_blocked or
+        (after.questions_unpicked == before.questions_unpicked - 1 and after.asked_task_blocked)
+}
+
+when pick_a_question_already_picked {
+    expect "a-question-is-picked-once":
+        before.questions_asked == before.questions_unpicked or
+        (after.pick_refused and after.questions_unpicked == before.questions_unpicked)
+}
+
+when try_to_hand_back_the_asked_task {
+    expect "an-unpicked-question-refuses-hand-back":
+        before.questions_unpicked == 0 or
+        (not after.asked_task_handed_back and any(after.question_standing, s => s.class == "question-unpicked"))
+    expect "picked-questions-do-not-stand":
+        before.questions_unpicked > 0 or
+        not any(after.question_standing, s => s.class == "question-unpicked")
+}
+
+when answer_the_blocking_pick_and_resume {
+    expect "an-answered-pick-lets-the-worker-resume":
+        not before.asked_task_blocked or not after.asked_task_blocked
+}
+
+always "unpicked-never-exceeds-asked" {
+    questions_unpicked <= questions_asked
+}
+
+always "the-roles-floor-is-a-percentage" {
+    role_floor >= 0 and role_floor <= 100
+}

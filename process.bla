@@ -10,7 +10,8 @@ role "worker" {
     purpose "Carry out one bounded task inside the write scope its orchestrator assigned."
     owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
     verification "focused"
-    model ["haiku-4.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna"]
+    block_below "70"
+    model ["haiku-4.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5"]
     consult ["engineering", "testing"]
 }
 
@@ -18,13 +19,26 @@ role "reviewer" {
     purpose "Independently review one bounded worker patch and report the defects that block its integration."
     owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
     verification "focused"
-    model ["qwen3.5:4b", "opus-5", "gpt-5.6-sol"]
+    model ["qwen3.5:4b", "opus-5", "gpt-5.6-sol", "haiku-4.5"]
     consult ["reviewing", "engineering", "testing", "design"]
 }
 
 policy "explicit-write-scope" {
     statement "A worker is given an explicit set of paths it may write, and writes nothing outside it. Two workers running at the same time never share a path. Reading is unrestricted: a worker reads whatever it needs to make its edit correct."
     applies_to ["orchestrator", "worker"]
+}
+
+alias "claude-haiku-4-5-20251001" {
+    model "haiku-4.5"
+}
+
+alias "claude-opus-5-5" {
+    model "opus-5"
+}
+
+policy "code-speaks-for-itself" {
+    statement "Code carries no comments and no docstrings. A name, a smaller function or a test says what a comment would have said. Text a person reads, such as a finding, a note, a commit message or a document, is plain and specific: it names the file, the behavior and the evidence, and leaves out filler, praise and summaries of what was just said."
+    applies_to ["orchestrator", "worker", "reviewer"]
 }
 
 policy "orchestrator-owns-integration" {

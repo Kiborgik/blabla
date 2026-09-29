@@ -49,6 +49,7 @@ pub struct Manifest {
     pub system: Option<MemoryEntry>,
     pub process: Option<MemoryEntry>,
     pub knowledge: Vec<MemoryEntry>,
+    pub goal: Option<MemoryEntry>,
     pub profile: Option<Profile>,
     pub profile_span: Option<Span>,
     pub voice: Voice,
@@ -95,6 +96,7 @@ enum Statement {
     System(MemoryEntry),
     Process(MemoryEntry),
     Knowledge(MemoryEntry),
+    Goal(MemoryEntry),
     Profile(Profile, Span),
     Tone(Voice, Span),
     Ignore(IgnoreDeclaration),
@@ -115,15 +117,17 @@ pub const RESERVED_GROUPS: &[&str] = &[
     "step",
     "runtime",
     "task",
+    "goal",
 ];
 
-const MEMORY_STATEMENTS: &[&str] = &["mission", "system", "process", "knowledge"];
+const MEMORY_STATEMENTS: &[&str] = &["mission", "system", "process", "knowledge", "goal"];
 
 fn memory_example(keyword: &str) -> &'static str {
     match keyword {
         "mission" => "mission.bla",
         "system" => "system.bla",
         "knowledge" => "knowledge/engineering.bla",
+        "goal" => "goals.bla",
         _ => "process.bla",
     }
 }
@@ -356,6 +360,7 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
     let mut system: Option<MemoryEntry> = None;
     let mut process: Option<MemoryEntry> = None;
     let mut knowledge: Vec<MemoryEntry> = Vec::new();
+    let mut goal: Option<MemoryEntry> = None;
     let mut ignores: Vec<IgnoreDeclaration> = Vec::new();
     while !parser.at_end() {
         match parser.statement(&root)? {
@@ -400,6 +405,16 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
                     ));
                 }
                 knowledge.push(entry);
+            }
+            Statement::Goal(entry) => {
+                if goal.is_some() {
+                    return Err(parser.error(
+                        entry.span,
+                        "E_DUPLICATE_GOAL",
+                        "the manifest registers more than one goal memory file; one file holds every goal declaration",
+                    ));
+                }
+                goal = Some(entry);
             }
             Statement::System(entry) => {
                 if system.is_some() {
@@ -484,6 +499,7 @@ pub fn parse_manifest(path: &Path, source: &str) -> Result<Manifest, Diagnostic>
         system,
         process,
         knowledge,
+        goal,
         profile,
         profile_span,
         voice: voice.unwrap_or_default(),
@@ -560,6 +576,7 @@ impl ManifestParser<'_> {
                     "mission" => Statement::Mission(entry),
                     "system" => Statement::System(entry),
                     "knowledge" => Statement::Knowledge(entry),
+                    "goal" => Statement::Goal(entry),
                     _ => Statement::Process(entry),
                 });
             }
@@ -649,7 +666,7 @@ impl ManifestParser<'_> {
                 return Err(self.error(
                     start.span,
                     "E_MANIFEST_STATEMENT",
-                    "expected `use behavior \"path\"`, `draft behavior \"path\"`, `mission \"path\"`, `system \"path\"`, `process \"path\"`, `knowledge \"path\"`, `voice <name>`, `ignore \"pattern\"`, `ignore from \"file\"` or `verify behavior { ... }`",
+                    "expected `use behavior \"path\"`, `draft behavior \"path\"`, `mission \"path\"`, `system \"path\"`, `process \"path\"`, `knowledge \"path\"`, `goal \"path\"`, `voice <name>`, `ignore \"pattern\"`, `ignore from \"file\"` or `verify behavior { ... }`",
                 ));
             }
         };
@@ -730,7 +747,7 @@ impl ManifestParser<'_> {
                     layer.span,
                     "E_UNSUPPORTED_LAYER",
                     format!(
-                        "layer '{other}' is not supported; a project composes `behavior` and `structure` contracts, and mission, system, process and knowledge memory are registered by their own statements `mission \"path\"`, `system \"path\"`, `process \"path\"` and `knowledge \"path\"` because they are not layers and never decide completion"
+                        "layer '{other}' is not supported; a project composes `behavior` and `structure` contracts, and mission, system, process, knowledge and goal memory are registered by their own statements `mission \"path\"`, `system \"path\"`, `process \"path\"`, `knowledge \"path\"` and `goal \"path\"` because they are not layers and never decide completion"
                     ),
                 ));
             }
@@ -1118,11 +1135,16 @@ pub fn load(manifest: Manifest) -> Result<Project, Diagnostic> {
 
 fn always_tracked(manifest: &Manifest) -> BTreeSet<String> {
     let root = normalize(&manifest.root);
-    let memory = [&manifest.mission, &manifest.system, &manifest.process]
-        .into_iter()
-        .flatten()
-        .chain(&manifest.knowledge)
-        .map(|entry| entry.path.clone());
+    let memory = [
+        &manifest.mission,
+        &manifest.system,
+        &manifest.process,
+        &manifest.goal,
+    ]
+    .into_iter()
+    .flatten()
+    .chain(&manifest.knowledge)
+    .map(|entry| entry.path.clone());
     std::iter::once(manifest.path.clone())
         .chain(manifest.entries.iter().map(|entry| entry.path.clone()))
         .chain(memory)
@@ -1301,7 +1323,7 @@ impl Project {
         self.diagnostic(
             "E_UNKNOWN_RULE",
             format!(
-                "no object matches '{query}' in project {}; blabla status lists every contract::<group>, mission::<name>, knowledge::<pack>, system::<name> and role::<name> this project has",
+                "no object matches '{query}' in project {}; blabla status lists every contract::<group>, mission::<name>, knowledge::<pack>, system::<name>, role::<name> and goal::<name> this project has",
                 self.manifest.name
             ),
         )

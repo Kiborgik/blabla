@@ -1,0 +1,63 @@
+type Standing { class: string }
+
+state goal_state: string
+state expectations: int
+state held: int
+state unverified: int
+state unresolved: int
+state goal_standing: [Standing]
+
+action declare_an_active_goal_on_a_green_rule()
+action declare_an_active_goal_on_an_unwritten_rule()
+action the_expected_rule_turns_red()
+action the_recorded_run_goes_stale()
+action mark_the_goal_done()
+action drop_the_goal()
+
+when declare_an_active_goal_on_a_green_rule {
+    expect "a-declared-goal-is-active":
+        after.goal_state == "active"
+    expect "a-green-expectation-holds":
+        after.expectations > 0 and after.held == after.expectations
+}
+
+when declare_an_active_goal_on_an_unwritten_rule {
+    expect "an-unwritten-rule-is-unresolved":
+        after.unresolved > 0
+    expect "an-unresolved-expectation-is-never-held":
+        after.held < after.expectations
+}
+
+when the_expected_rule_turns_red {
+    expect "a-red-expectation-is-not-held":
+        after.goal_state == "none" or after.unresolved > 0 or after.held < after.expectations
+}
+
+when the_recorded_run_goes_stale {
+    expect "a-stale-verdict-is-unverified-never-held":
+        after.goal_state == "none" or after.unresolved > 0 or
+        (after.unverified > 0 and after.held < after.expectations)
+}
+
+when mark_the_goal_done {
+    expect "a-goal-marked-done-without-its-outcome-is-challenged":
+        after.goal_state == "none" or after.held == after.expectations or
+        any(after.goal_standing, s => s.class == "goal-outcome-unmet")
+    expect "a-goal-whose-outcome-holds-is-not-challenged":
+        after.held != after.expectations or
+        not any(after.goal_standing, s => s.class == "goal-outcome-unmet")
+}
+
+when drop_the_goal {
+    expect "a-dropped-goal-is-never-challenged":
+        after.goal_state != "dropped" or
+        not any(after.goal_standing, s => s.class == "goal-outcome-unmet")
+}
+
+always "held-never-exceeds-the-expectations" {
+    held <= expectations and held + unverified + unresolved <= expectations
+}
+
+never "an-active-goal-is-challenged-for-its-outcome" {
+    goal_state == "active" and any(goal_standing, s => s.class == "goal-outcome-unmet")
+}

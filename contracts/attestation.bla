@@ -1,0 +1,57 @@
+type Standing { class: string }
+
+state carried: bool
+state records_during_carry: int
+state unconfirmed_during_carry: int
+state carry_closed: bool
+state carry_close_refused: bool
+state confirm_refused: bool
+state attestation_standing: [Standing]
+
+action take_the_task()
+action record_an_orchestrator_verb_while_carried()
+action record_an_orchestrator_verb_while_not_carried()
+action hand_the_task_back()
+action confirm_the_records_made_during_carry()
+action confirm_while_the_task_is_carried()
+action try_to_close_the_carried_task()
+
+when record_an_orchestrator_verb_while_carried {
+    expect "an-orchestrator-record-made-while-a-worker-carries-the-task-is-listed":
+        before.carry_closed or not before.carried or
+        (after.records_during_carry == before.records_during_carry + 1 and
+         after.unconfirmed_during_carry == before.unconfirmed_during_carry + 1)
+}
+
+when record_an_orchestrator_verb_while_not_carried {
+    expect "an-orchestrator-record-made-while-nobody-carries-the-task-is-not-listed":
+        after.records_during_carry == before.records_during_carry
+}
+
+when hand_the_task_back {
+    expect "an-unconfirmed-record-from-the-carry-stands-against-the-task":
+        after.unconfirmed_during_carry == 0 or
+        any(after.attestation_standing, s => s.class == "orchestrator-record-during-carry")
+}
+
+when confirm_the_records_made_during_carry {
+    expect "confirming-clears-every-record-from-the-carry":
+        after.unconfirmed_during_carry == 0
+    expect "confirming-keeps-the-list":
+        after.records_during_carry == before.records_during_carry
+}
+
+when confirm_while_the_task_is_carried {
+    expect "the-carrier-cannot-confirm-records-from-its-own-carry":
+        not before.carried or before.carry_closed or
+        (after.confirm_refused and after.unconfirmed_during_carry == before.unconfirmed_during_carry)
+}
+
+when try_to_close_the_carried_task {
+    expect "a-task-with-unconfirmed-records-from-the-carry-does-not-close":
+        before.unconfirmed_during_carry == 0 or (after.carry_close_refused and not after.carry_closed)
+}
+
+always "confirmed-never-exceeds-recorded" {
+    unconfirmed_during_carry <= records_during_carry
+}

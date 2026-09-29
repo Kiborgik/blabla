@@ -1,0 +1,48 @@
+module verify     "src/verify/mod.rs"
+module campaign   "src/verify/campaign.rs"
+module coverage   "src/verify/coverage.rs"
+module corpus     "src/verify/corpus.rs"
+module evaluator  "src/verify/evaluator.rs"
+module generator  "src/verify/generator.rs"
+module syntax     "src/syntax/mod.rs"
+module ir         "src/ir/mod.rs"
+module runtime    "src/runtime/mod.rs"
+module primitives "src/runtime/primitives.rs"
+module app        "src/application.rs"
+module report     "src/report.rs"
+module status     "src/project/status.rs"
+module cli        "src/cli/mod.rs"
+module cliproject "src/cli/project.rs"
+module voice      "src/voice.rs"
+module skeptic    "src/skeptic.rs"
+module task       "src/project/task.rs"
+
+require "the-verifier-consumes-the-typed-ir":           dependency verify -> ir
+require "coverage-is-derived-from-the-typed-ir":        dependency coverage -> ir
+forbid  "the-verifier-never-reads-the-syntax-tree":     dependency verify -> syntax
+forbid  "the-campaign-never-reads-the-syntax-tree":     dependency campaign -> syntax
+forbid  "coverage-never-reads-the-syntax-tree":         dependency coverage -> syntax
+forbid  "the-corpus-never-reads-the-syntax-tree":       dependency corpus -> syntax
+forbid  "evaluation-never-reads-the-syntax-tree":       dependency evaluator -> syntax
+forbid  "generation-never-reads-the-syntax-tree":       dependency generator -> syntax
+
+require "the-verifier-drives-an-application":           dependency verify -> app
+require "an-application-declares-trusted-restart":      symbol app::Application.restart
+forbid  "the-verifier-never-knows-a-process":           dependency verify -> runtime
+forbid  "the-campaign-never-knows-a-process":           dependency campaign -> runtime
+forbid  "coverage-never-knows-a-process":               dependency coverage -> runtime
+forbid  "the-corpus-never-knows-a-process":            dependency corpus -> runtime
+forbid  "evaluation-never-knows-a-process":             dependency evaluator -> runtime
+forbid  "generation-never-knows-a-process":             dependency generator -> runtime
+
+require "the-run-report-is-one-value":                  symbol report::RunReport
+forbid  "the-run-report-sits-below-the-cli":            dependency report -> cli
+forbid  "the-run-report-sits-below-project-rendering":  dependency report -> cliproject
+
+require "runtime-primitives-live-in-one-table":         symbol primitives::ALL
+require "status-renders-primitives-from-the-table":     dependency status -> primitives
+
+forbid  "adjudication-never-sees-the-voice":            dependency skeptic -> voice
+forbid  "the-task-record-never-sees-the-voice":         dependency task -> voice
+forbid  "completion-never-sees-the-voice":              dependency status -> voice
+forbid  "the-run-report-never-sees-the-voice":          dependency report -> voice

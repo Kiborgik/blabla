@@ -41,3 +41,8 @@ ruling "retrieving-guidance-is-not-applying-it" {
     pack "reviewing"
     statement "Naming a rule, quoting it, or citing its identity beside a finding is not evidence that the rule was used. A rule is applied only where the change is actually held against it and the outcome is stated for this change, in its own terms. A report that cites the rule about a failure while that very failure stands unexamined in the change is the most convincing way to look thorough while establishing nothing."
 }
+
+ruling "an-observer-reports-what-happened" {
+    pack "reviewing"
+    statement "Code whose job is to observe or report on another system, such as a test harness, an adapter or a probe, is correct when it reports what actually happened, failures included. A finding that asks it to report success on a failure path, to swallow an error, or to change what it observes so that a check passes is asking for a fabricated observation, and is itself the defect. When a check fails because the observed system misbehaves, the fault is in that system and the failing check is the check working; review the observer for whether it measures the right thing at the right moment, not for whether its checks pass."
+}

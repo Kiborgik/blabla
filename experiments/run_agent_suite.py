@@ -31,7 +31,7 @@ def campaign_rows(campaign):
         run_dir = summary.parent
         if (run_dir / 'trace.jsonl').exists() and (run_dir / 'workspace').is_dir():
             row = grade_directory(case, run_dir, metadata['host'], run_dir.parent.name)
-            for key in ('seconds', 'exit_code', 'native_exit'):
+            for key in ('seconds', 'exit_code', 'native_exit', 'direct_exit'):
                 if key in recorded:
                     row[key] = recorded[key]
         else:

@@ -13,9 +13,111 @@ import urllib.request
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = 'qwen3.5:4b'
 
+MODEL_SETS = {
+    'haiku': {
+        'qwen3.5:4b': {'api_id': 'claude-haiku-4-5-20251001', 'local_id': 'haiku-4.5'},
+        'qwen3.5:9b': {'api_id': 'claude-haiku-4-5-20251001', 'local_id': 'haiku-4.5'},
+    }
+}
+
 
 def case_model(case):
     return json.loads((case / 'fixture.json').read_text(encoding='utf-8')).get('model', MODEL)
+
+
+def get_model_set(name):
+    if name not in MODEL_SETS:
+        raise ValueError(f'Unknown model set: {name}. Available sets: {", ".join(MODEL_SETS.keys())}')
+    return MODEL_SETS[name]
+
+
+def rewrite_model_names_in_file(filepath, model_mapping):
+    content = filepath.read_text(encoding='utf-8')
+    for old_name, mapping in model_mapping.items():
+        new_name = mapping['local_id']
+        content = content.replace(old_name, new_name)
+    filepath.write_text(content, encoding='utf-8')
+
+
+def deduplicate_process_bla_models(filepath):
+    content = filepath.read_text(encoding='utf-8')
+    import re
+    def deduplicate_models(match):
+        opening = match.group(1)
+        models_str = match.group(2)
+        model_list = re.findall(r'"([^"]+)"|\'([^\']+)\'|([^\s,\]]+)', models_str)
+        models = [m[0] or m[1] or m[2] for m in model_list if any(m)]
+        seen = set()
+        dedup_models = []
+        for model in models:
+            if model not in seen:
+                seen.add(model)
+                dedup_models.append(model)
+        new_models_str = ', '.join(f'"{m}"' if ':' in m or '-' in m else m for m in dedup_models)
+        return f'{opening}[{new_models_str}]'
+
+    content = re.sub(r'(model\s+)\[([^\]]+)\]', deduplicate_models, content)
+    filepath.write_text(content, encoding='utf-8')
+
+
+def rewrite_staged_materials(materials_dir, model_set_name):
+    model_set = get_model_set(model_set_name)
+    evals_dir = materials_dir / 'evals'
+
+    if not evals_dir.exists():
+        raise ValueError(f'Materials directory does not contain evals: {materials_dir}')
+
+    case_files = ['fixture.json', 'prompt.md', 'prompt-without.md', 'rubric.json', 'case.yaml']
+    grader_files = []
+
+    for case_dir in evals_dir.iterdir():
+        if not case_dir.is_dir():
+            continue
+
+        for filename in case_files:
+            filepath = case_dir / filename
+            if filepath.exists():
+                rewrite_model_names_in_file(filepath, model_set)
+
+        graders_dir = case_dir / 'graders'
+        if graders_dir.exists():
+            for grader_file in graders_dir.glob('*.md'):
+                rewrite_model_names_in_file(grader_file, model_set)
+
+    for rubric in evals_dir.glob('*/rubric.json'):
+        accept_host_model_ids(rubric, model_set)
+
+    materials_subdir = evals_dir / 'materials'
+    if materials_subdir.exists():
+        for process_file in materials_subdir.rglob('process.bla'):
+            rewrite_model_names_in_file(process_file, model_set)
+            deduplicate_process_bla_models(process_file)
+            declare_host_model_aliases(process_file, model_set)
+
+
+def host_model_aliases(model_set):
+    return sorted({(mapping['api_id'], mapping['local_id']) for mapping in model_set.values()
+                   if mapping['api_id'] != mapping['local_id']})
+
+
+def declare_host_model_aliases(filepath, model_set):
+    content = filepath.read_text(encoding='utf-8')
+    for api_id, local_id in host_model_aliases(model_set):
+        if f'alias "{api_id}"' not in content:
+            content = content.rstrip('\n') + f'\n\nalias "{api_id}" {{\n    model "{local_id}"\n}}\n'
+    filepath.write_text(content, encoding='utf-8')
+
+
+def accept_host_model_ids(rubric_path, model_set):
+    rubric = json.loads(rubric_path.read_text(encoding='utf-8'))
+    names = {local_id: api_id for api_id, local_id in host_model_aliases(model_set)}
+    changed = False
+    for criterion in rubric.get('criteria', []):
+        if criterion.get('kind') == 'task_field' and criterion.get('field') == 'accepted.model' and criterion.get('equals') in names:
+            criterion['equals_any'] = [criterion['equals'], names[criterion['equals']]]
+            changed = True
+    if changed:
+        rubric_path.write_text(json.dumps(rubric, indent=2) + '\n', encoding='utf-8')
 
 
 def resolve_model(parser, case, requested):
@@ -119,10 +221,10 @@ def prompt_path(case, arm):
     return case / ('prompt-without.md' if arm == 'without' else 'prompt.md')
 
 
-def run_process(command, workspace, env, stdout, stderr, timeout):
+def run_process(command, workspace, env, stdout, stderr, timeout, stdin=subprocess.DEVNULL):
     with stdout.open('w') as output, stderr.open('w') as errors:
         process = subprocess.Popen(command, cwd=workspace, env=env, stdout=output, stderr=errors,
-                                   stdin=subprocess.DEVNULL, start_new_session=True)
+                                   stdin=stdin, start_new_session=True)
         try:
             return process.wait(timeout=timeout)
         except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:

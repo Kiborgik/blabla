@@ -320,3 +320,90 @@ fn check_reports_error_for_unsupported_file_extension() {
         first_line
     );
 }
+
+#[test]
+fn run_uses_project_profile_timeout() {
+    let dir = TempDir::new().unwrap();
+
+    fs::write(
+        dir.path().join("project.bla"),
+        r#"project TestProject
+
+verify behavior {
+    command ["python3", "simple_adapter.py"]
+    timeout_ms 3000
+}
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        dir.path().join("test_contract.bla"),
+        r#"state done: bool
+
+action start()
+
+when start {
+    expect "done": after.done == true
+}
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        dir.path().join("simple_adapter.py"),
+        r#"import json
+import sys
+import time
+
+sys.stdin.reconfigure(encoding="utf-8", errors="strict")
+sys.stdout.reconfigure(encoding="utf-8", errors="strict")
+done = False
+first_request = True
+
+def emit(request, result):
+    value = {"id": request["id"], "result": result}
+    print(json.dumps(value, separators=(",", ":")), flush=True)
+
+for line in sys.stdin:
+    try:
+        request = json.loads(line)
+        operation = request.get("op")
+        if operation == "reset":
+            if first_request:
+                time.sleep(1.5)
+                first_request = False
+            done = False
+            emit(request, {"ok": True})
+        elif operation == "observe":
+            emit(request, {"done": done})
+        elif operation == "call" and request.get("name") == "start" and request.get("args") == []:
+            done = True
+            emit(request, {"ok": True})
+        else:
+            emit(request, {"ok": False, "error": "unknown request"})
+    except Exception as error:
+        emit(request, {"ok": False, "error": str(error)})
+"#,
+    )
+    .unwrap();
+
+    let adapter_path = dir.path().join("simple_adapter.py");
+    let run_args = vec![
+        OsStr::new("run"),
+        OsStr::new("test_contract.bla"),
+        OsStr::new("--json"),
+        OsStr::new("--"),
+        OsStr::new("python3"),
+        adapter_path.as_os_str(),
+    ];
+    let output = support::run_in(Some(dir.path()), &run_args);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "Expected success with profile timeout: {output:?}"
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "green", "Expected green status: {report}");
+}

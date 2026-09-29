@@ -595,3 +595,47 @@ fn structure_contract_without_project_above_compiles_but_is_not_evaluated() {
     assert_eq!(check["status"], "ok");
     assert_eq!(check["layer"], "structure");
 }
+
+#[test]
+fn empty_structure_contract_is_rejected_with_e_no_rules() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("contracts/structure")).unwrap();
+    write(
+        &root.join("contracts/structure/empty.bla"),
+        "module app \"app.py\"\n",
+    );
+    let output = run_in(
+        Some(root),
+        &args(&["--json", "check", "contracts/structure/empty.bla"]),
+    );
+    assert_eq!(output.status.code().unwrap(), 2, "{}", text(&output.stderr));
+    let check = json(&output.stdout);
+    assert_eq!(check["status"], "error");
+    assert_eq!(check["diagnostic"]["code"], "E_NO_RULES");
+    assert!(
+        check["diagnostic"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("declares no rules")
+    );
+}
+
+#[test]
+fn empty_structure_contract_in_project_fails_at_load_time() {
+    let temp = layered();
+    let root = temp.path();
+    write(
+        &root.join("project.bla"),
+        &manifest_with_structure("empty_no_rules.bla"),
+    );
+    write(
+        &root.join("contracts/structure/empty_no_rules.bla"),
+        "module app \"app.py\"\n",
+    );
+    let output = run_in(Some(root), &args(&["--json", "status"]));
+    assert_eq!(output.status.code().unwrap(), 2);
+    let status = json(&output.stdout);
+    assert_eq!(status["status"], "error");
+    assert_eq!(status["diagnostic"]["code"], "E_NO_RULES");
+}

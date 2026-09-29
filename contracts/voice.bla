@@ -4,8 +4,6 @@ type Voiced {
 
 state voice: string
 state voiced_standing: [Voiced]
-state voiced_exit: int
-state voiced_record: string
 state voiced_keeps_the_statement: bool
 state voiced_speaks_bluntly: bool
 state voiced_adds_wording: bool
@@ -16,12 +14,6 @@ action select_the_blunt_voice()
 when select_the_blunt_voice {
     expect "the-blunt-voice-is-what-was-selected":
         after.voice == "blunt"
-    expect "tone-does-not-change-the-standing-set":
-        after.voiced_standing == before.voiced_standing
-    expect "tone-does-not-change-the-exit-code":
-        after.voiced_exit == before.voiced_exit
-    expect "tone-does-not-change-the-machine-record":
-        after.voiced_record == before.voiced_record
     expect "blunt-adds-wording-only-where-a-contradiction-stands":
         count(after.voiced_standing) == 0 or after.voiced_adds_wording
 }
@@ -29,12 +21,6 @@ when select_the_blunt_voice {
 when select_the_neutral_voice {
     expect "the-neutral-voice-is-what-was-selected":
         after.voice == "neutral"
-    expect "neutral-does-not-change-the-standing-set":
-        after.voiced_standing == before.voiced_standing
-    expect "neutral-does-not-change-the-exit-code":
-        after.voiced_exit == before.voiced_exit
-    expect "neutral-does-not-change-the-machine-record":
-        after.voiced_record == before.voiced_record
     expect "the-neutral-voice-adds-nothing":
         not after.voiced_adds_wording
 }

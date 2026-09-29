@@ -1,0 +1,65 @@
+{
+  "materials": [
+    "shared",
+    "structure",
+    "structure-plus",
+    "assignment",
+    "asked-question"
+  ],
+  "break_model": true,
+  "remove": [
+    "contracts"
+  ],
+  "model": "qwen3.5:4b",
+  "before_arm": [
+    {
+      "run": [
+        "blabla",
+        "init",
+        "--agents",
+        "--name",
+        "Widget"
+      ]
+    }
+  ],
+  "after_arm": [
+    {
+      "run": [
+        "blabla",
+        "task",
+        "open",
+        "fix-red-checks",
+        "--role",
+        "worker",
+        "--statement",
+        "Repair the two failing structure rules without changing declared intent.",
+        "--scope",
+        "widget",
+        "--deliverable",
+        "widget/store.py",
+        "--deliverable",
+        "widget/model.py",
+        "--check",
+        "blabla status"
+      ]
+    },
+    {
+      "run": [
+        "blabla",
+        "task",
+        "ask",
+        "fix-red-checks",
+        "Does repairing widget::the-store-encodes-through-the-format need widget/store.py to import widget.format?",
+        "--floor",
+        "80",
+        "--model",
+        "fixture-orchestrator"
+      ]
+    }
+  ],
+  "observations": [
+    "syntax",
+    "status",
+    "challenge:fix-red-checks"
+  ]
+}

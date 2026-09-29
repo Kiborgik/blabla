@@ -18,12 +18,20 @@ being dropped instead of settled.
 
 THE ORCHESTRATOR settles each finding against the repository, accepts the result, and decides
 completion. The evidence written into a resolution is the agent's claim about the repository,
-never BlaBla's verdict on it.
+never BlaBla's verdict on it, and every --model is an attestation, not proof.
 
+  blabla task ask <name> "<question>" --model <id>   ask the carrying role a call you doubt; --options
+                                                     a,b,c for a choice, --floor <0-100> to raise the
+                                                     confidence its pick needs above the role's floor;
+                                                     task ready is refused until it has a pick
   blabla task resolve <name> <id> --evidence "..." --model <id>
   blabla task check <name> "..."                     declare the check a record opened without, or
                                                      correct the one it declares
-  blabla task close <name> --model <id>              refused while a grounded challenge stands
+  blabla task confirm <name> --model <id>            after hand-back, confirm the records made
+                                                     under an orchestrator model while a worker
+                                                     carried the task; refused while it is carried
+  blabla task close <name> --model <id>              refused while a grounded challenge stands,
+                                                     including an unconfirmed record from a carry
   blabla finish
 
 PROJECT VERIFICATION AND TASK ACCEPTANCE ARE DIFFERENT QUESTIONS. blabla finish decides whether

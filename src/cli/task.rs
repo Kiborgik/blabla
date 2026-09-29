@@ -1,4 +1,5 @@
 use super::{emit_error, error, recovery, write_json};
+use blabla::memory::goal::Outcome;
 use blabla::project::Project;
 use blabla::project::status::{RECORD_DIRECTORY, StatusView, now_unix, status_view};
 use blabla::project::task::{self, Finding, Opening, Task};
@@ -88,22 +89,49 @@ fn declared_role(project: &Project, role_name: &str) -> Option<blabla::memory::p
         })
 }
 
+fn declared_permitted_models(project: &Project, role_name: &str) -> Vec<String> {
+    project
+        .manifest
+        .process
+        .as_ref()
+        .map(|entry| {
+            blabla::memory::read(
+                &entry.path,
+                &entry.display,
+                blabla::memory::process::build,
+                blabla::memory::process::validate,
+            )
+        })
+        .and_then(|memory| {
+            memory
+                .present()
+                .map(|process| blabla::memory::process::permitted_models(process, role_name))
+        })
+        .unwrap_or_default()
+}
+
 fn validate_orchestrator_model(project: &Project, model: &str, json: bool) -> Result<(), i32> {
     let role = declared_role(project, "orchestrator");
     match role {
-        Some(role) if role.model.is_empty() || role.model.contains(&model.to_owned()) => Ok(()),
-        Some(role) => Err(emit_error(
-            error(
-                "task",
-                format!(
-                    "model {model:?} is not in role::orchestrator's permitted list: {}",
-                    role.model.join(", ")
-                ),
-                None,
-            ),
-            json,
-            2,
-        )),
+        Some(_) => {
+            let permitted = declared_permitted_models(project, "orchestrator");
+            if permitted.is_empty() || permitted.contains(&model.to_owned()) {
+                Ok(())
+            } else {
+                Err(emit_error(
+                    error(
+                        "task",
+                        format!(
+                            "model {model:?} is not in role::orchestrator's permitted list: {}",
+                            permitted.join(", ")
+                        ),
+                        None,
+                    ),
+                    json,
+                    2,
+                ))
+            }
+        }
         None => Err(emit_error(
             error("task", undeclared_role("orchestrator"), None),
             json,
@@ -123,15 +151,22 @@ fn create(project: &Project, task: &mut Task, json: bool) -> i32 {
     write_record(project, task, json, true)
 }
 
-fn store(project: &Project, task: &mut Task, json: bool) -> i32 {
+fn stamp(task: &mut Task, json: bool) -> Result<(), i32> {
     let identity = recovery::running();
     if let Some(identity) = identity
         && let Some(message) = recovery::refuse_write(identity, task.build.as_deref())
     {
-        return emit_error(error("recovery", message, None), json, 2);
+        return Err(emit_error(error("recovery", message, None), json, 2));
     }
     if let Some(identity) = identity {
         task.build = Some(identity.stamp());
+    }
+    Ok(())
+}
+
+fn store(project: &Project, task: &mut Task, json: bool) -> i32 {
+    if let Err(exit) = stamp(task, json) {
+        return exit;
     }
     write_record(project, task, json, false)
 }
@@ -148,7 +183,11 @@ fn write_record(project: &Project, task: &mut Task, json: bool, whole_view: bool
     let result = if json {
         write_json(&view(task))
     } else if whole_view {
-        write_task(task)
+        write_task(
+            task,
+            &project.manifest.root,
+            role_floor(project, &task.role),
+        )
     } else {
         write_task_line(task)
     };
@@ -180,6 +219,11 @@ pub(super) fn open(project: &Project, opening: Opening, json: bool) -> i32 {
             json,
             2,
         );
+    }
+    if let Some(goal) = &opening.goal
+        && let Some(message) = super::project::undeclared_goal(project, goal)
+    {
+        return emit_error(error("task", message, None), json, 2);
     }
     let root = &project.manifest.root;
     let existing = task::read(root, name).ok().flatten();
@@ -303,26 +347,24 @@ pub(super) fn addressed(
         Ok(task) => task,
         Err(exit) => return exit,
     };
-    match declared_role(project, &task.role) {
-        Some(role) if role.model.is_empty() || role.model.contains(&model.to_owned()) => {}
-        Some(role) => {
-            return emit_error(
-                error(
-                    "task",
-                    format!(
-                        "model {model:?} is not in role::{}'s permitted list: {}",
-                        task.role,
-                        role.model.join(", ")
-                    ),
-                    None,
+    let permitted = declared_permitted_models(project, &task.role);
+    if !task::can_address_finding(&task, model, &permitted) {
+        return emit_error(
+            error(
+                "task",
+                format!(
+                    "model {model:?} is not in role::{}'s permitted list: {}",
+                    task.role,
+                    permitted.join(", ")
                 ),
-                json,
-                2,
-            );
-        }
-        None => {
-            return emit_error(error("task", undeclared_role(&task.role), None), json, 2);
-        }
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    if declared_role(project, &task.role).is_none() {
+        return emit_error(error("task", undeclared_role(&task.role), None), json, 2);
     }
     let Some(finding) = task.findings.iter_mut().find(|finding| finding.id == id) else {
         return emit_error(
@@ -374,6 +416,345 @@ pub(super) fn resolve(
         evidence: evidence.to_owned(),
         model: Some(model.to_owned()),
     });
+    task::attest(&mut task, "resolve", Some(model), now_unix());
+    store(project, &mut task, json)
+}
+
+pub(super) struct Asked {
+    pub question: Option<String>,
+    pub on: Option<String>,
+    pub pick: String,
+    pub confidence: i64,
+    pub model: String,
+    pub options: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct DecisionView<'a> {
+    task: &'a str,
+    decision: &'a task::Decision,
+    stands: bool,
+    next: String,
+}
+
+pub(super) fn decide(project: &Project, name: &str, asked: Asked, json: bool) -> i32 {
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    if let Some(blocking) = task::unanswered_decision(&task) {
+        return emit_error(
+            error(
+                "task",
+                format!(
+                    "task {name:?} is BLOCKED on decision {}: {} (picked {} at {}%). A blocked task takes no decision; stop, nothing is recorded. {}",
+                    blocking.id,
+                    blocking.question,
+                    blocking.pick,
+                    blocking.confidence,
+                    answer_route(&task, blocking)
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    if task.state != "accepted" {
+        return emit_error(
+            error(
+                "task",
+                format!(
+                    "task {name:?} is {}; a decision is recorded once the task is ACCEPTED. {}",
+                    state_label(&task),
+                    handback_guidance(&task, "accept")
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    let permitted = declared_permitted_models(project, &task.role);
+    if !task::can_address_finding(&task, &asked.model, &permitted) {
+        return emit_error(
+            error(
+                "task",
+                format!(
+                    "model {:?} is not in role::{}'s permitted list: {}",
+                    asked.model,
+                    task.role,
+                    permitted.join(", ")
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    let Some(role) = declared_role(project, &task.role) else {
+        return emit_error(error("task", undeclared_role(&task.role), None), json, 2);
+    };
+    let options = split_options(&asked.options);
+    let recorded = match (asked.on, asked.question) {
+        (Some(on), None) if options.is_empty() => task::pick(
+            &mut task,
+            task::Pick {
+                on,
+                pick: asked.pick,
+                confidence: asked.confidence,
+                model: asked.model,
+            },
+            role.floor(),
+        ),
+        (Some(on), _) => Err(format!(
+            "task decide --on {on} takes the question text and options from question {on}, so passing them as well is refused"
+        )),
+        (None, Some(question)) => task::decide(
+            &mut task,
+            task::Question {
+                question,
+                options,
+                pick: asked.pick,
+                confidence: asked.confidence,
+                model: asked.model,
+            },
+            role.floor(),
+        ),
+        (None, None) => Err(format!(
+            "state the call you are unsure of as a question, or pick one the orchestrator asked with --on <question-id>; blabla task show {name} lists them"
+        )),
+    };
+    let decision = match recorded {
+        Ok(decision) => decision.clone(),
+        Err(refusal) => {
+            return emit_error(
+                error("task", format!("{refusal}; nothing is recorded"), None),
+                json,
+                2,
+            );
+        }
+    };
+    if let Err(exit) = stamp(&mut task, json) {
+        return exit;
+    }
+    if let Err(failure) = task::write(&project.manifest.root, &task) {
+        return emit_error(
+            error(
+                "task",
+                format!("cannot record the decision: {failure}"),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    let next = decision_route(&task, &decision);
+    let result = if json {
+        write_json(&DecisionView {
+            task: &task.name,
+            decision: &decision,
+            stands: !decision.below_floor,
+            next,
+        })
+    } else {
+        let mut output = io::stdout().lock();
+        writeln!(
+            output,
+            "task::{}   {}   decision {} {}",
+            task.name,
+            state_label(&task),
+            decision.id,
+            if decision.below_floor {
+                "BLOCKS THE TASK"
+            } else {
+                "STANDS"
+            }
+        )
+        .and_then(|()| writeln!(output, "  {next}"))
+    };
+    if result.is_ok() { 0 } else { 4 }
+}
+
+fn split_options(given: &[String]) -> Vec<String> {
+    given
+        .iter()
+        .flat_map(|entry| entry.split(','))
+        .map(|option| option.trim().to_owned())
+        .collect()
+}
+
+fn decision_route(task: &Task, decision: &task::Decision) -> String {
+    let pick = &decision.pick;
+    let confidence = decision.confidence;
+    let owner = task::floor_owner(task, decision);
+    let floor = decision.floor;
+    if decision.below_floor {
+        return format!(
+            "Stop now. Do not act on {pick}: {confidence}% is below {owner}'s floor of {floor}%, so the call is the orchestrator's and the task is BLOCKED on it. {}.",
+            answer_route(task, decision)
+        );
+    }
+    format!(
+        "{pick} at {confidence}% is at or above {owner}'s floor of {floor}%, so the call stands. Act on {pick}. The orchestrator may still review it with blabla task answer {} {}.",
+        task.name, decision.id
+    )
+}
+
+fn pick_command(task: &Task, asked: &task::AskedQuestion) -> String {
+    format!(
+        "blabla task decide {} --on {} --pick <{}> --confidence <0-100> --model <id>",
+        task.name,
+        asked.id,
+        asked.options.join("|")
+    )
+}
+
+#[derive(Serialize)]
+struct QuestionView<'a> {
+    task: &'a str,
+    question: &'a task::AskedQuestion,
+    next: String,
+}
+
+pub(super) fn ask(project: &Project, name: &str, asked: task::Ask, json: bool) -> i32 {
+    if declared_role(project, "orchestrator").is_none() {
+        return emit_error(
+            error("task", undeclared_role("orchestrator"), None),
+            json,
+            2,
+        );
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let Some(role) = declared_role(project, &task.role) else {
+        return emit_error(error("task", undeclared_role(&task.role), None), json, 2);
+    };
+    let permitted = declared_permitted_models(project, "orchestrator");
+    let model = asked.model.clone();
+    let asked = task::Ask {
+        options: split_options(&asked.options),
+        ..asked
+    };
+    let question = match task::ask(&mut task, asked, role.floor(), &permitted) {
+        Ok(question) => question.clone(),
+        Err(refusal) => {
+            return emit_error(
+                error("task", format!("{refusal}; nothing is recorded"), None),
+                json,
+                2,
+            );
+        }
+    };
+    task::attest(&mut task, "ask", Some(&model), now_unix());
+    if let Err(exit) = stamp(&mut task, json) {
+        return exit;
+    }
+    if let Err(failure) = task::write(&project.manifest.root, &task) {
+        return emit_error(
+            error(
+                "task",
+                format!("cannot record the question: {failure}"),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    let next = format!(
+        "The carrying role picks it with {}; a pick below {}% blocks the task until the orchestrator answers, and task ready is refused until it has a pick.",
+        pick_command(&task, &question),
+        question.floor
+    );
+    let result = if json {
+        write_json(&QuestionView {
+            task: &task.name,
+            question: &question,
+            next,
+        })
+    } else {
+        let mut output = io::stdout().lock();
+        writeln!(
+            output,
+            "task::{}   {}   question {} asked, floor {}%",
+            task.name,
+            state_label(&task),
+            question.id,
+            question.floor
+        )
+        .and_then(|()| writeln!(output, "  {next}"))
+    };
+    if result.is_ok() { 0 } else { 4 }
+}
+
+fn answer_route(task: &Task, decision: &task::Decision) -> String {
+    format!(
+        "The orchestrator answers with blabla task answer {name} {id} --pick <{options}> --reason \"...\" --model <id>; after that, resume with blabla task accept {name} --model <id>",
+        name = task.name,
+        id = decision.id,
+        options = decision.options.join("|"),
+    )
+}
+
+pub(super) fn answer(
+    project: &Project,
+    name: &str,
+    id: usize,
+    given: task::Answer,
+    json: bool,
+) -> i32 {
+    if let Err(exit) = validate_orchestrator_model(project, &given.model, json) {
+        return exit;
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let model = given.model.clone();
+    if let Err(refusal) = task::answer(&mut task, id, given) {
+        return emit_error(
+            error("task", format!("{refusal}; nothing is recorded"), None),
+            json,
+            2,
+        );
+    }
+    task::attest(&mut task, "answer", Some(&model), now_unix());
+    store(project, &mut task, json)
+}
+
+pub(super) fn confirm(project: &Project, name: &str, model: &str, json: bool) -> i32 {
+    if let Err(exit) = validate_orchestrator_model(project, model, json) {
+        return exit;
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let confirmed = match task::confirm(&mut task, model, now_unix()) {
+        Ok(confirmed) => confirmed,
+        Err(refusal) => {
+            return emit_error(
+                error("task", format!("{refusal}; nothing is recorded"), None),
+                json,
+                2,
+            );
+        }
+    };
+    if confirmed == 0 {
+        return emit_error(
+            error(
+                "task",
+                format!(
+                    "task {name:?} holds no unconfirmed record made under an orchestrator model while a worker carried it, so there is nothing to confirm; nothing is recorded"
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     store(project, &mut task, json)
 }
 
@@ -387,6 +768,7 @@ pub(super) fn widen(project: &Project, name: &str, add: Vec<String>, json: bool)
             task.scope.push(path);
         }
     }
+    task::attest(&mut task, "scope", None, now_unix());
     store(project, &mut task, json)
 }
 
@@ -398,23 +780,10 @@ pub(super) fn owe(project: &Project, name: &str, add: Vec<String>, json: bool) -
         Ok(task) => task,
         Err(exit) => return exit,
     };
-    let root = &project.manifest.root;
     for path in owed_paths(project, add) {
-        task.removed_deliverables
-            .retain(|removed| removed.path != path);
-        if task
-            .deliverables
-            .iter()
-            .any(|deliverable| deliverable.path == path)
-        {
-            continue;
-        }
-        let opened_digest = blabla::project::digest_of(root, &path);
-        task.deliverables.push(task::Deliverable {
-            opened_digest,
-            path,
-        });
+        task::owe_path(&mut task, path);
     }
+    task::attest(&mut task, "deliverable --add", None, now_unix());
     store(project, &mut task, json)
 }
 
@@ -473,6 +842,7 @@ pub(super) fn unowe(
             reason: reason.to_owned(),
             unix,
         }));
+    task::attest(&mut task, "deliverable --remove", Some(model), unix);
     store(project, &mut task, json)
 }
 
@@ -501,6 +871,7 @@ pub(super) fn declare_check(
     }
     task.check_inputs = inputs.into_iter().map(normalize).collect();
     task.challenged = None;
+    task::attest(&mut task, "check", None, now_unix());
     store(project, &mut task, json)
 }
 
@@ -526,7 +897,12 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
     let evaluation = super::project::evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let status = status_view(project, &evaluation, &structure);
-    let report = report_for(project, &status, Some(&task));
+    let report = report_for(
+        project,
+        &status,
+        Some(&task),
+        Err(skeptic::GOALS_NOT_JUDGED),
+    );
     let standing = report.grounded.len();
     if !task::accept_result(&mut task, &tree, standing, model, now_unix()) {
         return emit_error(
@@ -540,7 +916,10 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
                             state = task.state
                         )
                     } else {
-                        format!("{standing} grounded challenge(s) stand against it")
+                        format!(
+                            "{standing} grounded challenge(s) stand against it{unconfirmed}",
+                            unconfirmed = unconfirmed_guidance(&task)
+                        )
                     }
                 ),
                 None,
@@ -550,6 +929,16 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
         );
     }
     store(project, &mut task, json)
+}
+
+fn unconfirmed_guidance(task: &Task) -> String {
+    match task.unconfirmed_during_carry().count() {
+        0 => String::new(),
+        count => format!(
+            "; {count} record(s) made under an orchestrator model while a worker carried the task are unconfirmed, so review them in blabla task show {name} and confirm them with blabla task confirm {name} --model <id>, or undo them",
+            name = task.name
+        ),
+    }
 }
 
 pub(super) fn show(project: &Project, name: Option<&str>, json: bool) -> i32 {
@@ -570,9 +959,18 @@ pub(super) fn show(project: &Project, name: Option<&str>, json: bool) -> i32 {
     let result = if json {
         write_json(&view(&task))
     } else {
-        write_task(&task).and_then(|()| write_resolution(&resolved(project, &task)))
+        write_task(
+            &task,
+            &project.manifest.root,
+            role_floor(project, &task.role),
+        )
+        .and_then(|()| write_resolution(&resolved(project, &task)))
     };
     if result.is_ok() { 0 } else { 4 }
+}
+
+fn role_floor(project: &Project, role: &str) -> Option<u8> {
+    declared_role(project, role).map(|role| role.floor())
 }
 
 fn write_resolution(resolution: &task::Resolution) -> io::Result<()> {
@@ -616,18 +1014,22 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
         Err(exit) => return exit,
     };
     if !task::apply(&mut task, "accepted") {
-        return emit_error(
-            error(
-                "task",
-                format!(
-                    "task {name:?} state {state:?} → \"accepted\" is not allowed",
-                    state = task.state
-                ),
-                None,
+        let reason = match task::unanswered_decision(&task) {
+            Some(decision) => format!(
+                "task {name:?} is BLOCKED on decision {}: {} (options {}; picked {} at {}%). Only the orchestrator's answer settles it, so it cannot be resumed yet. {}",
+                decision.id,
+                decision.question,
+                decision.options.join(", "),
+                decision.pick,
+                decision.confidence,
+                answer_route(&task, decision)
             ),
-            json,
-            2,
-        );
+            None => format!(
+                "task {name:?} state {state:?} → \"accepted\" is not allowed",
+                state = task.state
+            ),
+        };
+        return emit_error(error("task", reason, None), json, 2);
     }
     let current_tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     task::record_acceptance(&mut task, &current_tree, model, now_unix());
@@ -670,9 +1072,14 @@ pub(super) fn ready(project: &Project, name: &str, json: bool) -> i32 {
     let evaluation = super::project::evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let status = status_view(project, &evaluation, &structure);
-    let report = report_for(project, &status, Some(&task));
+    let report = report_for(
+        project,
+        &status,
+        Some(&task),
+        Err(skeptic::GOALS_NOT_JUDGED),
+    );
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
-    if let Err(next) = task::mark_ready(&mut task, &tree, assignment_blockers(&report).len()) {
+    if let Err(next) = task::mark_ready(&mut task, &tree, report.assignment_blockers().len()) {
         return emit_error(
             error(
                 "task",
@@ -694,6 +1101,25 @@ fn handback_guidance(task: &Task, next: &str) -> String {
     let name = &task.name;
     match next {
         "accept" => format!("accept or resume it with blabla task accept {name} --model <id>"),
+        "await-answer" => match task::unanswered_decision(task) {
+            Some(decision) => format!(
+                "decision {} ({}) is below {}'s floor and has no answer, so the task stays BLOCKED. {}",
+                decision.id,
+                decision.question,
+                task::floor_owner(task, decision),
+                answer_route(task, decision)
+            ),
+            None => "no decision is waiting for an answer".to_owned(),
+        },
+        "pick-question" => match task.unpicked().next() {
+            Some(asked) => format!(
+                "the orchestrator asked question {} ({}) and it has no pick; pick it with {}",
+                asked.id,
+                asked.question,
+                pick_command(task, asked)
+            ),
+            None => "every question the orchestrator asked has a pick".to_owned(),
+        },
         "declare-check" => format!(
             "ask the orchestrator to declare its check with blabla task check {name} \"<command>\""
         ),
@@ -711,15 +1137,6 @@ fn handback_guidance(task: &Task, next: &str) -> String {
         "closed" => "it is CLOSED; open a new assignment for new work".to_owned(),
         _ => "the task record has an invalid state".to_owned(),
     }
-}
-
-fn assignment_blockers(report: &ChallengeReport) -> Vec<&'static str> {
-    report
-        .grounded
-        .iter()
-        .copied()
-        .filter(|class| !matches!(*class, "verification-not-current" | "vacuous-rule"))
-        .collect()
 }
 
 pub(super) fn lens(project: &Project, name: &str, lens: &str, statement: &str, json: bool) -> i32 {
@@ -781,6 +1198,7 @@ pub(super) fn approve_model(
         );
     };
     exception.approval = Some(approval.to_owned());
+    task::attest(&mut task, "approve-model", None, now_unix());
     store(project, &mut task, json)
 }
 
@@ -846,6 +1264,7 @@ pub(super) fn attribute(
             model: Some(model.to_owned()),
         });
     }
+    task::attest(&mut task, "attribute", Some(model), now_unix());
     store(project, &mut task, json)
 }
 
@@ -868,6 +1287,15 @@ fn accepted_for_evidence(project: &Project, name: &str, json: bool) -> Result<Ta
     Ok(task)
 }
 
+fn tree_fingerprint(tree: &std::collections::BTreeMap<String, String>) -> String {
+    let mut hasher = blabla::project::Fnv::new();
+    for (path, digest) in tree {
+        hasher.write_str(path);
+        hasher.write_str(digest);
+    }
+    hasher.finish()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record_evidence(
     project: &Project,
@@ -881,15 +1309,10 @@ fn record_evidence(
 ) -> i32 {
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     let inputs = task::evidence_inputs(task, &tree);
-    let mut hasher = blabla::project::Fnv::new();
-    for (path, digest) in &tree {
-        hasher.write_str(path);
-        hasher.write_str(digest);
-    }
     task.evidence.push(task::Evidence {
         check,
         exit,
-        tree: hasher.finish(),
+        tree: tree_fingerprint(&tree),
         tool: tool.to_owned(),
         unix: now_unix(),
         inputs,
@@ -921,7 +1344,7 @@ pub(super) fn evidence(project: &Project, name: &str, exit: i32, tool: &str, jso
 }
 
 pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
-    let mut task = match accepted_for_evidence(project, name, json) {
+    let task = match accepted_for_evidence(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
     };
@@ -939,6 +1362,8 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         );
     };
     let root = &project.manifest.root;
+    let tree = blabla::project::snapshot(root, &project.ignore);
+    let input_digests = task::evidence_inputs(&task, &tree);
     let scratch = root
         .join(RECORD_DIRECTORY)
         .join(task::SCRATCH_DIRECTORY)
@@ -997,16 +1422,22 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         "{RECORD_DIRECTORY}/{}/{name}/{log_name}",
         task::SCRATCH_DIRECTORY
     );
-    record_evidence(
-        project,
-        &mut task,
-        argv.join(" "),
+    let mut reloaded = match accepted_for_evidence(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let evidence = task::Evidence {
+        check: argv.join(" "),
         exit,
-        "run",
-        Some(argv),
-        Some(log),
-        json,
-    )
+        tree: tree_fingerprint(&tree),
+        tool: "run".to_owned(),
+        unix: now_unix(),
+        inputs: input_digests,
+        command: Some(argv),
+        log: Some(log),
+    };
+    task::apply_evidence(&mut reloaded, evidence);
+    store(project, &mut reloaded, json)
 }
 
 pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i32 {
@@ -1046,9 +1477,18 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
     let evaluation = super::project::evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let status = status_view(project, &evaluation, &structure);
-    let report = report_for(project, &status, selected.as_ref());
+    let goals = match selected {
+        None => super::project::goal_outcomes(project, &evaluation, &status),
+        Some(_) => Err(skeptic::GOALS_NOT_JUDGED),
+    };
+    let report = report_for(
+        project,
+        &status,
+        selected.as_ref(),
+        goals.as_deref().map_err(|reason| *reason),
+    );
     let tree = blabla::project::snapshot(root, &project.ignore);
-    let blockers = assignment_blockers(&report);
+    let blockers = report.assignment_blockers();
     let mut assignment_clear = None;
     if let Some(task) = selected.as_mut() {
         if task.state == "accepted" {
@@ -1120,12 +1560,13 @@ pub(super) fn report_for(
     project: &Project,
     status: &StatusView,
     selected: Option<&Task>,
+    goals: Result<&[Outcome], &'static str>,
 ) -> ChallengeReport {
     let root = &project.manifest.root;
     let tree = blabla::project::snapshot(root, &project.ignore);
     let resolution = selected.map(|task| resolved(project, task));
     let other_tasks = task::read_all(root);
-    skeptic::challenge(&Evidence {
+    let evidence = Evidence {
         task: selected,
         tree: &tree,
         completion: status.completion.state,
@@ -1133,7 +1574,8 @@ pub(super) fn report_for(
         falsify: &|| falsify::falsify(&project.structure, root, &default_providers()),
         role: resolution.as_ref(),
         other_tasks: &other_tasks,
-    })
+    };
+    skeptic::challenge_against(&evidence, goals)
 }
 
 pub(super) fn standing(project: &Project, status: &StatusView) -> ChallengeReport {
@@ -1142,7 +1584,12 @@ pub(super) fn standing(project: &Project, status: &StatusView) -> ChallengeRepor
         .filter(Task::open)
         .collect();
     let selected = if open.len() == 1 { open.pop() } else { None };
-    report_for(project, status, selected.as_ref())
+    report_for(
+        project,
+        status,
+        selected.as_ref(),
+        Err(skeptic::GOALS_NOT_JUDGED),
+    )
 }
 
 pub(super) fn write_challenge(report: &ChallengeReport, voice: Voice) -> io::Result<()> {
@@ -1206,11 +1653,60 @@ pub(super) fn write_challenge_into(
     Ok(())
 }
 
-fn write_task(task: &Task) -> io::Result<()> {
+fn read_last_lines(path: &std::path::Path, count: usize) -> io::Result<Vec<String>> {
+    let contents = std::fs::read_to_string(path)?;
+    Ok(contents
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .rev()
+        .take(count)
+        .map(|s| s.to_owned())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect())
+}
+
+fn write_failing_evidence(
+    output: &mut impl Write,
+    root: &std::path::Path,
+    evidence: &task::Evidence,
+) -> io::Result<()> {
+    if evidence.tool != "run" || evidence.exit == 0 {
+        return Ok(());
+    }
+
+    if let Some(log_path_str) = &evidence.log {
+        writeln!(output, "\nExit code: {}", evidence.exit)?;
+        writeln!(output, "  Log: {}", log_path_str)?;
+
+        let log_path = root.join(log_path_str);
+        match read_last_lines(&log_path, 20) {
+            Ok(lines) if !lines.is_empty() => {
+                writeln!(output, "  Last {} non-empty lines:", lines.len())?;
+                for line in lines {
+                    writeln!(output, "    {}", line)?;
+                }
+            }
+            Ok(_) => {
+                writeln!(output, "  (log file is empty or contains only whitespace)")?;
+            }
+            Err(_) => {
+                writeln!(output, "  (could not read log file)")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_task(task: &Task, root: &std::path::Path, floor: Option<u8>) -> io::Result<()> {
     let mut output = io::stdout().lock();
     writeln!(output, "task::{}   {}", task.name, state_label(task))?;
     writeln!(output, "\nStatement:\n  {}", task.statement)?;
     writeln!(output, "\nCarried by:\n  role::{}", task.role)?;
+    if let Some(goal) = &task.goal {
+        writeln!(output, "\nServes goal::{goal}")?;
+    }
     writeln!(
         output,
         "\nWrite scope:\n  {}",
@@ -1269,6 +1765,9 @@ fn write_task(task: &Task) -> io::Result<()> {
             }
         }
     }
+    write_questions(&mut output, task)?;
+    write_decisions(&mut output, task, floor)?;
+    write_orchestrator_records(&mut output, task)?;
     if !task.notes.is_empty() {
         writeln!(output, "\nNotes:")?;
         for note in &task.notes {
@@ -1281,17 +1780,159 @@ fn write_task(task: &Task) -> io::Result<()> {
             writeln!(output, "  {} — {}", removed.path, removed.reason)?;
         }
     }
+    if let Some(latest_evidence) = task.evidence.last() {
+        write_failing_evidence(&mut output, root, latest_evidence)?;
+    }
     write_routes(&mut output, task)?;
     writeln!(output, "\n{}", task::AUTHORITY)
 }
 
-pub(super) const ROUTES: [&str; 9] = [
+fn write_questions(output: &mut impl Write, task: &Task) -> io::Result<()> {
+    if task.questions.is_empty() {
+        return writeln!(output, "\nQuestions from the orchestrator:\n  none asked");
+    }
+    writeln!(
+        output,
+        "\nQuestions from the orchestrator (task ready is refused while one has no pick):"
+    )?;
+    let (unpicked, picked): (Vec<&task::AskedQuestion>, Vec<&task::AskedQuestion>) = task
+        .questions
+        .iter()
+        .partition(|asked| task::picked_by(task, &asked.id).is_none());
+    for asked in unpicked.into_iter().chain(picked) {
+        writeln!(output, "  {} {}", asked.id, asked.question)?;
+        writeln!(
+            output,
+            "    {}: {}   floor {}%   asked by {}",
+            asked.kind,
+            asked.options.join(", "),
+            asked.floor,
+            asked.model
+        )?;
+        match task::picked_by(task, &asked.id) {
+            Some(decision) => writeln!(
+                output,
+                "    picked {} at {}% in decision {}",
+                decision.pick, decision.confidence, decision.id
+            )?,
+            None => writeln!(output, "    NO PICK: {}", pick_command(task, asked))?,
+        }
+    }
+    Ok(())
+}
+
+fn write_decisions(output: &mut impl Write, task: &Task, floor: Option<u8>) -> io::Result<()> {
+    let floor = match floor {
+        Some(floor) => format!(
+            "role::{} blocks the task on a decision below {floor}% confidence",
+            task.role
+        ),
+        None => format!("role::{} is not declared, so no floor is read", task.role),
+    };
+    if task.decisions.is_empty() {
+        return writeln!(output, "\nDecisions ({floor}):\n  none recorded");
+    }
+    writeln!(output, "\nDecisions ({floor}):")?;
+    for decision in &task.decisions {
+        match &decision.on {
+            Some(asked) => writeln!(
+                output,
+                "  {} {}   on question {asked}",
+                decision.id, decision.question
+            )?,
+            None => writeln!(output, "  {} {}", decision.id, decision.question)?,
+        }
+        writeln!(
+            output,
+            "    {}: {}   picked {} at {}% by {}   {}",
+            decision.kind,
+            decision.options.join(", "),
+            decision.pick,
+            decision.confidence,
+            decision.model,
+            if decision.below_floor {
+                format!("BLOCKS THE TASK, below {}%", decision.floor)
+            } else {
+                "STANDS".to_owned()
+            }
+        )?;
+        match &decision.answer {
+            Some(answer) => writeln!(
+                output,
+                "    answered {} by {}{}: {}",
+                answer.pick,
+                answer.model,
+                if answer.pick == decision.pick {
+                    ", holding the pick".to_owned()
+                } else {
+                    format!(", overruling {}", decision.pick)
+                },
+                answer.reason
+            )?,
+            None if decision.below_floor => writeln!(
+                output,
+                "    no answer yet: stop, do not act on {}. {}",
+                decision.pick,
+                answer_route(task, decision)
+            )?,
+            None => {}
+        }
+    }
+    Ok(())
+}
+
+fn write_orchestrator_records(output: &mut impl Write, task: &Task) -> io::Result<()> {
+    let mut carriers: Vec<&str> = Vec::new();
+    for carrier in task
+        .recorded_during_carry()
+        .filter_map(|record| record.carried_by.as_deref())
+    {
+        if !carriers.contains(&carrier) {
+            carriers.push(carrier);
+        }
+    }
+    for carrier in carriers {
+        writeln!(
+            output,
+            "\nRecorded under an orchestrator model while {carrier} carried the task:"
+        )?;
+        for record in task
+            .recorded_during_carry()
+            .filter(|record| record.carried_by.as_deref() == Some(carrier))
+        {
+            writeln!(
+                output,
+                "  {}   {}   {}",
+                record.verb,
+                record.model.as_deref().map_or_else(
+                    || "no --model given".to_owned(),
+                    |model| format!("--model {model}")
+                ),
+                match &record.confirmed {
+                    Some(confirmation) => format!("confirmed by {}", confirmation.model),
+                    None => "UNCONFIRMED".to_owned(),
+                }
+            )?;
+        }
+    }
+    if task.unconfirmed_during_carry().next().is_some() {
+        writeln!(
+            output,
+            "  --model is an attestation, not proof. After hand-back the orchestrator reviews each record and confirms it with blabla task confirm {} --model <id>, or undoes it; task close is refused until every record here is confirmed",
+            task.name
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) const ROUTES: [&str; 10] = [
     "accept",
     "check",
     "blocker",
     "note",
     "finding",
     "addressed",
+    "decide",
     "lens",
     "challenge",
     "hand-back",
@@ -1300,7 +1941,7 @@ pub(super) const ROUTES: [&str; 9] = [
 fn route_states(route: &str) -> &'static [&'static str] {
     match route {
         "accept" => &["open", "blocked", "ready"],
-        "check" | "blocker" | "note" | "addressed" | "hand-back" => {
+        "check" | "blocker" | "note" | "addressed" | "decide" | "hand-back" => {
             &["open", "accepted", "blocked"]
         }
         "finding" | "challenge" => &["open", "accepted", "blocked", "ready"],
@@ -1356,6 +1997,9 @@ fn render_route(
         )],
         "addressed" => vec![format!(
             "  blabla task addressed {name} <id> \"...\" --model <id>   say what you did about a finding; the orchestrator still resolves it"
+        )],
+        "decide" => vec![format!(
+            "  blabla task decide {name} \"<question>\" --pick <option> --confidence <0-100> --model <id>   a call you are not sure of (a cause, a name, a behavior the statement leaves open) is asked, not guessed; --options a,b,c for a choice; --on <question-id> in place of the question picks one the orchestrator asked. BLOCKS THE TASK means stop now and do not act on your pick until the orchestrator answers"
         )],
         "lens" => vec![format!(
             "  blabla task lens {name} <pack> \"...\"   one assessment against one lens the role consults"
@@ -1423,8 +2067,29 @@ fn write_routes(output: &mut impl Write, task: &Task) -> io::Result<()> {
         for line in route_lines(route, task) {
             writeln!(output, "{line}")?;
         }
+        if route == ROUTES[0] {
+            for line in pick_lines(task) {
+                writeln!(output, "{line}")?;
+            }
+        }
     }
     Ok(())
+}
+
+fn pick_lines(task: &Task) -> Vec<String> {
+    if !matches!(task.state.as_str(), "open" | "accepted" | "ready") {
+        return Vec::new();
+    }
+    task.unpicked()
+        .map(|asked| {
+            format!(
+                "\n  {}   the orchestrator asked {} ({}); pick it before anything else, since task ready is refused until every question has a pick",
+                pick_command(task, asked),
+                asked.id,
+                asked.question
+            )
+        })
+        .collect()
 }
 
 fn write_tasks(tasks: &[Task]) -> io::Result<()> {
@@ -1475,13 +2140,16 @@ pub(super) fn resolved(project: &Project, task: &Task) -> task::Resolution {
         })
         .collect();
     match role {
-        Some(role) => task::resolve(
-            task,
-            &role.model,
-            &role.consult,
-            role.verification.as_deref().unwrap_or("unstated"),
-            &contracts,
-        ),
+        Some(role) => {
+            let permitted = declared_permitted_models(project, &task.role);
+            task::resolve(
+                task,
+                &permitted,
+                &role.consult,
+                role.verification.as_deref().unwrap_or("unstated"),
+                &contracts,
+            )
+        }
         None => task::resolve(task, &[], &[], "unstated", &contracts),
     }
 }
@@ -1499,11 +2167,8 @@ mod tests {
                 name: "probe".to_owned(),
                 role: "worker".to_owned(),
                 statement: "probe".to_owned(),
-                scope: Vec::new(),
-                deliverables: Vec::new(),
                 check: check.map(str::to_owned),
-                check_argv: None,
-                inputs: Vec::new(),
+                ..Default::default()
             },
             0,
         )
@@ -1619,9 +2284,7 @@ mod tests {
             statement: "Test accept transition".to_owned(),
             scope: vec!["src".to_owned()],
             deliverables: vec!["src/main.rs".to_owned()],
-            check: None,
-            check_argv: None,
-            inputs: Vec::new(),
+            ..Default::default()
         };
         let root = &project.manifest.root;
         let task = task::record(root, &project.ignore, opening, 0);
@@ -1649,9 +2312,7 @@ mod tests {
             statement: "Test block transition".to_owned(),
             scope: vec!["src".to_owned()],
             deliverables: vec!["src/main.rs".to_owned()],
-            check: None,
-            check_argv: None,
-            inputs: Vec::new(),
+            ..Default::default()
         };
         let root = &project.manifest.root;
         let task = task::record(root, &project.ignore, opening, 0);
@@ -1675,8 +2336,7 @@ mod tests {
             scope: vec!["src".to_owned()],
             deliverables: vec!["src/main.rs".to_owned()],
             check: Some("check".to_owned()),
-            check_argv: None,
-            inputs: Vec::new(),
+            ..Default::default()
         };
         let root = &project.manifest.root;
         let mut task = task::record(root, &project.ignore, opening, 0);

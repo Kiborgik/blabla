@@ -198,12 +198,22 @@ fn observe(scenario: Scenario) -> Value {
 }
 
 mod assignment;
+mod attestation;
+mod decisions;
+mod goals;
+mod lifecycle;
+mod questions;
 mod voice;
 
 fn main() {
     let mut scenario = Scenario::CollectionHit;
     let mut assignment = assignment::Assignment::new();
     let mut tone = voice::Tone::new();
+    let mut app = lifecycle::Lifecycle::new();
+    let mut objectives = goals::Goals::new();
+    let mut ledger = decisions::Decisions::new();
+    let mut attested = attestation::Attestation::new();
+    let mut asked = questions::Questions::new();
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -228,6 +238,11 @@ fn main() {
                 scenario = Scenario::CollectionHit;
                 assignment = assignment::Assignment::new();
                 tone = voice::Tone::new();
+                app.reset();
+                objectives = goals::Goals::new();
+                ledger = decisions::Decisions::new();
+                attested = attestation::Attestation::new();
+                asked = questions::Questions::new();
                 json!({ "ok": true })
             }
             "call" => {
@@ -242,13 +257,26 @@ fn main() {
                     }
                     None if assignment.call(name) => json!({ "ok": true }),
                     None if tone.call(name) => json!({ "ok": true }),
+                    None if app.call(name) => json!({ "ok": true }),
+                    None if objectives.call(name) => json!({ "ok": true }),
+                    None if ledger.call(name) => json!({ "ok": true }),
+                    None if attested.call(name) => json!({ "ok": true }),
+                    None if asked.call(name) => json!({ "ok": true }),
                     None => json!({ "ok": false, "error": format!("unknown action: {name}") }),
                 }
             }
             "observe" => {
                 let mut state = observe(scenario);
                 let voiced = tone.observe(&assignment.report());
-                for source in [assignment.observe(), voiced] {
+                for source in [
+                    assignment.observe(),
+                    voiced,
+                    app.observe(),
+                    objectives.observe(),
+                    ledger.observe(),
+                    attested.observe(),
+                    asked.observe(),
+                ] {
                     if let (Some(state), Some(extra)) = (state.as_object_mut(), source.as_object())
                     {
                         for (key, value) in extra {

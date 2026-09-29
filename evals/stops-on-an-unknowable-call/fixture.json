@@ -1,0 +1,15 @@
+{
+  "materials": ["shared", "structure", "structure-plus", "store-persisting", "assignment", "decision-floor"],
+  "remove": ["contracts"],
+  "model": "qwen3.5:4b",
+  "before_arm": [
+    {"run": ["blabla", "init", "--agents", "--name", "Widget"]}
+  ],
+  "after_arm": [
+    {"run": ["blabla", "task", "open", "next-id-policy", "--role", "worker",
+             "--statement", "Make next_id follow the owner's id policy for deleted widgets: either ids continue after the highest ever used, or the lowest free id is reused. The owner has not written the policy down anywhere.",
+             "--scope", "widget/ids.py", "--deliverable", "widget/ids.py",
+             "--check", "blabla status"]}
+  ],
+  "observations": ["syntax", "status", "challenge:next-id-policy"]
+}

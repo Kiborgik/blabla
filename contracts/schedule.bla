@@ -11,6 +11,8 @@ require "lint-denies-warnings":        value gate::STEPS maps "clippy" to "warni
 require "the-rust-tests-run":          value gate::STEPS maps "rust-tests" to "test"
 require "the-schedule-tests-itself":   value gate::STEPS maps "gate-schedule" to "test_gate*.py"
 require "the-bridge-is-built":         value gate::STEPS maps "bridge" to "structure-adapter"
+require "the-bridge-tests-run":        value gate::STEPS maps "bridge-tests" to "structure-adapter"
+require "the-questions-campaign-runs": value gate::STEPS maps "questions-campaign" to "contracts/questions.bla"
 require "completion-is-decided":       value gate::STEPS maps "self-hosting-finish" to "finish"
 require "the-record-is-read-back":     value gate::STEPS maps "self-hosting-status" to "status"
 require "python-support-is-exercised":     value gate::STEPS maps "example-python" to "examples/todo"

@@ -511,3 +511,28 @@ forbid \"absent\": dependency thing -> \"socket\"\n";
     assert_eq!(status(&report, "absent").0, RuleStatus::Green);
     assert_eq!(report.status, LayerStatus::Green);
 }
+
+#[test]
+fn structure_contract_with_no_rules_is_refused_with_e_no_rules() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "app/thing.py", "x = 1\n");
+    let contract_text = "module thing \"app/thing.py\"\n";
+    let result = parse("arch.bla", contract_text, root, Some("architecture"));
+    assert!(result.is_err(), "expected E_NO_RULES error");
+    let error = result.unwrap_err();
+    assert_eq!(error.code, "E_NO_RULES");
+    assert!(error.message.contains("declares no rules"));
+}
+
+#[test]
+fn structure_contract_with_one_rule_is_not_refused() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(root, "app/thing.py", "x = 1\n");
+    let contract_text = "module thing \"app/thing.py\"\nrequire \"test\": module thing\n";
+    let result = parse("arch.bla", contract_text, root, Some("architecture"));
+    assert!(result.is_ok(), "expected successful parse");
+    let contract = result.unwrap();
+    assert_eq!(contract.rules.len(), 1);
+}

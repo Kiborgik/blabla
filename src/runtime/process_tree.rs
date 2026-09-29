@@ -133,6 +133,8 @@ impl ProcessTree {
         }
         Ok(accounting.ActiveProcesses == 0)
     }
+
+    pub(crate) fn reap_descendants(&self) {}
 }
 
 #[cfg(windows)]
@@ -177,6 +179,12 @@ impl ProcessTree {
     pub(crate) fn attach(child: &mut Child) -> Result<Self, AppError> {
         let process_group = i32::try_from(child.id())
             .map_err(|_| AppError::new("APP_SPAWN", "application process id is out of range"))?;
+
+        #[cfg(target_os = "linux")]
+        unsafe {
+            let _ = libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+        }
+
         Ok(Self {
             process_group: Some(process_group),
         })
@@ -190,10 +198,27 @@ impl ProcessTree {
         }
     }
 
+    pub(crate) fn reap_descendants(&self) {
+        #[cfg(target_os = "linux")]
+        {
+            let Some(group) = self.process_group else {
+                return;
+            };
+            loop {
+                let mut status = 0;
+                let result = unsafe { libc::waitpid(-group, &mut status, libc::WNOHANG) };
+                if result <= 0 {
+                    break;
+                }
+            }
+        }
+    }
+
     pub(crate) fn is_empty(&self) -> Result<bool, AppError> {
         let Some(group) = self.process_group else {
             return Ok(true);
         };
+
         if unsafe { libc::kill(-group, 0) } == 0 {
             return Ok(false);
         }
@@ -223,4 +248,6 @@ impl ProcessTree {
             "trusted process containment is unsupported on this platform",
         ))
     }
+
+    pub(crate) fn reap_descendants(&self) {}
 }

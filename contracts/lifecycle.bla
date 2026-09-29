@@ -1,0 +1,30 @@
+state running: bool
+state previous_descendant_alive: bool
+state last_termination: string
+
+action start_an_application_with_a_descendant()
+action restart_the_application()
+action finish_the_application()
+
+when start_an_application_with_a_descendant {
+    expect "an-application-is-running-after-a-start":
+        after.running
+}
+
+when restart_the_application {
+    expect "a-restart-releases-the-application-tree":
+        not before.running or after.last_termination == "released"
+    expect "a-restart-leaves-no-descendant-behind":
+        not before.running or not after.previous_descendant_alive
+    expect "a-restart-keeps-the-application-running":
+        after.running == before.running
+}
+
+when finish_the_application {
+    expect "a-finish-releases-the-application-tree":
+        not before.running or after.last_termination == "released"
+    expect "a-finish-leaves-no-descendant-behind":
+        not before.running or not after.previous_descendant_alive
+    expect "nothing-is-running-after-a-finish":
+        not after.running
+}

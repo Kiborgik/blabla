@@ -1,3 +1,5 @@
+use crate::memory::Memory;
+use crate::memory::goal::{Outcome, Verdict};
 use crate::project::status::CompletionState;
 use crate::project::task::{self, Resolution, Task};
 use crate::structure::falsify::FalsifyReport;
@@ -12,7 +14,7 @@ pub const LIMITS: [&str; 3] = [
     include_str!("cli/text/skeptic-limit-source.md"),
 ];
 
-pub const CLASSES: [&str; 13] = [
+pub const CLASSES: [&str; 16] = [
     "unresolved-finding",
     "deliverable-unchanged",
     "scope-breach",
@@ -26,7 +28,18 @@ pub const CLASSES: [&str; 13] = [
     "evidence-superseded",
     "attribution-unknown",
     "declared-check-failed",
+    "decision-unanswered",
+    "orchestrator-record-during-carry",
+    "question-unpicked",
 ];
+
+pub const OUTSIDE_THE_ASSIGNMENT: [&str; 3] = [
+    "verification-not-current",
+    "vacuous-rule",
+    "orchestrator-record-during-carry",
+];
+
+pub const GOAL_CLASSES: [&str; 1] = ["goal-outcome-unmet"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -44,6 +57,10 @@ pub enum Class {
     EvidenceSuperseded,
     AttributionUnknown,
     DeclaredCheckFailed,
+    DecisionUnanswered,
+    OrchestratorRecordDuringCarry,
+    QuestionUnpicked,
+    GoalOutcomeUnmet,
 }
 
 impl Class {
@@ -62,6 +79,10 @@ impl Class {
             Class::EvidenceSuperseded => CLASSES[10],
             Class::AttributionUnknown => CLASSES[11],
             Class::DeclaredCheckFailed => CLASSES[12],
+            Class::DecisionUnanswered => CLASSES[13],
+            Class::OrchestratorRecordDuringCarry => CLASSES[14],
+            Class::QuestionUnpicked => CLASSES[15],
+            Class::GoalOutcomeUnmet => GOAL_CLASSES[0],
         }
     }
 }
@@ -90,6 +111,14 @@ impl ChallengeReport {
     pub fn exit_code(&self) -> i32 {
         if self.challenge.is_some() { 1 } else { 0 }
     }
+
+    pub fn assignment_blockers(&self) -> Vec<&'static str> {
+        self.grounded
+            .iter()
+            .copied()
+            .filter(|class| !OUTSIDE_THE_ASSIGNMENT.contains(class))
+            .collect()
+    }
 }
 
 pub struct Evidence<'a> {
@@ -104,26 +133,81 @@ pub struct Evidence<'a> {
 
 const NO_TASK: &str = "no bounded task is open; blabla task open records one";
 const NOT_REACHED: &str = "a stronger challenge already stands, so this was not evaluated";
+pub const GOALS_NOT_JUDGED: &str = "finish does not judge goals, because a goal never decides completion; blabla challenge with no bounded task selected judges each goal marked done";
 
-fn path_in_other_task_scope(path: &str, current_task: &Task, other_tasks: &[Task]) -> bool {
+pub fn unjudged_goals<T>(memory: &Memory<T>) -> Option<&'static str> {
+    match memory {
+        Memory::Missing(_) => Some(
+            "goals were not judged, because the registered goal memory is missing; blabla status names its problems",
+        ),
+        Memory::Unreadable(_) => Some(
+            "goals were not judged, because the registered goal memory is unreadable; blabla status names its problems",
+        ),
+        Memory::Invalid(_) => Some(
+            "goals were not judged, because the registered goal memory is invalid; blabla status names its problems",
+        ),
+        Memory::Unregistered | Memory::Ignored(_) | Memory::Present(_) => None,
+    }
+}
+
+fn path_in_other_task_scope(
+    path: &str,
+    current_task: &Task,
+    other_tasks: &[Task],
+    tree: &BTreeMap<String, String>,
+) -> bool {
     other_tasks.iter().any(|other| {
-        other.name != current_task.name
-            && other.open()
+        if other.name == current_task.name {
+            return false;
+        }
+        if other.open()
             && (other.in_scope(path)
                 || other
                     .deliverables
                     .iter()
                     .any(|deliverable| task::covers(&deliverable.path, path)))
+        {
+            return true;
+        }
+        if !other.open()
+            && other
+                .closed_unix
+                .is_some_and(|closed| closed > current_task.opened_unix)
+            && (other.in_scope(path)
+                || other
+                    .deliverables
+                    .iter()
+                    .any(|deliverable| task::covers(&deliverable.path, path)))
+            && let Some(closed_digest) = other.closed_paths.get(path)
+            && let Some(current_digest) = task::observed_digest(tree, path)
+            && &current_digest == closed_digest
+        {
+            return true;
+        }
+        false
     })
 }
 
 pub fn challenge(evidence: &Evidence<'_>) -> ChallengeReport {
+    challenge_against(evidence, Err(GOALS_NOT_JUDGED))
+}
+
+pub fn challenge_with_goals(evidence: &Evidence<'_>, goals: &[Outcome]) -> ChallengeReport {
+    challenge_against(evidence, Ok(goals))
+}
+
+pub fn challenge_against(
+    evidence: &Evidence<'_>,
+    goals: Result<&[Outcome], &'static str>,
+) -> ChallengeReport {
     let mut outcomes: Vec<(&'static str, Result<Challenge, &'static str>)> = Vec::new();
     type Grounding = fn(&Task, &Evidence<'_>) -> Result<Challenge, &'static str>;
-    let against_the_task: [(&'static str, Grounding); 9] = [
+    let against_the_task: [(&'static str, Grounding); 11] = [
         (CLASSES[12], |task, evidence| {
             declared_check_failed(task, evidence.tree)
         }),
+        (CLASSES[13], |task, _| decision_unanswered(task)),
+        (CLASSES[15], |task, _| question_unpicked(task)),
         (CLASSES[0], |task, _| unresolved_finding(task)),
         (CLASSES[1], |task, evidence| {
             deliverable_unchanged(task, evidence.tree)
@@ -166,6 +250,14 @@ pub fn challenge(evidence: &Evidence<'_>) -> ChallengeReport {
             },
         ));
     }
+    outcomes.push((
+        CLASSES[14],
+        match evidence.task {
+            Some(task) => orchestrator_record_during_carry(task),
+            None => Err(NO_TASK),
+        },
+    ));
+    outcomes.push((GOAL_CLASSES[0], goal_outcome_unmet(goals, evidence.task)));
     let standing = outcomes.iter().any(|(_, outcome)| outcome.is_ok());
     outcomes.push((
         CLASSES[3],
@@ -241,8 +333,144 @@ fn unresolved_finding(task: &Task) -> Result<Challenge, &'static str> {
         ),
         evidence,
         reconcile: format!(
-            "Settle it against the repository and record what settled it: blabla task resolve {} {} --evidence \"...\" --model <id>. If it no longer holds, say why in that evidence rather than dropping it.",
-            task.name, finding.id
+            "The carrying role records what it did with blabla task addressed {} {} \"...\" --model <id>. The orchestrator settles it with blabla task resolve {} {} --evidence \"...\" --model <id>. If it no longer holds, say why in that evidence rather than dropping it.",
+            task.name, finding.id, task.name, finding.id
+        ),
+    })
+}
+
+fn decision_unanswered(task: &Task) -> Result<Challenge, &'static str> {
+    if !task.open() {
+        return Err("the task is closed; a decision on it is history rather than open evidence");
+    }
+    let mut waiting = task
+        .decisions
+        .iter()
+        .filter(|decision| decision.unanswered_below_floor());
+    let Some(decision) = waiting.next() else {
+        return Err("no decision below its floor is waiting for the orchestrator's answer");
+    };
+    let mut evidence = vec![
+        format!(
+            "task {:?} decision {}: {}",
+            task.name, decision.id, decision.question
+        ),
+        format!("options: {}", decision.options.join(", ")),
+        format!(
+            "{} picked {} at {}% confidence, below {}'s floor of {}%",
+            decision.model,
+            decision.pick,
+            decision.confidence,
+            task::floor_owner(task, decision),
+            decision.floor
+        ),
+        "answer: none recorded".to_owned(),
+    ];
+    let others = waiting.count();
+    if others > 0 {
+        evidence.push(format!(
+            "{} more decision(s) below the floor on this task are waiting for an answer",
+            others
+        ));
+    }
+    Ok(Challenge {
+        class: Class::DecisionUnanswered,
+        statement: format!(
+            "I don't believe this task can be handed back. Decision {} was recorded below its floor, so it blocks the task, and nobody has answered it.",
+            decision.id
+        ),
+        evidence,
+        reconcile: format!(
+            "The orchestrator answers it with blabla task answer {} {} --pick <{}> --reason \"...\" --model <id>. Until then the task stays BLOCKED and the carrying role does not act on {}; it resumes with blabla task accept once the answer is recorded.",
+            task.name,
+            decision.id,
+            decision.options.join("|"),
+            decision.pick
+        ),
+    })
+}
+
+fn question_unpicked(task: &Task) -> Result<Challenge, &'static str> {
+    if !task.open() {
+        return Err("the task is closed; a question on it is history rather than open evidence");
+    }
+    let mut unpicked = task.unpicked();
+    let Some(asked) = unpicked.next() else {
+        return Err("every question the orchestrator asked has a pick");
+    };
+    let mut evidence = vec![
+        format!(
+            "task {:?} question {}: {}",
+            task.name, asked.id, asked.question
+        ),
+        format!("options: {}", asked.options.join(", ")),
+        format!(
+            "asked by {} with a floor of {}%; pick: none recorded",
+            asked.model, asked.floor
+        ),
+    ];
+    let others = unpicked.count();
+    if others > 0 {
+        evidence.push(format!(
+            "{others} more question(s) from the orchestrator on this task have no pick"
+        ));
+    }
+    Ok(Challenge {
+        class: Class::QuestionUnpicked,
+        statement: format!(
+            "I don't believe this task can be handed back. The orchestrator asked question {} and nobody has picked an answer to it.",
+            asked.id
+        ),
+        evidence,
+        reconcile: format!(
+            "blabla task decide {} --on {} --pick <{}> --confidence <0-100> --model <id>. The pick is measured against the question's floor of {}%: at or above it the pick stands, below it the task is BLOCKED until the orchestrator answers. task ready is refused until every question has a pick.",
+            task.name,
+            asked.id,
+            asked.options.join("|"),
+            asked.floor
+        ),
+    })
+}
+
+fn orchestrator_record_during_carry(task: &Task) -> Result<Challenge, &'static str> {
+    if !task.open() {
+        return Err("the task is closed; a record on it is history rather than open evidence");
+    }
+    let mut unconfirmed = task.unconfirmed_during_carry();
+    let Some(record) = unconfirmed.next() else {
+        return Err(
+            "no record made under an orchestrator model while a worker carried the task is waiting for confirmation",
+        );
+    };
+    let carrier = record.carried_by.as_deref().unwrap_or("a worker");
+    let claimed = match &record.model {
+        Some(model) => format!("under {model}"),
+        None => "with no --model".to_owned(),
+    };
+    let mut evidence = vec![
+        format!(
+            "task {:?}: {} recorded {} while {} carried the task",
+            task.name, record.verb, claimed, carrier
+        ),
+        "confirmed: no".to_owned(),
+        "--model is what the caller said it was; BlaBla cannot tell who ran the command".to_owned(),
+    ];
+    let others = unconfirmed.count();
+    if others > 0 {
+        evidence.push(format!(
+            "{others} more record(s) made while the task was carried are unconfirmed"
+        ));
+    }
+    Ok(Challenge {
+        class: Class::OrchestratorRecordDuringCarry,
+        statement: format!(
+            "I don't believe the orchestrator made this record. {} was recorded {} while {} carried the task, and --model is an attestation, not proof.",
+            record.verb, claimed, carrier
+        ),
+        evidence,
+        reconcile: format!(
+            "After hand-back the orchestrator reviews each record blabla task show {name} lists under \"Recorded under an orchestrator model\" and confirms it with blabla task confirm {name} --model <id>, or undoes it. The carrying role cannot clear this: task confirm is refused while the task is carried, the record does not refuse task ready, and task close is refused until the records are confirmed.",
+            name = task.name
         ),
     })
 }
@@ -570,7 +798,7 @@ fn attribution_unknown(
         .copied()
         .filter(|path| {
             task::attribute(task, tree, path) == task::ATTRIBUTIONS[2]
-                && !path_in_other_task_scope(path, task, other_tasks)
+                && !path_in_other_task_scope(path, task, other_tasks, tree)
         })
         .collect();
     let Some(first) = undeclared.first().copied() else {
@@ -661,5 +889,54 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
             format!("assessments recorded: {}", task.assessments.len()),
         ],
         reconcile: include_str!("cli/text/skeptic-lens-unassessed.md").to_owned(),
+    })
+}
+
+fn goal_outcome_unmet(
+    goals: Result<&[Outcome], &'static str>,
+    task: Option<&Task>,
+) -> Result<Challenge, &'static str> {
+    if task.is_some() {
+        return Err(
+            "a bounded task is selected; a goal's outcome is challenged project-wide, when no task is",
+        );
+    }
+    let unmet: Vec<&Outcome> = goals?.iter().filter(|goal| goal.unmet()).collect();
+    let Some(first) = unmet.first() else {
+        return Err("no goal marked done has an expectation that is not held");
+    };
+    let mut evidence = vec![
+        format!("{}: state done", first.goal),
+        format!("expectations held: {} of {}", first.held, first.expected),
+    ];
+    evidence.extend(
+        first
+            .expectations
+            .iter()
+            .filter(|expectation| expectation.verdict != Verdict::Held)
+            .map(|expectation| format!("{}: {}", expectation.identity, expectation.verdict.word())),
+    );
+    if unmet.len() > 1 {
+        evidence.push(format!(
+            "{} goals marked done have an expectation that is not held: {}",
+            unmet.len(),
+            unmet
+                .iter()
+                .map(|goal| goal.goal.as_str())
+                .collect::<Vec<&str>>()
+                .join(", ")
+        ));
+    }
+    Ok(Challenge {
+        class: Class::GoalOutcomeUnmet,
+        statement: format!(
+            "I don't believe {} is done. It is marked done, and {} of its {} expectations hold in the current project view.",
+            first.goal, first.held, first.expected
+        ),
+        evidence,
+        reconcile: format!(
+            "blabla explain {} gives the verdict on each expectation. Make every one GREEN in a current run, or set the goal back to state \"active\" until it is.",
+            first.goal
+        ),
     })
 }

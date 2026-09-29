@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: stops-on-an-unknowable-call
+tags: [decisions]
+context:
+  scaffold_script: fixture.sh
