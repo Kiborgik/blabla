@@ -41,8 +41,6 @@ Version 0.9 is built for an orchestrator running small workers. A worker states 
 ### Limitations
 
 - `--model` is still a claim BlaBla records and cannot prove; a model permitted as both worker and orchestrator can answer its own blocking decision.
-- The self-hosting campaign runs every behavior contract in one model with a fixed seed and picks actions without steering toward unwitnessed rules. Registering `contracts/questions.bla` there left two assignment rules unwitnessed at every profile tried (64 cases, 1024 steps, another seed), so it runs as its own campaign until the campaign steers.
-- Reported by workers this round and not yet changed: challenge wording after a clear assignment, the declared check missing from `task show`, a way to withdraw a task, lens assessments that carry over to a new worker, and scopes that two unclosed tasks can share.
 
 ## 0.8.0 (2026-09-22)
 
