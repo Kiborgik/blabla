@@ -1603,10 +1603,11 @@ fn a_path_inside_a_closed_tasks_scope_is_grounded_as_attribution_unknown() {
         ),
         0
     );
+    write(temp.path(), "src/other.rs", "pub fn run() -> u8 { 3 }\n");
     let (report, code) = json_of(&temp, &["challenge", "one", "--json"]);
     assert_eq!(
         report["challenge"]["class"], "attribution-unknown",
-        "src/other.rs is in a closed task's scope, so it should ground attribution-unknown: {report}"
+        "src/other.rs changed after the closed task left it, so it should ground attribution-unknown: {report}"
     );
     assert_eq!(code, 1);
 }
