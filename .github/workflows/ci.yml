@@ -35,7 +35,7 @@ jobs:
           java-version: "21"
       - uses: Swatinem/rust-cache@v2
       - name: Historical and current experiment tests
-        run: python -m unittest discover -s experiments -p "test_*.py"
+        run: python experiments/run_historical_tests.py
       - name: Product gate
         run: python experiments/gate.py --tag ci --out ci-artifacts/gate
         env:

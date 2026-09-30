@@ -3,7 +3,7 @@ mod support;
 
 use blabla::memory::Memory;
 use blabla::memory::goal::{self, Goal, GoalMemory, Outcome, Verdict};
-use blabla::project::runstate::marker_path;
+use blabla::project::{runstate::marker_path, task};
 use blabla::skeptic::{self, Evidence};
 use blabla::structure::falsify::FalsifyReport;
 use blabla::voice::{self, Voice};
@@ -837,6 +837,7 @@ fn task_open_refuses_a_goal_the_goal_memory_does_not_declare() {
     let temp = project();
     let (refusal, code) = open_task(&temp, "serving", Some("nope"));
     assert_eq!(code, 2, "{refusal}");
+    assert_eq!(refusal["category"], "task");
     let message = refusal["message"].as_str().unwrap();
     let words: BTreeSet<&str> = message
         .split(|character: char| !(character.is_alphanumeric() || "-_".contains(character)))
@@ -845,15 +846,26 @@ fn task_open_refuses_a_goal_the_goal_memory_does_not_declare() {
         assert!(words.contains(declared), "{declared}: {message}");
     }
     assert!(!recorded(&temp, "serving"));
+    assert!(task::read(temp.path(), "serving").unwrap().is_none());
 
     let (opened, code) = open_task(&temp, "serving", Some("ready"));
     assert_eq!(code, 0, "{opened}");
     assert_eq!(opened["task"]["goal"], "ready");
 
-    let unregistered = without_goal_file(WITHOUT_GOALS);
-    let (refusal, code) = open_task(&unregistered, "serving", Some("ready"));
-    assert_eq!(code, 2, "{refusal}");
-    assert!(!recorded(&unregistered, "serving"));
+    for unregistered in [
+        without_goal_file(WITHOUT_GOALS),
+        project_with(WITHOUT_GOALS, GOALS),
+    ] {
+        let (refusal, code) = open_task(&unregistered, "serving", Some("ready"));
+        assert_eq!(code, 2, "{refusal}");
+        assert_eq!(refusal["category"], "task");
+        assert!(!recorded(&unregistered, "serving"));
+        assert!(
+            task::read(unregistered.path(), "serving")
+                .unwrap()
+                .is_none()
+        );
+    }
 }
 
 #[test]

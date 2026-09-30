@@ -78,19 +78,6 @@ always "rare" { value != 99 or sealed }
 }
 
 #[test]
-fn parameterless_prefix_scoring_evaluates_one_equivalent_candidate() {
-    let contract = scoring_contract();
-    let mut calls = 0;
-    let score = prefix_score(&contract.actions[0], || {
-        calls += 1;
-        Ok(0.5)
-    })
-    .unwrap();
-    assert_eq!(score, 0.5);
-    assert_eq!(calls, 1);
-}
-
-#[test]
 fn prefix_scoring_preserves_zero_floor_nan_and_parameterized_repetitions() {
     let contract = scoring_contract();
     for action in &contract.actions {

@@ -326,22 +326,3 @@ fn cli_task_without_goal_cannot_supply_required_goal_context() {
         "missing_required_context"
     );
 }
-
-#[test]
-fn cli_task_open_rejects_unknown_or_unregistered_goal() {
-    for registered in [true, false] {
-        let fixture = Fixture::new();
-        if !registered {
-            std::fs::write(
-                fixture.root.path().join("project.bla"),
-                MANIFEST.replace("goal \"goals.bla\"\n", ""),
-            )
-            .unwrap();
-        }
-        let output = fixture.open(Some(if registered { "unknown" } else { "target" }));
-        assert_eq!(output.status.code(), Some(2));
-        let error: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(error["category"], "task");
-        assert!(task::read(fixture.root.path(), "work").unwrap().is_none());
-    }
-}
