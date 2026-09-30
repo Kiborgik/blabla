@@ -500,6 +500,10 @@ fn bounded_labels_and_binding_lists_are_validated() {
         base.replace("\"justified\"", "\"unsafe/label\""),
         base.replace("output \"score\"", "output \"choice\"")
             .replace(
+                "requires [\"claim\", \"evidence\"]",
+                "requires [\"claim\", \"evidence\", \"candidates\"]",
+            )
+            .replace(
                 "levels [\"justified\", \"unclear\", \"repeating\"]",
                 "alternatives [\"candidate-1\", \"candidate-5\", \"none\"]",
             ),
@@ -518,6 +522,110 @@ fn bounded_labels_and_binding_lists_are_validated() {
     ] {
         let temp = fixture(true, KNOWLEDGE, &bad);
         assert_ne!(status(&temp)["process_memory"]["state"], "present");
+    }
+}
+
+#[test]
+fn generic_choice_accepts_candidate_prefixed_labels_without_candidates_context() {
+    for alternatives in [
+        vec!["candidate-ready", "candidate-blocked"],
+        vec!["candidate-1", "candidate-5", "none"],
+        vec!["candidate-ready", "ready"],
+    ] {
+        let source = KNOWLEDGE
+            .replace("output \"noul\"", "output \"choice\"")
+            .replace(
+                "proposition \"The evidence supports the claim.\"",
+                &format!("alternatives {}", json!(alternatives)),
+            );
+        let temp = fixture(true, &source, PROCESS);
+        let (checked, code) = cli(&temp, &["check", "knowledge/expert.bla", "--json"]);
+        assert_eq!(code, 0, "{checked}");
+        assert_eq!(checked["status"], "valid");
+        assert_eq!(status(&temp)["knowledge_memory"]["state"], "present");
+        let (definition, code) = cli(
+            &temp,
+            &[
+                "explain",
+                "judgment::expert-review::claim-support",
+                "--json",
+            ],
+        );
+        assert_eq!(code, 0);
+        assert_eq!(
+            definition["judgment"]["output"]["alternatives"],
+            json!(alternatives)
+        );
+    }
+}
+
+#[test]
+fn candidate_choice_accepts_bounded_labels_from_required_or_optional_context() {
+    for context in [
+        "requires [\"claim\", \"evidence\", \"candidates\"]",
+        "requires [\"claim\", \"evidence\"]\noptional [\"candidates\"]",
+    ] {
+        let source = KNOWLEDGE
+            .replace("requires [\"claim\", \"evidence\"]", context)
+            .replace("output \"noul\"", "output \"choice\"")
+            .replace(
+                "proposition \"The evidence supports the claim.\"",
+                "alternatives [\"candidate-1\", \"candidate-2\", \"candidate-3\", \"candidate-4\", \"none\"]",
+            );
+        let temp = fixture(true, &source, PROCESS);
+        let (checked, code) = cli(&temp, &["check", "knowledge/expert.bla", "--json"]);
+        assert_eq!(code, 0, "{checked}");
+        assert_eq!(checked["status"], "valid");
+    }
+}
+
+#[test]
+fn candidate_choice_rejects_unmapped_labels_from_required_or_optional_context() {
+    for context in [
+        "requires [\"claim\", \"evidence\", \"candidates\"]",
+        "requires [\"claim\", \"evidence\"]\noptional [\"candidates\"]",
+    ] {
+        for alternatives in [
+            vec!["candidate-1", "candidate-5", "none"],
+            vec!["candidate-ready", "candidate-blocked"],
+            vec!["aligned", "drift"],
+            vec!["candidate-01", "none"],
+            vec!["candidate-0", "none"],
+            vec!["candidate-1", "None"],
+        ] {
+            let source = KNOWLEDGE
+                .replace("requires [\"claim\", \"evidence\"]", context)
+                .replace("output \"noul\"", "output \"choice\"")
+                .replace(
+                    "proposition \"The evidence supports the claim.\"",
+                    &format!("alternatives {}", json!(alternatives)),
+                );
+            let temp = fixture(true, &source, PROCESS);
+            let (checked, code) = cli(&temp, &["check", "knowledge/expert.bla", "--json"]);
+            assert_eq!(code, 2, "{context}: {alternatives:?}: {checked}");
+            assert_eq!(checked["diagnostic"]["code"], "E_MEMORY_FIELD");
+            assert_eq!(status(&temp)["knowledge_memory"]["state"], "unreadable");
+        }
+    }
+}
+
+#[test]
+fn generic_choice_still_requires_distinct_identity_safe_alternatives() {
+    for (alternatives, diagnostic) in [
+        (vec!["candidate-ready", "candidate-ready"], "E_MEMORY_FIELD"),
+        (vec!["candidate-ready"], "E_MEMORY_FIELD"),
+        (vec!["candidate-ready", "unsafe/label"], "E_MEMORY_NAME"),
+    ] {
+        let source = KNOWLEDGE
+            .replace("output \"noul\"", "output \"choice\"")
+            .replace(
+                "proposition \"The evidence supports the claim.\"",
+                &format!("alternatives {}", json!(alternatives)),
+            );
+        let temp = fixture(true, &source, PROCESS);
+        let (checked, code) = cli(&temp, &["check", "knowledge/expert.bla", "--json"]);
+        assert_eq!(code, 2, "{alternatives:?}: {checked}");
+        assert_eq!(checked["diagnostic"]["code"], diagnostic);
     }
 }
 

@@ -448,9 +448,8 @@ fn build_judgment(block: &Block) -> Result<Judgment, Diagnostic> {
     let output = match output_name.as_str() {
         "choice" => {
             let alternatives = ordered_labels(block, "alternatives")?;
-            if alternatives
-                .iter()
-                .any(|label| label.starts_with("candidate-"))
+            if (requires.contains(&ContextSlot::Candidates)
+                || optional.contains(&ContextSlot::Candidates))
                 && alternatives.iter().any(|label| {
                     ![
                         "candidate-1",
