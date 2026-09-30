@@ -180,6 +180,10 @@ impl Assignment {
 
     fn record_result(&mut self, check: &str, exit: i32) {
         self.task.evidence.push(Evidence {
+            identity: Some(task::CheckIdentity::Text {
+                command: check.to_owned(),
+            }),
+            acceptance_epoch: Some(self.task.acceptance_epoch),
             check: check.to_owned(),
             exit,
             tree: digest("tree"),
@@ -336,6 +340,8 @@ impl Assignment {
         let evidence_inputs = task::evidence_inputs(&concurrent_task, &self.tree);
 
         concurrent_task.evidence = vec![Evidence {
+            identity: task::declared_check(&concurrent_task),
+            acceptance_epoch: Some(concurrent_task.acceptance_epoch),
             check: DECLARED_CHECK.to_owned(),
             exit: 0,
             tree: digest("tree"),
@@ -535,6 +541,8 @@ impl Assignment {
                 task::apply_evidence(
                     &mut self.task,
                     Evidence {
+                        identity: task::declared_check(&copy),
+                        acceptance_epoch: Some(copy.acceptance_epoch),
                         check: DECLARED_CHECK.to_owned(),
                         exit: 0,
                         tree: "tree".to_owned(),
@@ -620,6 +628,35 @@ impl Assignment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_result_bindings_preserve_the_observed_check_and_acceptance() {
+        let mut assignment = Assignment::new();
+        assignment.call("accept_with_a_permitted_model");
+        task::record_acceptance(&mut assignment.task, &assignment.tree, PERMITTED, 1);
+        assignment.call("record_a_check_result");
+        let evidence = assignment.task.evidence.last().unwrap();
+        assert_eq!(evidence.identity, task::declared_check(&assignment.task));
+        assert_eq!(
+            evidence.acceptance_epoch,
+            Some(assignment.task.acceptance_epoch)
+        );
+        assert!(task::evidence_matches(&assignment.task, evidence));
+        assignment.task.evidence.clear();
+        assignment.call("record_a_result_for_a_different_check");
+        let evidence = assignment.task.evidence.last().unwrap();
+        assert_eq!(
+            evidence.identity,
+            Some(task::CheckIdentity::Text {
+                command: OTHER_CHECK.to_owned()
+            })
+        );
+        assert_eq!(
+            evidence.acceptance_epoch,
+            Some(assignment.task.acceptance_epoch)
+        );
+        assert!(!task::evidence_matches(&assignment.task, evidence));
+    }
 
     #[test]
     fn resumed_work_exercises_both_guarded_handback_and_result_acceptance() {
