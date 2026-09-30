@@ -1310,6 +1310,8 @@ fn record_evidence(
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     let inputs = task::evidence_inputs(task, &tree);
     task.evidence.push(task::Evidence {
+        identity: task::declared_check(task),
+        acceptance_epoch: Some(task.acceptance_epoch),
         check,
         exit,
         tree: tree_fingerprint(&tree),
@@ -1364,6 +1366,8 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
     let root = &project.manifest.root;
     let tree = blabla::project::snapshot(root, &project.ignore);
     let input_digests = task::evidence_inputs(&task, &tree);
+    let identity = task::declared_check(&task);
+    let acceptance_epoch = task.acceptance_epoch;
     let scratch = root
         .join(RECORD_DIRECTORY)
         .join(task::SCRATCH_DIRECTORY)
@@ -1426,7 +1430,20 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if reloaded.opened_unix != task.opened_unix || reloaded.opened_tree != task.opened_tree {
+        return emit_error(
+            error(
+                "task",
+                format!("task {name:?} was replaced while its check ran; nothing is recorded"),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     let evidence = task::Evidence {
+        identity,
+        acceptance_epoch: Some(acceptance_epoch),
         check: argv.join(" "),
         exit,
         tree: tree_fingerprint(&tree),

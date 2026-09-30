@@ -34,6 +34,8 @@ fn accepted() -> (task::Task, BTreeMap<String, String>) {
 
 fn evidence(task: &mut task::Task, tree: &BTreeMap<String, String>) {
     task.evidence.push(Evidence {
+        identity: task::declared_check(&task),
+        acceptance_epoch: Some(task.acceptance_epoch),
         check: "check".to_owned(),
         exit: 0,
         tree: "tree".to_owned(),
@@ -105,6 +107,8 @@ fn a_new_directory_deliverable_has_a_digest_and_child_changes_stale_its_evidence
     tree.insert("generated/a.py".to_owned(), "first".to_owned());
     assert!(task::observed_digest(&tree, "generated").is_some());
     task.evidence.push(Evidence {
+        identity: task::declared_check(&task),
+        acceptance_epoch: Some(task.acceptance_epoch),
         check: "check".to_owned(),
         exit: 0,
         tree: "tree".to_owned(),
@@ -2040,4 +2044,419 @@ fn a_closed_task_refuses_an_address_and_a_run() {
         2
     );
     assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+fn task_tree(temp: &TempDir) -> BTreeMap<String, String> {
+    blabla::project::snapshot(temp.path(), &blabla::project::ignore::Ignore::default())
+}
+
+fn race_task(temp: &TempDir) -> task::Task {
+    task::read(temp.path(), "race").unwrap().unwrap()
+}
+
+fn race_fixture(temp: &TempDir, action: &str) -> Vec<String> {
+    setup_project(temp);
+    let executable = std::env::current_exe().unwrap();
+    let argv = vec![
+        executable.to_str().unwrap().to_owned(),
+        "--exact".to_owned(),
+        "run_task_record_mutation_child".to_owned(),
+        "--nocapture".to_owned(),
+    ];
+    open_with_argv_check(
+        temp,
+        "race",
+        &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 1 }\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(temp.path().join(".blabla/scratch/race")).unwrap();
+    std::fs::write(temp.path().join(".blabla/scratch/race/action"), action).unwrap();
+    argv
+}
+
+fn assert_no_current_credit(temp: &TempDir) {
+    let work = race_task(temp);
+    let tree = task_tree(temp);
+    assert!(!task::readiness(&work, &tree).supported);
+    assert_eq!(task::handback(&work, &tree), Err("record-evidence"));
+    assert!(!task::accept_result(
+        &mut work.clone(),
+        &tree,
+        0,
+        "owner",
+        5
+    ));
+    assert_eq!(cli_run(temp, &["task", "ready", "race", "--json"]), 2);
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task",
+                "close",
+                "race",
+                "--model",
+                "claude-opus-4-1",
+                "--json"
+            ]
+        ),
+        2
+    );
+}
+
+#[test]
+fn run_task_record_mutation_child() {
+    let marker = std::path::Path::new(".blabla/scratch/race/action");
+    let Ok(action) = std::fs::read_to_string(marker) else {
+        return;
+    };
+    let root = std::env::current_dir().unwrap();
+    let invoke = |values: &[&str]| {
+        let output = run_in(Some(&root), &args(values));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    };
+    match action.as_str() {
+        "check" => invoke(&[
+            "task",
+            "check",
+            "race",
+            "--argv",
+            env!("CARGO"),
+            "nonexistent-subcommand",
+        ]),
+        "reaccept" => invoke(&["task", "accept", "race", "--model", "new-worker"]),
+        "close" => {
+            invoke(&["challenge", "race", "--json"]);
+            invoke(&["task", "ready", "race", "--json"]);
+            invoke(&[
+                "task",
+                "close",
+                "race",
+                "--model",
+                "claude-opus-4-1",
+                "--json",
+            ]);
+        }
+        "noop" => {}
+        other => panic!("unknown fixture action {other}"),
+    }
+}
+
+#[test]
+fn argv_change_invalidates_old_success() {
+    let temp = TempDir::new().unwrap();
+    race_fixture(&temp, "noop");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    assert!(task::readiness(&race_task(&temp), &task_tree(&temp)).supported);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "check",
+                "race",
+                "--argv",
+                env!("CARGO"),
+                "nonexistent-subcommand"
+            ]
+        ),
+        0
+    );
+    assert_no_current_credit(&temp);
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    assert_ne!(race_task(&temp).evidence.last().unwrap().exit, 0);
+    assert_no_current_credit(&temp);
+}
+
+#[test]
+fn argv_boundaries_are_significant() {
+    let temp = TempDir::new().unwrap();
+    let original = race_fixture(&temp, "noop");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    let combined = format!("{} {}", original[1], original[2]);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "check",
+                "race",
+                "--argv",
+                &original[0],
+                &combined,
+                &original[3]
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        original.join(" "),
+        race_task(&temp).check_argv.unwrap().join(" ")
+    );
+    assert_no_current_credit(&temp);
+}
+
+#[test]
+fn text_and_argv_checks_are_distinct() {
+    let temp = TempDir::new().unwrap();
+    let original = race_fixture(&temp, "noop");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    assert_eq!(
+        cli_run(&temp, &["task", "check", "race", &original.join(" ")]),
+        0
+    );
+    assert_no_current_credit(&temp);
+}
+
+#[test]
+fn run_changing_its_own_check_cannot_credit_replacement() {
+    let temp = TempDir::new().unwrap();
+    let original = race_fixture(&temp, "check");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    let work = race_task(&temp);
+    assert_eq!(
+        work.check_argv,
+        Some(vec![
+            env!("CARGO").to_owned(),
+            "nonexistent-subcommand".to_owned()
+        ])
+    );
+    assert_eq!(work.evidence.len(), 1);
+    assert_eq!(work.evidence[0].exit, 0);
+    assert_eq!(work.evidence[0].command, Some(original));
+    assert_no_current_credit(&temp);
+}
+
+#[test]
+fn run_finishing_after_reaccept_cannot_credit_new_worker() {
+    let temp = TempDir::new().unwrap();
+    let original = race_fixture(&temp, "reaccept");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    let work = race_task(&temp);
+    assert_eq!(work.accepted.as_ref().unwrap().model, "new-worker");
+    assert_eq!(work.evidence.len(), 1);
+    assert_eq!(work.evidence[0].exit, 0);
+    assert_eq!(work.evidence[0].command, Some(original));
+    assert_no_current_credit(&temp);
+}
+
+#[test]
+fn run_finishing_after_terminal_transition_cannot_restore_task() {
+    let temp = TempDir::new().unwrap();
+    race_fixture(&temp, "noop");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    std::fs::write(temp.path().join(".blabla/scratch/race/action"), "close").unwrap();
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 2);
+    let work = race_task(&temp);
+    assert_eq!(work.state, "closed");
+    assert_eq!(work.evidence.len(), 1);
+    assert!(work.closed_unix.is_some());
+    assert_eq!(work.result.unwrap().model, "claude-opus-4-1");
+}
+
+#[test]
+fn same_second_reacceptance_invalidates_success() {
+    let (mut work, tree) = accepted();
+    task::record_acceptance(&mut work, &tree, "small", 7);
+    evidence(&mut work, &tree);
+    task::record_acceptance(&mut work, &tree, "small", 7);
+    assert_eq!(serde_json::to_value(&work).unwrap()["acceptance_epoch"], 2);
+    assert!(!task::readiness(&work, &tree).supported);
+}
+
+#[test]
+fn narrowed_check_inputs_require_fresh_evidence() {
+    let (mut work, tree) = accepted();
+    work.check_inputs = vec!["src".to_owned(), "shared/config".to_owned()];
+    evidence(&mut work, &tree);
+    work.check_inputs = vec!["src/a.rs".to_owned()];
+    assert!(!task::readiness(&work, &tree).supported);
+}
+
+#[test]
+fn legacy_evidence_is_unbound_history() {
+    let (mut work, tree) = accepted();
+    evidence(&mut work, &tree);
+    let mut record = serde_json::to_value(&work).unwrap();
+    let fields = record["evidence"][0].as_object_mut().unwrap();
+    fields.remove("identity");
+    fields.remove("acceptance_epoch");
+    let work: task::Task = serde_json::from_value(record).unwrap();
+    assert_eq!(work.evidence.len(), 1);
+    assert!(task::latest_evidence(&work).is_none());
+    assert!(!task::readiness(&work, &tree).supported);
+}
+
+#[test]
+fn relevant_revision_binds_assignment_decisions_findings_and_identity_digests() {
+    let (work, tree) = accepted();
+    let identities = BTreeMap::from([("role::worker".to_owned(), "first".to_owned())]);
+    let revision = task::relevant_revision(&work, &tree, identities.clone());
+    assert_eq!(revision.paths, task::evidence_inputs(&work, &tree));
+    assert_eq!(revision.identities, identities);
+    let mut changed = work.clone();
+    changed.statement.push_str(" again");
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.role = "reviewer".to_owned();
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.goal = Some("ship".to_owned());
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.scope.push("shared".to_owned());
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.check_argv = Some(vec!["check".to_owned()]);
+    changed.check = None;
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.check_inputs = vec!["src/a.rs".to_owned()];
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.deliverables.clear();
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.findings.push(task::Finding {
+        id: 1,
+        statement: "reconsider".to_owned(),
+        addressed: None,
+        resolution: None,
+    });
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    task::decide(
+        &mut changed,
+        task::Question {
+            question: "ship?".to_owned(),
+            options: Vec::new(),
+            pick: "yes".to_owned(),
+            confidence: 90,
+            model: "small".to_owned(),
+        },
+        70,
+    )
+    .unwrap();
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    let changed_identities = BTreeMap::from([("role::worker".to_owned(), "second".to_owned())]);
+    assert_ne!(
+        revision.fingerprint(),
+        task::relevant_revision(&work, &tree, changed_identities).fingerprint()
+    );
+}
+
+#[test]
+fn relevant_revision_tracks_missing_paths_and_directory_children() {
+    let (mut work, mut tree) = accepted();
+    work.check_inputs = vec!["generated".to_owned(), "config".to_owned()];
+    let missing = task::relevant_revision(&work, &tree, BTreeMap::new());
+    assert_eq!(missing.paths["config"], None);
+    tree.insert("config".to_owned(), "created".to_owned());
+    let created = task::relevant_revision(&work, &tree, BTreeMap::new());
+    assert_ne!(missing.fingerprint(), created.fingerprint());
+    tree.remove("config");
+    assert_eq!(
+        missing,
+        task::relevant_revision(&work, &tree, BTreeMap::new())
+    );
+    tree.insert("generated/one.rs".to_owned(), "one".to_owned());
+    let first_child = task::relevant_revision(&work, &tree, BTreeMap::new());
+    assert_ne!(missing, first_child);
+    tree.insert("generated/two.rs".to_owned(), "two".to_owned());
+    assert_ne!(
+        first_child,
+        task::relevant_revision(&work, &tree, BTreeMap::new())
+    );
+    tree.remove("generated/one.rs");
+    assert_ne!(
+        first_child,
+        task::relevant_revision(&work, &tree, BTreeMap::new())
+    );
+}
+
+#[test]
+fn relevant_revision_ignores_history_metadata_and_unrelated_concurrent_paths() {
+    let (mut work, mut tree) = accepted();
+    work.attributions.push(task::Attribution {
+        path: "src/concurrent".to_owned(),
+        kind: "concurrent".to_owned(),
+        digest: None,
+        model: None,
+    });
+    let revision = task::relevant_revision(&work, &tree, BTreeMap::new());
+    work.notes.push(task::Note {
+        statement: "progress".to_owned(),
+        unix: 9,
+    });
+    work.orchestrator_records.push(task::OrchestratorRecord {
+        verb: "review".to_owned(),
+        model: Some("owner".to_owned()),
+        unix: 10,
+        carried_by: None,
+        confirmed: Some(task::Confirmation {
+            model: "owner".to_owned(),
+            unix: 11,
+        }),
+    });
+    work.build = Some("stamp".to_owned());
+    work.closed_unix = Some(12);
+    work.result = work.accepted.clone();
+    work.accepted.as_mut().unwrap().unix = 13;
+    work.challenged = Some(task::ChallengeReceipt {
+        fingerprint: "receipt".to_owned(),
+        unix: 14,
+    });
+    evidence(&mut work, &tree);
+    tree.insert("docs/unrelated.md".to_owned(), "change".to_owned());
+    tree.insert("src/concurrent/other.rs".to_owned(), "change".to_owned());
+    assert_eq!(
+        revision,
+        task::relevant_revision(&work, &tree, BTreeMap::new())
+    );
+}
+
+#[test]
+fn relevant_revision_changes_on_same_second_reacceptance() {
+    let (mut work, tree) = accepted();
+    task::record_acceptance(&mut work, &tree, "small", 9);
+    let first = task::relevant_revision(&work, &tree, BTreeMap::new());
+    task::record_acceptance(&mut work, &tree, "small", 9);
+    let second = task::relevant_revision(&work, &tree, BTreeMap::new());
+    assert_ne!(first.fingerprint(), second.fingerprint());
+    assert_eq!(second.acceptance_epoch, 2);
 }

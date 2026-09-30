@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub mod revision;
+
+pub use revision::{RelevantRevision, relevant_revision};
+
 pub const TASK_DIRECTORY: &str = "tasks";
 
 pub const AUTHORITY: &str = include_str!("../cli/text/authority-task.md");
@@ -488,8 +492,46 @@ pub struct Exception {
     pub approval: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CheckIdentity {
+    Text { command: String },
+    Argv { argv: Vec<String> },
+}
+
+pub fn declared_check(task: &Task) -> Option<CheckIdentity> {
+    match (&task.check_argv, &task.check) {
+        (Some(argv), _) => Some(CheckIdentity::Argv { argv: argv.clone() }),
+        (None, Some(command)) => Some(CheckIdentity::Text {
+            command: command.clone(),
+        }),
+        (None, None) => None,
+    }
+}
+
+pub fn evidence_matches(task: &Task, evidence: &Evidence) -> bool {
+    if evidence.acceptance_epoch != Some(task.acceptance_epoch) {
+        return false;
+    }
+    match (declared_check(task), evidence.identity.as_ref()) {
+        (
+            Some(CheckIdentity::Argv { argv: declared }),
+            Some(CheckIdentity::Argv { argv: observed }),
+        ) => declared == *observed && evidence.command.as_ref() == Some(observed),
+        (
+            Some(CheckIdentity::Text { command: declared }),
+            Some(CheckIdentity::Text { command: observed }),
+        ) => declared == *observed && evidence.check == *observed && evidence.command.is_none(),
+        _ => false,
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Evidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<CheckIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_epoch: Option<u64>,
     pub check: String,
     pub exit: i32,
     pub tree: String,
@@ -630,26 +672,17 @@ pub struct Readiness {
 }
 
 pub fn latest_evidence(task: &Task) -> Option<&Evidence> {
-    match &task.check {
-        Some(declared) => task
-            .evidence
-            .iter()
-            .rev()
-            .find(|entry| &entry.check == declared),
-        None => task.evidence.last(),
-    }
+    task.evidence
+        .iter()
+        .rev()
+        .find(|entry| evidence_matches(task, entry))
 }
 
 pub fn readiness(task: &Task, tree: &BTreeMap<String, String>) -> Readiness {
     let recorded = !task.evidence.is_empty();
     let latest = latest_evidence(task);
     let answers_declared_check = latest.is_some_and(|entry| entry.exit == 0);
-    let current = latest.is_some_and(|entry| {
-        !stale(entry, tree)
-            && evidence_inputs(task, tree)
-                .keys()
-                .all(|path| entry.inputs.contains_key(path))
-    });
+    let current = latest.is_some_and(|entry| evidence_inputs(task, tree) == entry.inputs);
     Readiness {
         recorded,
         current,
@@ -803,6 +836,10 @@ pub fn mark_ready(
 }
 
 pub fn record_acceptance(task: &mut Task, tree: &BTreeMap<String, String>, model: &str, unix: u64) {
+    task.acceptance_epoch = task
+        .acceptance_epoch
+        .checked_add(1)
+        .expect("acceptance epoch exhausted");
     let changed_paths = changed(task, tree);
     let changed_at_acceptance = if changed_paths.is_empty() {
         None
@@ -879,6 +916,8 @@ pub struct Task {
     pub check_inputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accepted: Option<Acceptance>,
+    #[serde(default)]
+    pub acceptance_epoch: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Acceptance>,
     #[serde(default)]
@@ -930,6 +969,7 @@ impl Default for Task {
             check_argv: None,
             check_inputs: Vec::new(),
             accepted: None,
+            acceptance_epoch: 0,
             result: None,
             assessments: Vec::new(),
             exceptions: Vec::new(),
@@ -1297,6 +1337,7 @@ mod tests {
                 "opened_unix": 0,
                 "opened_tree": {},
                 "state": "open",
+                "acceptance_epoch": 0,
                 "check_inputs": [],
                 "assessments": [],
                 "exceptions": [],
@@ -1338,6 +1379,7 @@ mod tests {
                 "opened_unix": 7,
                 "opened_tree": { "src/a.rs": "old" },
                 "state": "open",
+                "acceptance_epoch": 0,
                 "check": "check",
                 "check_argv": ["cargo", "test"],
                 "check_inputs": ["shared"],

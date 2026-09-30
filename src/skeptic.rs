@@ -744,7 +744,8 @@ fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
     } else {
         (
             format!(
-                "I don't believe this hand-back is supported. Every result recorded against this assignment answers a different check than {declared}."
+                "I don't believe this hand-back is supported. No recorded result binds {declared} to the current acceptance epoch {}.",
+                task.acceptance_epoch
             ),
             format!("evidence recorded, for: {}", seen.join(", ")),
         )
@@ -755,6 +756,7 @@ fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
         evidence: vec![
             format!("state: {}", task.state),
             format!("declared check: {declared}"),
+            format!("acceptance epoch: {}", task.acceptance_epoch),
             observed,
         ],
         reconcile: include_str!("cli/text/skeptic-readiness-without-evidence.md").to_owned(),
