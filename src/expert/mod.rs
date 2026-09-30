@@ -103,7 +103,9 @@ impl CheckpointKind {
 }
 
 pub mod packet;
+pub mod policy;
 pub mod provider;
+pub mod trace;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

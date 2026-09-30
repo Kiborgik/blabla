@@ -13,6 +13,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod expert;
 mod guide;
 mod heartbeat;
 mod init;
@@ -179,6 +180,13 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
     Task {
         #[command(subcommand)]
         action: TaskAction,
+    },
+    #[command(
+        about = "Evaluate, record, reserve and replay bounded expert advice independently of completion"
+    )]
+    Expert {
+        #[command(subcommand)]
+        action: expert::Action,
     },
     #[command(
         about = "Hold current work against recorded evidence; for an accepted task, record whether its hand-back prerequisites are clear"
@@ -934,6 +942,7 @@ fn verb(command: &Command) -> &'static str {
         Command::Init { .. } => "init",
         Command::Task { .. } => "task",
         Command::Challenge { .. } => "challenge",
+        Command::Expert { .. } => "expert",
     }
 }
 
@@ -950,6 +959,7 @@ fn execute(cli: Cli) -> i32 {
         return emit_error(error("recovery", message, None), json, 2);
     }
     match cli.command {
+        Command::Expert { action } => expert::execute(action, explicit, &cwd, json),
         Command::Guide { topic } => {
             let text = guide::text(topic);
             let result = if json {

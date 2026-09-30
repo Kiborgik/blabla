@@ -71,6 +71,8 @@ struct StatusWithMemory<'a> {
     bounded_tasks: Option<TaskStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     expert: Option<ExpertStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expert_runtime: Option<blabla::expert::trace::RuntimeStatus>,
     capabilities: CapabilityReport,
     shared_state: &'a [project::SharedState],
 }
@@ -313,6 +315,7 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             goal_memory: views.goal,
             bounded_tasks: tasks,
             expert: views.expert,
+            expert_runtime: blabla::expert::trace::status(project),
             capabilities,
             shared_state: &project.shared_state,
         })
@@ -323,7 +326,13 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             tasks.as_ref(),
             &capabilities,
             &project.shared_state,
-        )
+        ).and_then(|()| {
+            if let Some(runtime) = blabla::expert::trace::status(project) {
+                let mut output = io::stdout().lock();
+                writeln!(output, "EXPERT RUNTIME {:?}  trace retention {} days  payload limit {} bytes  unresolved limit {}/task  retained {:?} bytes  unknown deliveries {:?}  error {:?}", runtime.mode, runtime.trace_limits.retention_days, runtime.trace_limits.payload_bytes, runtime.trace_limits.unresolved_per_task, runtime.payload_bytes, runtime.unknown_deliveries, runtime.error)?;
+            }
+            Ok(())
+        })
     };
     if result.is_ok() { view.exit } else { 4 }
 }
