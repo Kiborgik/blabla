@@ -231,6 +231,12 @@ enum TaskAction {
         input: Vec<String>,
         #[arg(long, help = "The declared goal this task serves")]
         goal: Option<String>,
+        #[arg(
+            long,
+            value_name = "NAME",
+            help = "The distinct existing task this review inspects"
+        )]
+        review_of: Option<String>,
     },
     #[command(about = "Record something discovered during the task that is not yet settled")]
     Finding { name: String, statement: String },
@@ -1014,6 +1020,7 @@ fn execute(cli: Cli) -> i32 {
                         check_argv,
                         input,
                         goal,
+                        review_of,
                     } => task::open(
                         &loaded,
                         blabla::project::task::Opening {
@@ -1030,6 +1037,7 @@ fn execute(cli: Cli) -> i32 {
                             },
                             inputs: input,
                             goal,
+                            review_of,
                         },
                         json,
                     ),

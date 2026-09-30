@@ -101,6 +101,24 @@ impl Decision {
         self.below_floor && self.answer.is_none()
     }
 
+    pub fn current_pick(&self) -> &str {
+        self.answer
+            .as_ref()
+            .map_or(&self.pick, |answer| &answer.pick)
+    }
+
+    pub fn current_status(&self) -> &'static str {
+        if self.overruled() {
+            "overruled"
+        } else if self.answer.is_some() {
+            "answered"
+        } else if self.below_floor {
+            "blocked"
+        } else {
+            "stands"
+        }
+    }
+
     pub fn overruled(&self) -> bool {
         self.answer
             .as_ref()
@@ -487,13 +505,89 @@ pub struct Acceptance {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Assessment {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_fingerprint: Option<String>,
     pub ruling: String,
     pub statement: String,
     pub unix: u64,
 }
 
+pub fn knowledge_fingerprint(
+    memory: &crate::memory::knowledge::KnowledgeMemory,
+    name: &str,
+) -> Option<String> {
+    let pack = memory.packs.iter().find(|pack| pack.name == name)?;
+    let rulings: BTreeMap<_, _> = memory
+        .rulings
+        .iter()
+        .filter(|ruling| ruling.pack == name)
+        .map(|ruling| (ruling.id(), ruling))
+        .collect();
+    let mut hash = super::Fnv::new();
+    hash.write_str("task-memory-v1");
+    hash.write_str(&serde_json::to_string(&(pack, rulings)).expect("knowledge serializes"));
+    Some(hash.finish())
+}
+
+pub fn assessment_current(
+    task: &Task,
+    assessment: &Assessment,
+    knowledge_fingerprint: &str,
+) -> bool {
+    task.accepted
+        .as_ref()
+        .is_some_and(|accepted| assessment.model.as_deref() == Some(&accepted.model))
+        && assessment.acceptance_epoch == Some(task.acceptance_epoch)
+        && assessment.knowledge_fingerprint.as_deref() == Some(knowledge_fingerprint)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewTarget {
+    pub task: String,
+    pub revision: RelevantRevision,
+}
+
+pub fn review_revision(
+    review: &Task,
+    reviewed: &Task,
+    tree: &BTreeMap<String, String>,
+    identities: BTreeMap<String, String>,
+) -> RelevantRevision {
+    let mut revision = relevant_revision(reviewed, tree, identities);
+    for input in &review.check_inputs {
+        revision
+            .paths
+            .insert(input.clone(), observed_digest(tree, input));
+    }
+    revision
+}
+
+pub fn review_current(
+    review: &Task,
+    reviewed: &Task,
+    tree: &BTreeMap<String, String>,
+    identities: BTreeMap<String, String>,
+) -> bool {
+    review.accepted.is_some()
+        && reviewed.state != "withdrawn"
+        && review.name != reviewed.name
+        && review.review_of.as_ref().is_some_and(|target| {
+            target.task == reviewed.name
+                && target.revision == review_revision(review, reviewed, tree, identities)
+        })
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Exception {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_epoch: Option<u64>,
+    #[serde(default)]
+    pub superseded: bool,
     pub model: String,
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -579,6 +673,8 @@ pub struct Attribution {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Resolution {
+    pub knowledge_fingerprints: BTreeMap<String, String>,
+    pub review_current: Option<bool>,
     pub models: Vec<String>,
     pub lenses: Vec<String>,
     pub requirements: Vec<String>,
@@ -602,6 +698,8 @@ pub fn resolve(
         .map(|(identity, _)| identity.clone())
         .collect();
     Resolution {
+        knowledge_fingerprints: BTreeMap::new(),
+        review_current: None,
         models: models.to_vec(),
         lenses: lenses.to_vec(),
         requirements,
@@ -845,6 +943,19 @@ pub fn mark_ready(
 }
 
 pub fn record_acceptance(task: &mut Task, tree: &BTreeMap<String, String>, model: &str, unix: u64) {
+    let replacement = task
+        .accepted
+        .as_ref()
+        .is_some_and(|accepted| accepted.model != model);
+    for exception in &mut task.exceptions {
+        if exception.approval.is_none() && !exception.superseded {
+            if replacement && exception.acceptance_epoch.is_some() && exception.model != model {
+                exception.superseded = true;
+            } else {
+                exception.acceptance_epoch = Some(task.acceptance_epoch + 1);
+            }
+        }
+    }
     task.acceptance_epoch = task
         .acceptance_epoch
         .checked_add(1)
@@ -1098,6 +1209,8 @@ pub fn validate_scope(
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_of: Option<ReviewTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawal: Option<Withdrawal>,
     pub name: String,
     pub role: String,
@@ -1160,6 +1273,7 @@ fn open_state() -> String {
 impl Default for Task {
     fn default() -> Task {
         Task {
+            review_of: None,
             withdrawal: None,
             name: String::new(),
             role: String::new(),
@@ -1277,6 +1391,7 @@ pub fn path_of(root: &Path, name: &str) -> PathBuf {
 
 #[derive(Default)]
 pub struct Opening {
+    pub review_of: Option<String>,
     pub name: String,
     pub role: String,
     pub statement: String,
@@ -1305,6 +1420,15 @@ pub fn record_from(
     digests: Vec<Option<String>>,
 ) -> Task {
     Task {
+        review_of: opening.review_of.map(|task| ReviewTarget {
+            task,
+            revision: RelevantRevision {
+                acceptance_epoch: 0,
+                task_digest: String::new(),
+                paths: BTreeMap::new(),
+                identities: BTreeMap::new(),
+            },
+        }),
         name: opening.name,
         role: opening.role,
         statement: opening.statement,
@@ -1414,10 +1538,9 @@ pub fn can_address_finding(task: &Task, model: &str, permitted: &[String]) -> bo
     task.accepted
         .as_ref()
         .is_some_and(|accepted| accepted.model == model)
-        && task
-            .exceptions
-            .iter()
-            .any(|exception| exception.model == model && exception.approval.is_some())
+        && task.exceptions.iter().any(|exception| {
+            !exception.superseded && exception.model == model && exception.approval.is_some()
+        })
 }
 
 pub fn apply_evidence(task: &mut Task, evidence: Evidence) {
@@ -1571,6 +1694,7 @@ mod tests {
                 check_argv: Some(vec!["cargo".to_owned(), "test".to_owned()]),
                 inputs: vec!["shared".to_owned()],
                 goal: Some("ship".to_owned()),
+                review_of: None,
             },
             7,
             BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),

@@ -240,6 +240,14 @@ fn scoped_handback_does_not_require_the_workers_product_gate() {
     let (challenge, code) = json_of(&temp, &["challenge", "one", "--json"]);
     assert_eq!(code, 0, "{challenge}");
     assert_eq!(challenge["assignment_clear"], true);
+    assert_eq!(challenge["assignment_blockers"], serde_json::json!([]));
+    assert!(
+        challenge["project_challenges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "verification-not-current")
+    );
     assert!(
         challenge["grounded"]
             .as_array()
@@ -1219,7 +1227,7 @@ fn a_lens_assessment_names_the_pack_the_role_consults_and_a_ruling_identity_does
                 "--json",
             ],
         ),
-        0
+        2
     );
     let (identity, code) = json_of(&temp, &["challenge", "one", "--json"]);
     assert_eq!(
@@ -1610,4 +1618,277 @@ fn a_path_inside_a_closed_tasks_scope_is_grounded_as_attribution_unknown() {
         "src/other.rs changed after the closed task left it, so it should ground attribution-unknown: {report}"
     );
     assert_eq!(code, 1);
+}
+
+fn assess_engineering(temp: &TempDir) {
+    assert_eq!(
+        run(
+            temp,
+            &[
+                "task",
+                "lens",
+                "one",
+                "engineering",
+                "checked bounded change"
+            ]
+        ),
+        0
+    );
+}
+
+fn lens_is_unassessed(temp: &TempDir) -> bool {
+    let (view, _) = json_of(temp, &["challenge", "one", "--json"]);
+    view["grounded"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|class| class == "lens-unassessed")
+}
+
+#[test]
+fn replacement_worker_must_reassess_lens() {
+    let temp = project_whose_role_consults_a_pack();
+    assign(&temp, "src/owed.rs");
+    assess_engineering(&temp);
+    assert!(!lens_is_unassessed(&temp));
+    assert_eq!(
+        run(&temp, &["task", "accept", "one", "--model", "replacement"]),
+        0
+    );
+    assert!(lens_is_unassessed(&temp));
+    let (view, _) = json_of(&temp, &["task", "show", "one", "--json"]);
+    assert_eq!(view["task"]["assessments"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn same_worker_new_epoch_must_reassess() {
+    let temp = project_whose_role_consults_a_pack();
+    assign(&temp, "src/owed.rs");
+    assess_engineering(&temp);
+    assert!(!lens_is_unassessed(&temp));
+    assert_eq!(
+        run(&temp, &["task", "accept", "one", "--model", "qwen3.5:4b"]),
+        0
+    );
+    assert!(lens_is_unassessed(&temp));
+    assess_engineering(&temp);
+    assert!(!lens_is_unassessed(&temp));
+}
+
+#[test]
+fn changed_ruling_invalidates_assessment() {
+    let temp = project_whose_role_consults_a_pack();
+    assign(&temp, "src/owed.rs");
+    assess_engineering(&temp);
+    assert!(!lens_is_unassessed(&temp));
+    write(
+        temp.path(),
+        "knowledge/engineering.bla",
+        &PACK.replace(
+            "change what the task requires and nothing else",
+            "require direct mutation evidence",
+        ),
+    );
+    assert!(lens_is_unassessed(&temp));
+    assess_engineering(&temp);
+    assert!(!lens_is_unassessed(&temp));
+}
+
+#[test]
+fn unknown_or_unconsulted_lens_is_rejected() {
+    let temp = project_whose_role_consults_a_pack();
+    assign(&temp, "src/owed.rs");
+    for lens in ["missing", "ruling::engineering::smallest-correct-change"] {
+        assert_eq!(run(&temp, &["task", "lens", "one", lens, "claim"]), 2);
+    }
+}
+
+#[test]
+fn superseded_proposal_does_not_block_replacement() {
+    let temp = project();
+    assign(&temp, "src/owed.rs");
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "propose-model",
+                "one",
+                "other",
+                "--reason",
+                "old worker proposal"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        run(&temp, &["task", "accept", "one", "--model", "replacement"]),
+        0
+    );
+    let (view, _) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert!(
+        !view["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "exception-unresolved")
+    );
+    let (shown, _) = json_of(&temp, &["task", "show", "one", "--json"]);
+    assert_eq!(shown["task"]["exceptions"][0]["superseded"], true);
+}
+
+#[test]
+fn current_unapproved_proposal_still_blocks() {
+    let temp = project();
+    assign(&temp, "src/owed.rs");
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "propose-model",
+                "one",
+                "other",
+                "--reason",
+                "current proposal"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        run(&temp, &["task", "accept", "one", "--model", "qwen3.5:4b"]),
+        0
+    );
+    let (view, _) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert!(
+        view["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "exception-unresolved")
+    );
+}
+
+#[test]
+fn a_proposal_before_first_acceptance_applies_to_that_assignment() {
+    let temp = project();
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "one",
+                "--role",
+                "worker",
+                "--statement",
+                "repair",
+                "--scope",
+                "src/owed.rs",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "propose-model",
+                "one",
+                "other",
+                "--reason",
+                "first assignment proposal"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        run(&temp, &["task", "accept", "one", "--model", "qwen3.5:4b"]),
+        0
+    );
+    let (view, _) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert!(
+        view["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "exception-unresolved")
+    );
+    let (record, _) = json_of(&temp, &["task", "show", "one", "--json"]);
+    assert_eq!(record["task"]["exceptions"][0]["acceptance_epoch"], 1);
+    assert_eq!(record["task"]["exceptions"][0]["superseded"], false);
+}
+
+#[test]
+fn unrelated_pack_changes_do_not_invalidate_assessment() {
+    let temp = project_whose_role_consults_a_pack();
+    write(
+        temp.path(),
+        "knowledge/engineering.bla",
+        &format!(
+            "{PACK}\nknowledge \"other\" {{ purpose \"unrelated\" }}\nruling \"other-rule\" {{ pack \"other\" statement \"unrelated advice\" }}\n"
+        ),
+    );
+    assign(&temp, "src/owed.rs");
+    assess_engineering(&temp);
+    assert!(!lens_is_unassessed(&temp));
+    write(
+        temp.path(),
+        "knowledge/engineering.bla",
+        &format!(
+            "{PACK}\nknowledge \"other\" {{ purpose \"changed unrelated\" }}\nruling \"other-rule\" {{ pack \"other\" statement \"unrelated advice\" }}\n"
+        ),
+    );
+    assert!(!lens_is_unassessed(&temp));
+}
+
+#[test]
+fn accepting_the_proposed_replacement_model_does_not_approve_its_exception() {
+    let temp = project();
+    assign(&temp, "src/owed.rs");
+    assert_eq!(
+        run(
+            &temp,
+            &[
+                "task",
+                "propose-model",
+                "one",
+                "replacement",
+                "--reason",
+                "replacement request"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        run(&temp, &["task", "accept", "one", "--model", "replacement"]),
+        0
+    );
+    let (view, _) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert!(
+        view["assignment_blockers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "exception-unresolved")
+    );
+    let (record, _) = json_of(&temp, &["task", "show", "one", "--json"]);
+    assert_eq!(record["task"]["exceptions"][0]["superseded"], false);
+    assert!(record["task"]["exceptions"][0]["approval"].is_null());
+    assert_eq!(record["task"]["exceptions"][0]["acceptance_epoch"], 2);
+}
+
+#[test]
+fn an_assessment_from_another_model_in_the_same_epoch_grants_no_credit() {
+    let temp = project_whose_role_consults_a_pack();
+    assign(&temp, "src/owed.rs");
+    assess_engineering(&temp);
+    let path = temp.path().join(".blabla/tasks/one.json");
+    let mut record: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    record["assessments"][0]["model"] = serde_json::json!("other-model");
+    std::fs::write(path, serde_json::to_vec(&record).unwrap()).unwrap();
+    assert!(lens_is_unassessed(&temp));
 }

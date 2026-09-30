@@ -1,5 +1,6 @@
 use super::{emit_error, error, recovery, write_json};
 use blabla::memory::goal::Outcome;
+use blabla::memory::{self, goal, knowledge, mission, process, system};
 use blabla::project::Project;
 use blabla::project::status::{RECORD_DIRECTORY, StatusView, now_unix, status_view};
 use blabla::project::task::{self, Finding, Opening, Task};
@@ -8,19 +9,62 @@ use blabla::structure::default_providers;
 use blabla::structure::falsify;
 use blabla::voice::{Voice, contradiction};
 use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 
 #[derive(Serialize)]
 struct TaskView<'a> {
     task: &'a Task,
+    review_current: Option<bool>,
+    approval_current: Option<bool>,
+    decisions: Vec<DecisionStateView<'a>>,
+    assessment_current: Vec<bool>,
     open: bool,
     unresolved: usize,
     possibly_incomplete: bool,
     authority: &'static str,
 }
 
-fn view(task: &Task) -> TaskView<'_> {
+#[derive(Serialize)]
+struct DecisionStateView<'a> {
+    id: usize,
+    status: &'static str,
+    current_pick: &'a str,
+}
+
+fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
+    let review_current = review_freshness(project, task);
+    let fingerprints = knowledge_fingerprints(project);
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     TaskView {
+        review_current,
+        approval_current: review_current.map(|current| {
+            current
+                && task.state == "closed"
+                && task.result.is_some()
+                && task::readiness(task, &tree).supported
+                && task::challenge_current(task, &tree)
+        }),
+        decisions: task
+            .decisions
+            .iter()
+            .map(|decision| DecisionStateView {
+                id: decision.id,
+                status: decision.current_status(),
+                current_pick: decision.current_pick(),
+            })
+            .collect(),
+        assessment_current: task
+            .assessments
+            .iter()
+            .map(|assessment| {
+                fingerprints
+                    .get(&assessment.ruling)
+                    .is_some_and(|fingerprint| {
+                        task::assessment_current(task, assessment, fingerprint)
+                    })
+            })
+            .collect(),
         open: task.open(),
         unresolved: task.unresolved().count(),
         possibly_incomplete: recovery::foreign(recovery::running(), task.build.as_deref()),
@@ -74,6 +118,214 @@ fn mutate(project: &Project, name: &str, json: bool) -> Result<Task, i32> {
         json,
         2,
     ))
+}
+
+fn fingerprint(value: &impl Serialize) -> String {
+    let mut hash = blabla::project::Fnv::new();
+    hash.write_str("task-memory-v1");
+    hash.write_str(&serde_json::to_string(value).expect("memory serializes"));
+    hash.finish()
+}
+
+fn knowledge_fingerprints(project: &Project) -> BTreeMap<String, String> {
+    let entries: Vec<_> = project
+        .manifest
+        .knowledge
+        .iter()
+        .map(|entry| (entry.path.as_path(), entry.display.as_str()))
+        .collect();
+    let memory = memory::read_all(&entries, knowledge::build, knowledge::validate);
+    let Some(memory) = memory.present() else {
+        return BTreeMap::new();
+    };
+    memory
+        .packs
+        .iter()
+        .map(|pack| {
+            (
+                pack.name.clone(),
+                task::knowledge_fingerprint(memory, &pack.name)
+                    .expect("resolved pack fingerprints"),
+            )
+        })
+        .collect()
+}
+
+fn review_target(project: &Project, name: &str, target: &str) -> Result<Task, String> {
+    let root = &project.manifest.root;
+    let reviewed = task::read(root, target)?
+        .ok_or_else(|| format!("no review target task {target:?} exists"))?;
+    if reviewed.state == "withdrawn" {
+        return Err(format!("review target {target:?} is withdrawn"));
+    }
+    let mut visited = vec![name.to_owned()];
+    let mut next = Some(reviewed.clone());
+    while let Some(current) = next {
+        if visited.contains(&current.name) {
+            return Err(format!("review target {target:?} creates a review cycle"));
+        }
+        visited.push(current.name.clone());
+        next = match current.review_of {
+            Some(target) => task::read(root, &target.task)?,
+            None => None,
+        };
+    }
+    Ok(reviewed)
+}
+
+fn review_dependencies(
+    project: &Project,
+    review: &Task,
+    reviewed: &Task,
+) -> BTreeMap<String, String> {
+    let mut identities = review_identities(project, reviewed);
+    identities.extend(review_identities(project, review));
+    identities
+}
+
+fn review_freshness(project: &Project, review: &Task) -> Option<bool> {
+    review.review_of.as_ref()?;
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    let mut current = review.clone();
+    let mut visited = BTreeSet::new();
+    while let Some(target) = &current.review_of {
+        if !visited.insert(current.name.clone()) {
+            return Some(false);
+        }
+        let Ok(Some(reviewed)) = task::read(&project.manifest.root, &target.task) else {
+            return Some(false);
+        };
+        if !task::review_current(
+            &current,
+            &reviewed,
+            &tree,
+            review_dependencies(project, &current, &reviewed),
+        ) {
+            return Some(false);
+        }
+        current = reviewed;
+    }
+    Some(true)
+}
+
+fn review_identities(project: &Project, task: &Task) -> BTreeMap<String, String> {
+    let mut identities = BTreeMap::new();
+    let mut packs = Vec::new();
+    if let Some(entry) = &project.manifest.process {
+        let memory = memory::read(
+            &entry.path,
+            &entry.display,
+            process::build,
+            process::validate,
+        );
+        if let Some(memory) = memory.present() {
+            if let Some(role) = memory.roles.iter().find(|role| role.name == task.role) {
+                identities.insert(format!("role::{}", role.name), fingerprint(role));
+                packs.extend(role.consult.clone());
+            }
+            for policy in memory
+                .policies
+                .iter()
+                .filter(|policy| policy.applies_to.contains(&task.role))
+            {
+                identities.insert(format!("policy::{}", policy.name), fingerprint(policy));
+                packs.extend(policy.consult.clone());
+            }
+            let models = process::permitted_models(memory, &task.role);
+            identities.insert(format!("models::{}", task.role), fingerprint(&models));
+        } else {
+            identities.insert(
+                "memory::process".to_owned(),
+                fingerprint(&(memory.state(), memory.problems())),
+            );
+        }
+    }
+    if let Some(entry) = &project.manifest.system {
+        let memory = memory::read(&entry.path, &entry.display, system::build, system::validate);
+        if let Some(memory) = memory.present() {
+            let paths = task.scope.iter().chain(&task.check_inputs).chain(
+                task.deliverables
+                    .iter()
+                    .map(|deliverable| &deliverable.path),
+            );
+            let paths: Vec<_> = paths.collect();
+            let systems: Vec<_> = memory
+                .systems
+                .iter()
+                .filter(|system| {
+                    system.paths.iter().any(|path| {
+                        paths
+                            .iter()
+                            .any(|input| task::covers(path, input) || task::covers(input, path))
+                    })
+                })
+                .collect();
+            for system in &systems {
+                identities.insert(format!("system::{}", system.name), fingerprint(system));
+                packs.extend(system.knowledge.clone());
+            }
+            for responsibility in memory.responsibilities.iter().filter(|responsibility| {
+                systems
+                    .iter()
+                    .any(|system| system.name == responsibility.owner)
+            }) {
+                identities.insert(
+                    format!("responsibility::{}", responsibility.name),
+                    fingerprint(responsibility),
+                );
+            }
+            for seam in memory.seams.iter().filter(|seam| {
+                seam.between
+                    .iter()
+                    .any(|name| systems.iter().any(|system| &system.name == name))
+            }) {
+                identities.insert(format!("seam::{}", seam.name), fingerprint(seam));
+            }
+        } else {
+            identities.insert(
+                "memory::system".to_owned(),
+                fingerprint(&(memory.state(), memory.problems())),
+            );
+        }
+    }
+    if let Some(name) = &task.goal
+        && let Some(entry) = &project.manifest.goal
+    {
+        let memory = memory::read(&entry.path, &entry.display, goal::build, goal::validate);
+        if let Some(goal) = memory.present().and_then(|memory| {
+            memory
+                .goals
+                .iter()
+                .find(|goal| goal.id() == *name || goal.name == *name)
+        }) {
+            identities.insert(goal.id(), fingerprint(goal));
+        } else {
+            identities.insert(
+                name.clone(),
+                fingerprint(&(memory.state(), memory.problems())),
+            );
+        }
+    }
+    if let Some(entry) = &project.manifest.mission {
+        let memory = memory::read(
+            &entry.path,
+            &entry.display,
+            mission::build,
+            mission::validate,
+        );
+        identities.insert("memory::mission".to_owned(), fingerprint(&memory.present()));
+    }
+    let fingerprints = knowledge_fingerprints(project);
+    for pack in packs {
+        identities.insert(
+            format!("knowledge::{pack}"),
+            fingerprints
+                .get(&pack)
+                .cloned()
+                .unwrap_or_else(|| "unresolved".to_owned()),
+        );
+    }
+    identities
 }
 
 fn declared_role(project: &Project, role_name: &str) -> Option<blabla::memory::process::Role> {
@@ -192,12 +444,13 @@ fn write_record(project: &Project, task: &mut Task, json: bool, whole_view: bool
         );
     }
     let result = if json {
-        write_json(&view(task))
+        write_json(&view(project, task))
     } else if whole_view {
         write_task(
             task,
             &project.manifest.root,
             role_floor(project, &task.role),
+            &view(project, task),
         )
     } else {
         write_task_line(task)
@@ -230,6 +483,11 @@ pub(super) fn open(project: &Project, opening: Opening, json: bool) -> i32 {
             json,
             2,
         );
+    }
+    if let Some(target) = &opening.review_of
+        && let Err(message) = review_target(project, &opening.name, target)
+    {
+        return emit_error(error("task", message, None), json, 2);
     }
     if let Some(goal) = &opening.goal
         && let Some(message) = super::project::undeclared_goal(project, goal)
@@ -1062,7 +1320,7 @@ fn unconfirmed_guidance(task: &Task) -> String {
 pub(super) fn show(project: &Project, name: Option<&str>, json: bool) -> i32 {
     let Some(name) = name else {
         let tasks = task::read_all(&project.manifest.root);
-        let views: Vec<TaskView<'_>> = tasks.iter().map(view).collect();
+        let views: Vec<TaskView<'_>> = tasks.iter().map(|task| view(project, task)).collect();
         let result = if json {
             write_json(&views)
         } else {
@@ -1075,12 +1333,13 @@ pub(super) fn show(project: &Project, name: Option<&str>, json: bool) -> i32 {
         Err(exit) => return exit,
     };
     let result = if json {
-        write_json(&view(&task))
+        write_json(&view(project, &task))
     } else {
         write_task(
             &task,
             &project.manifest.root,
             role_floor(project, &task.role),
+            &view(project, &task),
         )
         .and_then(|()| write_resolution(&resolved(project, &task)))
     };
@@ -1150,6 +1409,22 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
         return emit_error(error("task", reason, None), json, 2);
     }
     let current_tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    if let Some(target) = task.review_of.as_ref().map(|target| target.task.clone()) {
+        let reviewed = match review_target(project, name, &target) {
+            Ok(reviewed) => reviewed,
+            Err(message) => return emit_error(error("task", message, None), json, 2),
+        };
+        let revision = task::review_revision(
+            &task,
+            &reviewed,
+            &current_tree,
+            review_dependencies(project, &task, &reviewed),
+        );
+        task.review_of = Some(task::ReviewTarget {
+            task: target,
+            revision,
+        });
+    }
     task::record_acceptance(&mut task, &current_tree, model, now_unix());
     store(project, &mut task, json)
 }
@@ -1262,7 +1537,27 @@ pub(super) fn lens(project: &Project, name: &str, lens: &str, statement: &str, j
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    let fingerprint = knowledge_fingerprints(project).get(lens).cloned();
+    let consulted = declared_role(project, &task.role)
+        .is_some_and(|role| role.consult.iter().any(|pack| pack == lens));
+    if task.state != "accepted" || task.accepted.is_none() || !consulted || fingerprint.is_none() {
+        return emit_error(
+            error(
+                "task",
+                "a lens must name a resolved pack consulted by the accepted task's role",
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     task.assessments.push(task::Assessment {
+        model: task
+            .accepted
+            .as_ref()
+            .map(|accepted| accepted.model.clone()),
+        acceptance_epoch: Some(task.acceptance_epoch),
+        knowledge_fingerprint: fingerprint,
         ruling: lens.to_owned(),
         statement: statement.to_owned(),
         unix: now_unix(),
@@ -1282,6 +1577,8 @@ pub(super) fn propose_model(
         Err(exit) => return exit,
     };
     task.exceptions.push(task::Exception {
+        acceptance_epoch: task.accepted.as_ref().map(|_| task.acceptance_epoch),
+        superseded: false,
         model: model.to_owned(),
         reason: reason.to_owned(),
         approval: None,
@@ -1300,11 +1597,9 @@ pub(super) fn approve_model(
         Ok(task) => task,
         Err(exit) => return exit,
     };
-    let Some(exception) = task
-        .exceptions
-        .iter_mut()
-        .find(|exception| exception.model == model && exception.approval.is_none())
-    else {
+    let Some(exception) = task.exceptions.iter_mut().find(|exception| {
+        !exception.superseded && exception.model == model && exception.approval.is_none()
+    }) else {
         return emit_error(
             error(
                 "E_NO_PROPOSAL",
@@ -1386,6 +1681,21 @@ pub(super) fn attribute(
     store(project, &mut task, json)
 }
 
+fn require_current_review(project: &Project, task: &Task, json: bool) -> Result<(), i32> {
+    if review_freshness(project, task) == Some(false) {
+        return Err(emit_error(
+            error(
+                "task",
+                "the reviewed target changed; reaccept this review before recording evidence",
+                None,
+            ),
+            json,
+            2,
+        ));
+    }
+    Ok(())
+}
+
 fn accepted_for_evidence(project: &Project, name: &str, json: bool) -> Result<Task, i32> {
     let task = mutate(project, name, json)?;
     if task.state != "accepted" || task.accepted.is_none() {
@@ -1447,6 +1757,9 @@ pub(super) fn evidence(project: &Project, name: &str, exit: i32, tool: &str, jso
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_current_review(project, &task, json) {
+        return exit;
+    }
     let Some(check) = task.check.clone() else {
         let message = if task.check_argv.is_some() {
             format!(
@@ -1472,6 +1785,9 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_current_review(project, &task, json) {
+        return exit;
+    }
     let Some(argv) = task.check_argv.clone().filter(|argv| !argv.is_empty()) else {
         return emit_error(
             error(
@@ -1856,7 +2172,12 @@ fn write_failing_evidence(
     Ok(())
 }
 
-fn write_task(task: &Task, root: &std::path::Path, floor: Option<u8>) -> io::Result<()> {
+fn write_task(
+    task: &Task,
+    root: &std::path::Path,
+    floor: Option<u8>,
+    view: &TaskView<'_>,
+) -> io::Result<()> {
     let mut output = io::stdout().lock();
     writeln!(output, "task::{}   {}", task.name, state_label(task))?;
     writeln!(output, "\nStatement:\n  {}", task.statement)?;
@@ -1920,6 +2241,26 @@ fn write_task(task: &Task, root: &std::path::Path, floor: Option<u8>) -> io::Res
                 }
                 None => writeln!(output, "    UNRESOLVED")?,
             }
+        }
+    }
+    if let Some(current) = view.review_current {
+        let target = task.review_of.as_ref().expect("review target");
+        writeln!(
+            output,
+            "\nReview of task::{}: {}; current approval: {}",
+            target.task,
+            if current { "CURRENT" } else { "STALE" },
+            if view.approval_current == Some(true) {
+                "YES"
+            } else {
+                "NO"
+            }
+        )?;
+        if !current {
+            writeln!(
+                output,
+                "  Reaccept an open review to inspect the changed target; a CLOSED review remains historical and new work needs a new review task"
+            )?;
         }
     }
     write_questions(&mut output, task)?;
@@ -2035,10 +2376,11 @@ fn write_decisions(output: &mut impl Write, task: &Task, floor: Option<u8>) -> i
             decision.pick,
             decision.confidence,
             decision.model,
-            if decision.below_floor {
-                format!("BLOCKS THE TASK, below {}%", decision.floor)
-            } else {
-                "STANDS".to_owned()
+            match decision.current_status() {
+                "blocked" => format!("BLOCKS THE TASK, below {}%", decision.floor),
+                "answered" => "ANSWERED".to_owned(),
+                "overruled" => "OVERRULED".to_owned(),
+                _ => "STANDS".to_owned(),
             }
         )?;
         match &decision.answer {
@@ -2126,7 +2468,15 @@ pub(super) const ROUTES: [&str; 10] = [
 fn route_states(route: &str) -> &'static [&'static str] {
     match route {
         "accept" => &["open", "blocked", "ready"],
-        "check" | "blocker" | "note" | "addressed" | "decide" | "hand-back" => {
+        "check" => &[
+            "open",
+            "accepted",
+            "blocked",
+            "ready",
+            "closed",
+            "withdrawn",
+        ],
+        "blocker" | "note" | "addressed" | "decide" | "hand-back" => {
             &["open", "accepted", "blocked"]
         }
         "finding" | "challenge" => &["open", "accepted", "blocked", "ready"],
@@ -2170,6 +2520,10 @@ fn render_route(
                 "take the assignment before changing anything; unaccepted work is challenged as work done outside BlaBla"
             }
         )],
+        "check" if matches!(state, Some("ready" | "closed" | "withdrawn")) => {
+            let declared = check_lines(name, check, check_argv);
+            vec![declared[0].clone()]
+        }
         "check" => check_lines(name, check, check_argv),
         "blocker" => vec![format!(
             "  blabla task block {name} \"...\"   record the blocker and stop"
@@ -2324,7 +2678,7 @@ pub(super) fn resolved(project: &Project, task: &Task) -> task::Resolution {
             )
         })
         .collect();
-    match role {
+    let mut resolution = match role {
         Some(role) => {
             let permitted = declared_permitted_models(project, &task.role);
             task::resolve(
@@ -2336,7 +2690,10 @@ pub(super) fn resolved(project: &Project, task: &Task) -> task::Resolution {
             )
         }
         None => task::resolve(task, &[], &[], "unstated", &contracts),
-    }
+    };
+    resolution.knowledge_fingerprints = knowledge_fingerprints(project);
+    resolution.review_current = review_freshness(project, task);
+    resolution
 }
 
 #[cfg(test)]
@@ -2381,6 +2738,7 @@ mod tests {
         assert!(
             ROUTES
                 .iter()
+                .filter(|route| **route != "check")
                 .all(|route| route_lines(route, &task).is_empty())
         );
         assert!(route_lines("no-such-route", &task).is_empty());

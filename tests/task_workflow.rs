@@ -34,7 +34,7 @@ fn accepted() -> (task::Task, BTreeMap<String, String>) {
 
 fn evidence(task: &mut task::Task, tree: &BTreeMap<String, String>) {
     task.evidence.push(Evidence {
-        identity: task::declared_check(&task),
+        identity: task::declared_check(task),
         acceptance_epoch: Some(task.acceptance_epoch),
         check: "check".to_owned(),
         exit: 0,
@@ -1881,6 +1881,8 @@ fn evidence_run_records_nothing_when_its_check_moves_the_task_out_of_accepted() 
 fn with_exception(model: &str, approved: bool) -> task::Exception {
     task::Exception {
         model: model.to_owned(),
+        acceptance_epoch: None,
+        superseded: false,
         reason: "design heavy".to_owned(),
         approval: approved.then(|| "owner approved".to_owned()),
     }
@@ -3222,4 +3224,707 @@ fn withdrawal_residue_does_not_hide_vacuous_close_blocker() {
         ),
         2
     );
+}
+
+fn review_fixture() -> TempDir {
+    review_fixture_configured(false)
+}
+
+fn review_fixture_configured(consults: bool) -> TempDir {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let process = std::fs::read_to_string(temp.path().join("process.bla")).unwrap();
+    let consultation = if consults {
+        " consult [\"review-lens\"]\n"
+    } else {
+        ""
+    };
+    std::fs::write(temp.path().join("process.bla"), format!("{process}\nrole \"reviewer\" {{\n purpose \"review one task\"\n{consultation} model \"qwen3.5:4b\"\n}}\n")).unwrap();
+    if consults {
+        let manifest = std::fs::read_to_string(temp.path().join("project.bla")).unwrap();
+        std::fs::write(
+            temp.path().join("project.bla"),
+            format!("{manifest}\nknowledge \"knowledge.bla\"\n"),
+        )
+        .unwrap();
+        std::fs::write(temp.path().join("knowledge.bla"), "knowledge \"review-lens\" { purpose \"review fixture evidence\" }\nruling \"current\" { pack \"review-lens\" statement \"inspect current evidence\" }\nknowledge \"unrelated\" { purpose \"unrelated expertise\" }\nruling \"other\" { pack \"unrelated\" statement \"unrelated advice\" }\n").unwrap();
+    }
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "target",
+                "--role",
+                "worker",
+                "--statement",
+                "repair target",
+                "--scope",
+                "src/thing.rs",
+                "--deliverable",
+                "src/thing.rs",
+                "--input",
+                "config.txt",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "target", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "review",
+                "--role",
+                "reviewer",
+                "--statement",
+                "review target",
+                "--review-of",
+                "target",
+                "--input",
+                "manual.txt",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "review", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    temp
+}
+
+fn review_handback(temp: &TempDir) {
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task", "evidence", "review", "--exit", "0", "--tool", "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(temp, &["challenge", "review"]), 0);
+    assert_eq!(cli_run(temp, &["task", "ready", "review"]), 0);
+}
+
+#[test]
+fn review_rework_invalidates_approval() {
+    for closed in [false, true] {
+        let temp = review_fixture();
+        review_handback(&temp);
+        if closed {
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "close", "review", "--model", "claude-opus-4-1"]
+                ),
+                0
+            );
+        }
+        let (before, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+        assert_eq!(before["review_current"], true);
+        assert_eq!(before["approval_current"], closed);
+        assert_eq!(
+            cli_run(
+                &temp,
+                &["task", "accept", "target", "--model", "qwen3.5:4b"]
+            ),
+            0
+        );
+        let (stale, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+        assert_eq!(stale["review_current"], false);
+        assert_eq!(stale["approval_current"], false);
+        assert_eq!(
+            stale["task"]["state"],
+            if closed { "closed" } else { "ready" }
+        );
+        if !closed {
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "close", "review", "--model", "claude-opus-4-1"]
+                ),
+                2
+            );
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &[
+                        "task", "evidence", "review", "--exit", "0", "--tool", "test"
+                    ]
+                ),
+                2
+            );
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "accept", "review", "--model", "qwen3.5:4b"]
+                ),
+                0
+            );
+            review_handback(&temp);
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "close", "review", "--model", "claude-opus-4-1"]
+                ),
+                0
+            );
+        }
+    }
+}
+
+#[test]
+fn review_ignores_unrelated_notes_and_paths() {
+    let temp = review_fixture();
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "note", "target", "unrelated note"]),
+        0
+    );
+    std::fs::write(temp.path().join("unrelated.txt"), "unrelated").unwrap();
+    let (view, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(view["review_current"], true);
+    std::fs::write(temp.path().join("config.txt"), "new target input").unwrap();
+    let (view, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(view["review_current"], false);
+}
+
+#[test]
+fn review_manual_inputs_and_target_deliverables_are_dependencies() {
+    for path in ["manual.txt", "src/thing.rs"] {
+        let temp = review_fixture();
+        review_handback(&temp);
+        std::fs::write(temp.path().join(path), "changed").unwrap();
+        let (view, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+        assert_eq!(view["review_current"], false, "{path}");
+        assert_eq!(
+            cli_run(
+                &temp,
+                &["task", "close", "review", "--model", "claude-opus-4-1"]
+            ),
+            2
+        );
+    }
+}
+
+#[test]
+fn ready_and_closed_views_keep_declared_check() {
+    let temp = review_fixture();
+    review_handback(&temp);
+    for closed in [false, true] {
+        if closed {
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "close", "review", "--model", "claude-opus-4-1"]
+                ),
+                0
+            );
+        }
+        let output = run_in(Some(temp.path()), &args(&["task", "show", "review"]));
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("Declared check:\n  check")
+        );
+        let (view, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+        assert_eq!(view["task"]["check"], "check");
+    }
+}
+
+#[test]
+fn review_targets_reject_missing_self_withdrawn_and_cycles() {
+    let temp = review_fixture();
+    for target in ["missing", "fresh"] {
+        assert_eq!(
+            cli_run(
+                &temp,
+                &[
+                    "task",
+                    "open",
+                    "fresh",
+                    "--role",
+                    "reviewer",
+                    "--statement",
+                    "invalid review",
+                    "--review-of",
+                    target
+                ]
+            ),
+            2
+        );
+    }
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "withdraw",
+                "target",
+                "--reason",
+                "cancelled",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "fresh",
+                "--role",
+                "reviewer",
+                "--statement",
+                "invalid review",
+                "--review-of",
+                "target"
+            ]
+        ),
+        2
+    );
+    let path = temp.path().join(".blabla/tasks/review.json");
+    let mut review: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    review["review_of"]["task"] = serde_json::json!("review");
+    std::fs::write(path, serde_json::to_vec(&review).unwrap()).unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "fresh",
+                "--role",
+                "reviewer",
+                "--statement",
+                "invalid review",
+                "--review-of",
+                "review"
+            ]
+        ),
+        2
+    );
+}
+
+#[test]
+fn review_relevant_role_changes_invalidate_closed_approval() {
+    let temp = review_fixture();
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let path = temp.path().join("process.bla");
+    let process = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        process.replace(
+            "carry out one bounded task",
+            "carry out one bounded task carefully",
+        ),
+    )
+    .unwrap();
+    let (view, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(view["review_current"], false);
+    assert_eq!(view["approval_current"], false);
+}
+
+#[test]
+fn review_stale_target_refuses_new_check_evidence_and_ready() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "target", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task", "evidence", "review", "--exit", "0", "--tool", "test"
+            ]
+        ),
+        2
+    );
+    assert_eq!(cli_run(&temp, &["task", "ready", "review"]), 2);
+    let (view, _) = cli_json(&temp, &["challenge", "review", "--json"]);
+    assert!(
+        view["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "review-target-stale")
+    );
+    assert_eq!(view["assignment_clear"], false);
+}
+
+#[test]
+fn review_check_retains_observation_without_credit_when_target_advances_during_run() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "check",
+                "review",
+                "--argv",
+                env!("CARGO_BIN_EXE_blabla"),
+                "task",
+                "accept",
+                "target",
+                "--model",
+                "qwen3.5:4b"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "review", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "evidence", "review", "--run"]), 0);
+    let (view, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(view["task"]["evidence"].as_array().unwrap().len(), 1);
+    assert_eq!(view["task"]["evidence"][0]["exit"], 0);
+    assert_eq!(view["review_current"], false);
+    assert_eq!(view["approval_current"], false);
+    assert_eq!(cli_run(&temp, &["task", "ready", "review"]), 2);
+}
+
+fn review_with_consulted_memory() -> TempDir {
+    let temp = review_fixture_configured(true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "review",
+                "review-lens",
+                "checked current evidence"
+            ]
+        ),
+        0
+    );
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    temp
+}
+
+#[test]
+fn closed_review_approval_expires_when_its_own_consulted_knowledge_changes() {
+    let temp = review_with_consulted_memory();
+    let (before, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(before["approval_current"], true);
+    let path = temp.path().join("knowledge.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace(
+            "inspect current evidence",
+            "inspect current evidence with mutation proof",
+        ),
+    )
+    .unwrap();
+    let (after, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["assessment_current"], serde_json::json!([false]));
+    assert_eq!(after["approval_current"], false);
+    assert_eq!(after["task"]["state"], "closed");
+}
+
+#[test]
+fn closed_review_approval_expires_when_its_own_role_policy_changes() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("process.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace(
+            "purpose \"review one task\"",
+            "purpose \"review one task with a stricter policy\"",
+        ),
+    )
+    .unwrap();
+    let (after, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["approval_current"], false);
+    assert_eq!(after["task"]["state"], "closed");
+}
+
+#[test]
+fn closed_review_approval_ignores_unrelated_reviewer_memory_changes() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("knowledge.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace("unrelated advice", "changed unrelated advice"),
+    )
+    .unwrap();
+    let (after, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["assessment_current"], serde_json::json!([true]));
+    assert_eq!(after["approval_current"], true);
+}
+
+#[test]
+fn review_target_explicit_inputs_remain_dependencies_when_attributed_concurrent() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "check", "target", "check", "--input", "shared"]
+        ),
+        0
+    );
+    std::fs::create_dir(temp.path().join("shared")).unwrap();
+    std::fs::write(temp.path().join("shared/data.txt"), "initial input").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "target",
+                "shared",
+                "--kind",
+                "concurrent",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "review", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "review",
+                "shared",
+                "--kind",
+                "concurrent",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "confirm", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("shared/data.txt"),
+        "changed explicit input",
+    )
+    .unwrap();
+    let (after, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["review_current"], false);
+    assert_eq!(after["approval_current"], false);
+}
+
+#[test]
+fn relevant_revision_keeps_explicit_dependencies_even_when_attributed_concurrent() {
+    for deliverable in [false, true] {
+        let (mut work, mut tree) = accepted();
+        tree.insert("shared/data.txt".to_owned(), "v1".to_owned());
+        if deliverable {
+            task::owe_path(&mut work, "shared".to_owned());
+        } else {
+            work.check_inputs.push("shared".to_owned());
+        }
+        work.attributions.push(task::Attribution {
+            path: "shared".to_owned(),
+            kind: "concurrent".to_owned(),
+            digest: None,
+            model: None,
+        });
+        let before = task::relevant_revision(&work, &tree, BTreeMap::new());
+        assert!(before.paths["shared"].is_some());
+        tree.insert("shared/data.txt".to_owned(), "v2".to_owned());
+        assert_ne!(
+            before,
+            task::relevant_revision(&work, &tree, BTreeMap::new())
+        );
+    }
+}
+
+#[test]
+fn nested_review_target_rework_expires_outer_closed_approval() {
+    let temp = review_fixture();
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "outer",
+                "--role",
+                "reviewer",
+                "--statement",
+                "review the review",
+                "--review-of",
+                "review",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "accept", "outer", "--model", "qwen3.5:4b"]),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "evidence", "outer", "--exit", "0", "--tool", "test"]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "outer"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "outer"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "outer", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    std::fs::write(temp.path().join("unrelated.txt"), "unrelated").unwrap();
+    let (stable, _) = cli_json(&temp, &["task", "show", "outer", "--json"]);
+    assert_eq!(stable["approval_current"], true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "target", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    for name in ["review", "outer"] {
+        let (stale, _) = cli_json(&temp, &["task", "show", name, "--json"]);
+        assert_eq!(stale["review_current"], false, "{name}");
+        assert_eq!(stale["approval_current"], false, "{name}");
+        assert_eq!(stale["task"]["state"], "closed");
+    }
+}
+
+#[test]
+fn closed_review_approval_expires_when_a_new_reviewer_lens_is_required() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("process.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace(
+            "consult [\"review-lens\"]",
+            "consult [\"review-lens\", \"unrelated\"]",
+        ),
+    )
+    .unwrap();
+    let (after, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["assessment_current"], serde_json::json!([true]));
+    assert_eq!(after["approval_current"], false);
+}
+
+#[test]
+fn closed_review_approval_expires_when_its_reviewer_model_policy_changes() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("process.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let (unchanged, reviewer) = text.split_once("role \"reviewer\"").unwrap();
+    std::fs::write(
+        path,
+        format!(
+            "{unchanged}role \"reviewer\"{}",
+            reviewer.replace(
+                "model \"qwen3.5:4b\"",
+                "model \"different-permitted-model\""
+            )
+        ),
+    )
+    .unwrap();
+    let (after, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["approval_current"], false);
+}
+
+#[test]
+fn closed_review_approval_expires_when_a_reviewer_policy_is_added() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("process.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(path, format!("{text}\npolicy \"review-proof\" {{ statement \"require direct mutation evidence\" applies_to [\"reviewer\"] }}\n")).unwrap();
+    let (after, _) = cli_json(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["approval_current"], false);
 }

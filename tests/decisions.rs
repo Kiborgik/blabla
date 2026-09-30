@@ -752,3 +752,17 @@ fn calibration_counts_only_answered_decisions_per_model() {
     );
     assert!(task::calibration(&[], str::to_owned).is_empty());
 }
+
+#[test]
+fn answered_decisions_show_current_status_and_pick() {
+    for (pick, status) in [("yes", "answered"), ("no", "overruled")] {
+        let temp = project(PROCESS);
+        accepted(&temp);
+        assert_eq!(decide(&temp, "yes", "20", None).status.code(), Some(0));
+        assert_eq!(answer(&temp, "1", pick, "opus"), 0);
+        let shown = json(&temp, &["task", "show", "work"]);
+        assert_eq!(shown["decisions"][0]["status"], status);
+        assert_eq!(shown["decisions"][0]["current_pick"], pick);
+        assert!(!text(&temp, &["task", "show", "work"]).contains("BLOCKS THE TASK, below 70%"));
+    }
+}

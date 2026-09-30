@@ -345,14 +345,15 @@ The evidence it may use, and nothing else:
 | `scope-breach` | a file changed since the task opened that no declared scope covers |
 | `work-without-acceptance` | a file changed since the task opened while no role accepted the assignment |
 | `model-outside-role-policy` | the task was accepted on a model the role's declared choices do not list, with no owner ruling |
-| `exception-unresolved` | a model exception was proposed and no owner ruling answers it |
+| `exception-unresolved` | a current, unsuperseded model exception was proposed and no owner ruling answers it |
+| `review-target-stale` | an explicit review targets an assignment, input, deliverable or relevant-memory revision different from the one accepted, including a CLOSED historical review |
 | `declared-check-failed` | the most recent result for the declared check exited non-zero |
 | `decision-unanswered` | a decision recorded below its floor, the role's `block_below` or an asked question's, that has no answer from the orchestrator |
 | `question-unpicked` | a question the orchestrator asked with `task ask` that has no pick from the carrying role; `task ready` is refused while it stands |
 | `orchestrator-record-during-carry` | a record made under an orchestrator model while a worker carried the task that the orchestrator has not confirmed; it does not refuse `task ready`, and `task close` is refused while it stands |
 | `readiness-without-evidence` | an accepted or handed-back task with no result recorded for the declared check, or only results for other checks |
 | `evidence-superseded` | the most recent result for the declared check ran against inputs that have since changed |
-| `lens-unassessed` | an accepted or handed-back task with a lens the role consults carrying no assessment; a lens is one of the knowledge packs `role::<name>` lists under Consult, so `blabla task lens` takes the pack name and not a `ruling::<pack>::<name>` identity |
+| `lens-unassessed` | an accepted or handed-back task with a lens the role consults carrying no current model-, epoch- and knowledge-bound assessment; a lens is one of the knowledge packs `role::<name>` lists under Consult, so `blabla task lens` takes the pack name and not a `ruling::<pack>::<name>` identity |
 | `attribution-unknown` | a path changed since the task opened whose origin, this task or concurrent work, is not stated |
 | `vacuous-rule` | a structure rule the falsifier reports VACUOUS — a rule standing on absent ground |
 | `verification-not-current` | project completion is not current; this remains an orchestrator-owned concern for a selected assignment challenge |
@@ -473,3 +474,53 @@ list, together or skipped with a visible budget reason. A selected candidate alo
 Expert opinions never alter deterministic verdicts, verifier exit codes or `OVERALL`, never serve
 as authoritative challenge evidence, and never close a task. `finish` remains the sole project
 completion command.
+
+## Current worker assessments and explicit reviews
+
+Every acceptance starts a new assignment epoch, including accepting again on the same model.
+A lens assessment records the accepted model, epoch and the resolved knowledge pack plus its
+rulings. Replacing the worker, accepting again or changing that expertise requires another
+assessment. Old assessments remain visible as history and grant no current credit. A lens must
+name a pack the accepted role actually consults; unknown packs and individual ruling identities
+are refused. Changes to other packs do not invalidate the assessment.
+
+An unresolved model proposal belongs to the assignment that proposed it. Replacing its worker
+supersedes earlier unresolved proposals, except a proposal for the replacement model itself.
+Accepting the same model again keeps its current unresolved proposals standing. A proposal made
+before the first acceptance applies to that first assignment. Superseded proposals remain in the
+record; approving a model continues to require the owner's actual ruling.
+
+A reviewer can make its target explicit:
+
+```text
+blabla task open review-cache --role reviewer --statement "Review cache repair" --review-of repair-cache --input fixtures/cache.txt --check "cargo test --test cache"
+blabla task accept review-cache --model <id>
+```
+
+The target must already exist, be distinct and not be withdrawn; cyclic review chains are
+refused. Acceptance snapshots the target's assignment epoch, declarations, decisions, findings,
+check inputs, deliverables and relevant registered memory. The reviewer's own role, model policy,
+consulted packs and other relevant memory also bind its approval. Explicit reviewer inputs are
+additional dependencies. Declared target inputs and deliverables remain dependencies even when
+their writes are attributed to concurrent work. Unrelated notes, paths and knowledge packs are excluded from review freshness.
+Review chains are checked iteratively: a stale inner review invalidates every review depending
+on it, while cycle detection prevents looping. This link does not impose a review requirement on
+other tasks.
+
+A changed target invalidates the review's evidence credit, hand-back and result acceptance.
+Reaccept an open review to inspect the new target, then record fresh check evidence, lens
+assessments and a challenge. A check already running when its target changes retains its actual
+observation, but that observation cannot approve the changed target. A CLOSED review remains
+CLOSED history; its view reports stale freshness and no current approval rather than reopening it.
+Open a new review assignment when a historical review needs replacement.
+
+Task views retain the declared check in READY and CLOSED and label answered or overruled decisions
+with their current pick. JSON includes decision status and current pick, assessment freshness,
+review freshness and current approval separately from the historical records.
+
+A selected task's challenge reports `assignment_clear`, `assignment_blockers` and
+`project_challenges` separately. A clear assignment can hand back while a project-wide challenge
+still stands; it does not mean the project is complete. Restore work that lacks current evidence,
+or ask the orchestrator to resolve the scope or dependency deliberately. Unresolved withdrawal
+residue remains a project challenge until its paths are restored or explicitly reconciled against
+current evidence from a CLOSED successor.

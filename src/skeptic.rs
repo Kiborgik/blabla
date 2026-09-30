@@ -14,7 +14,7 @@ pub const LIMITS: [&str; 3] = [
     include_str!("cli/text/skeptic-limit-source.md"),
 ];
 
-pub const CLASSES: [&str; 17] = [
+pub const CLASSES: [&str; 18] = [
     "unresolved-finding",
     "deliverable-unchanged",
     "scope-breach",
@@ -32,6 +32,7 @@ pub const CLASSES: [&str; 17] = [
     "orchestrator-record-during-carry",
     "question-unpicked",
     "withdrawal-residue",
+    "review-target-stale",
 ];
 
 pub const OUTSIDE_THE_ASSIGNMENT: [&str; 4] = [
@@ -64,6 +65,7 @@ pub enum Class {
     QuestionUnpicked,
     GoalOutcomeUnmet,
     WithdrawalResidue,
+    ReviewTargetStale,
 }
 
 impl Class {
@@ -87,6 +89,7 @@ impl Class {
             Class::QuestionUnpicked => CLASSES[15],
             Class::GoalOutcomeUnmet => GOAL_CLASSES[0],
             Class::WithdrawalResidue => CLASSES[16],
+            Class::ReviewTargetStale => CLASSES[17],
         }
     }
 }
@@ -106,6 +109,8 @@ pub struct ChallengeReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub challenge: Option<Challenge>,
     pub grounded: Vec<&'static str>,
+    pub assignment_blockers: Vec<&'static str>,
+    pub project_challenges: Vec<&'static str>,
     pub ungrounded: Vec<(&'static str, &'static str)>,
     pub authority: &'static str,
     pub limits: [&'static str; 3],
@@ -117,11 +122,7 @@ impl ChallengeReport {
     }
 
     pub fn assignment_blockers(&self) -> Vec<&'static str> {
-        self.grounded
-            .iter()
-            .copied()
-            .filter(|class| !OUTSIDE_THE_ASSIGNMENT.contains(class))
-            .collect()
+        self.assignment_blockers.clone()
     }
 }
 
@@ -242,9 +243,10 @@ pub fn challenge_against(
         ));
     }
     type RoleGrounding = fn(&Task, Option<&Resolution>) -> Result<Challenge, &'static str>;
-    let against_the_role: [(&'static str, RoleGrounding); 2] = [
+    let against_the_role: [(&'static str, RoleGrounding); 3] = [
         (CLASSES[6], model_outside_role_policy),
         (CLASSES[8], lens_unassessed),
+        (CLASSES[17], review_target_stale),
     ];
     for (class, grounding) in against_the_role {
         outcomes.push((
@@ -301,6 +303,16 @@ pub fn challenge_against(
     ChallengeReport {
         task: evidence.task.map(|task| task.name.clone()),
         challenge: found,
+        assignment_blockers: grounded
+            .iter()
+            .copied()
+            .filter(|class| !OUTSIDE_THE_ASSIGNMENT.contains(class))
+            .collect(),
+        project_challenges: grounded
+            .iter()
+            .copied()
+            .filter(|class| OUTSIDE_THE_ASSIGNMENT.contains(class))
+            .collect(),
         grounded,
         ungrounded,
         authority: AUTHORITY,
@@ -704,7 +716,7 @@ fn exception_unresolved(task: &Task) -> Result<Challenge, &'static str> {
     let Some(exception) = task
         .exceptions
         .iter()
-        .find(|exception| exception.approval.is_none())
+        .find(|exception| !exception.superseded && exception.approval.is_none())
     else {
         return Err("no model exception is waiting on the owner");
     };
@@ -875,11 +887,9 @@ fn model_outside_role_policy(
     if role.models.iter().any(|model| model == &accepted.model) {
         return Err("the accepted model is one the role permits");
     }
-    if task
-        .exceptions
-        .iter()
-        .any(|exception| exception.model == accepted.model && exception.approval.is_some())
-    {
+    if task.exceptions.iter().any(|exception| {
+        !exception.superseded && exception.model == accepted.model && exception.approval.is_some()
+    }) {
         return Err("an owner ruling approved this model for this assignment");
     }
     Ok(Challenge {
@@ -904,11 +914,16 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
     let Some(role) = role else {
         return Err("no role memory is registered, so no lens is expected");
     };
-    let Some(missing) = role
-        .lenses
-        .iter()
-        .find(|lens| !task.assessments.iter().any(|entry| &&entry.ruling == lens))
-    else {
+    let Some(missing) = role.lenses.iter().find(|lens| {
+        !role
+            .knowledge_fingerprints
+            .get(*lens)
+            .is_some_and(|fingerprint| {
+                task.assessments.iter().any(|entry| {
+                    &entry.ruling == *lens && task::assessment_current(task, entry, fingerprint)
+                })
+            })
+    }) else {
         return Err("every lens the role consults carries an assessment");
     };
     Ok(Challenge {
@@ -922,6 +937,30 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
             format!("assessments recorded: {}", task.assessments.len()),
         ],
         reconcile: include_str!("cli/text/skeptic-lens-unassessed.md").to_owned(),
+    })
+}
+
+fn review_target_stale(task: &Task, role: Option<&Resolution>) -> Result<Challenge, &'static str> {
+    let Some(target) = &task.review_of else {
+        return Err("the task is not an explicit review");
+    };
+    if role.is_some_and(|role| role.review_current == Some(true)) {
+        return Err("the review inspects the current target revision");
+    }
+    Ok(Challenge {
+        class: Class::ReviewTargetStale,
+        statement: format!(
+            "Review {} no longer establishes approval of task {} at its current revision",
+            task.name, target.task
+        ),
+        evidence: vec![format!(
+            "reviewed revision: {}",
+            target.revision.fingerprint()
+        )],
+        reconcile: format!(
+            "Reaccept {} to inspect the target again, record current evidence and assessments, challenge and hand back. A CLOSED review stays historical; open a new review task",
+            task.name
+        ),
     })
 }
 

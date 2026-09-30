@@ -1,4 +1,4 @@
-use super::{ATTRIBUTIONS, Task, attribute, declared_check, evidence_inputs};
+use super::{ATTRIBUTIONS, Task, attribute, covers, declared_check, evidence_inputs};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -41,6 +41,7 @@ pub fn relevant_revision(
         })
         .collect();
     let assignment = serde_json::json!({
+        "review_of": task.review_of,
         "statement": task.statement,
         "role": task.role,
         "goal": task.goal,
@@ -55,7 +56,14 @@ pub fn relevant_revision(
     });
     let relevant_tree = tree
         .iter()
-        .filter(|(path, _)| attribute(task, tree, path) != ATTRIBUTIONS[1])
+        .filter(|(path, _)| {
+            task.check_inputs.iter().any(|input| covers(input, path))
+                || task
+                    .deliverables
+                    .iter()
+                    .any(|deliverable| covers(&deliverable.path, path))
+                || attribute(task, tree, path) != ATTRIBUTIONS[1]
+        })
         .map(|(path, digest)| (path.clone(), digest.clone()))
         .collect();
     RelevantRevision {
