@@ -1637,7 +1637,17 @@ fn failing_evidence_displays_log_path_and_last_lines() {
     );
 
     assert!(
-        stdout.contains("Log: .blabla/scratch/failing-run/evidence-1.log"),
+        stdout.contains(
+            task::read(temp.path(), "failing-run")
+                .unwrap()
+                .unwrap()
+                .evidence
+                .last()
+                .unwrap()
+                .log
+                .as_ref()
+                .unwrap()
+        ),
         "Output should contain log path: {}",
         stdout
     );
@@ -1752,7 +1762,17 @@ fn failing_evidence_log_readable_from_subdirectory() {
     );
 
     assert!(
-        stdout.contains("Log: .blabla/scratch/subdir-test/evidence-1.log"),
+        stdout.contains(
+            task::read(temp.path(), "subdir-test")
+                .unwrap()
+                .unwrap()
+                .evidence
+                .last()
+                .unwrap()
+                .log
+                .as_ref()
+                .unwrap()
+        ),
         "Output should contain log path when run from subdirectory: {}",
         stdout
     );
@@ -2459,4 +2479,747 @@ fn relevant_revision_changes_on_same_second_reacceptance() {
     let second = task::relevant_revision(&work, &tree, BTreeMap::new());
     assert_ne!(first.fingerprint(), second.fingerprint());
     assert_eq!(second.acceptance_epoch, 2);
+}
+
+fn withdrawal_fixture() -> TempDir {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "withdraw-work",
+                "--role",
+                "worker",
+                "--statement",
+                "repair",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "withdraw-work", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 7 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "finding", "withdraw-work", "remaining work"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "withdraw-work",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    temp
+}
+
+fn withdraw_fixture_task(temp: &TempDir) {
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task",
+                "withdraw",
+                "withdraw-work",
+                "--reason",
+                "reassign remaining work",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+}
+
+#[test]
+fn withdraw_releases_scope_without_completing_work() {
+    let temp = withdrawal_fixture();
+    let before = task::read(temp.path(), "withdraw-work").unwrap().unwrap();
+    withdraw_fixture_task(&temp);
+    let after = task::read(temp.path(), "withdraw-work").unwrap().unwrap();
+    let view = serde_json::to_value(&after).unwrap();
+    assert_eq!(after.state, "withdrawn");
+    assert!(!after.open());
+    assert!(after.result.is_none());
+    assert!(after.closed_unix.is_none());
+    assert!(after.closed_paths.is_empty());
+    assert_eq!(after.findings.len(), before.findings.len());
+    assert_eq!(after.evidence.len(), before.evidence.len());
+    assert_eq!(view["withdrawal"]["model"], "claude-opus-4-1");
+    assert_eq!(
+        view["withdrawal"]["unresolved_paths"]["src/thing.rs"],
+        blabla::project::snapshot(temp.path(), &Default::default())["src/thing.rs"]
+    );
+    for action in ["accept", "ready", "close", "block"] {
+        let mut values = vec!["task", action, "withdraw-work"];
+        if action == "accept" {
+            values.extend(["--model", "qwen3.5:4b"]);
+        }
+        if action == "close" {
+            values.extend(["--model", "claude-opus-4-1"]);
+        }
+        if action == "block" {
+            values.push("stop");
+        }
+        assert_eq!(cli_run(&temp, &values), 2);
+    }
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "finish",
+                "--scope",
+                "src"
+            ]
+        ),
+        0
+    );
+}
+
+#[test]
+fn withdrawn_changed_paths_remain_project_challenges() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    let (report, code) = cli_json(&temp, &["challenge", "--json"]);
+    assert_eq!(code, 1);
+    assert!(
+        report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(report["challenge"]["class"], "withdrawal-residue");
+}
+
+#[test]
+fn restored_residue_clears_without_claiming_completion() {
+    let temp = withdrawal_fixture();
+    std::fs::write(temp.path().join("src/new.rs"), "new").unwrap();
+    withdraw_fixture_task(&temp);
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn run() {}\n").unwrap();
+    std::fs::remove_file(temp.path().join("src/new.rs")).unwrap();
+    let (report, _) = cli_json(&temp, &["challenge", "--json"]);
+    assert!(
+        !report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(
+        task::read(temp.path(), "withdraw-work")
+            .unwrap()
+            .unwrap()
+            .state,
+        "withdrawn"
+    );
+}
+
+#[test]
+fn withdrawal_reconciliation_requires_current_closed_successor() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    let reconcile = [
+        "task",
+        "reconcile-withdrawal",
+        "withdraw-work",
+        "src/thing.rs",
+        "--successor",
+        "successor",
+        "--model",
+        "claude-opus-4-1",
+    ];
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "src",
+                "--input",
+                "src/thing.rs",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+    let mut successor = task::read(temp.path(), "successor").unwrap().unwrap();
+    let tree = blabla::project::snapshot(temp.path(), &Default::default());
+    assert!(task::apply(&mut successor, "accepted"));
+    task::record_acceptance(&mut successor, &tree, "qwen3.5:4b", 10);
+    evidence(&mut successor, &tree);
+    assert!(task::record_challenge(&mut successor, &tree, 0, 11));
+    assert!(task::mark_ready(&mut successor, &tree, 0).is_ok());
+    assert!(task::accept_result(
+        &mut successor,
+        &tree,
+        0,
+        "claude-opus-4-1",
+        12
+    ));
+    task::write(temp.path(), &successor).unwrap();
+    assert_eq!(cli_run(&temp, &reconcile), 0);
+    let after = task::read(temp.path(), "withdraw-work").unwrap().unwrap();
+    let value = serde_json::to_value(&after).unwrap();
+    assert_eq!(after.state, "withdrawn");
+    assert!(after.result.is_none());
+    assert_eq!(
+        value["withdrawal"]["reconciliations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let (report, _) = cli_json(&temp, &["challenge", "--json"]);
+    assert!(
+        !report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    successor.check = Some("replacement check".to_owned());
+    task::write(temp.path(), &successor).unwrap();
+    let (report, _) = cli_json(&temp, &["challenge", "--json"]);
+    assert!(
+        report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+}
+
+#[test]
+fn withdrawal_successor_can_close_and_reconcile_through_cli() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "src",
+                "--input",
+                "src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "successor", "--json"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let reconcile = [
+        "task",
+        "reconcile-withdrawal",
+        "withdraw-work",
+        "src/thing.rs",
+        "--successor",
+        "successor",
+        "--model",
+        "claude-opus-4-1",
+    ];
+    assert_eq!(cli_run(&temp, &reconcile), 0);
+    let (report, _) = cli_json(&temp, &["challenge", "--json"]);
+    assert!(
+        !report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 8 }\n",
+    )
+    .unwrap();
+    let (report, _) = cli_json(&temp, &["challenge", "--json"]);
+    assert!(
+        report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+}
+
+#[test]
+fn withdrawal_residue_is_visible_with_multiple_open_assignments() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    for (name, scope) in [("one", "src"), ("two", "tests")] {
+        assert_eq!(
+            cli_run(
+                &temp,
+                &[
+                    "task",
+                    "open",
+                    name,
+                    "--role",
+                    "worker",
+                    "--statement",
+                    "remaining work",
+                    "--scope",
+                    scope
+                ]
+            ),
+            0
+        );
+    }
+    let (report, code) = cli_json(&temp, &["challenge", "--json"]);
+    assert_eq!(code, 1);
+    assert_eq!(report["challenge"]["class"], "withdrawal-residue");
+}
+
+#[test]
+fn simultaneous_evidence_runs_preserve_both_observations_and_logs() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_with_argv_check(&temp, "race", &[env!("CARGO_BIN_EXE_blabla"), "--help"]);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let barrier = barrier.clone();
+            let temp = &temp;
+            handles.push(scope.spawn(move || {
+                barrier.wait();
+                cli_run(temp, &["task", "evidence", "race", "--run"])
+            }));
+        }
+        barrier.wait();
+        for handle in handles {
+            assert_eq!(handle.join().unwrap(), 0);
+        }
+    });
+    let task = race_task(&temp);
+    assert_eq!(task.evidence.len(), 2);
+    let logs = task
+        .evidence
+        .iter()
+        .map(|evidence| evidence.log.as_ref().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(logs.len(), 2);
+    for evidence in &task.evidence {
+        assert_eq!(evidence.exit, 0);
+        assert_eq!(evidence.acceptance_epoch, Some(task.acceptance_epoch));
+        assert!(
+            !std::fs::read(temp.path().join(evidence.log.as_ref().unwrap()))
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn changed_work_withdrawal_successor_can_close_and_reconcile_through_cli() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "finish repair",
+                "--scope",
+                "src",
+                "--input",
+                "src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 9 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "successor", "--json"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let successor = task::read(temp.path(), "successor").unwrap().unwrap();
+    assert!(successor.closed_paths.contains_key("src/thing.rs"));
+    let reconcile = [
+        "task",
+        "reconcile-withdrawal",
+        "withdraw-work",
+        "src/thing.rs",
+        "--successor",
+        "successor",
+        "--model",
+        "claude-opus-4-1",
+    ];
+    assert_eq!(cli_run(&temp, &reconcile), 0);
+    assert!(task::challenge_current(&successor, &task_tree(&temp)));
+    assert!(
+        task::withdrawal_residue(
+            &task::read(temp.path(), "withdraw-work").unwrap().unwrap(),
+            &task::read_all(temp.path()),
+            &task_tree(&temp)
+        )
+        .is_empty()
+    );
+    let mut replaced = successor.clone();
+    replaced.evidence.last_mut().unwrap().exit = 1;
+    task::write(temp.path(), &replaced).unwrap();
+    let (report, _) = cli_json(&temp, &["challenge", "--json"]);
+    assert!(
+        report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+    task::write(temp.path(), &successor).unwrap();
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 10 }\n",
+    )
+    .unwrap();
+    assert!(!task::challenge_current(&successor, &task_tree(&temp)));
+    let (report, _) = cli_json(&temp, &["challenge", "--json"]);
+    assert!(
+        report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+}
+
+#[test]
+fn withdrawal_reconciliation_preserves_observed_path_spelling() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let root = temp.path();
+    std::fs::rename(root.join("src"), root.join("Src")).unwrap();
+    std::fs::rename(root.join("Src/thing.rs"), root.join("Src/Thing.rs")).unwrap();
+    std::fs::write(
+        root.join("contracts/arch.bla"),
+        "module thing \"Src/Thing.rs\"\n\nrequire \"entry\": symbol thing::run\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "old",
+                "--role",
+                "worker",
+                "--statement",
+                "repair",
+                "--scope",
+                "Src"
+            ]
+        ),
+        0
+    );
+    std::fs::write(root.join("Src/Thing.rs"), "pub fn run() -> u8 { 7 }\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "withdraw",
+                "old",
+                "--reason",
+                "reassign",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    let old = task::read(root, "old").unwrap().unwrap();
+    assert!(
+        old.withdrawal
+            .as_ref()
+            .unwrap()
+            .unresolved_paths
+            .contains_key("Src/Thing.rs")
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "Src",
+                "--input",
+                "Src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "successor", "--json"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let spelling = if cfg!(windows) {
+        "sRC/tHING.RS"
+    } else {
+        "Src/Thing.rs"
+    };
+    let reconcile = |path: &str| {
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "reconcile-withdrawal",
+                "old",
+                path,
+                "--successor",
+                "successor",
+                "--model",
+                "claude-opus-4-1",
+            ],
+        )
+    };
+    #[cfg(not(windows))]
+    assert_eq!(reconcile("sRC/tHING.RS"), 2);
+    assert_eq!(reconcile(spelling), 0);
+    let old = task::read(root, "old").unwrap().unwrap();
+    assert_eq!(
+        old.withdrawal.as_ref().unwrap().reconciliations[0].path,
+        "Src/Thing.rs"
+    );
+    assert!(task::withdrawal_residue(&old, &task::read_all(root), &task_tree(&temp)).is_empty());
+    std::fs::write(root.join("Src/Thing.rs"), "pub fn run() {}\n").unwrap();
+    assert!(task::withdrawal_residue(&old, &task::read_all(root), &task_tree(&temp)).is_empty());
+}
+
+#[test]
+fn withdrawal_residue_does_not_hide_vacuous_close_blocker() {
+    let temp = withdrawal_fixture();
+    std::fs::write(temp.path().join("contracts/arch.bla"), "module missing \"src/missing.py\"\nforbid \"missing-restart\": symbol missing::Domain.restart\n").unwrap();
+    withdraw_fixture_task(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "src",
+                "--input",
+                "src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    let (report, _) = cli_json(&temp, &["challenge", "successor", "--json"]);
+    let grounded = report["grounded"].as_array().unwrap();
+    assert!(grounded.iter().any(|class| class == "withdrawal-residue"));
+    assert!(grounded.iter().any(|class| class == "vacuous-rule"));
+    assert_eq!(cli_run(&temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        2
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "reconcile-withdrawal",
+                "withdraw-work",
+                "src/thing.rs",
+                "--successor",
+                "successor",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        2
+    );
 }

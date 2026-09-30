@@ -29,6 +29,19 @@ fn view(task: &Task) -> TaskView<'_> {
     }
 }
 
+pub(super) fn locked(project: &Project, json: bool, f: impl FnOnce() -> i32) -> i32 {
+    match task::store::lock(&project.manifest.root) {
+        Ok(_lock) => {
+            let unreadable = task::unreadable(&project.manifest.root);
+            if !unreadable.is_empty() {
+                return emit_error(error("task", unreadable.join("; "), None), json, 2);
+            }
+            f()
+        }
+        Err(message) => emit_error(error("task", message, None), json, 2),
+    }
+}
+
 fn load(project: &Project, name: &str, json: bool) -> Result<Task, i32> {
     match task::read(&project.manifest.root, name) {
         Ok(Some(task)) => Ok(task),
@@ -55,9 +68,7 @@ fn mutate(project: &Project, name: &str, json: bool) -> Result<Task, i32> {
     Err(emit_error(
         error(
             "task",
-            format!(
-                "task {name:?} is closed; what it holds is history rather than open evidence, and amending it would rewrite an account that was already decided. Open a new task for the follow-on work"
-            ),
+            include_str!("text/task-recovery.md").replace("{{name}}", name),
             None,
         ),
         json,
@@ -252,7 +263,15 @@ pub(super) fn open(project: &Project, opening: Opening, json: bool) -> i32 {
         root,
         &project.ignore,
         Opening {
-            scope: opening.scope.into_iter().map(normalize).collect(),
+            scope: match task::validate_scope(
+                root,
+                &opening.name,
+                &opening.scope,
+                &task::read_all(root),
+            ) {
+                Ok(scope) => scope,
+                Err(message) => return emit_error(error("task", message, None), json, 2),
+            },
             inputs: opening.inputs.into_iter().map(normalize).collect(),
             deliverables: owed_paths(project, opening.deliverables),
             ..opening
@@ -763,12 +782,107 @@ pub(super) fn widen(project: &Project, name: &str, add: Vec<String>, json: bool)
         Ok(task) => task,
         Err(exit) => return exit,
     };
-    for path in add.into_iter().map(normalize) {
+    let add = match task::validate_scope(
+        &project.manifest.root,
+        name,
+        &add,
+        &task::read_all(&project.manifest.root),
+    ) {
+        Ok(scope) => scope,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    for path in add {
         if !task.scope.contains(&path) {
             task.scope.push(path);
         }
     }
     task::attest(&mut task, "scope", None, now_unix());
+    store(project, &mut task, json)
+}
+
+pub(super) fn withdraw(
+    project: &Project,
+    name: &str,
+    reason: &str,
+    model: &str,
+    json: bool,
+) -> i32 {
+    if let Err(exit) = validate_orchestrator_model(project, model, json) {
+        return exit;
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    if let Err(message) = task::withdraw(&mut task, &tree, reason, model, now_unix()) {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    task::attest(&mut task, "withdraw", Some(model), now_unix());
+    store(project, &mut task, json)
+}
+
+pub(super) fn reconcile_withdrawal(
+    project: &Project,
+    name: &str,
+    path: &str,
+    successor: &str,
+    model: &str,
+    json: bool,
+) -> i32 {
+    if let Err(exit) = validate_orchestrator_model(project, model, json) {
+        return exit;
+    }
+    let root = &project.manifest.root;
+    let path = match task::normalize_scope(root, path) {
+        Ok(path) => path,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    let mut task = match load(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let captured = task.withdrawal.as_ref().and_then(|record| {
+        record
+            .unresolved_paths
+            .keys()
+            .find(|captured| task::covers(&path, captured) && task::covers(captured, &path))
+            .cloned()
+    });
+    let path = match (task.state.as_str(), captured) {
+        ("withdrawn", Some(path)) => path,
+        _ => {
+            return emit_error(
+                error(
+                    "task",
+                    "reconciliation requires a captured path on a WITHDRAWN task".to_owned(),
+                    None,
+                ),
+                json,
+                2,
+            );
+        }
+    };
+    let successor = match load(project, successor, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let tree = blabla::project::snapshot(root, &project.ignore);
+    if !task::successful_successor(&successor, &tree, &path) {
+        return emit_error(error("task", "reconciliation requires a CLOSED successor with current successful evidence and explicit input or deliverable coverage".to_owned(), None), json, 2);
+    }
+    task.withdrawal
+        .as_mut()
+        .expect("withdrawal checked")
+        .reconciliations
+        .push(task::WithdrawalReconciliation {
+            revision: task::successor_revision(&successor, &tree, &path),
+            path,
+            successor: successor.name.clone(),
+            model: model.to_owned(),
+            unix: now_unix(),
+        });
+    task::attest(&mut task, "reconcile-withdrawal", Some(model), now_unix());
     store(project, &mut task, json)
 }
 
@@ -903,7 +1017,11 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
         Some(&task),
         Err(skeptic::GOALS_NOT_JUDGED),
     );
-    let standing = report.grounded.len();
+    let standing = report
+        .grounded
+        .iter()
+        .filter(|class| **class != "withdrawal-residue")
+        .count();
     if !task::accept_result(&mut task, &tree, standing, model, now_unix()) {
         return emit_error(
             error(
@@ -1346,6 +1464,10 @@ pub(super) fn evidence(project: &Project, name: &str, exit: i32, tool: &str, jso
 }
 
 pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
+    let initial_lock = match task::store::lock(&project.manifest.root) {
+        Ok(lock) => lock,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
     let task = match accepted_for_evidence(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
@@ -1383,7 +1505,16 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
             2,
         );
     }
-    let log_name = format!("evidence-{}.log", task.evidence.len() + 1);
+    let log_name = format!(
+        "evidence-{}-{}-{}.log",
+        task.evidence.len() + 1,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    drop(initial_lock);
     let output = match std::process::Command::new(&argv[0])
         .args(&argv[1..])
         .current_dir(root)
@@ -1426,6 +1557,10 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         "{RECORD_DIRECTORY}/{}/{name}/{log_name}",
         task::SCRATCH_DIRECTORY
     );
+    let _completion_lock = match task::store::lock(root) {
+        Ok(lock) => lock,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
     let mut reloaded = match accepted_for_evidence(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
@@ -1469,7 +1604,12 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
                 .into_iter()
                 .filter(Task::open)
                 .collect();
-            if open.len() > 1 {
+            let tasks = task::read_all(root);
+            let tree = blabla::project::snapshot(root, &project.ignore);
+            let residue = tasks
+                .iter()
+                .any(|task| !task::withdrawal_residue(task, &tasks, &tree).is_empty());
+            if open.len() > 1 && !residue {
                 let names: Vec<String> = open
                     .iter()
                     .map(|task| format!("blabla challenge {}", task.name))
@@ -1488,7 +1628,7 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
                     2,
                 );
             }
-            open.pop()
+            if open.len() > 1 { None } else { open.pop() }
         }
     };
     let evaluation = super::project::evaluate_with_run_state(project);
@@ -1524,7 +1664,7 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
                 );
             }
             assignment_clear = Some(recorded);
-        } else if task.state != "closed" {
+        } else if task.open() {
             assignment_clear = Some(
                 task.state == "ready"
                     && blockers.is_empty()
@@ -1796,6 +1936,34 @@ fn write_task(task: &Task, root: &std::path::Path, floor: Option<u8>) -> io::Res
         for removed in &task.removed_deliverables {
             writeln!(output, "  {} — {}", removed.path, removed.reason)?;
         }
+    }
+    if let Some(withdrawal) = &task.withdrawal {
+        writeln!(
+            output,
+            "\nWITHDRAWN by {}: {}",
+            withdrawal.model, withdrawal.reason
+        )?;
+        for (path, digest) in &withdrawal.unresolved_paths {
+            writeln!(
+                output,
+                "  captured residue {path}: {}",
+                digest.as_deref().unwrap_or("absent")
+            )?;
+        }
+        for record in &withdrawal.reconciliations {
+            writeln!(
+                output,
+                "  reconciliation {} -> {} by {} at revision {}",
+                record.path,
+                record.successor,
+                record.model,
+                record.revision.fingerprint()
+            )?;
+        }
+        writeln!(
+            output,
+            "  Withdrawal releases ownership and grants no completion credit; restore captured paths or reconcile them against a current CLOSED successor"
+        )?;
     }
     if let Some(latest_evidence) = task.evidence.last() {
         write_failing_evidence(&mut output, root, latest_evidence)?;

@@ -14,7 +14,7 @@ pub const LIMITS: [&str; 3] = [
     include_str!("cli/text/skeptic-limit-source.md"),
 ];
 
-pub const CLASSES: [&str; 16] = [
+pub const CLASSES: [&str; 17] = [
     "unresolved-finding",
     "deliverable-unchanged",
     "scope-breach",
@@ -31,12 +31,14 @@ pub const CLASSES: [&str; 16] = [
     "decision-unanswered",
     "orchestrator-record-during-carry",
     "question-unpicked",
+    "withdrawal-residue",
 ];
 
-pub const OUTSIDE_THE_ASSIGNMENT: [&str; 3] = [
+pub const OUTSIDE_THE_ASSIGNMENT: [&str; 4] = [
     "verification-not-current",
     "vacuous-rule",
     "orchestrator-record-during-carry",
+    "withdrawal-residue",
 ];
 
 pub const GOAL_CLASSES: [&str; 1] = ["goal-outcome-unmet"];
@@ -61,6 +63,7 @@ pub enum Class {
     OrchestratorRecordDuringCarry,
     QuestionUnpicked,
     GoalOutcomeUnmet,
+    WithdrawalResidue,
 }
 
 impl Class {
@@ -83,6 +86,7 @@ impl Class {
             Class::OrchestratorRecordDuringCarry => CLASSES[14],
             Class::QuestionUnpicked => CLASSES[15],
             Class::GoalOutcomeUnmet => GOAL_CLASSES[0],
+            Class::WithdrawalResidue => CLASSES[16],
         }
     }
 }
@@ -201,6 +205,7 @@ pub fn challenge_against(
     goals: Result<&[Outcome], &'static str>,
 ) -> ChallengeReport {
     let mut outcomes: Vec<(&'static str, Result<Challenge, &'static str>)> = Vec::new();
+    outcomes.push((CLASSES[16], withdrawal_residue(evidence)));
     type Grounding = fn(&Task, &Evidence<'_>) -> Result<Challenge, &'static str>;
     let against_the_task: [(&'static str, Grounding); 11] = [
         (CLASSES[12], |task, evidence| {
@@ -258,7 +263,9 @@ pub fn challenge_against(
         },
     ));
     outcomes.push((GOAL_CLASSES[0], goal_outcome_unmet(goals, evidence.task)));
-    let standing = outcomes.iter().any(|(_, outcome)| outcome.is_ok());
+    let standing = outcomes
+        .iter()
+        .any(|(class, outcome)| *class != CLASSES[16] && outcome.is_ok());
     outcomes.push((
         CLASSES[3],
         if standing {
@@ -299,6 +306,30 @@ pub fn challenge_against(
         authority: AUTHORITY,
         limits: LIMITS,
     }
+}
+
+fn withdrawal_residue(evidence: &Evidence<'_>) -> Result<Challenge, &'static str> {
+    for task in evidence.other_tasks {
+        let paths = task::withdrawal_residue(task, evidence.other_tasks, evidence.tree);
+        if !paths.is_empty() {
+            return Ok(Challenge {
+                class: Class::WithdrawalResidue,
+                statement: format!(
+                    "Withdrawn task {} still has unresolved changed paths",
+                    task.name
+                ),
+                evidence: paths
+                    .iter()
+                    .map(|path| format!("task::{} captured changed path {path}", task.name))
+                    .collect(),
+                reconcile: format!(
+                    "Restore each path to its pre-task content, or record task reconcile-withdrawal {} PATH --successor TASK --model MODEL against a CLOSED successor with current evidence",
+                    task.name
+                ),
+            });
+        }
+    }
+    Err("no unresolved withdrawal residue remains")
 }
 
 fn unresolved_finding(task: &Task) -> Result<Challenge, &'static str> {

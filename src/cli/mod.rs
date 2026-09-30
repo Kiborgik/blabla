@@ -378,6 +378,25 @@ enum TaskAction {
         #[arg(long, help = "The model recording the acceptance of the result")]
         model: String,
     },
+    #[command(about = "Withdraw an assignment, release ownership and retain unresolved changes")]
+    Withdraw {
+        name: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        model: String,
+    },
+    #[command(
+        about = "Reconcile a withdrawn path against current evidence from a closed successor"
+    )]
+    ReconcileWithdrawal {
+        name: String,
+        path: String,
+        #[arg(long)]
+        successor: String,
+        #[arg(long)]
+        model: String,
+    },
     #[command(about = "Show one bounded task, or every recorded task without a name")]
     Show { name: Option<String> },
     #[command(about = "Accept a task and record which model took it")]
@@ -974,180 +993,212 @@ fn execute(cli: Cli) -> i32 {
             Err(exit) => exit,
         },
         Command::Task { action } => match project::load(explicit, &cwd, json, None) {
-            Ok(loaded) => match action {
-                TaskAction::Open {
-                    name,
-                    role,
-                    statement,
-                    scope,
-                    deliverable,
-                    check,
-                    check_argv,
-                    input,
-                    goal,
-                } => task::open(
-                    &loaded,
-                    blabla::project::task::Opening {
+            Ok(loaded) => {
+                if let TaskAction::Show { name } = action {
+                    return task::show(&loaded, name.as_deref(), json);
+                }
+                if let TaskAction::Evidence {
+                    name, run: true, ..
+                } = action
+                {
+                    return task::evidence_run(&loaded, &name, json);
+                }
+                task::locked(&loaded, json, || match action {
+                    TaskAction::Open {
                         name,
                         role,
                         statement,
                         scope,
-                        deliverables: deliverable,
+                        deliverable,
                         check,
-                        check_argv: if check_argv.is_empty() {
-                            None
-                        } else {
-                            Some(check_argv)
-                        },
-                        inputs: input,
+                        check_argv,
+                        input,
                         goal,
-                    },
-                    json,
-                ),
-                TaskAction::Finding { name, statement } => {
-                    task::finding(&loaded, &name, &statement, json)
-                }
-                TaskAction::Addressed {
-                    name,
-                    id,
-                    statement,
-                    model,
-                } => task::addressed(&loaded, &name, id, &statement, &model, json),
-                TaskAction::Resolve {
-                    name,
-                    id,
-                    evidence,
-                    model,
-                } => task::resolve(&loaded, &name, id, &evidence, &model, json),
-                TaskAction::Ask {
-                    name,
-                    question,
-                    options,
-                    floor,
-                    model,
-                } => task::ask(
-                    &loaded,
-                    &name,
-                    blabla::project::task::Ask {
+                    } => task::open(
+                        &loaded,
+                        blabla::project::task::Opening {
+                            name,
+                            role,
+                            statement,
+                            scope,
+                            deliverables: deliverable,
+                            check,
+                            check_argv: if check_argv.is_empty() {
+                                None
+                            } else {
+                                Some(check_argv)
+                            },
+                            inputs: input,
+                            goal,
+                        },
+                        json,
+                    ),
+                    TaskAction::Finding { name, statement } => {
+                        task::finding(&loaded, &name, &statement, json)
+                    }
+                    TaskAction::Addressed {
+                        name,
+                        id,
+                        statement,
+                        model,
+                    } => task::addressed(&loaded, &name, id, &statement, &model, json),
+                    TaskAction::Resolve {
+                        name,
+                        id,
+                        evidence,
+                        model,
+                    } => task::resolve(&loaded, &name, id, &evidence, &model, json),
+                    TaskAction::Ask {
+                        name,
                         question,
                         options,
                         floor,
                         model,
-                    },
-                    json,
-                ),
-                TaskAction::Decide {
-                    name,
-                    question,
-                    on,
-                    pick,
-                    confidence,
-                    model,
-                    options,
-                } => task::decide(
-                    &loaded,
-                    &name,
-                    task::Asked {
+                    } => task::ask(
+                        &loaded,
+                        &name,
+                        blabla::project::task::Ask {
+                            question,
+                            options,
+                            floor,
+                            model,
+                        },
+                        json,
+                    ),
+                    TaskAction::Decide {
+                        name,
                         question,
                         on,
                         pick,
                         confidence,
                         model,
                         options,
-                    },
-                    json,
-                ),
-                TaskAction::Answer {
-                    name,
-                    id,
-                    pick,
-                    reason,
-                    model,
-                } => task::answer(
-                    &loaded,
-                    &name,
-                    id,
-                    blabla::project::task::Answer {
+                    } => task::decide(
+                        &loaded,
+                        &name,
+                        task::Asked {
+                            question,
+                            on,
+                            pick,
+                            confidence,
+                            model,
+                            options,
+                        },
+                        json,
+                    ),
+                    TaskAction::Answer {
+                        name,
+                        id,
                         pick,
+                        reason,
+                        model,
+                    } => task::answer(
+                        &loaded,
+                        &name,
+                        id,
+                        blabla::project::task::Answer {
+                            pick,
+                            model,
+                            reason,
+                        },
+                        json,
+                    ),
+                    TaskAction::Confirm { name, model } => {
+                        task::confirm(&loaded, &name, &model, json)
+                    }
+                    TaskAction::Note { name, statement } => {
+                        task::note(&loaded, &name, &statement, json)
+                    }
+                    TaskAction::Scope { name, add } => task::widen(&loaded, &name, add, json),
+                    TaskAction::Close { name, model } => task::close(&loaded, &name, &model, json),
+                    TaskAction::Withdraw {
+                        name,
+                        reason,
+                        model,
+                    } => task::withdraw(&loaded, &name, &reason, &model, json),
+                    TaskAction::ReconcileWithdrawal {
+                        name,
+                        path,
+                        successor,
+                        model,
+                    } => {
+                        task::reconcile_withdrawal(&loaded, &name, &path, &successor, &model, json)
+                    }
+                    TaskAction::Show { name } => task::show(&loaded, name.as_deref(), json),
+                    TaskAction::Accept { name, model } => {
+                        task::accept(&loaded, &name, &model, json)
+                    }
+                    TaskAction::Block { name, reason } => {
+                        task::block(&loaded, &name, &reason, json)
+                    }
+                    TaskAction::Ready { name } => task::ready(&loaded, &name, json),
+                    TaskAction::Lens {
+                        name,
+                        lens,
+                        statement,
+                    } => task::lens(&loaded, &name, &lens, &statement, json),
+                    TaskAction::ProposeModel {
+                        name,
                         model,
                         reason,
+                    } => task::propose_model(&loaded, &name, &model, &reason, json),
+                    TaskAction::ApproveModel {
+                        name,
+                        model,
+                        approval,
+                    } => task::approve_model(&loaded, &name, &model, &approval, json),
+                    TaskAction::Attribute {
+                        name,
+                        paths,
+                        kind,
+                        model,
+                    } => task::attribute(&loaded, &name, &paths, &kind, &model, json),
+                    TaskAction::Check {
+                        name,
+                        command,
+                        argv,
+                        input,
+                    } => task::declare_check(&loaded, &name, command, argv, input, json),
+                    TaskAction::Deliverable {
+                        name,
+                        add,
+                        remove,
+                        reason,
+                        model,
+                    } => {
+                        if let Some(path) = remove {
+                            task::unowe(
+                                &loaded,
+                                &name,
+                                &path,
+                                reason.as_deref(),
+                                model.as_deref(),
+                                json,
+                            )
+                        } else {
+                            task::owe(&loaded, &name, add, json)
+                        }
+                    }
+                    TaskAction::Evidence {
+                        name,
+                        exit,
+                        tool,
+                        run,
+                    } => match (run, exit, tool) {
+                        (true, _, _) => task::evidence_run(&loaded, &name, json),
+                        (false, Some(exit), Some(tool)) => {
+                            task::evidence(&loaded, &name, exit, &tool, json)
+                        }
+                        _ => 2,
                     },
-                    json,
-                ),
-                TaskAction::Confirm { name, model } => task::confirm(&loaded, &name, &model, json),
-                TaskAction::Note { name, statement } => {
-                    task::note(&loaded, &name, &statement, json)
-                }
-                TaskAction::Scope { name, add } => task::widen(&loaded, &name, add, json),
-                TaskAction::Close { name, model } => task::close(&loaded, &name, &model, json),
-                TaskAction::Show { name } => task::show(&loaded, name.as_deref(), json),
-                TaskAction::Accept { name, model } => task::accept(&loaded, &name, &model, json),
-                TaskAction::Block { name, reason } => task::block(&loaded, &name, &reason, json),
-                TaskAction::Ready { name } => task::ready(&loaded, &name, json),
-                TaskAction::Lens {
-                    name,
-                    lens,
-                    statement,
-                } => task::lens(&loaded, &name, &lens, &statement, json),
-                TaskAction::ProposeModel {
-                    name,
-                    model,
-                    reason,
-                } => task::propose_model(&loaded, &name, &model, &reason, json),
-                TaskAction::ApproveModel {
-                    name,
-                    model,
-                    approval,
-                } => task::approve_model(&loaded, &name, &model, &approval, json),
-                TaskAction::Attribute {
-                    name,
-                    paths,
-                    kind,
-                    model,
-                } => task::attribute(&loaded, &name, &paths, &kind, &model, json),
-                TaskAction::Check {
-                    name,
-                    command,
-                    argv,
-                    input,
-                } => task::declare_check(&loaded, &name, command, argv, input, json),
-                TaskAction::Deliverable {
-                    name,
-                    add,
-                    remove,
-                    reason,
-                    model,
-                } => {
-                    if let Some(path) = remove {
-                        task::unowe(
-                            &loaded,
-                            &name,
-                            &path,
-                            reason.as_deref(),
-                            model.as_deref(),
-                            json,
-                        )
-                    } else {
-                        task::owe(&loaded, &name, add, json)
-                    }
-                }
-                TaskAction::Evidence {
-                    name,
-                    exit,
-                    tool,
-                    run,
-                } => match (run, exit, tool) {
-                    (true, _, _) => task::evidence_run(&loaded, &name, json),
-                    (false, Some(exit), Some(tool)) => {
-                        task::evidence(&loaded, &name, exit, &tool, json)
-                    }
-                    _ => 2,
-                },
-            },
+                })
+            }
             Err(exit) => exit,
         },
         Command::Challenge { task: name } => match project::load(explicit, &cwd, json, None) {
-            Ok(loaded) => task::challenge(&loaded, name.as_deref(), json),
+            Ok(loaded) => task::locked(&loaded, json, || {
+                task::challenge(&loaded, name.as_deref(), json)
+            }),
             Err(exit) => exit,
         },
         Command::Explain { rule } if rule.starts_with(runtime::primitives::PREFIX) => {

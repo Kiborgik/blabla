@@ -582,3 +582,63 @@ fn a_task_with_unconfirmed_records_from_the_carry_does_not_close() {
         2
     );
 }
+
+#[test]
+fn withdrawal_requires_orchestrator_attestation_and_preserves_rejected_record() {
+    let temp = project();
+    ok(
+        &temp,
+        &[
+            "task",
+            "open",
+            "withdraw",
+            "--role",
+            "worker",
+            "--statement",
+            "repair",
+            "--scope",
+            "src",
+        ],
+    );
+    let path = temp.path().join(".blabla/tasks/withdraw.json");
+    let before = std::fs::read(&path).unwrap();
+    for model in ["small", "unknown"] {
+        assert_eq!(
+            code(
+                &temp,
+                &[
+                    "task", "withdraw", "withdraw", "--reason", "reassign", "--model", model
+                ]
+            ),
+            2
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    assert_eq!(
+        code(
+            &temp,
+            &[
+                "task", "withdraw", "withdraw", "--reason", " ", "--model", "opus"
+            ]
+        ),
+        2
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    ok(
+        &temp,
+        &[
+            "task", "withdraw", "withdraw", "--reason", "reassign", "--model", "opus",
+        ],
+    );
+    let view = json(&temp, &["task", "show", "withdraw"]);
+    assert_eq!(view["task"]["withdrawal"]["model"], "opus");
+    assert_eq!(
+        view["task"]["orchestrator_records"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["model"],
+        "opus"
+    );
+    assert_eq!(view["task"]["state"], "withdrawn");
+}

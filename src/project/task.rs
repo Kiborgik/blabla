@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub mod revision;
+pub mod store;
 
 pub use revision::{RelevantRevision, relevant_revision};
 
@@ -465,7 +466,14 @@ pub fn calibration(tasks: &[Task], model_named_by: impl Fn(&str) -> String) -> V
         .collect()
 }
 
-pub const STATES: [&str; 5] = ["open", "accepted", "blocked", "ready", "closed"];
+pub const STATES: [&str; 6] = [
+    "open",
+    "accepted",
+    "blocked",
+    "ready",
+    "closed",
+    "withdrawn",
+];
 
 pub const SCRATCH_DIRECTORY: &str = "scratch";
 
@@ -723,6 +731,7 @@ fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String
     record.challenged = None;
     record.state.clear();
     record.closed_unix = None;
+    record.closed_paths.clear();
     record.result = None;
     record.build = None;
     for finding in &mut record.findings {
@@ -770,7 +779,7 @@ pub fn handback(task: &Task, tree: &BTreeMap<String, String>) -> Result<(), &'st
     match task.state.as_str() {
         "open" | "blocked" => return Err("accept"),
         "ready" => return Err("review"),
-        "closed" => return Err("closed"),
+        "closed" | "withdrawn" => return Err("closed"),
         "accepted" => {}
         _ => return Err("invalid-state"),
     }
@@ -893,7 +902,203 @@ pub struct RemovedDeliverable {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Withdrawal {
+    pub reason: String,
+    pub model: String,
+    pub unix: u64,
+    pub unresolved_paths: BTreeMap<String, Option<String>>,
+    #[serde(default)]
+    pub reconciliations: Vec<WithdrawalReconciliation>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WithdrawalReconciliation {
+    pub path: String,
+    pub successor: String,
+    pub revision: revision::RelevantRevision,
+    pub model: String,
+    pub unix: u64,
+}
+
+pub fn withdraw(
+    task: &mut Task,
+    tree: &BTreeMap<String, String>,
+    reason: &str,
+    model: &str,
+    unix: u64,
+) -> Result<(), String> {
+    if !task.open() || reason.trim().is_empty() {
+        return Err("withdrawal requires a nonterminal task and a nonempty reason".to_owned());
+    }
+    let unresolved_paths = changed(task, tree)
+        .into_iter()
+        .filter(|path| task.in_scope(path) || attribute(task, tree, path) == ATTRIBUTIONS[0])
+        .map(|path| (path.to_owned(), observed_digest(tree, path)))
+        .collect();
+    task.withdrawal = Some(Withdrawal {
+        reason: reason.to_owned(),
+        model: model.to_owned(),
+        unix,
+        unresolved_paths,
+        reconciliations: Vec::new(),
+    });
+    task.state = "withdrawn".to_owned();
+    task.result = None;
+    task.closed_unix = None;
+    task.closed_paths.clear();
+    task.challenged = None;
+    Ok(())
+}
+
+pub fn successor_revision(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    path: &str,
+) -> revision::RelevantRevision {
+    let mut revision = revision::relevant_revision(task, tree, BTreeMap::new());
+    let mut fingerprint = super::Fnv::new();
+    fingerprint.write_str("withdrawal-successor-v1");
+    fingerprint.write_str(
+        &serde_json::to_string(&(
+            revision.task_digest,
+            &task.accepted,
+            &task.result,
+            &task.evidence,
+            &task.challenged,
+        ))
+        .expect("successor serializes"),
+    );
+    revision.task_digest = fingerprint.finish();
+    revision
+        .paths
+        .insert(path.to_owned(), observed_digest(tree, path));
+    revision
+}
+
+pub fn successor_covers(task: &Task, path: &str) -> bool {
+    task.check_inputs.iter().any(|input| covers(input, path))
+        || task
+            .deliverables
+            .iter()
+            .any(|deliverable| covers(&deliverable.path, path))
+}
+
+pub fn successful_successor(task: &Task, tree: &BTreeMap<String, String>, path: &str) -> bool {
+    task.state == "closed"
+        && task.result.is_some()
+        && readiness(task, tree).supported
+        && challenge_current(task, tree)
+        && successor_covers(task, path)
+}
+
+pub fn withdrawal_residue(
+    task: &Task,
+    tasks: &[Task],
+    tree: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(withdrawal) = &task.withdrawal else {
+        return Vec::new();
+    };
+    withdrawal
+        .unresolved_paths
+        .keys()
+        .filter(|path| {
+            if observed_digest(tree, path) == observed_digest(&task.opened_tree, path) {
+                return false;
+            }
+            !withdrawal.reconciliations.iter().any(|record| {
+                record.path == **path
+                    && tasks.iter().any(|successor| {
+                        successor.name == record.successor
+                            && successful_successor(successor, tree, path)
+                            && successor_revision(successor, tree, path) == record.revision
+                            && record.revision.paths.get(*path)
+                                == Some(&observed_digest(tree, path))
+                    })
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+pub fn normalize_scope(root: &Path, path: &str) -> Result<String, String> {
+    let path = path.replace('\\', "/");
+    if path.starts_with('/') || path.as_bytes().get(1) == Some(&b':') {
+        return Err(format!("write scope {path:?} must be project-relative"));
+    }
+    let mut components = Vec::new();
+    let mut current = root.to_path_buf();
+    for component in path.split('/') {
+        if component.is_empty() || component == "." {
+            continue;
+        }
+        if component == ".." || component.contains('\0') {
+            return Err(format!(
+                "write scope {path:?} contains an invalid component"
+            ));
+        }
+        if components.is_empty() && component.as_bytes().get(1) == Some(&b':') {
+            return Err(format!("write scope {path:?} must be project-relative"));
+        }
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!("write scope {path:?} traverses a symlink"));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("cannot inspect write scope {path:?}: {error}")),
+        }
+        components.push(component);
+    }
+    if components.is_empty() {
+        return Err("write scope must name a project path".to_owned());
+    }
+    let normalized = components.join("/");
+    Ok(if cfg!(windows) {
+        normalized.to_lowercase()
+    } else {
+        normalized
+    })
+}
+
+pub fn scopes_intersect(a: &str, b: &str) -> bool {
+    covers(a, b) || covers(b, a)
+}
+
+pub fn validate_scope(
+    root: &Path,
+    name: &str,
+    scopes: &[String],
+    tasks: &[Task],
+) -> Result<Vec<String>, String> {
+    let scopes = scopes
+        .iter()
+        .map(|path| normalize_scope(root, path))
+        .collect::<Result<Vec<_>, _>>()?;
+    for other in tasks
+        .iter()
+        .filter(|other| other.name != name && other.open())
+    {
+        for owned in &other.scope {
+            let owned = normalize_scope(root, owned)?;
+            if let Some(path) = scopes.iter().find(|path| scopes_intersect(path, &owned)) {
+                return Err(format!(
+                    "write scope {path:?} overlaps task::{} at {owned:?}; withdraw the old assignment before transferring ownership",
+                    other.name
+                ));
+            }
+        }
+    }
+    Ok(scopes)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withdrawal: Option<Withdrawal>,
     pub name: String,
     pub role: String,
     pub statement: String,
@@ -955,6 +1160,7 @@ fn open_state() -> String {
 impl Default for Task {
     fn default() -> Task {
         Task {
+            withdrawal: None,
             name: String::new(),
             role: String::new(),
             statement: String::new(),
@@ -990,7 +1196,7 @@ impl Default for Task {
 
 impl Task {
     pub fn open(&self) -> bool {
-        self.state != "closed"
+        !matches!(self.state.as_str(), "closed" | "withdrawn")
     }
 
     pub fn declares_check(&self) -> bool {
@@ -1045,6 +1251,15 @@ pub fn replaceable(existing: Option<&Task>) -> bool {
 }
 
 pub fn covers(allowed: &str, path: &str) -> bool {
+    let allowed_case;
+    let path_case;
+    let (allowed, path) = if cfg!(windows) {
+        allowed_case = allowed.to_lowercase();
+        path_case = path.to_lowercase();
+        (allowed_case.as_str(), path_case.as_str())
+    } else {
+        (allowed, path)
+    };
     let allowed = allowed.trim_end_matches('/');
     path == allowed
         || path
@@ -1114,13 +1329,7 @@ pub fn record_from(
 }
 
 pub fn write(root: &Path, task: &Task) -> std::io::Result<PathBuf> {
-    let path = path_of(root, &task.name);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let text = serde_json::to_vec_pretty(task).map_err(std::io::Error::other)?;
-    std::fs::write(&path, text)?;
-    Ok(path)
+    store::replace(root, task)
 }
 
 pub fn read(root: &Path, name: &str) -> Result<Option<Task>, String> {
