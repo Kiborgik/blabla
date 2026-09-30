@@ -9,6 +9,7 @@ knowledge "knowledge/engineering.bla"
 knowledge "knowledge/testing.bla"
 knowledge "knowledge/reviewing.bla"
 knowledge "knowledge/design.bla"
+knowledge "knowledge/expert.bla"
 
 use structure "contracts/extractor.bla"
 use structure "contracts/publication.bla"

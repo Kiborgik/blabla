@@ -435,3 +435,41 @@ blabla guide bootstrap
 The [agent integration smoke tests](../evals/README.md) exercise discovery and this workflow in
 Claude Code and Codex. Their [findings](../evals/findings.md) distinguish source fixes from observed
 agent behavior; these manual diagnostics are separate from the product completion gate.
+
+
+## Reading advisory expert memory
+
+Registered Knowledge can carry fixed Choice, Noul and ordered Score judgments. Project-local
+Process bindings name eligible roles, observed checkpoint kinds and canonical context identities.
+The binding does not expand an assignment or change the role's permissions.
+
+```text
+blabla status --json
+blabla explain judgment::expert-review::claim-support
+blabla explain binding::claim-check
+blabla check knowledge/expert.bla
+blabla check process.bla
+```
+
+Use the binding IDs printed by Process status or role views, and judgment IDs printed by the
+Knowledge pack view. Explain shows each definition, its references and its registered source.
+`check <file>.bla` validates the file's local grammar and declarations; registered project status
+also resolves binding references against the current loaded project memory and contracts.
+These commands never contact an expert provider. Projects without expert declarations retain
+their existing deterministic verification and completion behavior.
+
+Bindings default to shadow-only. The optional expert status reports mode and binding count, with
+host and provider capability `unknown` until runtime evidence establishes them. A valid authored
+binding does not prove that a host observes a checkpoint or can deliver an intervention.
+
+The complete context slots and fixed template reference requirements are documented in
+[the project reference](project.md#fixed-expert-judgments-and-bindings). Task and declared-goal
+context belongs to the selected task; proposal, claim, evidence and attempts must come from typed
+observations or history. Missing runtime facts stay explicit. Questions, IDs and criteria are data
+and never authorize commands, file reads or remediation.
+
+Expertise usefulness and selection must be evaluated independently on the same bounded candidate
+list, together or skipped with a visible budget reason. A selected candidate alone is never advice.
+Expert opinions never alter deterministic verdicts, verifier exit codes or `OVERALL`, never serve
+as authoritative challenge evidence, and never close a task. `finish` remains the sole project
+completion command.

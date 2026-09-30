@@ -190,3 +190,38 @@ step "gate" {
     statement "Decide completion. Structure is checked live and the canonical behavior profile is run; only OVERALL GREEN is completion, and a contract or profile is never weakened to obtain it. Any challenge still standing is printed beside the verdict and changes none of it."
     command "blabla finish"
 }
+
+
+binding "goal-alignment" {
+    judgment "judgment::expert-review::goal-drift"
+    roles ["worker", "reviewer"]
+    checkpoints ["plan", "tool-result", "turn-end", "review"]
+    mission ["mission::blabla"]
+}
+
+binding "expertise-usefulness" {
+    judgment "judgment::expert-review::expertise-useful"
+    roles ["worker", "reviewer"]
+    checkpoints ["plan", "tool-result", "turn-end", "review"]
+    candidates ["knowledge::engineering", "knowledge::testing", "knowledge::reviewing", "knowledge::design"]
+}
+
+binding "expertise-choice" {
+    judgment "judgment::expert-review::expertise-selection"
+    roles ["worker", "reviewer"]
+    checkpoints ["plan", "tool-result", "turn-end", "review"]
+    candidates ["knowledge::engineering", "knowledge::testing", "knowledge::reviewing", "knowledge::design"]
+}
+
+binding "claim-check" {
+    judgment "judgment::expert-review::claim-support"
+    roles ["worker", "reviewer"]
+    checkpoints ["tool-result", "claim", "turn-end", "review"]
+    rules ["ruling::expert-review::evidence-before-claim"]
+}
+
+binding "retry-review" {
+    judgment "judgment::expert-review::failed-approach"
+    roles ["worker", "reviewer"]
+    checkpoints ["plan", "tool-result", "turn-end", "review"]
+}

@@ -108,7 +108,7 @@ directories in `project::SKIPPED_DIRECTORIES` stay left out with or without `ign
 
 Paths resolve from the manifest directory. The group name is the file stem or the `as` alias; rule identities are `group::label`, so `core::restart` and `sealing::restart` coexist. `verify structure` is rejected because structure needs no profile. A second `mission`, `system` or `process` statement is `E_DUPLICATE_MISSION`, `E_DUPLICATE_SYSTEM` or `E_DUPLICATE_PROCESS`; the same knowledge path registered twice is `E_DUPLICATE_KNOWLEDGE`. `use mission`, `use system`, `use process` and `use knowledge` are all `E_UNSUPPORTED_LAYER`, because project memory is not a layer.
 
-A group may not be named `contract`, `mission`, `priority`, `knowledge`, `ruling`, `system`, `responsibility`, `seam`, `role`, `policy`, `flow`, `step`, `runtime`, `task` or `goal` (`E_RESERVED_GROUP`): each of those prefixes names a kind of canonical identity, so a group of that name would make `seam::x` mean two things. Use `as <name>` to give such a contract another group.
+A group may not be named `contract`, `mission`, `priority`, `knowledge`, `ruling`, `judgment`, `binding`, `system`, `responsibility`, `seam`, `role`, `policy`, `flow`, `step`, `runtime`, `task` or `goal` (`E_RESERVED_GROUP`): each of those prefixes names a kind of canonical identity, so a group of that name would make `seam::x` mean two things. Use `as <name>` to give such a contract another group.
 
 ## Canonical identities
 
@@ -122,6 +122,8 @@ Every object BlaBla can explain has exactly one identity, and the command that d
 | `priority::<name>` | one priority and what it outranks |
 | `knowledge::<pack>` | one knowledge pack: its purpose and the canonical id of every ruling it holds |
 | `ruling::<pack>::<name>` | one ruling, in full |
+| `judgment::<pack>::<name>` | one fixed typed question and its reusable context requirements |
+| `binding::<name>` | one project-local judgment, role, checkpoint and identity binding |
 | `system::<name>` | one system from system memory |
 | `responsibility::<name>` | one responsibility, and the system that owns it |
 | `seam::<name>` | one seam, the value that crosses it and what moves with it |
@@ -132,9 +134,9 @@ Every object BlaBla can explain has exactly one identity, and the command that d
 | `runtime::<name>` | one BlaBla-controlled runtime primitive |
 | `goal::<name>` | one goal: its statement, the priorities it serves and the verdict on each expectation |
 
-`ruling::<pack>::<name>` is the one identity with three segments, and it carries its pack deliberately: two reusable packs written by different authors may both declare `smallest-correct-change`, and a consuming project that registers both must not become invalid over a name collision neither author could have foreseen. Ruling names are unique inside a pack and free to repeat between packs.
+`ruling::<pack>::<name>` and `judgment::<pack>::<name>` carry their packs deliberately: two reusable packs written by different authors may both declare `smallest-correct-change`, and a consuming project that registers both must not become invalid over a name collision neither author could have foreseen. Ruling and judgment names are unique within their own kind inside a pack and free to repeat between packs.
 
-`blabla status` lists every `contract::<group>`, `mission::<name>`, `knowledge::<pack>`, `system::<name>` and `role::<name>` the project has, and every active `goal::<name>`, including when every rule is GREEN, so `status` → coarse identity → `explain` → finer identity → `explain` reaches any rule, priority, ruling, responsibility, seam or policy without guessing a separator.
+`blabla status` lists every `contract::<group>`, `mission::<name>`, `knowledge::<pack>`, `system::<name>` and `role::<name>` the project has, and every active `goal::<name>`, including when every rule is GREEN, so `status` → coarse identity → `explain` → finer identity → `explain` reaches any rule, priority, ruling, judgment, binding, responsibility, seam or policy without guessing a separator.
 
 A name that is not one of these is a convenience, not an identity: a unique rule label still resolves, a group name alone answers with `blabla explain contract::<group>` (`E_COARSE_IDENTITY`), an ambiguous name answers with the canonical commands it matched (`E_AMBIGUOUS_RULE`), and a name that matches in more than one namespace is refused rather than resolved to one of them (`E_AMBIGUOUS_IDENTITY`).
 
@@ -294,3 +296,94 @@ OVERALL    GREEN only when every active layer is GREEN and the behavior record i
 - `blabla finish` writes `.blabla/verifying.json` (run id, pid, start time, project and profile identity) before the campaign and removes it after the record. `status` reports VERIFYING while that process is alive and was started when the marker says, INTERRUPTED otherwise; both block completion, and a new `finish` replaces an interrupted marker.
 
 Exit codes of `status` and `finish`: 0 OVERALL GREEN; 1 a RED layer; 2 contract or manifest error; 3 structure provider unavailable or application failure; 4 internal; 5 any other BLOCKED state. `--json` exposes `state` (behavior), `structure`, `overall` and `completion` so agents never parse English.
+
+
+## Fixed expert judgments and bindings
+
+Knowledge can declare a reusable typed question alongside its packs and rulings. Register the file
+with the ordinary `knowledge "path"` manifest statement; an unregistered declaration is never
+loaded. A pack containing only judgments still carries expertise. A judgment's local name may
+repeat in another pack because its identity is `judgment::<pack>::<name>`.
+
+```text
+knowledge "expert-review" {
+    purpose "Notice a bounded concern and point back to relevant project memory."
+}
+judgment "claim-support" {
+    pack "expert-review"
+    purpose "Check whether the supplied evidence supports a specific claim."
+    requires ["claim", "evidence"]
+    question "Does the supplied evidence support the stated claim?"
+    criteria "Unknown, missing or unrelated evidence does not establish the claim."
+    output "noul"
+    proposition "The evidence supports the claim."
+    templates ["cite-evidence", "ask-owner"]
+}
+```
+
+The required fields are `pack`, `purpose`, `requires`, `question`, `criteria`, `output` and
+`templates`. `optional` is an optional slot list, disjoint from `requires`. Criteria cannot be
+empty. Output is exactly one of these shapes:
+
+- `output "choice"` with `alternatives ["first", "second"]`: at least two distinct identity-safe labels
+- `output "noul"` with one nonempty `proposition "..."`
+- `output "score"` with `levels ["low", "high"]`: at least two distinct identity-safe labels in ascending order
+
+Other output-specific fields are rejected. Score positions are zero-based ordinals in authored
+list order; numeric weights are not supported. Slot and template lists cannot contain duplicates.
+The complete slot vocabulary is `task`, `goal`, `mission`, `proposal`, `claim`, `evidence`,
+`attempts`, `candidates`, `rules`, `system`. Templates are exactly `read-identity`, `cite-evidence`,
+`reconsider-approach`, `ask-owner`. Questions, criteria, propositions and IDs are inert text;
+no executable template, arbitrary response schema or policy language is introduced.
+
+Process supplies project-local routing into registered Knowledge:
+
+```text
+binding "claim-check" {
+    judgment "judgment::expert-review::claim-support"
+    roles ["worker", "reviewer"]
+    checkpoints ["tool-result", "claim", "turn-end"]
+    rules ["ruling::expert-review::evidence-before-claim"]
+}
+```
+
+`judgment`, `roles` and `checkpoints` are required; roles are local declared role names. Checkpoints
+are exactly `plan`, `tool-call`, `tool-result`, `claim`, `turn-end`, `review`. Optional identity
+lists bind `goal` to goals, `mission` to the mission, `system` to systems, `rules` to rules,
+contracts or rulings, and `candidates` to at most four packs or rulings. Every value must resolve
+as an existing canonical identity of the corresponding kind. Candidate order maps deterministically
+to `candidate-1` through `candidate-4`; the selection judgment may also return `none`.
+
+The selected task supplies `task` and its declared goal supplies `goal` when the binding omits
+that list. `proposal`, `claim`, `evidence` and `attempts` are reserved for typed observations or
+history, never arbitrary file paths or a `slot=value` mini-language. A definition can be valid
+while runtime context is missing; absence must be explicit rather than fabricated.
+
+Template reference requirements are fixed: `read-identity` needs an available goal, mission,
+candidate, rule or system slot; `cite-evidence` needs evidence; `reconsider-approach` needs a
+proposal or attempts; `ask-owner` addresses the selected task. Validation rejects a binding when
+neither the judgment's required/optional slots nor binding context can supply a template's
+references. Bindings grant no write scope, role authority or completion credit.
+
+`status --json` includes an optional compact `expert` view. Registered judgments without bindings
+report mode `off`; valid bindings default to `shadow`. Host and provider capability remain
+`unknown` until verified by a runtime integration. Repository bindings remain shadow-only.
+Knowledge packs list judgment identities, and Process status and role views list binding identities.
+`explain judgment::...` and `explain binding::...` expose the typed definition, references and
+registered source file. Authored spelling uses hyphens; JSON enum values use snake_case.
+`status`, `explain` and `check` never contact a provider.
+
+The shipped questions are `goal-drift`, `expertise-useful`, `expertise-selection`, `claim-support`
+and `failed-approach`. Expertise usefulness and selection are independent questions on the same
+candidate list. The future runtime must schedule them together or skip them with a visible budget
+reason; selection alone never causes advice. These declarations do not implement provider
+execution, packets, scheduling or delivery.
+
+### Breaking in 0.10
+
+`judgment` and `binding` become reserved contract-group prefixes. Knowledge status adds a judgment
+count; Process status adds a binding count and canonical binding IDs when present. Judgment and
+binding explain views expose typed definitions with snake_case enum values, canonical references
+and their registered source. Role explain views include applicable binding IDs. The optional
+`expert` status field is advisory metadata, separate from deterministic rule verdicts, verifier
+exit codes, `OVERALL` and completion. `finish` remains the sole project completion command.

@@ -1,5 +1,6 @@
 pub mod application;
 pub mod diagnostic;
+pub mod expert;
 pub mod ir;
 pub mod memory;
 pub mod project;

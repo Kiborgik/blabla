@@ -1,0 +1,66 @@
+knowledge "expert-review" {
+    purpose "Notice a bounded concern and point back to relevant project memory."
+}
+
+ruling "evidence-before-claim" {
+    pack "expert-review"
+    statement "A claim is supported only by evidence that establishes it."
+}
+
+judgment "goal-drift" {
+    pack "expert-review"
+    purpose "Notice when a proposed approach appears to leave the assigned goal."
+    requires ["task", "goal", "proposal"]
+    optional ["mission", "evidence"]
+    question "Does the current proposal serve the assigned goal?"
+    criteria "Compare the proposal with the declared goal and supplied owner intent. An explicit owner-approved change is evidence of changed intent. Missing intent leaves alignment unclear."
+    output "choice"
+    alternatives ["aligned", "drift", "unclear"]
+    templates ["read-identity", "reconsider-approach", "ask-owner"]
+}
+
+judgment "expertise-useful" {
+    pack "expert-review"
+    purpose "Decide whether any supplied expertise would help the current bounded task."
+    requires ["task", "proposal", "candidates"]
+    optional ["evidence"]
+    question "Would any supplied candidate expertise materially help the current task?"
+    criteria "A candidate is useful only when it addresses a concrete concern in the task or proposal. A forced selection is not evidence of usefulness. Evaluate independently from the selection question."
+    output "noul"
+    proposition "At least one supplied candidate expertise would materially help the current task."
+    templates ["read-identity", "ask-owner"]
+}
+
+judgment "expertise-selection" {
+    pack "expert-review"
+    purpose "Select one relevant candidate from a bounded expertise shortlist."
+    requires ["task", "proposal", "candidates"]
+    optional ["evidence"]
+    question "Which supplied candidate expertise best addresses the current concern?"
+    criteria "Choose only a supplied candidate label, or none when no candidate applies. Labels map in list order to at most four resolved expertise identities. Evaluate independently from usefulness; selection alone never causes advice."
+    output "choice"
+    alternatives ["candidate-1", "candidate-2", "candidate-3", "candidate-4", "none"]
+    templates ["read-identity", "ask-owner"]
+}
+
+judgment "claim-support" {
+    pack "expert-review"
+    purpose "Check whether the supplied evidence supports a specific claim."
+    requires ["claim", "evidence"]
+    question "Does the supplied evidence support the stated claim?"
+    criteria "Unknown, missing or unrelated evidence does not establish the claim."
+    output "noul"
+    proposition "The evidence supports the claim."
+    templates ["cite-evidence", "ask-owner"]
+}
+
+judgment "failed-approach" {
+    pack "expert-review"
+    purpose "Distinguish a justified retry from repetition without new evidence."
+    requires ["task", "proposal", "attempts", "evidence"]
+    question "How strongly does the current proposal repeat a failed approach without justification?"
+    criteria "The ordered levels run from justified through unclear to repeating. New evidence, a changed hypothesis or an explicit reason can justify a repeat. Unknown outcomes do not establish an unproductive loop."
+    output "score"
+    levels ["justified", "unclear", "repeating"]
+    templates ["cite-evidence", "reconsider-approach", "ask-owner"]
+}

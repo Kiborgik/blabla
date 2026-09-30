@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 
+pub mod expert;
 pub mod ignore;
 pub mod runstate;
 pub mod status;
@@ -108,6 +109,8 @@ pub const RESERVED_GROUPS: &[&str] = &[
     "priority",
     "knowledge",
     "ruling",
+    "judgment",
+    "binding",
     "system",
     "responsibility",
     "seam",

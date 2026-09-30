@@ -11,6 +11,7 @@ use blabla::memory::mission::{MissionExplainView, MissionMemory, MissionStatus};
 use blabla::memory::process::{ProcessExplainView, ProcessMemory, ProcessStatus};
 use blabla::memory::system::{SystemExplainView, SystemMemory, SystemStatus};
 use blabla::memory::{self, Memory, goal, knowledge, mission, process, routing, system};
+use blabla::project::expert::{self, ExpertStatus};
 use blabla::project::runstate::{
     Classification, Marker, new_run_id, profile_identity, read_marker, remove_marker, write_marker,
 };
@@ -68,6 +69,8 @@ struct StatusWithMemory<'a> {
     goal_memory: Option<GoalStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bounded_tasks: Option<TaskStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expert: Option<ExpertStatus>,
     capabilities: CapabilityReport,
 }
 
@@ -78,6 +81,7 @@ pub(super) struct MemoryViews {
     process: Option<ProcessStatus>,
     knowledge: Option<KnowledgeStatus>,
     goal: Option<GoalStatus>,
+    expert: Option<ExpertStatus>,
 }
 
 struct Memories {
@@ -101,6 +105,7 @@ impl Memories {
             process: process::status(&self.process, &self.process_file),
             knowledge: knowledge::status(&self.knowledge, &self.knowledge_files),
             goal: goal::status(&self.goal, &self.goal_file, goals),
+            expert: expert::status(&self.knowledge, &self.process),
         }
     }
 }
@@ -182,10 +187,13 @@ fn memories(project: &Project) -> Memories {
         .present()
         .map(|memory| routing::system_problems(memory, &knowledge_memory))
         .unwrap_or_default();
-    let process_routing = process_memory
+    let mut process_routing = process_memory
         .present()
         .map(|memory| routing::process_problems(memory, &knowledge_memory))
         .unwrap_or_default();
+    if process_memory.present().is_some() {
+        process_routing.extend(expert::validate_bindings(project));
+    }
     Memories {
         mission: mission_memory,
         mission_file,
@@ -303,6 +311,7 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             knowledge_memory: views.knowledge,
             goal_memory: views.goal,
             bounded_tasks: tasks,
+            expert: views.expert,
             capabilities,
         })
     } else {
@@ -325,7 +334,10 @@ pub(super) fn explain(project: &Project, query: &str, json: bool) -> i32 {
                 } else {
                     write_mission_explain(&view)
                 }
-            } else if let Some(view) = knowledge::explain(&loaded.knowledge, &id) {
+            } else if let Some(mut view) = knowledge::explain(&loaded.knowledge, &id) {
+                if view.kind == "judgment" {
+                    view.source = expert::judgment_source(project, &id);
+                }
                 if json {
                     write_json(&view)
                 } else {
@@ -344,9 +356,12 @@ pub(super) fn explain(project: &Project, query: &str, json: bool) -> i32 {
                     write_goal_explain(&view)
                 }
             } else {
-                let Some(view) = process::explain(&loaded.process, &id) else {
+                let Some(mut view) = process::explain(&loaded.process, &id) else {
                     unreachable!("resolve matched a memory identity")
                 };
+                if view.kind == "binding" {
+                    view.source = expert::binding_source(project).map(str::to_owned);
+                }
                 let calibration = role_calibration(project, &loaded.process, &view);
                 if json {
                     write_json(&CalibratedExplainView {
@@ -694,6 +709,22 @@ Consult:
             view.consult.join("  ")
         )?;
     }
+    if let Some(binding) = &view.binding {
+        writeln!(
+            output,
+            "\nDefinition:\n  {}",
+            serde_json::to_string(binding).map_err(io::Error::other)?
+        )?;
+    }
+    if !view.bindings.is_empty() {
+        writeln!(output, "\nBindings:\n  {}", view.bindings.join("  "))?;
+    }
+    if !view.references.is_empty() {
+        writeln!(output, "\nReferences:\n  {}", view.references.join("  "))?;
+    }
+    if let Some(source) = &view.source {
+        writeln!(output, "\nSource:\n  {source}")?;
+    }
     if !calibration.is_empty() {
         writeln!(
             output,
@@ -834,6 +865,22 @@ fn write_knowledge_explain(view: &KnowledgeExplainView) -> io::Result<()> {
             output,
             "\nEach ruling is explained on demand; this view lists identities so a pack costs one line per ruling instead of one paragraph."
         )?;
+    }
+    if !view.judgments.is_empty() {
+        writeln!(output, "\nJudgments:\n  {}", view.judgments.join("  "))?;
+    }
+    if let Some(judgment) = &view.judgment {
+        writeln!(
+            output,
+            "\nDefinition:\n  {}",
+            serde_json::to_string(judgment).map_err(io::Error::other)?
+        )?;
+    }
+    if !view.references.is_empty() {
+        writeln!(output, "\nReferences:\n  {}", view.references.join("  "))?;
+    }
+    if let Some(source) = &view.source {
+        writeln!(output, "\nSource:\n  {source}")?;
     }
     writeln!(output, "\n{}", view.authority)
 }
@@ -1737,9 +1784,10 @@ fn write_knowledge_line(
     match memory.state {
         "present" => writeln!(
             output,
-            "KNOWLEDGE  {} packs  {} rulings   (memory only; never part of completion)",
+            "KNOWLEDGE  {} packs  {} rulings  {} judgments   (memory only; never part of completion)",
             memory.packs.len(),
-            memory.rulings
+            memory.rulings,
+            memory.judgments
         ),
         _ => writeln!(
             output,
@@ -1869,11 +1917,12 @@ fn write_process_line(output: &mut impl Write, memory: Option<&ProcessStatus>) -
     match memory.state {
         "present" => writeln!(
             output,
-            "PROCESS    {} roles  {} policies  {} flows  {} steps   (memory only; never part of completion)",
+            "PROCESS    {} roles  {} policies  {} flows  {} steps  {} bindings   (memory only; never part of completion)",
             memory.roles.len(),
             memory.policies,
             memory.flows.len(),
-            memory.steps
+            memory.steps,
+            memory.bindings
         ),
         _ => writeln!(
             output,
@@ -1905,6 +1954,9 @@ Process memory ({}):",
         );
     }
     writeln!(output, "  {}", memory.roles.join("  "))?;
+    if !memory.binding_ids.is_empty() {
+        writeln!(output, "  {}", memory.binding_ids.join("  "))?;
+    }
     if !memory.flows.is_empty() {
         writeln!(output, "  {}", memory.flows.join("  "))?;
     }
@@ -2112,6 +2164,13 @@ fn write_status(
     write_process_line(&mut output, views.process.as_ref())?;
     write_knowledge_line(&mut output, views.knowledge.as_ref())?;
     write_goal_line(&mut output, views.goal.as_ref())?;
+    if let Some(expert) = &views.expert {
+        writeln!(
+            output,
+            "EXPERT     {:?}  {} bindings  host {}  provider {}   (advisory memory; never part of completion)",
+            expert.mode, expert.bindings, expert.host, expert.provider
+        )?;
+    }
     if let Some(failure) = &view.record_error {
         writeln!(output, "Recorded run unreadable: {failure}")?;
     }
