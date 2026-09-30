@@ -2,12 +2,13 @@
 
 The current implementation, so that a later restructuring does not have to be reconstructed from source. This describes what exists. It invents no future layer.
 
-Three concerns live in this repository. Keeping them apart is the point of the layout: only one of them decides completion.
+Authored memory, development state and advisory expert evaluation stay separate from the
+completion pipelines. Only Behavior and Structure decide completion.
 
 ## Authored project memory
 
 ```text
-project.bla  ->  src/memory/*  ->  Mission | System | Process | Knowledge
+project.bla  ->  src/memory/*  ->  Mission | System | Process | Knowledge | Goals
                                             |
                                    status | explain
 ```
@@ -55,7 +56,7 @@ A bounded task is machine state written by BlaBla: write scope, deliverables, fi
 ## CLI surfaces
 
 ```text
-status | explain | check | run | finish | task | challenge | guide | init
+status | explain | check | run | finish | task | challenge | expert | guide | init
 ```
 
 ## Components
@@ -69,6 +70,12 @@ status | explain | check | run | finish | task | challenge | guide | init
 | `src/memory/mission.rs`, `system.rs`, `process.rs`, `knowledge.rs` | one memory kind each: its declarations, its validation and its `status` and `explain` views |
 | `src/memory/routing.rs` | the one-way references from System and Process into Knowledge packs |
 | `src/project/task.rs` | the bounded task record: scope, deliverables, findings, the tree snapshot and the per-file digests it is compared against |
+| `src/project/task/revision.rs`, `store.rs` | one shared relevant-revision identity and atomic task-record transactions for current evidence/reviews and disjoint live write ownership |
+| `src/project/expert.rs` | resolves registered judgments/bindings and selects bounded task, identity and observation context |
+| `src/expert/mod.rs`, `packet.rs` | fixed typed observations/limits and canonical selected packets with explicit absent/truncated context and source provenance |
+| `src/expert/provider.rs` | strict response/identity validation, independent shared-context batching and bounded subprocess transport |
+| `src/expert/policy.rs`, `trace.rs` | pure policy/rendering, saved-response replay, bounded persistent records, final current-revision/checkpoint checks and unresolved-delivery suppression |
+| `src/cli/expert.rs`, `adapters/systemone/provider.py` | opt-in expert commands and actual local SystemOne HTTP transport; no certified live host adapter is supplied |
 | `src/skeptic.rs` | the challenge classes, the evidence they rest on and the single grounded challenge chosen from them |
 | `src/cli/guide.rs`, `src/cli/init.rs` | the canonical onboarding texts, and project scaffolding including the managed `AGENTS.md` block and the portable skill |
 | `src/cli/heartbeat.rs` | progress lines during a long campaign, through an observer that leaves the logical campaign untouched |
@@ -111,6 +118,14 @@ Changing one of these is an interface change with consequences beyond its own fi
 
 **`Task`** (`src/project/task.rs`) — everything the skeptic knows about a change in flight crosses as this record. The skeptic reads no chat, no agent report and no diff of its own, so a challenge can rest only on what was written down at assignment and what the tree says now. A new class of challenge therefore cannot be added without first adding its evidence to the record. This is `seam::bounded-task` in `system.bla`.
 
+**Expert packet/decision** — `EvaluationRequest` carries a selected `ExpertPacket` and a fixed
+authored judgment; `EvaluationResponse` is validated before pure policy produces an
+`ExpertResult`. The result proposes advice, never a verifier verdict. `TraceStore` rechecks the
+same actual selected-revision comparison before reservation and at current-result boundaries.
+Unknown delivery remains unresolved across restart. Acknowledgment is not observed correction.
+Provider calls and network transport are absent from verification; self-hosting fixtures exercise
+only the real deterministic policy/revision seams. All repository bindings remain shadow-only.
+
 **The on-disk state** — everything BlaBla writes lives under `.blabla/`:
 
 ```text
@@ -118,6 +133,7 @@ Changing one of these is an interface change with consequences beyond its own fi
                          application command, options and run report
 .blabla/verifying.json   the in-flight campaign marker: run id, pid, start time, identities
 .blabla/tasks/*.json     one bounded task record each
+.blabla/expert/          bounded runtime settings, selected traces and delivery/suppression ledger
 ```
 
 `status` compares identities and reports STALE on any difference. Structure results are stored in the record for audit only and are never read back as current. None of this is authored memory and none of it reaches `OVERALL`.
@@ -134,6 +150,12 @@ Changing one of these is an interface change with consequences beyond its own fi
 
 ## Self-hosting contracts
 
-The repository's own `project.bla` binds six structure contracts over BlaBla's Python tooling, its structure subsystem and its skeptic. `contracts/rust.bla` constrains the seams above: the `Provider` trait and its four required methods, the provider registry, the inspected extensions, both providers' entry points, the challenge entry point, classes and evidence seam, and the layering boundaries.
+The repository's own `project.bla` registers the active contracts over Python tooling, structure,
+task lifecycle and product seams; `status` lists the current inventory. `contracts/rust.bla`
+constrains the `Provider` trait, registry, inspected extensions, provider entry points, challenge
+classes/evidence and layering boundaries. `contracts/expert.bla` calls actual pure policy and
+current-revision logic through the rebuilt bridge; its authored fixture result is a proposal,
+never live delivery. `contracts/expert-seams.bla` checks the production wiring, with separate
+structure falsification and real product-mutation receipts. Neither adds a model dependency.
 
 The `forbid dependency` rules are what keep the three concerns apart — the structure pipeline independent of the behavior pipeline, and the skeptic below the CLI, reading no source provider and running no campaign. They are checked on every `blabla status`.

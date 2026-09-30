@@ -43,11 +43,40 @@ subdirectory while retaining its unfinished-task and explicit-choice assertions.
 here is from Linux and the fixed bounded campaigns above; it does not prove every future
 composition or seed will find every witness.
 
+## 0.10 carryover and evaluation boundary
+
+All 100 historical observation strings below are retained in their original order. They record
+past product defects, harness corrections and worker behavior, rather than 100 currently missing
+features. The release carryover audit classified eight rows as reproduced/new 0.10 repairs,
+56 as already-shipped mechanisms or harness corrections, 25 as historical observations and 11
+as limited or awaiting behavioral revalidation at audited source `34e5c6`. Related rows can refer
+to one defect; these counts are not independent bug or model-quality samples.
+
+Exact-check/epoch evidence, withdrawal/ownership, current lens/review credit, superseded proposals,
+decision/check display and the named composition-search case have concrete current-source
+repairs. Model aliases, typed questions/decisions, attestation, empty-contract rejection, project
+timeout inheritance and the direct evaluation driver already shipped in 0.9. Final release
+revalidation must name their retained suites; implementing them again is not required.
+
+The later `8d268c1` recovery-copy correction requires restoration of safe, identifiable own
+out-of-scope changes and preserves uncertain evidence for owner reconciliation. It addresses the
+restore-or-block wording noted by the audit, including F99; passing copy-route tests do not prove
+historical workers now restore correctly. Actor authenticity, restored-byte authorship blindness,
+general reviewer/steering quality, all 45 explicit missing opportunities and seven excluded
+categories in `coverage.json` remain separate limitations or unmeasured work.
+
+The new expert evaluation splits contain authored fixed outputs, not model samples. Replay tests
+scoring and deterministic saved-response behavior; it does not establish advisory benefit.
+Repository bindings remain shadow-only, the actual host pilot is blocked/unexecuted, and no
+judgment is promoted. [Release evidence](../docs/design/0.10-release-evidence.md) separates each
+baseline, core/platform, provider, host, replay and live claim with its own evidence boundary.
+
 Working triage, not a published comparison. [Run guide](README.md).
 Raw reports and transcripts are retained under ignored `artifacts/agent-evals/`. The suite runs
 `qwen3.5:4b` as the worker and `qwen3.5:9b` as the reviewer through Ollama, Claude Code and
-Codex CLI; the arms are with BlaBla and without BlaBla as the run guide defines them. No suite
-has been run under those arms yet; this ledger holds what preparing it found.
+Codex CLI; the arms are with BlaBla and without BlaBla as the run guide defines them. The first
+preparation section predates the later dated historical shakedowns and runs retained below.
+Those observations are not fresh 0.10 evaluations.
 
 ## Preparing the suite: 2026-09-21, dogfooding the workflow and the harness
 

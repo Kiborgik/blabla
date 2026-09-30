@@ -274,8 +274,10 @@ decision: `task decide` on it is refused with exit 2, records nothing and names 
 blocks it.
 
 `task show <name>` lists every decision under **Decisions**, headed by the floor the carrying role
-declares: its kind and options, the pick and confidence, STANDS or BLOCKS THE TASK, and the answer if
-there is one. `blabla explain role::<name>` prints the floor and, from every task record that role
+declares: its kind/options, current pick/confidence, and current status. STANDS or BLOCKS THE TASK
+describes an unanswered decision; an owner answer is shown as ANSWERED or OVERRULED with the
+current pick. Historical confidence does not make an answered call remain blocking.
+`blabla explain role::<name>` prints the floor and, from every task record that role
 carried, closed or not, one calibration line per model with answered decisions:
 
 ```text

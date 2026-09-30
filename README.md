@@ -4,7 +4,7 @@
 
 [![Release](https://github.com/Kiborgik/blabla/actions/workflows/release.yml/badge.svg)](https://github.com/Kiborgik/blabla/actions/workflows/release.yml)
 ![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-yellow)
-![version 0.9.0](https://img.shields.io/badge/version-0.9.0-blue)
+![version 0.10.0 unreleased](https://img.shields.io/badge/version-0.10.0%20unreleased-blue)
 ![license MIT](https://img.shields.io/badge/license-MIT-green)
 ![Rust stable](https://img.shields.io/badge/rust-stable-black)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -15,6 +15,11 @@ Coding agents can change code quickly. The harder problem is carrying project in
 BlaBla keeps that information in the repository. Agents enter through `blabla status`, follow canonical identities with `blabla explain`, work inside a bounded task when the project uses that workflow, and finish against deterministic project evidence instead of reconstructing the project from chat history.
 
 BlaBla has two executable completion layers, Behavior and Structure, plus four queryable memory kinds: Mission, System, Process and Knowledge. Project memory informs the work; it does not decide completion.
+
+This checkout prepares **0.10.0, unreleased**. The [breaking changes](CHANGELOG.md#0100-unreleased)
+require fresh task evidence and lens/review credit when their relevant revision changes.
+[Release evidence](docs/design/0.10-release-evidence.md) separates the imported baseline, current
+core/platform gates, provider transport, host gaps, replay and live advisory work.
 
 ![BlaBla concept: human intent becomes project.bla composing behavior and structure contracts; a coding agent reads them through blabla status and explain, writes an ordinary implementation, and runs blabla finish, which reports OVERALL GREEN only when every active contract is satisfied.](docs/assets/concept.svg)
 
@@ -155,8 +160,8 @@ Contracts say what must remain true. Project memory says the rest of what an age
 | --- | --- | --- |
 | Mission | `mission`, `priority` | why the project exists and what decides a tradeoff |
 | System | `system`, `responsibility`, `seam` | what part is being touched and who owns it |
-| Process | `role`, `policy`, `flow`, `step` | who is expected to do what, and in what order |
-| Knowledge | `knowledge`, `ruling` | reusable expertise, portable between projects |
+| Process | `role`, `policy`, `flow`, `step`, `binding` | who is expected to do what, in what order, and which typed questions apply |
+| Knowledge | `knowledge`, `ruling`, `judgment` | reusable expertise and fixed typed questions, portable between projects |
 
 ```text
 mission   "mission.bla"
@@ -174,7 +179,22 @@ blabla explain ruling::testing::read-the-whole-run  one ruling, in full
 
 Surveying a pack costs one line per ruling; reading a ruling costs one more `explain`. An agent loads the entry it needs, not the file.
 
-Project memory is validated within itself, never against the repository, and never reaches `OVERALL`. A project that declares none of it is not thereby incomplete. Process policies and flows are advisory: BlaBla describes the intended authority and does not enforce it. The task commands enforce the recorded hand-back and close prerequisites, the permitted models on `addressed`, `resolve`, `attribute` and `deliverable --remove`, and a few declaration rules: no ignored deliverable or input, no attribution of an unchanged path, no change to a closed record.
+Project memory is validated within itself, never against the repository, and never reaches `OVERALL`. A project that declares none of it is not thereby incomplete. Process policies bind the role carrying the task; BlaBla does not sandbox arbitrary writes or authenticate the model a caller names. Task commands enforce recorded lifecycle/evidence/review prerequisites, model gates, disjoint declared write ownership and declaration rules. Shared read inputs can overlap.
+
+### Experimental expert loop
+
+Knowledge judgments ask fixed Choice, Noul or ordered Score questions. Process bindings select
+the roles, checkpoints and canonical context identities. The expert receives only a bounded
+selected packet; missing required context, invalid responses or stale revisions prevent
+actionable advice. Deterministic policy and saved-response replay require no model call.
+
+Repository bindings remain **shadow-only**. No judgment has passed promotion, and expert advice
+never changes `OVERALL`, verifier verdicts or exit codes. The actual Codex delivery interface is
+blocked, Luna repository inference and Jev are unverified, and Kev has local CPU transport
+evidence without advisory-quality certification. The authored evaluation fixtures test scoring
+and replay mechanics; they provide no matched-live correctness or reduced-steering claim.
+See [host capabilities](docs/design/0.10-host-capabilities.md) and
+[expert design](docs/design/0.10-expert-loop.md).
 
 `blabla guide memory` is the authoring procedure; `blabla check <file>.bla` validates a memory file while it is still being written. Full reference: [docs/project.md](docs/project.md).
 
@@ -206,7 +226,7 @@ blabla task close <name> --model <id>    refused while a grounded challenge stan
 blabla finish
 ```
 
-`blabla task show <name>` prints those routes for one assignment, and `blabla guide loop` prints the same routes from the same source. Tasks render `OPEN`, `ACCEPTED`, `BLOCKED`, `READY` or `CLOSED`. Evidence is accepted only in ACCEPTED; READY requires current successful declared evidence plus an explicit assignment challenge receipt tied to the task's own paths. An edit inside the write scope, the deliverables or the declared inputs, new evidence, findings or policy metadata invalidate that receipt, so a READY worker accepts again before changing anything; an edit anywhere else, including a path attributed to concurrent work, leaves it standing. Project verification and task acceptance are different questions: `finish` decides whether the project is complete, while task transitions decide whether one handoff is ready for review.
+`blabla task show <name>` prints those routes for one assignment, and `blabla guide loop` prints the same routes from the same source. Tasks render `OPEN`, `ACCEPTED`, `BLOCKED`, `READY`, `CLOSED` or `WITHDRAWN`. Evidence is accepted only in ACCEPTED; READY requires current successful exact-check evidence plus an explicit assignment challenge receipt tied to the task's own revision. Reacceptance creates a fresh epoch and invalidates old evidence/lens credit. Relevant edits, findings and policy metadata invalidate the receipt; unrelated concurrent work leaves it standing. Explicit `--review-of` links make stale review approval visible. Withdrawal releases ownership without successful-completion credit and retains unresolved changed paths. Project verification and task acceptance are different questions: `finish` decides whether the project is complete, while task transitions decide whether one handoff is ready for review.
 
 The classes it can report, and their limits: [docs/agent-workflow.md](docs/agent-workflow.md).
 
@@ -230,9 +250,11 @@ cargo build --release
 
 The binary is `target/release/blabla` (`blabla.exe` on Windows).
 
+A build from this unreleased checkout reports:
+
 ```text
 $ blabla --version
-blabla 0.9.0
+blabla 0.10.0
 ```
 
 ### Try the Todo example

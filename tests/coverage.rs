@@ -472,6 +472,7 @@ mod composed_bridge {
         decisions: decisions::Decisions,
         attestation: attestation::Attestation,
         questions: questions::Questions,
+        expert: expert::Expert,
     }
 
     impl App {
@@ -485,6 +486,7 @@ mod composed_bridge {
                 decisions: decisions::Decisions::new(),
                 attestation: attestation::Attestation::new(),
                 questions: questions::Questions::new(),
+                expert: expert::Expert::new(),
             }
         }
     }
@@ -508,7 +510,8 @@ mod composed_bridge {
                 || self.goals.call(&call.action)
                 || self.decisions.call(&call.action)
                 || self.attestation.call(&call.action)
-                || self.questions.call(&call.action))
+                || self.questions.call(&call.action)
+                || self.expert.call(&call.action))
             {
                 return Err(blabla::diagnostic::AppError::new(
                     "E_ACTION",
@@ -531,6 +534,7 @@ mod composed_bridge {
                 self.decisions.observe(),
                 self.attestation.observe(),
                 self.questions.observe(),
+                self.expert.observe(),
             ] {
                 state
                     .as_object_mut()
@@ -573,6 +577,7 @@ fn composed_contract(reordered: bool) -> blabla::ir::Contract {
         })
         .collect();
     assert!(sources.iter().any(|(group, _, _)| group == "questions"));
+    assert!(sources.iter().any(|(group, _, _)| group == "expert"));
     if reordered {
         let unrelated = sources
             .iter()

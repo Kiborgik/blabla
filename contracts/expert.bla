@@ -1,0 +1,23 @@
+state expert_outcome: string
+state expert_revision_current: bool
+
+action expert_evaluate_current_claim()
+action expert_evaluate_missing_evidence()
+action expert_recheck_changed_revision()
+
+when expert_evaluate_current_claim {
+    expect "the-current-authored-answer-maps-to-a-proposal":
+        after.expert_outcome == "nudge"
+    expect "the-current-selected-revision-matches":
+        after.expert_revision_current
+}
+
+when expert_evaluate_missing_evidence {
+    expect "missing-required-evidence-abstains":
+        after.expert_outcome == "abstain"
+}
+
+when expert_recheck_changed_revision {
+    expect "a-changed-selected-input-fails-the-final-revision-guard":
+        not after.expert_revision_current
+}

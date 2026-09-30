@@ -115,4 +115,12 @@ four cases.
 
 BlaBla's long-term hypothesis is not simply "tests for agents." It is that selected project intent can live outside transient chat context as executable, queryable memory.
 
-The current implementation covers behavior and structure. Higher-level process/orchestrator and mission layers remain research directions rather than shipped features.
+Behavior and Structure are the shipped completion layers. Mission, System, Process, Knowledge
+and Goals are shipped queryable, non-gating memory; bounded task records carry development state.
+Their general utility across fresh contexts and model sizes remains a research question.
+
+The 0.10 expert loop adds typed selected-context and deterministic shadow/replay mechanisms.
+The authored fixtures and local provider transport tests do not establish semantic advisory
+quality or reduced owner steering. The actual host pilot is blocked and no judgment is promoted.
+The historical methods/results above are retained unchanged; additional application languages
+and memory mechanisms do not themselves perform the listed independent replications.

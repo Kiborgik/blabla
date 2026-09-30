@@ -208,8 +208,8 @@ Each kind answers one question, and none of them repeats another's content.
 | --- | --- | --- |
 | Mission | `mission`, `priority` | why this matters to the project and the owner |
 | System | `system`, `responsibility`, `seam` | what part of the project is being touched |
-| Process | `role`, `policy`, `flow`, `step`, `alias` | who is expected to do what, in what order, and when knowledge is consulted |
-| Knowledge | `knowledge`, `ruling` | the expertise itself, reusable across projects |
+| Process | `role`, `policy`, `flow`, `step`, `alias`, `binding` | who is expected to do what, in what order, when knowledge is consulted and which typed questions apply |
+| Knowledge | `knowledge`, `ruling`, `judgment` | reusable expertise and fixed typed questions |
 | Goal | `goal` | which rules have to hold before an objective counts as reached |
 
 A role's `owns` is orchestration authority and has nothing to do with a `responsibility::<name>`.
@@ -269,7 +269,7 @@ A project registers at most one mission file, one system file, one process file,
 
 - None is **a layer**. `OVERALL` is decided by the active completion layers alone, and no state of any project memory — unregistered, missing, unreadable or invalid — changes it.
 - Each is **validated within project memory**: syntax, required and unknown fields, duplicate fields, identity-safe names, and references (a responsibility owner and each seam side name a declared system; each `applies_to` names a declared role; each `ruling` names a declared pack; each `knowledge` and `consult` entry names a registered pack; each goal's `serves` names a declared priority). **Project memory is never checked against the repository** — that half is what keeps it out of completion and out of a false RED. A goal's expectations are judged against the project's rules when it is shown, and that verdict never makes the goal memory invalid. An unknown declaration or field is an error, never ignored.
-- Exactly **one `mission` declaration** per project; a second is an error naming the first. Ruling names are unique inside a pack; pack names are unique across every registered knowledge file. A pack that declares no ruling is invalid, because routing would point at nothing.
+- Exactly **one `mission` declaration** per project; a second is an error naming the first. Ruling and judgment names are unique within their own kind inside a pack; pack names are unique across every registered knowledge file. A pack that declares neither a ruling nor a judgment is invalid, because routing would point at nothing.
 - A **name must be identity-safe** — it starts with a letter or digit and continues with letters, digits, `_` or `-` — because it becomes part of a canonical identity. `purpose`, `statement`, `paths`, `verification` and `model` are ordinary text.
 - **`verification` and `model` are opaque strings.** BlaBla keeps no enum of verification tiers and no enum of models, and infers nothing about either. `model` records the topology a project chose, so an orchestrator does not silently substitute a different one.
 - **Process memory describes the intended authority and workflow.** `status` lists its roles, and every role and policy view names what binds the role that carries the work.
@@ -278,6 +278,29 @@ A project registers at most one mission file, one system file, one process file,
 - `status` reports `state` as `present`, `missing` (registered, no file there), `unreadable`, `invalid` or `unregistered`.
 - `blabla check <file.bla>` validates a memory file while it is being authored and reports **VALID** or **INVALID**. It is not a completion signal and implies no enforcement; `status` and `finish` remain the authority over the project.
 - `blabla guide memory` is the authoring procedure in short form: what each kind answers, the declaration and registration shape, the direction routing runs, and the authoring loop. This document is its full reference, and the guide exists so that authoring does not begin by loading this document.
+
+## 0.10 task-record revalidation
+
+Task views and JSON enumerate `OPEN`, `ACCEPTED`, `BLOCKED`, `READY`, `CLOSED` and `WITHDRAWN`.
+Withdrawal is terminal and releases declared ownership without successful-completion credit;
+changed-path residue remains visible until restoration or explicit successor reconciliation.
+Opening/widening live tasks rejects overlapping write scopes and unsafe path forms atomically.
+Read inputs may overlap. This governs declarations, not arbitrary writes or actor authentication.
+
+Current evidence records carry an exact `CheckIdentity` (`Text` or `Argv`), acceptance epoch
+and declared input map. Argv boundaries are significant. A new acceptance, even of the same
+model, creates a new epoch. Legacy records deserialize as history without current evidence
+credit; reaccept, run the declared check, record its actual result and obtain a fresh challenge
+receipt before hand-back. Mid-run check/acceptance/input changes retain the real observation
+without crediting the replacement declaration.
+
+Lens credit binds accepted model, epoch and relevant consulted knowledge. Reassess after those
+change; old unbound assessments remain history. `task open --review-of <task>` records a distinct
+review target and relevant revision. Current approval is explicit (`review_current` and
+`approval_current` in task views); historical CLOSED is not fresh approval of later work, and
+old unlinked reviews are not inferred. Declared checks remain visible in READY/CLOSED views.
+Decision views retain current status/pick and task/challenge JSON separates assignment blockers
+from project challenges. See [0.10 Breaking notes](../CHANGELOG.md#0100-unreleased).
 
 ## Discovery
 
