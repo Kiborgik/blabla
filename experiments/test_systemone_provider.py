@@ -1,5 +1,6 @@
 import copy
 import importlib.util
+import io
 import json
 import pathlib
 import threading
@@ -8,6 +9,7 @@ import sys
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import Mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('systemone_provider', ROOT / 'adapters/systemone/provider.py')
@@ -73,7 +75,7 @@ class FakeEndpoint:
                 self.end_headers()
                 try:
                     self.wfile.write(encoded)
-                except (BrokenPipeError, ConnectionResetError):
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     pass
 
             def log_message(self, *args):
@@ -253,34 +255,89 @@ class SystemOneAdditionalTests(unittest.TestCase):
             self.assertEqual(endpoint.calls, [])
 
 
+def slow_response_handler(mode, ended):
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            raw_body = json.dumps({'models': [{'name': 'kev-latest', 'run': 'kev@fixture'}]}).encode()
+            try:
+                if mode == 'headers':
+                    self.wfile.write(b'HTTP/1.0 200 OK\r\nX-Slow: ')
+                    self.wfile.flush()
+                    for value in b'12345678':
+                        self.wfile.write(bytes([value]))
+                        self.wfile.flush()
+                        time.sleep(0.02)
+                    self.wfile.write(b'\r\n\r\n' + raw_body)
+                else:
+                    self.send_response(200)
+                    self.end_headers()
+                    for value in raw_body:
+                        self.wfile.write(bytes([value]))
+                        self.wfile.flush()
+                        time.sleep(0.02)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                ended.set()
+        def log_message(self, *args):
+            pass
+    return Handler
+
+
 class SystemOneReviewRegressions(unittest.TestCase):
+    def failing_writer(self, handler_type, error):
+        handler = handler_type.__new__(handler_type)
+        handler.wfile = Mock()
+        handler.wfile.write.side_effect = error
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock()
+        return handler
+
+    def test_slow_fixture_recognizes_peer_close_errors(self):
+        for mode in ['headers', 'body']:
+            for error_type in [BrokenPipeError, ConnectionResetError, ConnectionAbortedError]:
+                with self.subTest(mode=mode, error=error_type.__name__):
+                    ended = threading.Event()
+                    handler = self.failing_writer(slow_response_handler(mode, ended), error_type())
+                    try:
+                        handler.do_GET()
+                    except error_type:
+                        self.fail('peer-close error escaped the slow-response fixture')
+                    self.assertTrue(ended.is_set())
+
+    def test_post_fixture_recognizes_peer_abort(self):
+        with FakeEndpoint() as endpoint:
+            handler = self.failing_writer(endpoint.server.RequestHandlerClass, ConnectionAbortedError())
+            payload = b'{"questions": {}}'
+            handler.path = '/'
+            handler.rfile = io.BytesIO(payload)
+            handler.headers = {'Content-Length': str(len(payload))}
+            try:
+                handler.do_POST()
+            except ConnectionAbortedError:
+                self.fail('peer-abort error escaped the POST fixture')
+            self.assertEqual(endpoint.calls, [('POST', '/', {'questions': {}})])
+
+    def test_fixture_write_errors_do_not_hide_unrelated_oserror(self):
+        for mode in ['headers', 'body']:
+            with self.subTest(mode=mode):
+                ended = threading.Event()
+                handler = self.failing_writer(slow_response_handler(mode, ended), OSError('unrelated fixture error'))
+                with self.assertRaisesRegex(OSError, 'unrelated fixture error'):
+                    handler.do_GET()
+                self.assertFalse(ended.is_set())
+        with FakeEndpoint() as endpoint:
+            handler = self.failing_writer(endpoint.server.RequestHandlerClass, OSError('unrelated fixture error'))
+            payload = b'{"questions": {}}'
+            handler.path = '/'
+            handler.rfile = io.BytesIO(payload)
+            handler.headers = {'Content-Length': str(len(payload))}
+            with self.assertRaisesRegex(OSError, 'unrelated fixture error'):
+                handler.do_POST()
+
     def test_slow_headers_and_body_obey_absolute_deadline_without_orphan_thread(self):
         for mode in ['headers', 'body']:
             ended = threading.Event()
-            class Handler(BaseHTTPRequestHandler):
-                def do_GET(self):
-                    raw_body = json.dumps({'models': [{'name': 'kev-latest', 'run': 'kev@fixture'}]}).encode()
-                    try:
-                        if mode == 'headers':
-                            self.wfile.write(b'HTTP/1.0 200 OK\r\nX-Slow: ')
-                            self.wfile.flush()
-                            for value in b'12345678':
-                                self.wfile.write(bytes([value]))
-                                self.wfile.flush()
-                                time.sleep(0.02)
-                            self.wfile.write(b'\r\n\r\n' + raw_body)
-                        else:
-                            self.send_response(200)
-                            self.end_headers()
-                            for value in raw_body:
-                                self.wfile.write(bytes([value]))
-                                self.wfile.flush()
-                                time.sleep(0.02)
-                    except (BrokenPipeError, ConnectionResetError):
-                        ended.set()
-                def log_message(self, *args):
-                    pass
-            server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+            server = ThreadingHTTPServer(('127.0.0.1', 0), slow_response_handler(mode, ended))
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:

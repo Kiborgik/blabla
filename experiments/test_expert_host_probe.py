@@ -77,29 +77,37 @@ class ExpertHostProbe(unittest.TestCase):
 
     def test_probe_never_edits_global_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            global_home = root / "global-codex"
-            global_home.mkdir()
-            config = global_home / "config.toml"
-            hooks = global_home / "hooks.json"
-            config.write_bytes(b'model = "unchanged"\n')
-            hooks.write_bytes(b'{"hooks":{}}\n')
-            before = {path.name: path.read_bytes() for path in global_home.iterdir()}
-            environment = dict(os.environ)
-            with patch.dict(os.environ, {"CODEX_HOME": str(global_home)}):
-                with patch("probe_expert_host.capture", side_effect=self.fake_capture(self.fake_cli)) as run:
-                    probe("codex-fixture", root / "workspace")
-                after = {path.name: path.read_bytes() for path in global_home.iterdir()}
-                discovery_calls = [call for call in run.call_args_list if call.args[0][1:] != ["login", "status"]]
-                self.assertTrue(discovery_calls)
-                for call in discovery_calls:
-                    home = Path(call.args[2]["CODEX_HOME"])
-                    self.assertNotEqual(home, global_home)
-                    self.assertTrue(home.is_relative_to(root / "workspace"))
-                    self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", call.args[0])
-                    self.assertNotIn("--dangerously-bypass-hook-trust", call.args[0])
-            self.assertEqual(before, after)
-            self.assertEqual(environment, dict(os.environ))
+            self.assert_global_configuration_unchanged(Path(directory))
+
+    def test_probe_preserves_global_configuration_through_noncanonical_workspace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            alias = Path(directory) / "path-alias"
+            alias.mkdir()
+            self.assert_global_configuration_unchanged(alias / "..")
+
+    def assert_global_configuration_unchanged(self, root):
+        global_home = root / "global-codex"
+        global_home.mkdir()
+        config = global_home / "config.toml"
+        hooks = global_home / "hooks.json"
+        config.write_bytes(b'model = "unchanged"\n')
+        hooks.write_bytes(b'{"hooks":{}}\n')
+        before = {path.name: path.read_bytes() for path in global_home.iterdir()}
+        environment = dict(os.environ)
+        with patch.dict(os.environ, {"CODEX_HOME": str(global_home)}):
+            with patch("probe_expert_host.capture", side_effect=self.fake_capture(self.fake_cli)) as run:
+                probe("codex-fixture", root / "workspace")
+            after = {path.name: path.read_bytes() for path in global_home.iterdir()}
+            discovery_calls = [call for call in run.call_args_list if call.args[0][1:] != ["login", "status"]]
+            self.assertTrue(discovery_calls)
+            for call in discovery_calls:
+                home = Path(call.args[2]["CODEX_HOME"]).resolve()
+                self.assertNotEqual(home, global_home.resolve())
+                self.assertTrue(home.is_relative_to((root / "workspace").resolve()))
+                self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", call.args[0])
+                self.assertNotIn("--dangerously-bypass-hook-trust", call.args[0])
+        self.assertEqual(before, after)
+        self.assertEqual(environment, dict(os.environ))
 
     def test_missing_cli_records_unverified_without_raising(self):
         with tempfile.TemporaryDirectory() as directory:
