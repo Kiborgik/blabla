@@ -32,3 +32,10 @@ goal "hand-backs-survive-concurrent-work" {
     expect ["assignment::reconciling-concurrent-work-keeps-the-challenge-receipt", "assignment::a-closed-concurrent-task-still-accounts-for-its-change", "assignment::a-note-keeps-the-challenge-receipt"]
     state "done"
 }
+
+goal "bounded-expert-release-ready-for-review" {
+    serves ["truthful-over-convenient", "steering-cost-over-token-cost", "bounded-workers-free-planners"]
+    statement "Prepare the bounded 0.10 expert foundation for independent user review while preserving deterministic completion and stating unverified live delivery and benefit honestly. Contract expectations do not replace release checks or user acceptance."
+    expect ["contract::expert", "contract::expert-seams", "contract::assignment", "contract::gate", "contract::schedule"]
+    state "active"
+}

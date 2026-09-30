@@ -1242,15 +1242,21 @@ impl TraceStore {
     ) -> Result<Vec<InterventionSummary>, TraceError> {
         let _lock = self.lock()?;
         let ledger = self.ledger()?;
-        Ok(ledger
+        let mut entries = ledger
             .entries
-            .values()
-            .filter(|entry| {
+            .iter()
+            .filter(|(_, entry)| {
                 entry.task == task_id
                     && entry.acceptance_epoch == acceptance_epoch
                     && !entry.no_delivery_verified
             })
-            .map(|entry| InterventionSummary {
+            .collect::<Vec<_>>();
+        entries.sort_unstable_by(|(key_a, a), (key_b, b)| {
+            (a.reserved_unix_ms, key_a).cmp(&(b.reserved_unix_ms, key_b))
+        });
+        Ok(entries
+            .into_iter()
+            .map(|(_, entry)| InterventionSummary {
                 request_id: entry.request_id.clone(),
                 concern: entry.concern.clone(),
                 target: entry.target.clone(),

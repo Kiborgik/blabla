@@ -394,19 +394,26 @@ fn run_with_input(
     arguments: &[&str],
     input: &[u8],
 ) -> std::process::Output {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_blabla"));
+    command.current_dir(root).args(arguments);
+    run_command_with_input(command, input)
+}
+
+fn run_command_with_input(
+    mut command: std::process::Command,
+    input: &[u8],
+) -> std::process::Output {
     use std::io::Write;
-    use std::process::{Command, Stdio};
+    let mut stdin = tempfile::NamedTempFile::new().unwrap();
+    stdin.write_all(input).unwrap();
     let stdout = tempfile::NamedTempFile::new().unwrap();
     let stderr = tempfile::NamedTempFile::new().unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_blabla"))
-        .current_dir(root)
-        .args(arguments)
-        .stdin(Stdio::piped())
+    let mut child = command
+        .stdin(stdin.reopen().unwrap())
         .stdout(stdout.as_file().try_clone().unwrap())
         .stderr(stderr.as_file().try_clone().unwrap())
         .spawn()
         .unwrap();
-    let _ = child.stdin.take().unwrap().write_all(input);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let status = loop {
         if let Some(status) = child.try_wait().unwrap() {
@@ -424,6 +431,40 @@ fn run_with_input(
         stdout: std::fs::read(stdout.path()).unwrap(),
         stderr: std::fs::read(stderr.path()).unwrap(),
     }
+}
+
+fn input_fixture(script: &str) -> std::process::Command {
+    let mut command = std::process::Command::new(if cfg!(windows) { "python" } else { "python3" });
+    command.args(["-c", script]);
+    command
+}
+
+#[test]
+fn input_setup_is_complete_for_a_child_that_never_reads_stdin() {
+    let input = vec![b'x'; 8 * 1024 * 1024];
+    let output = run_command_with_input(
+        input_fixture(
+            "import os,sys; assert os.fstat(0).st_size == 8*1024*1024; assert sys.stdin.buffer.seekable(); os.write(1,b'unread-output'); os.write(2,b'unread-error'); sys.exit(17)",
+        ),
+        &input,
+    );
+    assert_eq!(output.status.code(), Some(17));
+    assert_eq!(output.stdout, b"unread-output");
+    assert_eq!(output.stderr, b"unread-error");
+}
+
+#[test]
+fn input_setup_preserves_binary_bytes_and_eof() {
+    let input = (0..=255).collect::<Vec<u8>>();
+    let output = run_command_with_input(
+        input_fixture(
+            "import sys; data=sys.stdin.buffer.read(); assert sys.stdin.buffer.read() == b''; sys.stdout.buffer.write(data); sys.stderr.buffer.write(b'binary-error\\x00\\xff'); sys.exit(23)",
+        ),
+        &input,
+    );
+    assert_eq!(output.status.code(), Some(23));
+    assert_eq!(output.stdout, input);
+    assert_eq!(output.stderr, b"binary-error\x00\xff");
 }
 
 #[test]

@@ -1105,6 +1105,114 @@ fn delivery_receipt_history_is_not_material_evidence() {
 }
 
 #[test]
+fn packet_history_uses_reservation_chronology_after_store_filtering() {
+    let mut fixture = LocalFixture::new();
+    fixture.persist();
+    let delivery = fixture.reserve();
+    delivered_receipt(&mut fixture, &delivery);
+    let ledger_path = fixture.root.path().join(".blabla/expert/ledger.json");
+    let mut ledger: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&ledger_path).unwrap()).unwrap();
+    let prototype = ledger["entries"][delivery.idempotency_key.unwrap()].clone();
+    let entries = ledger["entries"].as_object_mut().unwrap();
+    entries.clear();
+    let mut keys = (0..15)
+        .map(|index| packet::digest(&("history-key", index)))
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    for (index, key) in keys.into_iter().enumerate() {
+        let mut entry = prototype.clone();
+        entry["request_id"] = format!("history-request-{index}").into();
+        entry["idempotency_key"] = key.clone().into();
+        entry["reserved_unix_ms"] = if index == 8 { 93 } else { 100 - index as u64 }.into();
+        match index {
+            12 => entry["task"] = "task::other".into(),
+            13 => entry["acceptance_epoch"] = 2.into(),
+            14 => {
+                entry["state"] = "proposed".into();
+                entry["no_delivery_verified"] = true.into();
+                entry["receipts"][0]["state"] = "proposed".into();
+            }
+            _ => {}
+        }
+        if index >= 12 {
+            entry["reserved_unix_ms"] = 1000.into();
+        }
+        entries.insert(key, entry);
+    }
+    let persisted = serde_json::to_vec(&ledger).unwrap();
+    std::fs::write(&ledger_path, &persisted).unwrap();
+    let store = fixture.store();
+    let history = store
+        .history(&fixture.event.task, fixture.task.acceptance_epoch)
+        .unwrap();
+    let (_, bindings) = definitions(&fixture.project).unwrap();
+    let packet = blabla::project::expert::build_packet(
+        &fixture.project,
+        &fixture.task,
+        &fixture.event,
+        &bindings[0],
+        &ExpertLimits::default(),
+        &history,
+    )
+    .unwrap();
+    let expected_ids = |indices: &[usize]| {
+        indices
+            .iter()
+            .map(|index| format!("history-request-{index}"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        packet
+            .history
+            .iter()
+            .map(|entry| entry.request_id.clone())
+            .collect::<Vec<_>>(),
+        expected_ids(&[8, 6, 5, 4, 3, 2, 1, 0])
+    );
+    assert_eq!(
+        history
+            .iter()
+            .map(|entry| entry.request_id.clone())
+            .collect::<Vec<_>>(),
+        expected_ids(&[11, 10, 9, 7, 8, 6, 5, 4, 3, 2, 1, 0])
+    );
+    assert!(
+        history
+            .iter()
+            .all(|entry| entry.state == DeliveryState::Delivered)
+    );
+    let baseline = blabla::project::expert::build_packet(
+        &fixture.project,
+        &fixture.task,
+        &fixture.event,
+        &bindings[0],
+        &ExpertLimits::default(),
+        &[],
+    )
+    .unwrap();
+    let omitted_bytes = history[..4]
+        .iter()
+        .flat_map(|entry| {
+            [
+                &entry.request_id,
+                &entry.concern,
+                &entry.target,
+                &entry.evidence_revision,
+            ]
+        })
+        .map(String::len)
+        .sum::<usize>();
+    assert_eq!(
+        packet.accounting.omitted_bytes,
+        baseline.accounting.omitted_bytes + omitted_bytes
+    );
+    store.delete_run(&fixture.event.run_id).unwrap();
+    assert_eq!(store.history(&fixture.event.task, 1).unwrap(), history);
+    assert_eq!(std::fs::read(&ledger_path).unwrap(), persisted);
+}
+
+#[test]
 fn failed_check_to_current_success_is_corrective_without_file_edit() {
     let mut fixture = LocalFixture::new();
     let mut failed = fixture.task.evidence[0].clone();

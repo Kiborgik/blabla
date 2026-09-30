@@ -399,7 +399,17 @@ pub fn build_packet(
         let mut reference_omissions = 0usize;
         let declared = binding.context.get(slot).cloned().unwrap_or_else(|| {
             if *slot == ContextSlot::Goal {
-                task.goal.clone().into_iter().collect()
+                task.goal
+                    .as_ref()
+                    .map(|goal| {
+                        if goal.starts_with("goal::") {
+                            goal.clone()
+                        } else {
+                            format!("goal::{goal}")
+                        }
+                    })
+                    .into_iter()
+                    .collect()
             } else {
                 Vec::new()
             }

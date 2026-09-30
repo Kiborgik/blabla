@@ -343,3 +343,42 @@ fn name_affinity_does_not_coerce_integer_ids_to_float_arguments() {
         assert!(call.args[0].is_f64(), "{:?}", call.args);
     }
 }
+
+#[test]
+fn parameterless_candidate_preserves_rng_and_future_parameterized_calls() {
+    let contract = crate::semantics::compile(
+        "mixed.bla",
+        "state value: int\naction inspect()\naction set(value: int)\nwhen set { expect \"set\": after.value == input.value }",
+    )
+    .unwrap();
+    let guidance = Guidance::new(&contract);
+    let state = json!({"value":99,"nested":[{"id":"A","owner":"B"}]});
+    let original = state.clone();
+    for seed in [0, 1, 99, u64::MAX] {
+        let mut actual = SplitMix64::new(seed);
+        let mut expected = SplitMix64::new(seed);
+        for _ in 0..64 {
+            let call = guidance
+                .candidate(&contract.actions[0], &state, &mut actual)
+                .unwrap();
+            assert_eq!(
+                call,
+                Call {
+                    action: "inspect".into(),
+                    args: Vec::new()
+                }
+            );
+            assert_eq!(actual.state, expected.state);
+            assert_eq!(
+                guidance
+                    .candidate(&contract.actions[1], &state, &mut actual)
+                    .unwrap(),
+                guidance
+                    .candidate(&contract.actions[1], &state, &mut expected)
+                    .unwrap()
+            );
+            assert_eq!(actual.next_u64(), expected.next_u64());
+        }
+    }
+    assert_eq!(state, original);
+}

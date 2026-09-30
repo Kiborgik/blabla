@@ -49,6 +49,19 @@ source identities and remaining work are separated in [release evidence](docs/de
 
 ### Fixed
 
+- The shared Python adapter explicitly uses strict UTF-8 for its default protocol streams.
+  Non-UTF-8 host defaults no longer corrupt Unicode requests or identifiers; caller-supplied
+  streams remain caller-owned
+- Provider cleanup preserves direct-child exit ownership before reaping descendants, avoiding
+  a race that could consume the whole cleanup deadline after the process tree was already empty
+- Expert packets select recent intervention history by reservation time with a deterministic
+  key tie-break, rather than by the hash-key order of the delivery ledger
+- Goals attached through the actual task CLI are expanded to canonical expert-context identities
+  without changing task storage or allowing absent and unresolved goals to supply context
+- Historical fixture tests build the current source CLI before use, and argument validation is
+  portable without broadening the evaluation driver's Linux-only execution support
+- Expert CLI input tests prepare file-backed input before spawning, so a non-reading child
+  cannot block the test before its watchdog begins
 - Exact-check evidence substitution and in-flight declaration/acceptance/input changes no longer
   credit a replacement check
 - Concurrent task ownership, withdrawal residue, stale worker/lens/review credit and superseded
@@ -60,6 +73,12 @@ source identities and remaining work are separated in [release evidence](docs/de
 - A request/key-matched verified non-delivery receipt no longer suppresses a fresh current retry
   through active policy history or the unresolved-concern cap. Retry reservations use distinct
   keys and preserve the earlier ledger/trace receipt history
+
+### Performance
+
+- Parameter-free actions avoid repeated identical candidate construction and scoring. The
+  parameterized paths, RNG draws, scoring and tie rules, canonical budgets and normal/reordered
+  witness assertions are retained. Measured results and their limits are in release evidence
 
 ### Revalidation and limits
 

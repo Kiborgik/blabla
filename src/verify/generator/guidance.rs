@@ -104,6 +104,12 @@ impl Guidance {
         state: &Value,
         rng: &mut SplitMix64,
     ) -> Result<Call, VerifyError> {
+        if action.params.is_empty() {
+            return Ok(Call {
+                action: action.name.clone(),
+                args: Vec::new(),
+            });
+        }
         let mut records = Vec::new();
         collect_records(state, &mut records);
         let mut pools = CandidatePools::default();

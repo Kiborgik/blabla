@@ -849,18 +849,60 @@ struct ProviderProcess {
     child: Child,
     tree: ProcessTree,
 }
+impl ProviderProcess {
+    fn reap_terminated_tree(&self, child_exited: bool) -> bool {
+        if !child_exited {
+            return false;
+        }
+        self.tree.reap_descendants();
+        self.tree.is_empty().unwrap_or(false)
+    }
+}
 impl Drop for ProviderProcess {
     fn drop(&mut self) {
         self.tree.terminate();
         let _ = self.child.kill();
         let deadline = Instant::now() + Duration::from_millis(250);
+        let mut exited = false;
         loop {
-            let reaped = self.child.try_wait().ok().flatten().is_some();
-            self.tree.reap_descendants();
-            if (reaped && self.tree.is_empty().unwrap_or(false)) || Instant::now() >= deadline {
+            if !exited {
+                exited = self.child.try_wait().ok().flatten().is_some();
+            }
+            if self.reap_terminated_tree(exited) || Instant::now() >= deadline {
                 break;
             }
             thread::sleep(Duration::from_millis(1));
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn descendant_reaping_preserves_unobserved_direct_child_exit() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "exit 17"]);
+        process_tree::configure(&mut command);
+        let mut child = command.spawn().unwrap();
+        let tree = ProcessTree::attach(&mut child).unwrap();
+        let mut process = ProviderProcess { child, tree };
+        let mut status = std::mem::MaybeUninit::<libc::siginfo_t>::uninit();
+        assert_eq!(
+            unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    process.child.id(),
+                    status.as_mut_ptr(),
+                    libc::WEXITED | libc::WNOWAIT,
+                )
+            },
+            0
+        );
+
+        assert!(!process.reap_terminated_tree(false));
+        assert_eq!(process.child.try_wait().unwrap().unwrap().code(), Some(17));
+        assert!(process.reap_terminated_tree(true));
     }
 }
