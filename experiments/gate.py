@@ -14,6 +14,8 @@ STEPS = (
     ("clippy", ("cargo", "clippy", "@cargo", "--all-targets", "--", "-D", "warnings")),
     ("rust-tests", ("cargo", "test", "@cargo")),
     ("gate-schedule", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_gate*.py")),
+    ("expert-host-probe", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_expert_host_probe.py")),
+    ("systemone-provider", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_systemone_provider.py")),
     ("todo-python", ("@python", "-m", "unittest", "discover", "-s", "examples/todo", "-p", "test_*.py")),
     ("bridge", ("cargo", "build", "@cargo", "--quiet", "--example", "structure-adapter")),
     ("bridge-tests", ("cargo", "test", "@cargo", "--quiet", "--example", "structure-adapter")),

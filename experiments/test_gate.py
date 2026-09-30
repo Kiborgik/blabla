@@ -1,4 +1,5 @@
 import unittest
+import sys
 from pathlib import Path
 
 from gate import REQUIRED_ORDER, STEPS, checks, ordered, steps_of
@@ -51,6 +52,27 @@ class RunnerUsesTheSchedule(unittest.TestCase):
     def test_every_placeholder_is_expanded(self):
         for _, command in checks(Path("."), True):
             self.assertEqual(PLACEHOLDERS.intersection(command), set())
+
+    def test_credential_free_expert_checks_are_exact_product_gate_stages(self):
+        schedule = dict(checks(Path("."), True))
+        expected = {
+            "expert-host-probe": "test_expert_host_probe.py",
+            "systemone-provider": "test_systemone_provider.py",
+        }
+        for name, pattern in expected.items():
+            self.assertIn(name, schedule)
+            self.assertEqual(schedule[name], [sys.executable, "-m", "unittest", "discover", "-s", "experiments", "-p", pattern])
+        tokens = [token for _, command in checks(Path("."), True) for token in command]
+        self.assertNotIn("smoke_systemone_provider.py", tokens)
+        self.assertNotIn("--allow-local-inference", tokens)
+
+    def test_expert_check_stages_precede_completion_without_reordering_existing_steps(self):
+        names = [name for name, _ in STEPS]
+        for name in ("expert-host-probe", "systemone-provider"):
+            self.assertIn(name, names)
+            self.assertLess(names.index("gate-schedule"), names.index(name))
+            self.assertLess(names.index(name), names.index("todo-python"))
+            self.assertLess(names.index(name), names.index("self-hosting-finish"))
 
     def test_the_offline_flag_reaches_the_commands_that_declare_it(self):
         offline = dict(checks(Path("."), True))
