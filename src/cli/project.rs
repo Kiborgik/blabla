@@ -72,6 +72,7 @@ struct StatusWithMemory<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     expert: Option<ExpertStatus>,
     capabilities: CapabilityReport,
+    shared_state: &'a [project::SharedState],
 }
 
 #[derive(Default)]
@@ -313,9 +314,16 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             bounded_tasks: tasks,
             expert: views.expert,
             capabilities,
+            shared_state: &project.shared_state,
         })
     } else {
-        write_status(&view, &views, tasks.as_ref(), &capabilities)
+        write_status(
+            &view,
+            &views,
+            tasks.as_ref(),
+            &capabilities,
+            &project.shared_state,
+        )
     };
     if result.is_ok() { view.exit } else { 4 }
 }
@@ -956,6 +964,7 @@ struct CheckView {
     postconditions: usize,
     invariants: usize,
     forbidden: usize,
+    shared_state: Vec<project::SharedState>,
 }
 
 pub(super) fn check(project: &Project, json: bool) -> i32 {
@@ -1012,6 +1021,7 @@ pub(super) fn check(project: &Project, json: bool) -> i32 {
         forbidden: contract
             .map(|c| c.invariants.iter().filter(|p| p.forbidden).count())
             .unwrap_or(0),
+        shared_state: project.shared_state.clone(),
     };
     let result = if json {
         write_json(&view)
@@ -1064,11 +1074,32 @@ fn write_check(view: &CheckView) -> io::Result<()> {
             }
         }
     }
+    write_shared_state(&mut output, &view.shared_state)?;
     writeln!(
         output,
         "{} actions\n{} postconditions\n{} invariants\n{} forbidden conditions",
         view.actions, view.postconditions, view.invariants, view.forbidden
     )
+}
+
+fn write_shared_state(output: &mut impl Write, states: &[project::SharedState]) -> io::Result<()> {
+    if !states.is_empty() {
+        writeln!(output, "\nShared state:")?;
+        for state in states {
+            writeln!(
+                output,
+                "  {}: {}  {}",
+                state.name,
+                state.ty,
+                state.contracts.join(", ")
+            )?;
+        }
+        writeln!(
+            output,
+            "  Same-name, same-type declarations observe one shared value."
+        )?;
+    }
+    Ok(())
 }
 
 fn manifest_diagnostic(project: &Project, code: &str, message: &str) -> Diagnostic {
@@ -2150,6 +2181,7 @@ fn write_status(
     views: &MemoryViews,
     tasks: Option<&TaskStatus>,
     capabilities: &CapabilityReport,
+    shared_state: &[project::SharedState],
 ) -> io::Result<()> {
     let mut output = io::stdout().lock();
     writeln!(output, "BlaBla: executable project memory\n")?;
@@ -2175,6 +2207,7 @@ fn write_status(
         writeln!(output, "Recorded run unreadable: {failure}")?;
     }
     write_contracts(&mut output, view)?;
+    write_shared_state(&mut output, shared_state)?;
     write_mission_memory(&mut output, views.mission.as_ref())?;
     write_system_memory(&mut output, views.system.as_ref())?;
     write_process_memory(&mut output, views.process.as_ref())?;

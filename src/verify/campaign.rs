@@ -97,7 +97,7 @@ pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
                     let mut score: f64 = 0.0;
                     for _ in 0..4 {
                         let call = guidance.candidate(action, &entry.state, &mut rng)?;
-                        score = score.max(coverage.score(
+                        score = score.max(coverage.preparation_score(
                             index,
                             &entry.state,
                             &action_input(action, &call)?,
@@ -205,7 +205,11 @@ pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
                     } else {
                         best_call(wanted, &before, &guidance, &coverage, index, &mut rng)?
                     };
-                    let score = coverage.score(index, &before, &action_input(wanted, &candidate)?);
+                    let score = coverage.preparation_score(
+                        index,
+                        &before,
+                        &action_input(wanted, &candidate)?,
+                    );
                     if population.is_some()
                         || score >= 0.999
                         || rng.sample_below_rejecting_modulo_bias(3) == 0

@@ -2,6 +2,26 @@ use super::*;
 use std::collections::BTreeSet;
 
 impl Coverage {
+    pub(in crate::verify) fn preparation_score(
+        &self,
+        index: usize,
+        state: &Value,
+        input: &Value,
+    ) -> f64 {
+        let Some(probe) = &self.plans[index] else {
+            return 1.0;
+        };
+        let predicate = &self.predicates[probe.predicate];
+        let route = observed_route(&probe.route);
+        score_route(
+            &route,
+            &probe.witness,
+            frame(predicate, [state, input, state]),
+            predicate,
+            &origins(&route),
+        )
+    }
+
     pub(in crate::verify) fn unmet_fields(
         &self,
         index: usize,
@@ -13,12 +33,13 @@ impl Coverage {
         };
         let predicate = &self.predicates[probe.predicate];
         let mut result = BTreeSet::new();
+        let route = observed_route(&probe.route);
         missing_route(
-            &probe.route,
+            &route,
             &probe.witness,
             frame(predicate, [state, input, state]),
             predicate,
-            &origins(&probe.route),
+            &origins(&route),
             &mut result,
         );
         result
@@ -43,6 +64,36 @@ impl Coverage {
         slots.resize_with(effect.slots.max(slots.len()), || None);
         fitness(&effect.guard, true, &mut slots, predicate, &BTreeMap::new())
     }
+}
+
+fn observed_route(route: &[Route]) -> Vec<Route> {
+    route
+        .iter()
+        .map(|step| match step {
+            Route::Check(expr, wanted) => Route::Check(observed_expr(expr), *wanted),
+            Route::Bind(list, slot) => Route::Bind(observed_expr(list), *slot),
+        })
+        .collect()
+}
+
+fn observed_expr(expr: &Expr) -> Expr {
+    let mut observed = expr.clone();
+    match &mut observed.kind {
+        ExprKind::Load(2) => observed.kind = ExprKind::Load(0),
+        ExprKind::Field { base, .. }
+        | ExprKind::Count(base)
+        | ExprKind::Unary { operand: base, .. } => **base = observed_expr(base),
+        ExprKind::Binary { left, right, .. } => {
+            **left = observed_expr(left);
+            **right = observed_expr(right);
+        }
+        ExprKind::Query { list, body, .. } => {
+            **list = observed_expr(list);
+            **body = observed_expr(body);
+        }
+        ExprKind::Load(_) | ExprKind::Literal(_) => {}
+    }
+    observed
 }
 
 fn missing_route(

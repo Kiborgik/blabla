@@ -1,5 +1,48 @@
 # Agent integration findings
 
+## 0.10 carryover: composed state and witness steering, 2026-09-30
+
+Same-name, same-type state declarations still observe one shared value. Project `check` and
+`status` now expose a nonfatal `shared_state` list containing the resolved type and every active
+declaring contract identity. Intentional sharing and an unrelated same-name collision receive
+the same diagnostic; incompatible types still fail with `E_INCOMPATIBLE_STATE`. Draft declarations
+are excluded. `shared_state_reports_all_contract_sources` covers unchanged execution and reordered
+composition; `shared_state_reports_resolved_types` covers scalar, list and optional-record types.
+The first diagnostic test failed because the field was absent; suppressing the production
+diagnostic after implementation makes both tests fail.
+
+Adding the already-shipped questions contract to the full behavior composition reproduced current
+witness starvation. With seed 0, 32 cases, 512 steps, timeout 5000 ms and shrink budget 256, the
+current-source CLI executed all 16,384 actions but returned YELLOW: 331 obligations witnessed,
+two unexercised, no violations. The missing obligations were
+`assignment::an-unapproved-outside-model-may-not-address-findings/root.left.effect` and
+`assignment::a-failing-check-is-visible-at-hand-back/root.right.member`. The smaller
+Assignment+Goals+Questions composition was already GREEN and is not evidence of this defect.
+
+Future-state guards previously scored as satisfied for preparation, so corpus selection favored
+the empty reset state even when an approved exception or ready task was needed. Preparation now
+ranks those guards against observed state and uses their missing fields to find related actions.
+Predicate evaluation, witness accounting, the random lane and campaign budgets are unchanged.
+The full native bridge regression fails before the repair with the same two missing obligations
+and passes after it, including a renamed/reordered goals contract. The matching current-source
+CLI campaign is GREEN at the original budget: 333 obligations witnessed, zero unexercised and
+zero violations. Full coverage is reached at action 2768; the two formerly missing obligations
+have 12 and 10 witnesses with multi-action traces. One before/after run is no general speed claim.
+
+A temporary mutation of the actual unapproved-model addressing action to report no refusal
+produces RED at action 19 for
+`assignment::an-unapproved-outside-model-may-not-address-findings`. The action was restored and
+its SHA-256 verified unchanged. This is a witnessed violation, rather than acceptance of an
+unexercised YELLOW result. `contract::questions` is now registered as active in `project.bla`;
+the goal expectation, goal state and canonical profile are unchanged. The orchestrator still
+owns canonical `finish` and release evidence.
+
+The existing unfinished-task status fixture opened two tasks over `src`. The new ownership
+rejection correctly refused the second opening, so that fixture now gives each task a distinct
+subdirectory while retaining its unfinished-task and explicit-choice assertions. All evidence
+here is from Linux and the fixed bounded campaigns above; it does not prove every future
+composition or seed will find every witness.
+
 Working triage, not a published comparison. [Run guide](README.md).
 Raw reports and transcripts are retained under ignored `artifacts/agent-evals/`. The suite runs
 `qwen3.5:4b` as the worker and `qwen3.5:9b` as the reviewer through Ollama, Claude Code and

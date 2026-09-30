@@ -1,5 +1,5 @@
 use crate::diagnostic::{Diagnostic, Location, Span};
-use crate::ir::Contract;
+use crate::ir::{Contract, Type};
 use crate::report::{DEFAULT_CASES, DEFAULT_STEPS, DEFAULT_TIMEOUT_MS, MAX_SHRINK_ATTEMPTS};
 use crate::runtime::{MAX_STARTUP, MAX_TIMEOUT, primitives};
 use crate::semantics::{Unit, compile_units};
@@ -200,6 +200,15 @@ pub struct Project {
     pub drafts: Vec<Draft>,
     pub identity: String,
     pub ignore: Ignore,
+    pub shared_state: Vec<SharedState>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SharedState {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub ty: String,
+    pub contracts: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -1067,6 +1076,7 @@ pub fn load(manifest: Manifest) -> Result<Project, Diagnostic> {
     } else {
         Some(compile_units(&units)?)
     };
+    let shared_state = shared_state(&active, contract.as_ref());
     let drafts = pending_drafts
         .into_iter()
         .map(|pending| match pending {
@@ -1133,7 +1143,54 @@ pub fn load(manifest: Manifest) -> Result<Project, Diagnostic> {
         drafts,
         identity: hasher.finish(),
         ignore,
+        shared_state,
     })
+}
+
+fn shared_state(active: &[Loaded<'_>], contract: Option<&Contract>) -> Vec<SharedState> {
+    let mut sources: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+    for loaded in active {
+        for declaration in &loaded.syntax.declarations {
+            if let syntax::Declaration::State(state) = declaration {
+                sources
+                    .entry(&state.name)
+                    .or_default()
+                    .insert(format!("contract::{}", loaded.entry.group));
+            }
+        }
+    }
+    contract
+        .into_iter()
+        .flat_map(|contract| &contract.state)
+        .filter_map(|field| {
+            let sources = sources.get(field.name.as_str())?;
+            (sources.len() > 1).then(|| SharedState {
+                name: field.name.clone(),
+                ty: state_type(&field.ty),
+                contracts: sources.iter().cloned().collect(),
+            })
+        })
+        .collect()
+}
+
+fn state_type(ty: &Type) -> String {
+    match ty {
+        Type::Bool => "bool".into(),
+        Type::Int => "int".into(),
+        Type::Float => "float".into(),
+        Type::String => "string".into(),
+        Type::Null => "null".into(),
+        Type::Optional(inner) => format!("optional<{}>", state_type(inner)),
+        Type::List(inner) => format!("[{}]", state_type(inner)),
+        Type::Record(fields) => format!(
+            "{{ {} }}",
+            fields
+                .iter()
+                .map(|field| format!("{}: {}", field.name, state_type(&field.ty)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
 }
 
 fn always_tracked(manifest: &Manifest) -> BTreeSet<String> {
