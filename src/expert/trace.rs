@@ -2369,7 +2369,8 @@ pub(crate) fn validate_resolution(
         .ok_or(TraceError::InvalidInput)?;
     let observed = task.evidence.get(index).ok_or(TraceError::InvalidInput)?;
     let tree = project::snapshot(&project.manifest.root, &project.ignore);
-    if observed.exit != 0
+    if task::tracking_error(&task, &project.manifest.root, &project.ignore).is_some()
+        || observed.exit != 0
         || observed.tool != "run"
         || observed.unix.saturating_mul(1000) < entry.reserved_unix_ms.saturating_sub(1000)
         || !task::evidence_matches(&task, observed)

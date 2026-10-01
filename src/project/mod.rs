@@ -37,6 +37,22 @@ const SKIPPED_DIRECTORIES: &[&str] = &[
     ".pytest_cache",
 ];
 
+fn path_identity_with_case(path: &str, case_insensitive: bool) -> String {
+    if case_insensitive {
+        path.to_lowercase()
+    } else {
+        path.to_owned()
+    }
+}
+
+fn path_identity(path: &str) -> String {
+    path_identity_with_case(path, cfg!(windows))
+}
+
+fn skipped_directory(name: &str) -> bool {
+    SKIPPED_DIRECTORIES.contains(&path_identity(name).as_str())
+}
+
 const CONTENT_HASH_LIMIT: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
@@ -1645,10 +1661,7 @@ fn walk(
         }
         if kind.is_dir() {
             let name = child.file_name();
-            if SKIPPED_DIRECTORIES
-                .iter()
-                .any(|skipped| name.to_string_lossy() == *skipped)
-            {
+            if skipped_directory(&name.to_string_lossy()) {
                 continue;
             }
             if ignore.skips_directory(&relative(root, &path)) {
@@ -1693,10 +1706,18 @@ pub fn digest_of(root: &Path, relative_path: &str) -> Option<String> {
 }
 
 fn relative(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    relative_with_case(root, path, cfg!(windows))
+}
+
+fn relative_with_case(root: &Path, path: &Path, case_insensitive: bool) -> String {
+    path_identity_with_case(
+        &path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/"),
+        case_insensitive,
+    )
 }
 
 fn hash_file(name: &str, path: &Path, hasher: &mut Fnv) {

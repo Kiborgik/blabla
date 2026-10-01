@@ -515,7 +515,7 @@ pub fn build_packet(
         }
     }
     if slots.contains(&ContextSlot::Task) {
-        let selected = serde_json::json!({"id": format!("task::{}", task.name), "statement": task.statement, "role": task.role, "goal": task.goal, "scope": task.scope, "check": task::declared_check(task), "state": task.state, "readiness": task::readiness(task, &tree), "unresolved_findings": task.unresolved().map(|f| (&f.id, &f.statement)).collect::<Vec<_>>(), "blocked": task.state == "blocked", "successful_current_check": task::readiness(task, &tree).supported});
+        let selected = serde_json::json!({"id": format!("task::{}", task.name), "statement": task.statement, "role": task.role, "goal": task.goal, "scope": task.scope, "check": task::declared_check(task), "state": task.state, "readiness": task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree), "unresolved_findings": task.unresolved().map(|f| (&f.id, &f.statement)).collect::<Vec<_>>(), "blocked": task.state == "blocked", "successful_current_check": task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree).supported});
         context.insert(
             ContextSlot::Task,
             ContextValue::Present {
@@ -598,9 +598,12 @@ pub fn build_packet(
             }
         }
     }
+    let current_inputs = task::tracking_error(task, &project.manifest.root, &project.ignore)
+        .is_none()
+        .then(|| task::evidence_inputs(task, &tree));
     omitted = omitted.saturating_add(collect_evidence(
         task,
-        &tree,
+        current_inputs.as_ref(),
         &fingerprint,
         &slots,
         &mut context,
@@ -746,7 +749,7 @@ fn compatible_fingerprints(
 
 fn collect_evidence(
     task: &Task,
-    tree: &BTreeMap<String, String>,
+    current_inputs: Option<&BTreeMap<String, Option<String>>>,
     revision: &str,
     slots: &BTreeSet<ContextSlot>,
     context: &mut BTreeMap<ContextSlot, ContextValue>,
@@ -758,10 +761,10 @@ fn collect_evidence(
     }
     let mut omitted_by_slot: BTreeMap<ContextSlot, usize> = BTreeMap::new();
     let mut omitted_references = 0usize;
-    let current_inputs = task::evidence_inputs(task, tree);
     for (position, (index, evidence)) in task.evidence.iter().enumerate().rev().enumerate() {
         let id = format!("evidence::{}::{}", task.name, index + 1);
-        let current = task::evidence_matches(task, evidence) && evidence.inputs == current_inputs;
+        let current = task::evidence_matches(task, evidence)
+            && current_inputs.is_some_and(|inputs| evidence.inputs == *inputs);
         let captured = evidence.tool == "run"
             && matches!((&evidence.identity, &evidence.command), (Some(task::CheckIdentity::Argv { argv }), Some(command)) if argv == command);
         let observed = current && captured;

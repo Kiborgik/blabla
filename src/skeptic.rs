@@ -14,7 +14,7 @@ pub const LIMITS: [&str; 3] = [
     include_str!("cli/text/skeptic-limit-source.md"),
 ];
 
-pub const CLASSES: [&str; 18] = [
+pub const CLASSES: [&str; 19] = [
     "unresolved-finding",
     "deliverable-unchanged",
     "scope-breach",
@@ -33,6 +33,7 @@ pub const CLASSES: [&str; 18] = [
     "question-unpicked",
     "withdrawal-residue",
     "review-target-stale",
+    "unobservable-task-input",
 ];
 
 pub const OUTSIDE_THE_ASSIGNMENT: [&str; 4] = [
@@ -66,6 +67,7 @@ pub enum Class {
     GoalOutcomeUnmet,
     WithdrawalResidue,
     ReviewTargetStale,
+    UnobservableTaskInput,
 }
 
 impl Class {
@@ -90,6 +92,7 @@ impl Class {
             Class::GoalOutcomeUnmet => GOAL_CLASSES[0],
             Class::WithdrawalResidue => CLASSES[16],
             Class::ReviewTargetStale => CLASSES[17],
+            Class::UnobservableTaskInput => CLASSES[18],
         }
     }
 }
@@ -205,8 +208,44 @@ pub fn challenge_against(
     evidence: &Evidence<'_>,
     goals: Result<&[Outcome], &'static str>,
 ) -> ChallengeReport {
+    challenge_against_tracking(evidence, goals, None)
+}
+
+pub fn challenge_tracked_against(
+    evidence: &Evidence<'_>,
+    goals: Result<&[Outcome], &'static str>,
+    root: &std::path::Path,
+    ignore: &crate::project::ignore::Ignore,
+) -> ChallengeReport {
+    challenge_against_tracking(evidence, goals, Some((root, ignore)))
+}
+
+fn challenge_against_tracking(
+    evidence: &Evidence<'_>,
+    goals: Result<&[Outcome], &'static str>,
+    tracking: Option<(&std::path::Path, &crate::project::ignore::Ignore)>,
+) -> ChallengeReport {
+    let tracking_error = evidence.task.and_then(|task| {
+        tracking.and_then(|(root, ignore)| task::tracking_error(task, root, ignore))
+    });
     let mut outcomes: Vec<(&'static str, Result<Challenge, &'static str>)> = Vec::new();
-    outcomes.push((CLASSES[16], withdrawal_residue(evidence)));
+    outcomes.push((
+        CLASSES[18],
+        match (evidence.task, tracking_error) {
+            (Some(task), Some(problem)) => Ok(Challenge {
+                class: Class::UnobservableTaskInput,
+                statement: format!("I don't believe this result has observable inputs. {problem}"),
+                evidence: vec![format!("task: {}", task.name), problem.clone()],
+                reconcile: task::tracking_recovery(task, &problem),
+            }),
+            (Some(_), None) if tracking.is_some() => {
+                Err("every declared evidence path is observable in change tracking")
+            }
+            (Some(_), None) => Err("path observability was not evaluated against project tracking"),
+            (None, _) => Err(NO_TASK),
+        },
+    ));
+    outcomes.push((CLASSES[16], withdrawal_residue(evidence, tracking)));
     type Grounding = fn(&Task, &Evidence<'_>) -> Result<Challenge, &'static str>;
     let against_the_task: [(&'static str, Grounding); 11] = [
         (CLASSES[12], |task, evidence| {
@@ -320,9 +359,21 @@ pub fn challenge_against(
     }
 }
 
-fn withdrawal_residue(evidence: &Evidence<'_>) -> Result<Challenge, &'static str> {
+fn withdrawal_residue(
+    evidence: &Evidence<'_>,
+    tracking: Option<(&std::path::Path, &crate::project::ignore::Ignore)>,
+) -> Result<Challenge, &'static str> {
     for task in evidence.other_tasks {
-        let paths = task::withdrawal_residue(task, evidence.other_tasks, evidence.tree);
+        let paths = match tracking {
+            Some((root, ignore)) => task::tracked_withdrawal_residue(
+                task,
+                evidence.other_tasks,
+                evidence.tree,
+                root,
+                ignore,
+            ),
+            None => task::withdrawal_residue(task, evidence.other_tasks, evidence.tree),
+        };
         if !paths.is_empty() {
             return Ok(Challenge {
                 class: Class::WithdrawalResidue,

@@ -103,6 +103,27 @@ The normal frozen fixture did not leak. Browser delivery, persistence transactio
 real DM/Kev play and product acceptance remain separate obligations. No speed or
 rework reduction has been measured.
 
+## A next-project finding changed BlaBla itself
+
+Inspecting the adventure review’s declared inputs exposed a **BlaBla freshness
+bug**: an input inside skipped `.blabla/scratch/` had a null digest. A retained CLI
+reproduction then changed that input, made the real check fail, and still obtained
+READY from its older successful evidence. Traversal and outside paths reproduced
+the same gap; ordinary tracked and missing-in-root controls did not.
+
+The repair rejects unobservable declarations and withdraws current credit from
+legacy invalid inputs, while retaining their history. Independent review caught
+Windows case/expansion defects in that repair, then ambiguous physical aliases;
+the correction uses one path identity domain and fails closed on unsafe mappings. Subsequent adventure review moved its exact proofs into tracked
+`scripts/reviews/` files, rebound the check, and reran it with non-null digests.
+
+This was an agent inspection finding during full workflow use, not an automatic
+expert discovery. It changed how the next feature’s evidence is retained. Sources:
+BlaBla tasks `investigate-skipped-inputs`, `reject-unobservable-task-inputs` and
+`review-unobservable-task-inputs`; adventure `review-adventure-tactical-encounter`
+and its proof-retention manifest. Earlier scratch-input receipts remain historical
+and must not be presented as fully source-bound evidence.
+
 ## Runtime-expert boundary
 
 The separate real Kev calibration completed but selected **no feasible policy**:

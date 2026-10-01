@@ -1109,6 +1109,27 @@ pub fn withdrawal_residue(
     tasks: &[Task],
     tree: &BTreeMap<String, String>,
 ) -> Vec<String> {
+    withdrawal_residue_by(task, tasks, tree, |_| true)
+}
+
+pub fn tracked_withdrawal_residue(
+    task: &Task,
+    tasks: &[Task],
+    tree: &BTreeMap<String, String>,
+    root: &Path,
+    ignore: &Ignore,
+) -> Vec<String> {
+    withdrawal_residue_by(task, tasks, tree, |successor| {
+        tracking_error(successor, root, ignore).is_none()
+    })
+}
+
+fn withdrawal_residue_by(
+    task: &Task,
+    tasks: &[Task],
+    tree: &BTreeMap<String, String>,
+    observable: impl Fn(&Task) -> bool,
+) -> Vec<String> {
     let Some(withdrawal) = &task.withdrawal else {
         return Vec::new();
     };
@@ -1123,6 +1144,7 @@ pub fn withdrawal_residue(
                 record.path == **path
                     && tasks.iter().any(|successor| {
                         successor.name == record.successor
+                            && observable(successor)
                             && successful_successor(successor, tree, path)
                             && successor_revision(successor, tree, path) == record.revision
                             && record.revision.paths.get(*path)
@@ -1168,11 +1190,185 @@ pub fn normalize_scope(root: &Path, path: &str) -> Result<String, String> {
         return Err("write scope must name a project path".to_owned());
     }
     let normalized = components.join("/");
-    Ok(if cfg!(windows) {
-        normalized.to_lowercase()
+    Ok(super::path_identity(&normalized))
+}
+
+fn case_identity_error(
+    root: &Path,
+    ignore: &Ignore,
+    path: &str,
+    case_insensitive: bool,
+) -> Option<String> {
+    if !case_insensitive {
+        return None;
+    }
+    fn entries(directory: &Path) -> Result<BTreeMap<String, Vec<std::fs::DirEntry>>, String> {
+        let mut groups: BTreeMap<String, Vec<std::fs::DirEntry>> = BTreeMap::new();
+        let children = std::fs::read_dir(directory).map_err(|_| {
+            format!(
+                "cannot inspect filesystem aliases in {}",
+                directory.display()
+            )
+        })?;
+        for child in children {
+            let child = child.map_err(|_| {
+                format!(
+                    "cannot inspect filesystem aliases in {}",
+                    directory.display()
+                )
+            })?;
+            let key = super::path_identity_with_case(&child.file_name().to_string_lossy(), true);
+            groups.entry(key).or_default().push(child);
+        }
+        Ok(groups)
+    }
+    fn unique(
+        directory: &Path,
+        key: &str,
+        aliases: &[std::fs::DirEntry],
+    ) -> Result<PathBuf, String> {
+        if aliases.len() != 1 {
+            return Err(format!(
+                "ambiguous Windows path identity {key:?} in {}; case-fold aliases include regular files, directories and symlinks",
+                directory.display()
+            ));
+        }
+        let canonical = directory.join(key);
+        if std::fs::symlink_metadata(&canonical).is_err() {
+            return Err(format!(
+                "Windows path identity {key:?} does not resolve in {}; case-sensitive filesystem mappings are unsupported for this task path",
+                directory.display()
+            ));
+        }
+        Ok(canonical)
+    }
+    let inspect = || -> Result<(), String> {
+        let mut current = root.to_path_buf();
+        if path != "." {
+            for component in path.split('/') {
+                if !current.is_dir() {
+                    return Ok(());
+                }
+                let groups = entries(&current)?;
+                let Some(aliases) = groups.get(component) else {
+                    return Ok(());
+                };
+                current = unique(&current, component, aliases)?;
+            }
+        }
+        if !current.is_dir() {
+            return Ok(());
+        }
+        let mut pending = vec![current];
+        while let Some(directory) = pending.pop() {
+            for (key, aliases) in entries(&directory)? {
+                let relative = super::relative_with_case(root, &directory.join(&key), true);
+                let mut tracked = false;
+                for alias in &aliases {
+                    let kind = alias.file_type().map_err(|_| {
+                        format!("cannot inspect filesystem alias {}", alias.path().display())
+                    })?;
+                    if kind.is_file() && !ignore.skips_file(&relative)
+                        || kind.is_dir()
+                            && !super::skipped_directory(&key)
+                            && !ignore.skips_directory(&relative)
+                    {
+                        tracked = true;
+                    }
+                }
+                if !tracked {
+                    continue;
+                }
+                let child = unique(&directory, &key, &aliases)?;
+                if aliases[0]
+                    .file_type()
+                    .map_err(|_| format!("cannot inspect filesystem alias {}", child.display()))?
+                    .is_dir()
+                {
+                    pending.push(child);
+                }
+            }
+        }
+        Ok(())
+    };
+    inspect().err()
+}
+
+pub fn normalize_tracked_path(
+    root: &Path,
+    ignore: &Ignore,
+    kind: &str,
+    path: &str,
+) -> Result<String, String> {
+    let normalized =
+        normalize_scope(root, path).map_err(|error| error.replace("write scope", kind))?;
+    let mut current = root.to_path_buf();
+    for component in normalized.split('/') {
+        current.push(component);
+        if super::skipped_directory(component) && !current.is_file() {
+            return Err(format!(
+                "{kind} {path:?} is left out of change tracking by built-in skipped directory {component:?}; declare a tracked project path"
+            ));
+        }
+    }
+    let path_on_disk = root.join(&normalized);
+    if let Some(rule) = ignore.rule_for(&normalized, !path_on_disk.is_file()) {
+        return Err(format!(
+            "{kind} {path:?} is left out of change tracking by {rule}, so BlaBla could never observe it; drop that ignore rule or declare a path it does not cover"
+        ));
+    }
+    if let Some(problem) = case_identity_error(root, ignore, &normalized, cfg!(windows)) {
+        return Err(format!(
+            "{kind} {path:?} is not safely observable: {problem}"
+        ));
+    }
+    Ok(normalized)
+}
+
+pub fn tracking_error(task: &Task, root: &Path, ignore: &Ignore) -> Option<String> {
+    let declared = if task.check_inputs.is_empty() {
+        &task.scope
     } else {
-        normalized
-    })
+        &task.check_inputs
+    };
+    declared
+        .iter()
+        .map(|path| ("input", path))
+        .chain(
+            task.deliverables
+                .iter()
+                .map(|deliverable| ("deliverable", &deliverable.path)),
+        )
+        .find_map(
+            |(kind, path)| match normalize_tracked_path(root, ignore, kind, path) {
+                Err(message) => Some(message),
+                Ok(normalized) if normalized != *path => Some(format!(
+                    "{kind} {path:?} is not normalized for change tracking; declare {normalized:?}"
+                )),
+                Ok(_) => None,
+            },
+        )
+}
+
+pub fn tracking_recovery(task: &Task, problem: &str) -> String {
+    format!(
+        "{problem}. Correct inputs with blabla task check {name} --input <tracked-path> and the exact check; remove invalid deliverables with blabla task deliverable {name} --remove <path> --reason <reason> --model <id>, then add tracked replacements. Resume READY work with task accept, rerun evidence and challenge. CLOSED records remain history; open a new assignment for current credit",
+        name = task.name
+    )
+}
+
+pub fn tracked_readiness(
+    task: &Task,
+    root: &Path,
+    ignore: &Ignore,
+    tree: &BTreeMap<String, String>,
+) -> Readiness {
+    let mut readiness = readiness(task, tree);
+    if tracking_error(task, root, ignore).is_some() {
+        readiness.current = false;
+        readiness.supported = false;
+    }
+    readiness
 }
 
 pub fn scopes_intersect(a: &str, b: &str) -> bool {
@@ -1368,8 +1564,8 @@ pub fn covers(allowed: &str, path: &str) -> bool {
     let allowed_case;
     let path_case;
     let (allowed, path) = if cfg!(windows) {
-        allowed_case = allowed.to_lowercase();
-        path_case = path.to_lowercase();
+        allowed_case = super::path_identity(allowed);
+        path_case = super::path_identity(path);
         (allowed_case.as_str(), path_case.as_str())
     } else {
         (allowed, path)
@@ -1608,6 +1804,81 @@ pub fn owe_path(task: &mut Task, path: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn case_identity_guard_rejects_colliding_regular_and_symlink_aliases() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/Foo.rs"), "first").unwrap();
+        std::fs::write(root.join("src/foo.rs"), "second").unwrap();
+        let ignore = Ignore::default();
+        for path in ["src", "src/foo.rs", "."] {
+            assert!(
+                case_identity_error(root, &ignore, path, true).is_some(),
+                "{path}"
+            );
+        }
+        assert!(case_identity_error(root, &ignore, "src", false).is_none());
+        std::fs::remove_file(root.join("src/Foo.rs")).unwrap();
+        std::os::unix::fs::symlink(root.join("outside.rs"), root.join("src/Foo.rs")).unwrap();
+        for path in ["src", "src/foo.rs"] {
+            assert!(
+                case_identity_error(root, &ignore, path, true).is_some(),
+                "symlink alias: {path}"
+            );
+        }
+        assert!(case_identity_error(root, &ignore, "src/absent.rs", true).is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn case_identity_guard_refuses_unresolvable_case_mapping_but_keeps_safe_absence() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/Foo.rs"), "upper-only").unwrap();
+        let ignore = Ignore::default();
+        assert!(case_identity_error(root, &ignore, "src/foo.rs", true).is_some());
+        assert!(case_identity_error(root, &ignore, "src", true).is_some());
+        assert!(case_identity_error(root, &ignore, "src/Foo.rs", false).is_none());
+        assert!(case_identity_error(root, &ignore, "future/nested.rs", true).is_none());
+        std::fs::create_dir(root.join("node_modules")).unwrap();
+        std::fs::write(root.join("node_modules/A"), "a").unwrap();
+        std::fs::write(root.join("node_modules/a"), "b").unwrap();
+        std::fs::remove_file(root.join("src/Foo.rs")).unwrap();
+        std::fs::write(root.join("src/foo.rs"), "safe").unwrap();
+        assert!(case_identity_error(root, &ignore, ".", true).is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn case_identity_guard_skips_fully_excluded_alias_groups() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/Foo.LOG"), "ignored first").unwrap();
+        std::fs::write(root.join("src/foo.log"), "ignored second").unwrap();
+        let ignore = Ignore::new(
+            root,
+            &[super::super::ignore::IgnoreDeclaration::Pattern {
+                written: "*.log".to_owned(),
+                span: crate::diagnostic::Span {
+                    start: 0,
+                    end: 1,
+                    line: 1,
+                    column: 1,
+                },
+            }],
+            Default::default(),
+        )
+        .unwrap();
+        assert!(case_identity_error(root, &ignore, "src", true).is_none());
+        std::fs::write(root.join("src/foo.rs"), "tracked").unwrap();
+        std::os::unix::fs::symlink(root.join("external"), root.join("src/Foo.rs")).unwrap();
+        assert!(case_identity_error(root, &ignore, "src", true).is_some());
+    }
 
     #[test]
     fn task_without_closed_paths_serializes_without_field() {

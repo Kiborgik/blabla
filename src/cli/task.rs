@@ -42,7 +42,8 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
             current
                 && task.state == "closed"
                 && task.result.is_some()
-                && task::readiness(task, &tree).supported
+                && task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree)
+                    .supported
                 && task::challenge_current(task, &tree)
         }),
         decisions: task
@@ -195,12 +196,15 @@ fn review_freshness(project: &Project, review: &Task) -> Option<bool> {
         let Ok(Some(reviewed)) = task::read(&project.manifest.root, &target.task) else {
             return Some(false);
         };
-        if !task::review_current(
-            &current,
-            &reviewed,
-            &tree,
-            review_dependencies(project, &current, &reviewed),
-        ) {
+        if task::tracking_error(&current, &project.manifest.root, &project.ignore).is_some()
+            || task::tracking_error(&reviewed, &project.manifest.root, &project.ignore).is_some()
+            || !task::review_current(
+                &current,
+                &reviewed,
+                &tree,
+                review_dependencies(project, &current, &reviewed),
+            )
+        {
             return Some(false);
         }
         current = reviewed;
@@ -469,7 +473,7 @@ fn write_task_line(task: &Task) -> io::Result<()> {
     )
 }
 
-pub(super) fn open(project: &Project, opening: Opening, json: bool) -> i32 {
+pub(super) fn open(project: &Project, mut opening: Opening, json: bool) -> i32 {
     let name = &opening.name;
     if !blabla::memory::syntax::is_identity_safe(name) {
         return emit_error(
@@ -512,11 +516,15 @@ pub(super) fn open(project: &Project, opening: Opening, json: bool) -> i32 {
             2,
         );
     }
-    let ignored = ignored_declaration(project, "deliverable", &opening.deliverables)
-        .or_else(|| ignored_declaration(project, "input", &opening.inputs));
-    if let Some(message) = ignored {
-        return emit_error(error("task", message, None), json, 2);
-    }
+    opening.inputs = match tracked_declarations(project, "input", opening.inputs) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    opening.deliverables = match tracked_declarations(project, "deliverable", opening.deliverables)
+    {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
     let mut recorded = task::record(
         root,
         &project.ignore,
@@ -530,27 +538,40 @@ pub(super) fn open(project: &Project, opening: Opening, json: bool) -> i32 {
                 Ok(scope) => scope,
                 Err(message) => return emit_error(error("task", message, None), json, 2),
             },
-            inputs: opening.inputs.into_iter().map(normalize).collect(),
+            inputs: opening.inputs,
             deliverables: owed_paths(project, opening.deliverables),
             ..opening
         },
         now_unix(),
     );
+    if let Err(exit) = require_tracking(project, &recorded, json) {
+        return exit;
+    }
     create(project, &mut recorded, json)
 }
 
-fn ignored_declaration(project: &Project, kind: &str, declared: &[String]) -> Option<String> {
-    let root = &project.manifest.root;
-    declared.iter().map(|path| normalize(path.clone())).find_map(|path| {
-        project
-            .ignore
-            .rule_for(&path, root.join(&path).is_dir())
-            .map(|rule| {
-                format!(
-                    "{kind} {path:?} is left out of change tracking by {rule}, so BlaBla could never observe it; drop that ignore rule or declare a path it does not cover"
-                )
-            })
-    })
+fn tracked_declarations(
+    project: &Project,
+    kind: &str,
+    declared: Vec<String>,
+) -> Result<Vec<String>, String> {
+    declared
+        .into_iter()
+        .map(|path| {
+            task::normalize_tracked_path(&project.manifest.root, &project.ignore, kind, &path)
+        })
+        .collect()
+}
+
+fn require_tracking(project: &Project, task: &Task, json: bool) -> Result<(), i32> {
+    match task::tracking_error(task, &project.manifest.root, &project.ignore) {
+        Some(problem) => Err(emit_error(
+            error("task", task::tracking_recovery(task, &problem), None),
+            json,
+            2,
+        )),
+        None => Ok(()),
+    }
 }
 
 fn normalize(path: String) -> String {
@@ -1126,7 +1147,9 @@ pub(super) fn reconcile_withdrawal(
         Err(exit) => return exit,
     };
     let tree = blabla::project::snapshot(root, &project.ignore);
-    if !task::successful_successor(&successor, &tree, &path) {
+    if task::tracking_error(&successor, root, &project.ignore).is_some()
+        || !task::successful_successor(&successor, &tree, &path)
+    {
         return emit_error(error("task", "reconciliation requires a CLOSED successor with current successful evidence and explicit input or deliverable coverage".to_owned(), None), json, 2);
     }
     task.withdrawal
@@ -1145,9 +1168,10 @@ pub(super) fn reconcile_withdrawal(
 }
 
 pub(super) fn owe(project: &Project, name: &str, add: Vec<String>, json: bool) -> i32 {
-    if let Some(message) = ignored_declaration(project, "deliverable", &add) {
-        return emit_error(error("task", message, None), json, 2);
-    }
+    let add = match tracked_declarations(project, "deliverable", add) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
     let mut task = match mutate(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
@@ -1226,9 +1250,10 @@ pub(super) fn declare_check(
     inputs: Vec<String>,
     json: bool,
 ) -> i32 {
-    if let Some(message) = ignored_declaration(project, "input", &inputs) {
-        return emit_error(error("task", message, None), json, 2);
-    }
+    let inputs = match tracked_declarations(project, "input", inputs) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
     let mut task = match mutate(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
@@ -1241,7 +1266,12 @@ pub(super) fn declare_check(
         task.check_argv = Some(argv);
         task.check = None;
     }
-    task.check_inputs = inputs.into_iter().map(normalize).collect();
+    if inputs.is_empty()
+        && let Err(message) = tracked_declarations(project, "input", task.scope.clone())
+    {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    task.check_inputs = inputs;
     task.challenged = None;
     task::attest(&mut task, "check", None, now_unix());
     store(project, &mut task, json)
@@ -1252,6 +1282,9 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     if task.state == "ready" && !task::challenge_current(&task, &tree) {
         return emit_error(
@@ -1462,6 +1495,9 @@ pub(super) fn ready(project: &Project, name: &str, json: bool) -> i32 {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
     let evaluation = super::project::evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let status = status_view(project, &evaluation, &structure);
@@ -1757,6 +1793,9 @@ pub(super) fn evidence(project: &Project, name: &str, exit: i32, tool: &str, jso
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
     if let Err(exit) = require_current_review(project, &task, json) {
         return exit;
     }
@@ -1785,6 +1824,9 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
     if let Err(exit) = require_current_review(project, &task, json) {
         return exit;
     }
@@ -1922,9 +1964,10 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
                 .collect();
             let tasks = task::read_all(root);
             let tree = blabla::project::snapshot(root, &project.ignore);
-            let residue = tasks
-                .iter()
-                .any(|task| !task::withdrawal_residue(task, &tasks, &tree).is_empty());
+            let residue = tasks.iter().any(|task| {
+                !task::tracked_withdrawal_residue(task, &tasks, &tree, root, &project.ignore)
+                    .is_empty()
+            });
             if open.len() > 1 && !residue {
                 let names: Vec<String> = open
                     .iter()
@@ -1984,7 +2027,13 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
             assignment_clear = Some(
                 task.state == "ready"
                     && blockers.is_empty()
-                    && task::readiness(task, &tree).supported
+                    && task::tracked_readiness(
+                        task,
+                        &project.manifest.root,
+                        &project.ignore,
+                        &tree,
+                    )
+                    .supported
                     && task::challenge_current(task, &tree),
             );
         }
@@ -2048,7 +2097,7 @@ pub(super) fn report_for(
         role: resolution.as_ref(),
         other_tasks: &other_tasks,
     };
-    skeptic::challenge_against(&evidence, goals)
+    skeptic::challenge_tracked_against(&evidence, goals, root, &project.ignore)
 }
 
 pub(super) fn standing(project: &Project, status: &StatusView) -> ChallengeReport {
