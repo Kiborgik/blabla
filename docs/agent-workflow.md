@@ -1,528 +1,162 @@
 # Agent workflow
 
-BlaBla is executable project memory. Agents should not read every contract up front; start from the project state and drill down only when needed.
+Start with `blabla status`, follow the printed identities with `blabla explain`, change the implementation, then run `blabla finish`. Do not load every contract or weaken intent to obtain GREEN. In BlaBla's own checkout use `cargo run --release --quiet --bin blabla --` instead of an installed binary.
+
+## Find the relevant context
 
 ```text
-blabla status                 current layers, rules needing attention, completion state
-blabla explain <group>::<label>   one rule and its evidence/counterexample
-blabla explain contract::<group>  one contract: its path, its state, the id of every rule
-blabla explain mission::<name>    why the project exists, what decides a tradeoff, the non-goals
-blabla explain system::<name>     one system, the responsibilities it owns and its seams
-blabla explain knowledge::<pack>  one knowledge pack and the id of every ruling it holds
-blabla explain flow::<name>       the order the roles are meant to work in, one line per step
-blabla guide memory               how project memory is authored, when you are adding to it
-# edit ordinary application code
-blabla challenge              one grounded challenge to the current account of the work
-blabla finish                 canonical behavior run + live structure check
+blabla status
+blabla explain system::<name>
+blabla explain role::<name>
+blabla explain flow::<name>
+blabla explain knowledge::<pack>
+blabla explain ruling::<pack>::<name>
 ```
 
-Only `OVERALL GREEN` means the declared project state is complete.
+Copy identities from the preceding output. A pack lists ruling/judgment IDs; a flow lists step IDs. Expand only what matters. A role or system can route you to expertise, but that expertise never enlarges your assignment. [Identity and memory reference](project.md#canonical-identities)
 
-## Progressive disclosure
+For a failing rule, `explain <group>::<label>` supplies the observed fact, counterexample or required witness. If it names `runtime::restart`, explain that identity; do not implement BlaBla's process restart inside the application.
 
-Pull context in only as far as the question needs:
+- RED: repair the reproduced violation
+- ERROR: make the fact evaluable; do not treat unknown as absence
+- YELLOW: reach the named behavioral witness; no violation found is insufficient
+- STALE / UNVERIFIED / INTERRUPTED: rerun `finish`; VERIFYING means a run is still active
+- OVERALL GREEN: the current canonical project gate passed, within its declared limits
 
-1. `blabla status`
-2. the one rule it names
-3. `blabla explain <group>::<label>`, or `blabla explain contract::<group>` for the whole contract
-4. `blabla explain runtime::<id>`, if that rule depends on a runtime primitive
-5. the contract source, only when the rule is still unclear
-
-The point is not to replace a large prompt with a large `.bla` dump. Contracts stay in the
-repository and enter context only when they are needed.
-
-Knowledge follows the same path, and this is where the saving is largest:
-
-1. `blabla explain system::<name>` for the part you are about to touch, which names the packs
-   its work commonly needs; `blabla explain role::<name>` names the packs your role consults
-2. `blabla explain knowledge::<pack>` prints the pack's purpose and the **identity** of every
-   ruling in it, never the rulings themselves
-3. `blabla explain ruling::<pack>::<name>` for the one ruling that bears on the decision
-
-A pack therefore costs one line per ruling to survey and one ruling to read. Enumerating every
-pack in a project is cheap; reading every ruling is not, and is almost never what the question
-needs. A ruling is reusable expertise about how to do the work well — it is not permission to
-widen the task you were given, which comes from your assignment and from `role::<name>`.
-
-## Reading status
-
-```text
-BEHAVIOR   54/54 rules  GREEN
-STRUCTURE  45/47 rules  RED
-OVERALL    BLOCKED
-
-Structure violations:
-  RED    architecture::no-domain-restart    glyph_vault/domain.py:86 defines VaultDomain.restart
-  RED    architecture::no-protocol-restart  glyph_vault/protocol.py:4 ARGUMENTS contains "restart"
-
-Next:
-  blabla explain architecture::no-domain-restart
-```
-
-- **RED:** fix the counterexample (behavior) or observed fact (structure).
-- **YELLOW:** no violation was found, but required behavior was not exercised. Not complete.
-- **STALE / UNVERIFIED / INTERRUPTED:** run `blabla finish`.
-- **VERIFYING:** another `finish` is still running.
-- **OVERALL GREEN:** completion gate passed.
-
-## Long verification runs
-
-`blabla finish` prints `COMPLETION GATE: VERIFYING` immediately, then periodic progress and the final verdict. In `--json` mode, progress goes to stderr and stdout remains one JSON document.
-
-Give the command enough time to finish. A run that is killed or detached does not leave behind a current GREEN.
-
-## Runtime primitives
-
-Some actions are controlled by BlaBla rather than implemented by the application. For example, `action restart()` maps to `runtime::restart`.
-
-Every explainable object has one canonical identity — `contract::<group>`, `<group>::<label>`, `mission::<name>`, `priority::<name>`, `knowledge::<pack>`, `ruling::<pack>::<name>`, `system::<name>`, `responsibility::<name>`, `seam::<name>`, `role::<name>`, `policy::<name>`, `flow::<name>`, `step::<name>`, `runtime::<name>` — and the command before it prints that identity. Copy it; never build one by guessing a separator. A ruling identity has three segments because it carries its pack: two reusable packs may declare the same ruling name and both must stay reachable. `status` lists every coarse identity even when everything is GREEN, so the path from `status` to any rule, ruling, responsibility or seam is two explains.
-
-If a rule depends on a runtime primitive, `blabla explain <group>::<label>` shows the dependency. Use `blabla explain runtime::restart` for the exact semantics.
-
-Do not add an application-level implementation of a BlaBla runtime primitive.
+Long runs print progress; `--json` keeps stdout machine-readable and puts progress on stderr. Wait for the actual exit. [Completion states and exits](project.md#layers-and-completion)
 
 ## The development loop
 
-A project that declares a `flow` describes how work moves between agents. The order below is the
-normal path:
+![Recover intent, assign a bounded task, accept and implement, record focused evidence and challenge, independently review and correct, then integrate, close and finish. Optional expert advice enters only at supported checkpoints and never decides the gate.](assets/agent-workflow.svg)
 
-1. **Enter the project.** `blabla status` — what project this is, what is GREEN, what needs attention.
-2. **Recover only the relevant context.** `blabla explain <identity>` for the system you are about to
-   touch, the rulings it routes to, and nothing else.
-3. **Find your role and the flow.** `blabla explain role::<name>` for what you own and which
-   verification is yours; `blabla explain flow::<name>` for the order, one line per step, and
-   `blabla explain step::<name>` for one step in full.
-4. **Open or read the bounded task.** The orchestrator opens it with `blabla task open`, naming
-   the scope, the deliverables and the check that covers it; a worker reads its assignment with
-   `blabla task show <name>`, which prints the routes below in the order they are taken.
-5. **Accept the assignment.** `blabla task accept <name> --model <id>` before changing anything.
-   Acceptance records that a role took the work through BlaBla and nothing about what it read.
-6. **Implement inside the scope.** Ordinary code, only in the paths the task names. When a call
-   is yours to make and you are not sure of it, ask it with `blabla task decide` instead of
-   guessing; see [Asking instead of guessing](#asking-instead-of-guessing). When `task show`
-   lists a question under **Questions from the orchestrator** with no pick, its first route line
-   says to pick it: do that before anything else with `blabla task decide <name> --on <id>`,
-   because `task ready` is refused until every question has a pick; see
-   [Questions from the orchestrator](#questions-from-the-orchestrator).
-7. **Run the declared check and record it while the task is ACCEPTED.** `blabla task evidence <name> --exit <code> --tool <tool>`
-   after reading the whole run — not a summary line alone. Evidence is bound to the task tree and
-   only a current successful result can support READY.
-8. **Challenge the account.** `blabla challenge <name>` records or clears the explicit assignment
-   challenge receipt. Project-wide verification concerns remain orchestrator-owned.
-9. **Hand back.** `blabla task ready <name>` requires ACCEPTED ownership, current successful evidence
-   and that explicit challenge receipt. A READY task must be accepted again before edits or new evidence.
-10. **Independent review.** A reviewer reads the task and the diff in a context that never saw the
-    work being done, records one assessment per lens the role consults with `blabla task lens`, and
-    records defects with `blabla task finding`.
-11. **Integrate.** The orchestrator settles each finding against the repository and records what
-    settled it with `blabla task resolve`.
-12. **Accept the result.** `blabla task close <name> --model <id>`, refused until the fresh task
-    evidence, receipt and project report satisfy the close prerequisites and every record made
-    under an orchestrator model while the worker carried the task is confirmed; see
-    [What --model attests](#what---model-attests).
-13. **Decide completion.** `blabla finish`.
+Process memory describes the project's roles and order. Task commands enforce recorded prerequisites; BlaBla does not schedule work or launch agents.
 
-In this repository that flow is `flow::development`, and `role::orchestrator`, `role::worker` and
-`role::reviewer` are the roles its steps name.
+| Step | Who / action |
+| --- | --- |
+| Recover and plan | Orchestrator reads status, relevant memory and `flow::<name>`; defines the change and acceptance criteria |
+| Assign | Orchestrator opens a task with role, write scope, deliverables and focused check; optionally `--goal` |
+| Accept | Worker reads `task show`, role policies and relevant knowledge, then accepts **before editing** |
+| Implement | Worker stays inside scope, answers assigned questions, records uncertainty or blocks when needed |
+| Verify | Worker runs the exact declared check, reads its whole result and records evidence; assesses every consulted lens |
+| Challenge and hand back | Worker runs `challenge NAME`, then `task ready NAME` |
+| Review and correct | Independent reviewer reads task, diff and evidence; records findings. Worker accepts again before repairs, then renews evidence, lenses and challenge |
+| Integrate and accept | Orchestrator verifies resolutions, reconciles ownership and confirms any owner records made during carry; closes the task when prerequisites hold |
+| Complete | Orchestrator runs project-wide checks and `finish`; a task handoff does not replace the project gate |
 
-Process describes the intended loop. Task transitions enforce the recorded prerequisites
-described below. BlaBla does not schedule work or launch agents.
+The normal task states are `OPEN → ACCEPTED → READY → CLOSED`. `BLOCKED` suspends carried work; `WITHDRAWN` terminates it without completion credit. A READY task must be accepted again before changes or new evidence.
 
-`challenge` and the reviewer are not the same thing. `challenge` is a deterministic check over
-recorded evidence and reads no meaning from source code. The reviewer is a role: it reads the diff,
-forms judgements BlaBla cannot, and records them as findings. Neither decides completion.
+### Minimal command path
 
-## Project verification versus task acceptance
+```sh
+# Orchestrator: choose actual files and a check that covers them.
+blabla task open fix-cache --role worker --statement "Repair stale cache reads" \
+  --scope src/cache.rs --scope tests/cache.rs --deliverable src/cache.rs \
+  --input src/cache.rs --input tests/cache.rs --check-argv cargo test --release --test cache
 
-Two different questions, answered by different commands. `blabla finish` decides whether the
-**project** is complete: structure evaluated live, the canonical behavior campaign run, `OVERALL`
-GREEN or not. A task's transitions decide only whether one **handoff** is in order, and they enforce
-recorded prerequisites. Tasks render as
-`OPEN`, `ACCEPTED`, `BLOCKED`, `READY` or `CLOSED`. Evidence is accepted only in ACCEPTED; READY
-requires accepted ownership, current successful evidence and an explicit assignment challenge receipt
-tied to the task's own paths. An edit inside the write scope, the deliverables or the declared
-inputs, new evidence, findings or policy metadata invalidate that receipt; an edit anywhere else,
-including a path attributed to concurrent work, does not. A READY worker resumes by accepting before changing anything. CLOSE still requires fresh
-task evidence, a current receipt and the current project report. Neither a clean task record nor
-`OVERALL GREEN` alone establishes everything: a record shows what was recorded rather than what was
-done, and GREEN is bounded by the campaign and the providers that produced it.
-
-## Bounded tasks
-
-Check evidence covers the write scope and deliverables by default. Use `--input PATH` on
-`task open` or `task check` to declare the actual check dependencies, including read dependencies
-outside the write scope; deliverables are always included. Directory inputs cover their descendants.
-Creating, deleting or changing an input invalidates evidence, including a path absent when checked.
-Declaring inputs is an orchestrator claim, not automatic dependency discovery. Omitting `--input`
-when correcting a check restores the scope default.
-
-A bounded task is the handoff record between an orchestrator and a worker. It is **machine state,
-not project memory**: BlaBla writes it under `.blabla/tasks/`, no manifest registers it, nothing
-validates it for truth, and no state of it reaches `OVERALL`.
-
-```text
-blabla task open <name> --role worker --statement "…" --scope src/cli --deliverable tests/cli.rs --check "…"
-blabla task open <name> … --goal <name>   record the declared goal the task serves; task show prints Serves goal::<name>
-blabla task show <name>                 what this task may write and what it owes, then its routes
-blabla task accept <name> --model <id>  take the assignment; the model is compared exactly against what the role lists, and `blabla challenge <name>` reports a mismatch immediately rather than at hand-back
-blabla task evidence <name> --exit <code> --tool <tool>   the declared check's result, bound to the inputs it saw
-blabla task evidence <name> --run       for a check declared as a program and its arguments: BlaBla runs it from the project root without a shell and records the exit code it observed
-blabla task block <name> "…"            stop, and record why as a finding
-blabla task note <name> "…"             keep a note on the record; a note is not a finding and blocks nothing
-blabla task finding <name> "…"          something discovered and not yet settled
-blabla task addressed <name> <id> "…" --model <id>   what the carrying role did about a finding; an addressed finding blocks neither hand-back nor close, and resolving it stays the orchestrator's job
-blabla task decide <name> "<question>" --pick <option> --confidence <0-100> --model <id> [--options a,b,c]   ask a call you are not sure of; below the role's floor it blocks the task until the orchestrator answers
-blabla task ask <name> "<question>" [--options a,b,c] [--floor <0-100>] --model <id>   the orchestrator asks the carrying role a call it doubts; hand-back is refused until it has a pick
-blabla task decide <name> --on <question-id> --pick <option> --confidence <0-100> --model <id>   pick a question the orchestrator asked; below the question's floor it blocks the task until the orchestrator answers
-blabla task answer <name> <id> --pick <option> --reason "…" --model <id>   the orchestrator answers a decision below the floor or reviews one that stood; the worker then resumes with task accept
-blabla task lens <name> <lens> "…"      one assessment against one lens the role consults, named by its pack; each is recorded before hand-back
-blabla task ready <name>                hand back for review
-blabla task resolve <name> <id> --evidence "…" --model <id>   what settled a finding; the orchestrator's decision
-blabla task attribute <name> <path>... --kind <task|concurrent|unknown> --model <id>   the orchestrator states where a changed path came from
-blabla task check <name> "…"            declare the check a record opened without, or correct it; --input <path>... names what it reads
-blabla task check <name> --argv <prog> <arg>...   the same check as a program and its arguments; --argv, like --check-argv on task open, takes every argument after it, so it goes last
-blabla task deliverable <name> --add <path>...   owe more
-blabla task deliverable <name> --remove <path> --reason "…" --model <id>   withdraw what the task owes; a directory withdraws every file owed under it
-blabla task scope <name> --add <path>   widen a scope that was declared too narrowly
-blabla task confirm <name> --model <id>   after hand-back, confirm every record made under an orchestrator model while a worker carried the task; refused while it is carried; the list is kept
-blabla task close <name> --model <id>   accept the result; refused while a grounded challenge stands
+# Worker: MODEL must be permitted by the declared role.
+blabla task show fix-cache
+blabla task accept fix-cache --model MODEL
+# Implement only inside scope.
+blabla task evidence fix-cache --run
+blabla task lens fix-cache engineering "Explain the relevant engineering assessment"
+blabla task lens fix-cache testing "State what the focused check establishes and misses"
+blabla challenge fix-cache
+blabla task ready fix-cache
 ```
 
-A task moves `OPEN → ACCEPTED → READY → CLOSED`, with `BLOCKED` reachable from `ACCEPTED` and
-back. `blabla guide loop` prints the worker's routes in the order they are taken, generated from
-the same source as `task show`, so the two cannot drift apart.
+This is a workflow template for a project with those files, role and consulted packs, not a runnable cache fixture. `task show` and `guide loop` derive their routes from the same source. Use the lenses your role actually consults, not names copied from this example.
 
-Opening a task snapshots the tree it starts from. That snapshot is the only reason a later
-challenge can distinguish a deliverable that was produced from one that was never touched, and a
-file changed inside the write scope from one changed outside it. `blabla status` lists every
-recorded task.
+## Bounded tasks and current evidence
 
-A deliverable is measured per file, so a directory named as one becomes the files under it, the way
-`git add` treats a directory. `blabla task deliverable <name> --add <dir>` re-reads it and owes any
-file that appeared since. The files it walks are the ones the implementation fingerprint walks, so
-build output and `.blabla` are never owed.
+A task under `.blabla/tasks/` is a machine record, not authored memory or proof of work. Opening it snapshots the tree. Deliverables must change from that snapshot; directory deliverables expand to files, and `deliverable --add DIR` refreshes that set. Ignored output and `.blabla/` are not deliverables.
 
-A recorded finding outlives the context that found it. A finding with neither a resolution nor an
-addressed mark is evidence still outstanding, and `challenge` reports it while it stays that way. The evidence written into a
-resolution is the recording agent's claim about the repository, not BlaBla's verdict on it.
+- Live write scopes, including READY assignments, must be disjoint normalized project-relative paths. Root, escape, symlink and unsafe drive-relative paths are refused atomically. Read inputs may overlap
+- Evidence covers scope plus deliverables by default. `--input PATH` on `open`/`check` substitutes explicit dependencies; deliverables always remain included. Directory inputs include descendants; creation/deletion also invalidates evidence. Dependency declarations are the orchestrator's claim, not automatic discovery
+- Evidence binds exact `Text` or `Argv` check identity, argument boundaries, acceptance epoch and input digests. A new acceptance, even on the same model, starts a new epoch. Mid-run declaration/input changes preserve the observed result without granting credit to the replacement
+- `task evidence --run` executes a declared argv check from the project root without a shell. It has no task-runner timeout or process containment; choose a bounded check. For a text check, run it yourself and record the real `--exit CODE --tool TOOL`
+- READY needs ACCEPTED ownership, current successful exact-check evidence, current required lens assessments and an explicit assignment challenge receipt. Relevant edits/findings/policy changes invalidate the receipt; unrelated concurrent work does not
+- CLOSE rechecks evidence, receipt and the current project report. Task acceptance and project verification answer different questions; neither replaces the other
 
-## What --model attests
+### Common changes and recovery
 
-`--model <id>` is an attestation, not proof. On every verb that takes it, BlaBla records the model
-the caller says it is and cannot check the claim: a worker that types the orchestrator's model into
-`task resolve` leaves a record identical to one the orchestrator made. BlaBla challenges the case
-where that matters most, an orchestrator-only record made while a worker holds the task.
+| Need | Command / rule |
+| --- | --- |
+| Preserve a nonblocking observation | `task note NAME "…"` |
+| Record unsettled work / stop | `task finding NAME "…"` / `task block NAME "…"` |
+| Describe a repair | `task addressed NAME ID "…" --model MODEL`; an addressed finding no longer blocks hand-back, but resolution stays the orchestrator's |
+| Resolve a finding | `task resolve NAME ID --evidence "…" --model MODEL` |
+| Correct check/dependencies | `task check NAME --input PATH --argv PROGRAM ARG…`; omitting inputs restores scope defaults |
+| Change owed files | `task deliverable NAME --add PATH`, or `--remove PATH --reason "…" --model MODEL` |
+| Widen scope / attribute changes | `task scope NAME --add PATH`; `task attribute NAME PATH… --kind task\|concurrent\|unknown --model MODEL` |
+| Propose another model | `task propose-model NAME MODEL --reason "…"`; owner rules with `task approve-model` |
+| Withdraw | `task withdraw NAME --reason "…" --model MODEL` |
+| Settle withdrawal residue | Restore original bytes, or `task reconcile-withdrawal NAME PATH --successor TASK --model MODEL` against current successful evidence from a CLOSED successor |
 
-A task is carried from the carrying role's `task accept` until its `task ready` or `task block`,
-that is, while it is ACCEPTED. The orchestrator-only verbs that write the task are `task resolve`,
-`task attribute`, `task scope`, `task check`, `task deliverable --add` and `--remove`,
-`task approve-model`, `task answer` and `task ask`. Each one stores the model it was given, the time, and the
-model that carried the task if one did; `task scope`, `task check`, `task deliverable --add` and
-`task approve-model` take no `--model`, so their records name none. For a record made while a worker
-carries the task, BlaBla:
-
-- lists it in `task show <name>` under "Recorded under an orchestrator model while <model> carried
-  the task", with its verb, its model and whether it is confirmed;
-- grounds the `orchestrator-record-during-carry` challenge while it is unconfirmed;
-- does not refuse `task ready`, because the carrying role cannot clear it;
-- refuses `task close` until the orchestrator confirms it.
-
-After hand-back the orchestrator reviews each listed record and confirms it with `blabla task
-confirm <name> --model <id>`, which is gated like `task resolve`, or undoes it. `task confirm` is
-refused with exit 2 while the task is carried, naming the carrier, so the role that holds the task
-cannot clear a record from its own carry by typing the orchestrator's model. Undoing a change does
-not remove its record: after undoing what it did not make, the orchestrator still confirms before
-close. A confirmation covers every record from a carry made so far and keeps the list; a later
-record stands until it is confirmed too. A confirmation is itself an attestation under a second `--model`,
-not proof of who made either. A record made while nobody carries the task, OPEN, BLOCKED or READY,
-stays in the task record that `task show <name> --json` prints, is not listed and grounds nothing.
+Declaration changes, attribution, withdrawal and reconciliation are orchestrator decisions. A withdrawn task releases scope, but its changed paths remain project challenges until settled; reconciliation can become stale. Restoration cannot prove authorship. Restore identifiable own out-of-scope edits when safe, preserve uncertain evidence and block for owner reconciliation. Merely blocking does not settle a changed path.
 
 ## Asking instead of guessing
 
-A worker meets calls the statement leaves open: which of two causes explains a failure, what a
-flag should be named, whether an edge case is in scope. Stating one with confidence and building
-on it is how a small model goes wrong without anyone noticing. `task decide` turns the call into a
-typed question with the pick and a stated confidence, on the record:
-
-```text
-blabla task decide fix-cache "Is the stale read caused by the cache?" --pick yes --confidence 55 --model haiku-4.5
-blabla task decide fix-cache "Which lock guards the entry?" --options read,write,none --pick write --confidence 80 --model haiku-4.5
+```sh
+blabla task decide fix-cache "Is the cache the cause?" --pick yes --confidence 55 --model MODEL
+blabla task decide fix-cache "Which lock?" --options read,write,none --pick write --confidence 80 --model MODEL
 ```
 
-Without `--options` the question is yes-no and the pick is `yes` or `no`; with `--options` the pick
-is one of them. A pick outside the options, or a confidence outside 0..100, is refused with exit 2
-and nothing is recorded. Only the carrying role decides, once the task is accepted, with a model its
-role permits, the same check `task addressed` makes.
+Without `--options`, picks are `yes`/`no`; otherwise pick one declared option. Confidence is a whole number 0–100. Only an accepted carrier may decide. At or above the role's `block_below`, the pick STANDS; below it, the task becomes BLOCKED immediately. Stop rather than act on that pick.
 
-The role's `block_below` is the floor. The command prints one of two outcomes:
-
-- **STANDS**: the confidence is at or above the floor. Act on the pick. The orchestrator may still
-  review it.
-- **BLOCKS THE TASK**: the confidence is below the floor, so the call is the orchestrator's. The
-  decision is recorded and the task is BLOCKED on it in the same step. Stop now and do not act on
-  the pick.
-
-Only the orchestrator's answer settles a decision below the floor. It answers with `blabla task
-answer <name> <id> --pick <option> --reason "…" --model <id>`, which is gated like `task resolve`.
-An answer settles a decision below the floor or reviews one that stood, and a pick that differs
-from the worker's overrules it. Answering does not unblock the task: the worker reads the answer in
-`task show <name>` and resumes with `blabla task accept <name> --model <id>`, which is refused, with
-the question named, while a decision below the floor has no answer. Until then `task ready` is
-refused and the `decision-unanswered` challenge stands. An answer does not invalidate a challenge
-receipt, so a READY task can be reviewed without being handed back again. A BLOCKED task takes no
-decision: `task decide` on it is refused with exit 2, records nothing and names the decision that
-blocks it.
-
-`task show <name>` lists every decision under **Decisions**, headed by the floor the carrying role
-declares: its kind/options, current pick/confidence, and current status. STANDS or BLOCKS THE TASK
-describes an unanswered decision; an owner answer is shown as ANSWERED or OVERRULED with the
-current pick. Historical confidence does not make an answered call remain blocking.
-`blabla explain role::<name>` prints the floor and, from every task record that role
-carried, closed or not, one calibration line per model with answered decisions:
-
-```text
-haiku-4.5  12 answered  7 held  mean confidence 84  3 on asked questions
-```
-
-`held` counts answers that kept the pick, and `on asked questions` counts the answered picks made
-on a question the orchestrator asked. The line shows how well a model's stated confidence matches
-what the orchestrator decided. It is a record, like a task: it reaches no layer and never decides
-completion.
+The orchestrator answers with `task answer NAME ID --pick OPTION --reason "…" --model MODEL`. The worker reads the answer and accepts again. Unanswered below-floor decisions prohibit acceptance and hand-back. An answer settles or overrules the pick; historical confidence does not keep an answered decision blocking. Answering alone does not resume a blocked task or invalidate a READY receipt.
 
 ### Questions from the orchestrator
 
-The floor stops a worker acting on a low-confidence call it chose to record, but an overconfident
-worker never records one. The orchestrator knows which calls it doubts, such as a cause, a fix or
-whether a failure is this task's, and asks them as typed questions:
-
-```text
-blabla task ask fix-cache "Is the failing test this task's?" --floor 90 --model opus-5
-blabla task ask fix-cache "Which lock guards the entry?" --options read,write,none --model opus-5
+```sh
+blabla task ask fix-cache "Is this failure in scope?" --floor 90 --model OWNER_MODEL
+blabla task decide fix-cache --on q1 --pick yes --confidence 95 --model MODEL
 ```
 
-`task ask` is gated like `task resolve`: a model role::orchestrator does not permit is refused with
-exit 2 and nothing is recorded, and like every orchestrator verb it is attested; see
-[What --model attests](#what---model-attests). Without `--options` the question is yes-no. It gets
-the id `q1`, `q2` and so on. `--floor` is the confidence a pick needs to stand: without it the
-question uses the carrying role's `block_below`, and a floor outside 0..100 or below the role's is
-refused with exit 2, so a question can raise the floor but never lower it. Asking is allowed on any
-task that is not closed and never changes its state.
-
-The worker picks with `blabla task decide <name> --on <id> --pick <option> --confidence <0-100>
---model <id>`. The question text and options come from the question, so passing a question text or
-`--options` as well is refused. The pick is a decision linked to the question, measured against the
-question's floor, or the role's if the role's is higher, and it follows every rule above: a pick
-outside the options or a confidence outside 0..100 is refused, a BLOCKED task takes no pick, and
-below the floor the task is BLOCKED at once until the orchestrator answers. A question is picked
-once; a second pick is refused with exit 2 and names the decision that picked it.
-
-`task show <name>` lists the questions under **Questions from the orchestrator**, before
-**Decisions**, unpicked first, each with its floor and either its pick or the exact command to pick
-it. While a question has no pick, the first route line says to pick it before anything else,
-`task ready` is refused and the `question-unpicked` challenge stands with the question's id, text
-and options as its evidence and that command as its reconcile text. A question asked after
-hand-back stands against the READY task too, so the worker resumes with `task accept` and picks it.
-A pick is a decision, so it counts in calibration like any other.
-
-## Challenging the account of the work
-
-```text
-blabla challenge
-```
-
-`challenge` holds the current account of the work against evidence BlaBla already has and states
-**one** grounded challenge to reconcile — the strongest available — or says that nothing can be
-grounded. For a selected ACCEPTED task it records or clears the assignment challenge receipt; a
-project-only inspection remains nonmutating. Run it before reporting a task done, before writing a
-review verdict and before the gate. Without a task it exits 0 when no challenge stands and 1 when
-one does; with a task that is not closed it exits on the assignment check, 0 when the assignment is
-clear and 1 when it needs attention, because project-wide verification stays the orchestrator's.
-
-The evidence it may use, and nothing else:
-
-| Class | Grounded in |
-| --- | --- |
-| `unresolved-finding` | a finding recorded against an open task with neither a resolution nor an addressed mark |
-| `deliverable-unchanged` | a declared deliverable absent, or byte-identical to the task's snapshot |
-| `scope-breach` | a file changed since the task opened that no declared scope covers |
-| `work-without-acceptance` | a file changed since the task opened while no role accepted the assignment |
-| `model-outside-role-policy` | the task was accepted on a model the role's declared choices do not list, with no owner ruling |
-| `exception-unresolved` | a current, unsuperseded model exception was proposed and no owner ruling answers it |
-| `review-target-stale` | an explicit review targets an assignment, input, deliverable or relevant-memory revision different from the one accepted, including a CLOSED historical review |
-| `declared-check-failed` | the most recent result for the declared check exited non-zero |
-| `decision-unanswered` | a decision recorded below its floor, the role's `block_below` or an asked question's, that has no answer from the orchestrator |
-| `question-unpicked` | a question the orchestrator asked with `task ask` that has no pick from the carrying role; `task ready` is refused while it stands |
-| `orchestrator-record-during-carry` | a record made under an orchestrator model while a worker carried the task that the orchestrator has not confirmed; it does not refuse `task ready`, and `task close` is refused while it stands |
-| `readiness-without-evidence` | an accepted or handed-back task with no result recorded for the declared check, or only results for other checks |
-| `evidence-superseded` | the most recent result for the declared check ran against inputs that have since changed |
-| `lens-unassessed` | an accepted or handed-back task with a lens the role consults carrying no current model-, epoch- and knowledge-bound assessment; a lens is one of the knowledge packs `role::<name>` lists under Consult, so `blabla task lens` takes the pack name and not a `ruling::<pack>::<name>` identity |
-| `attribution-unknown` | a path changed since the task opened whose origin, this task or concurrent work, is not stated |
-| `vacuous-rule` | a structure rule the falsifier reports VACUOUS — a rule standing on absent ground |
-| `verification-not-current` | project completion is not current; this remains an orchestrator-owned concern for a selected assignment challenge |
-| `goal-outcome-unmet` | with no bounded task selected, a goal in state `done` has an expectation that is not held in the current project view; `finish` never raises it |
-
-One challenge is reported at a time, the strongest available; the classes it could not ground are
-listed with the evidence each lacked.
-
-What it does **not** do: it decides no correctness, grants no completion and withholds none, and
-`blabla status` and `blabla finish` remain the only authority over that. `finish` prints a
-standing challenge beside its verdict and its exit code is unchanged by it. Silence is not
-approval — no challenge means no contradiction was reachable from that evidence, which is a
-statement about the evidence and not about the work. BlaBla reads no meaning from source code, so
-it cannot tell whether a branch is reachable or whether a test asserts the thing it claims; a
-challenge about those never appears, because it could not be grounded.
-
-## Authoring a structure contract
-
-```text
-blabla check contracts/architecture.bla
-```
-
-This evaluates that one contract against the real project root, so an author learns whether their
-rules evaluate before the contract is registered. Exit 0 all GREEN, 1 on any RED, 3 on any ERROR;
-rule ids print as bare labels because the file is checked standalone.
-
-An ERROR means BlaBla cannot establish the fact at all and the rule is worthless as written — fix it
-or delete it, never leave it. A GREEN result proves each rule evaluates; it does not prove any rule
-can fail. A `forbid` rule that could never be violated is indistinguishable from a satisfied one, so
-check that the fact you wrote is the fact you meant.
-
-```text
-blabla check --falsify contracts/architecture.bla
-```
-
-That is the command for the second question. For each rule it inverts the fact the rule names inside
-the facts already inspected and decides the rule again: FALSIFIABLE when the verdict moves between
-GREEN and RED, VACUOUS when it does not because the fact has no ground to stand on, UNEVALUABLE when
-the rule is ERROR and has no truth value to invert. Exit 0 every rule falsifiable, 1 any vacuous,
-3 any unevaluable. It never writes to the repository, and a FALSIFIABLE verdict is about the
-evaluator, not about whether you named the concept you meant.
-
-`blabla status` and `blabla finish` remain the only authority over whether the project is complete.
-
-## Authoring project memory
-
-```text
-blabla guide memory
-blabla check mission.bla
-```
-
-`guide memory` is the authoring procedure: what Mission, System, Process and Knowledge each answer,
-the declaration and registration shape, the direction routing runs, and what memory deliberately
-does not do. `check <file>.bla` reports VALID or INVALID for one memory file while it is still being
-written, and `blabla status` reports each registered kind once the manifest names it.
-
-Memory is validated within itself and never against the repository, so neither VALID nor a GREEN
-status is a claim that a system, role or ruling describes this project accurately. That judgment
-stays with the author.
-
-## Contracts vs implementation
-
-Implementation work should change ordinary source code. Do not edit `.bla` contracts or the canonical verification profile just to obtain GREEN.
-
-Changing intended product behavior is a separate contract-authoring operation:
-
-```text
-blabla guide change
-```
-
-For a new project:
-
-```text
-blabla init --agents
-blabla guide bootstrap
-```
-
-`init --agents` writes a small managed `AGENTS.md` block and a portable skill under `.agents/skills/blabla/` and `.claude/skills/blabla/`.
-
-The [agent integration smoke tests](../evals/README.md) exercise discovery and this workflow in
-Claude Code and Codex. Their [findings](../evals/findings.md) distinguish source fixes from observed
-agent behavior; these manual diagnostics are separate from the product completion gate.
-
-
-## Reading advisory expert memory
-
-Registered Knowledge can carry fixed Choice, Noul and ordered Score judgments. Project-local
-Process bindings name eligible roles, observed checkpoint kinds and canonical context identities.
-The binding does not expand an assignment or change the role's permissions.
-
-```text
-blabla status --json
-blabla explain judgment::expert-review::claim-support
-blabla explain binding::claim-check
-blabla check knowledge/expert.bla
-blabla check process.bla
-```
-
-Use the binding IDs printed by Process status or role views, and judgment IDs printed by the
-Knowledge pack view. Explain shows each definition, its references and its registered source.
-`check <file>.bla` validates the file's local grammar and declarations; registered project status
-also resolves binding references against the current loaded project memory and contracts.
-These commands never contact an expert provider. Projects without expert declarations retain
-their existing deterministic verification and completion behavior.
-
-Bindings default to shadow-only. The optional expert status reports mode and binding count, with
-host and provider capability `unknown` until runtime evidence establishes them. A valid authored
-binding does not prove that a host observes a checkpoint or can deliver an intervention.
-
-The complete context slots and fixed template reference requirements are documented in
-[the project reference](project.md#fixed-expert-judgments-and-bindings). Task and declared-goal
-context belongs to the selected task; proposal, claim, evidence and attempts must come from typed
-observations or history. Missing runtime facts stay explicit. Questions, IDs and criteria are data
-and never authorize commands, file reads or remediation.
-
-Expertise usefulness and selection must be evaluated independently on the same bounded candidate
-list, together or skipped with a visible budget reason. A selected candidate alone is never advice.
-Expert opinions never alter deterministic verdicts, verifier exit codes or `OVERALL`, never serve
-as authoritative challenge evidence, and never close a task. `finish` remains the sole project
-completion command.
+An asked question can raise, never lower, the role's floor. Pick it once, without repeating its text/options. Unpicked questions block READY, including questions asked after hand-back; reaccept first. `task show` prints the exact route and current answered/overruled pick. `explain role::<name>` summarizes answered decisions per model; that is calibration of recorded claims against owner rulings, not authenticated model accuracy.
 
 ## Current worker assessments and explicit reviews
 
-Every acceptance starts a new assignment epoch, including accepting again on the same model.
-A lens assessment records the accepted model, epoch and the resolved knowledge pack plus its
-rulings. Replacing the worker, accepting again or changing that expertise requires another
-assessment. Old assessments remain visible as history and grant no current credit. A lens must
-name a pack the accepted role actually consults; unknown packs and individual ruling identities
-are refused. Changes to other packs do not invalidate the assessment.
+Each `task lens NAME PACK "…"` assessment binds the accepted model, epoch and relevant consulted knowledge. Reacceptance or changes to that knowledge require a new assessment; unrelated packs do not. Old unbound assessments stay readable history. Use a consulted pack name, not a ruling ID.
 
-An unresolved model proposal belongs to the assignment that proposed it. Replacing its worker
-supersedes earlier unresolved proposals, except a proposal for the replacement model itself.
-Accepting the same model again keeps its current unresolved proposals standing. A proposal made
-before the first acceptance applies to that first assignment. Superseded proposals remain in the
-record; approving a model continues to require the owner's actual ruling.
+Unresolved model proposals follow the assignment that made them. Replacement supersedes earlier proposals except one for the replacement itself; same-model reacceptance keeps its unresolved proposal standing. Approval still requires an owner ruling.
 
-A reviewer can make its target explicit:
-
-```text
-blabla task open review-cache --role reviewer --statement "Review cache repair" --review-of repair-cache --input fixtures/cache.txt --check "cargo test --test cache"
-blabla task accept review-cache --model <id>
+```sh
+blabla task open review-cache --role reviewer --statement "Review cache repair" \
+  --review-of fix-cache --input tests/cache.rs --check-argv cargo test --release --test cache
+blabla task accept review-cache --model REVIEWER_MODEL
 ```
 
-The target must already exist, be distinct and not be withdrawn; cyclic review chains are
-refused. Acceptance snapshots the target's assignment epoch, declarations, decisions, findings,
-check inputs, deliverables and relevant registered memory. The reviewer's own role, model policy,
-consulted packs and other relevant memory also bind its approval. Explicit reviewer inputs are
-additional dependencies. Declared target inputs and deliverables remain dependencies even when
-their writes are attributed to concurrent work. Unrelated notes, paths and knowledge packs are excluded from review freshness.
-Review chains are checked iteratively: a stale inner review invalidates every review depending
-on it, while cycle detection prevents looping. This link does not impose a review requirement on
-other tasks.
+A review target must exist, be distinct and not withdrawn; cycles are refused. Acceptance binds the target's epoch, declarations, decisions, findings, inputs, deliverables and relevant memory, plus the reviewer's own policy/knowledge and explicit inputs. Concurrent attribution does not remove declared dependencies. Unrelated notes/paths/packs do not stale the review. A stale inner review invalidates dependent review chains.
 
-A changed target invalidates the review's evidence credit, hand-back and result acceptance.
-Reaccept an open review to inspect the new target, then record fresh check evidence, lens
-assessments and a challenge. A check already running when its target changes retains its actual
-observation, but that observation cannot approve the changed target. A CLOSED review remains
-CLOSED history; its view reports stale freshness and no current approval rather than reopening it.
-Open a new review assignment when a historical review needs replacement.
+If the target changes, reaccept an open review, inspect the new work, rerun its check and renew lenses/challenge. A running check retains its real observation but cannot approve a changed target. A CLOSED review remains historical CLOSED with no current approval; open a replacement review. `--review-of` does not impose review on unrelated tasks or infer links for old records.
 
-Task views retain the declared check in READY and CLOSED and label answered or overruled decisions
-with their current pick. JSON includes decision status and current pick, assessment freshness,
-review freshness and current approval separately from the historical records.
+## What --model attests
 
-A selected task's challenge reports `assignment_clear`, `assignment_blockers` and
-`project_challenges` separately. A clear assignment can hand back while a project-wide challenge
-still stands; it does not mean the project is complete. Restore work that lacks current evidence,
-or ask the orchestrator to resolve the scope or dependency deliberately. Unresolved withdrawal
-residue remains a project challenge until its paths are restored or explicitly reconciled against
-current evidence from a CLOSED successor.
+Model IDs and task records are caller attestations, not actor authentication. Roles can list models and owner-declared aliases, but a caller can still claim another identity or edit state files outside BlaBla.
+
+Owner-only mutations made while a worker carries an ACCEPTED task are retained as unconfirmed records. They ground `orchestrator-record-during-carry`: READY remains possible, CLOSE is refused. After hand-back the orchestrator checks them and runs `task confirm NAME --model MODEL`, even if it undid the change. Confirmation is refused during carry and preserves the record. Later owner mutations during carry require another confirmation. OPEN/BLOCKED/READY mutations do not receive that carry challenge.
+
+## Challenging the account of the work
+
+`blabla challenge NAME` reports one strongest grounded discrepancy; on ACCEPTED it also records or clears the assignment receipt. Project-only inspection is nonmutating. A selected nonterminal task exits on assignment status (0 clear, 1 blocked), separately reporting `assignment_blockers` and `project_challenges`; without a selected task, exit 1 means a standing challenge.
+
+| Evidence | Challenge classes |
+| --- | --- |
+| Task findings and snapshot | `unresolved-finding`, `deliverable-unchanged`, `scope-breach`, `work-without-acceptance`, `attribution-unknown` |
+| Role, decisions and owner records | `model-outside-role-policy`, `exception-unresolved`, `decision-unanswered`, `question-unpicked`, `orchestrator-record-during-carry` |
+| Check, review and knowledge revisions | `declared-check-failed`, `readiness-without-evidence`, `evidence-superseded`, `review-target-stale`, `lens-unassessed` |
+| Project facts | `vacuous-rule`, `verification-not-current`, `withdrawal-residue`; `goal-outcome-unmet` for a done goal when no task is selected |
+
+Unavailable evidence is named rather than treated as clean. The skeptic reads no semantic meaning from code; independent review still matters. Silence means no reachable contradiction, not approval. `finish` may display a challenge beside its verdict without changing its completion decision or exit code.
+
+## Authoring and optional expert advice
+
+- `blabla guide bootstrap` starts a project; `init --agents` writes managed onboarding and skills under `.agents/skills/blabla/` and `.claude/skills/blabla/`
+- `blabla guide change` separates intended contract changes from implementation fixes
+- `blabla guide memory` and `check FILE.bla` author/validate memory; VALID does not prove it describes the repository
+- `check FILE.bla` and `check --falsify FILE.bla` author [structure contracts](structure.md#falsification); neither is completion
+- [Expert judgments and bindings](expert.md) add optional checkpoint advice. Reading `status`, `explain` or `check` never calls a provider. Advice grants no write permission, deterministic evidence or task-completion credit
+
+## Upgrading task records to 0.10
+
+Legacy evidence/lens records remain readable history without current credit. Reaccept, rerun the exact check, reassess consulted packs and obtain a fresh challenge before READY. Old reviews need an explicit review relationship; historical CLOSED alone is not fresh approval. JSON clients must handle `WITHDRAWN`, exact check/epoch/input bindings, assessment/review freshness, current decision picks and separate assignment/project challenges. [Breaking notes](../CHANGELOG.md#0100-unreleased)
