@@ -4,7 +4,7 @@
 
 [![Release](https://github.com/Kiborgik/blabla/actions/workflows/release.yml/badge.svg)](https://github.com/Kiborgik/blabla/actions/workflows/release.yml)
 ![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-yellow)
-![version 0.10.0 unreleased](https://img.shields.io/badge/version-0.10.0%20unreleased-blue)
+![version 0.10.0 release candidate](https://img.shields.io/badge/version-0.10.0%20release%20candidate-blue)
 ![license MIT](https://img.shields.io/badge/license-MIT-green)
 ![Rust stable](https://img.shields.io/badge/rust-stable-black)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -12,11 +12,11 @@
 
 Keep what the software must do, how its code is constrained, and why the project works that way in the repository. Agents query the relevant identity instead of rebuilding context from chat. BlaBla verifies declared **Behavior** and **Structure**; Mission, System, Process, Knowledge and Goals guide the work without deciding completion.
 
-**0.10.0 is unreleased.** It adds revision-bound handoffs and an experimental expert layer. [Upgrade notes](CHANGELOG.md#0100-unreleased) · [release evidence](docs/design/0.10-release-evidence.md)
+**0.10.0 is a release candidate, not yet published.** It adds revision-bound handoffs and an experimental expert layer. [Upgrade notes](CHANGELOG.md#0100-unreleased) · [release evidence](docs/design/0.10-release-evidence.md)
 
 ## Start here
 
-Install the published release with stable Rust (the 0.10-only features below remain unreleased):
+Install the published crate with stable Rust (this does not install the 0.10.0 release candidate):
 
 ```sh
 cargo install blabla --locked
@@ -39,6 +39,8 @@ To try **this source version**, start from a checkout containing it, currently t
 cargo run --release --quiet --bin blabla -- --project examples/todo status
 cargo run --release --quiet --bin blabla -- --project examples/todo finish
 ```
+
+To install this candidate locally instead, run `cargo install --path . --locked` from its checkout. This builds the checked-out source; it does not fetch a published 0.10.0 crate.
 
 The first command may report UNVERIFIED/BLOCKED; the second runs the example's canonical campaign. The same [Todo behavior contract](examples/todo.bla) drives [Python](examples/todo), [TypeScript](examples/todo-ts), [Go](examples/todo-go), [C](examples/todo-c), [C++](examples/todo-cpp) and [Java](examples/todo-java) applications through small reusable [JSON Lines adapters](adapters/README.md).
 

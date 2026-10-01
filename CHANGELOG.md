@@ -2,7 +2,7 @@
 
 ## 0.10.0 (Unreleased)
 
-Revision-bound handoffs and an experimental bounded expert layer. Source preparation is not a published release; [release evidence](docs/design/0.10-release-evidence.md) identifies completed checks and remaining qualification.
+Release candidate: revision-bound handoffs and an experimental bounded expert layer. Source preparation is not a published release; [release evidence](docs/design/0.10-release-evidence.md) identifies completed checks and remaining qualification.
 
 ### Breaking and upgrade
 
