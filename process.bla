@@ -2,7 +2,7 @@ role "orchestrator" {
     purpose "Decide what the work is, divide it, integrate what comes back, and decide completion."
     owns ["decomposition and worker assignment", "shared and hot files", "integration of every worker's result", "contract semantics and the manifest", "project-wide falsification", "the product gate and blabla finish", "every commit"]
     verification "product"
-    model ["opus-5", "claude-fable-5-1", "gpt-6-astra"]
+    model ["opus-5", "claude-fable-5-1", "gpt-6-astra", "gpt-6.1-sol"]
     consult ["engineering", "testing", "design"]
 }
 
@@ -11,7 +11,7 @@ role "worker" {
     owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
     verification "focused"
     block_below "70"
-    model ["haiku-4.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5"]
+    model ["haiku-4.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["engineering", "testing"]
 }
 
@@ -19,7 +19,7 @@ role "reviewer" {
     purpose "Independently review one bounded worker patch and report the defects that block its integration."
     owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
     verification "focused"
-    model ["qwen3.5:4b", "opus-5", "gpt-5.6-sol", "haiku-4.5"]
+    model ["qwen3.5:4b", "opus-5", "gpt-5.6-sol", "haiku-4.5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["reviewing", "engineering", "testing", "design"]
 }
 

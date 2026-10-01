@@ -1,13 +1,17 @@
 import copy
+import contextlib
 import hashlib
 import importlib.util
 import json
 import os
 import pathlib
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import expert_eval
 from test_native_expert import child, host_request, native, observation, boundary
@@ -32,7 +36,7 @@ def save(path, value):
 
 class SyntheticCore:
     def __init__(self, project, script):
-        self.project = pathlib.Path(project)
+        self.project = pathlib.Path(project).resolve()
         self.script = script
         self.calls = []
 
@@ -47,6 +51,27 @@ class SyntheticCore:
 
     def checkpoint(self, run_id, event):
         return self.invoke('checkpoint', {'run_id': run_id, 'event': event})
+
+
+@contextlib.contextmanager
+def windows_filesystem(roots, attributes=None):
+    windows = pathlib.PureWindowsPath
+    attributes = attributes or {}
+    read = runner.read_bytes
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.object(runner, 'pathlib', SimpleNamespace(Path=windows)))
+        for name, function in {
+            'is_dir': lambda path: True,
+            'is_file': lambda path: True,
+            'is_symlink': lambda path: False,
+            'lstat': lambda path: SimpleNamespace(st_mode=stat.S_IFDIR,
+                st_file_attributes=attributes.get(path, 0)),
+            'resolve': lambda path, strict=False: windows(str(path).replace('WORKSP~1', 'workspace')),
+        }.items():
+            stack.enter_context(mock.patch.object(windows, name, function, create=True))
+        stack.enter_context(mock.patch.object(runner, 'read_bytes',
+            side_effect=lambda root, relative, *limit: read(roots[root.name], relative, *limit)))
+        yield
 
 
 class NativeLiveImportTests(unittest.TestCase):
@@ -109,7 +134,7 @@ class NativeLiveTests(unittest.TestCase):
 
     def core(self, mode, script):
         core = SyntheticCore(self.roots[mode], script)
-        self.cores[self.roots[mode]] = core
+        self.cores[core.project] = core
         return core
 
     def run_live(self):
@@ -316,6 +341,40 @@ class NativeLiveTests(unittest.TestCase):
         del self.roots['shadow']
         with self.assertRaises(ValueError):
             self.run_live()
+
+    def test_windows_short_roots_use_canonical_identity(self):
+        roots = {mode: pathlib.PureWindowsPath('C:/Fixture/WORKSP~1/Temp') / mode for mode in self.roots}
+        with windows_filesystem(self.roots):
+            frozen = runner.freeze_inputs('protocol.json', 'plan.json', roots)[2]
+        self.assertEqual(frozen, {mode: pathlib.PureWindowsPath('C:/Fixture/workspace/Temp') / mode
+            for mode in self.roots})
+
+    def test_windows_aliases_cannot_hide_overlapping_roots(self):
+        for other in ('C:/Fixture/workspace/Temp/off', 'C:/Fixture/workspace/Temp/off/nested'):
+            with self.subTest(other=other):
+                roots = {mode: pathlib.PureWindowsPath('C:/Fixture/WORKSP~1/Temp') / mode for mode in self.roots}
+                roots['shadow'] = pathlib.PureWindowsPath(other)
+                with windows_filesystem(self.roots), self.assertRaisesRegex(ValueError, 'disjoint'):
+                    runner.freeze_inputs('protocol.json', 'plan.json', roots)
+
+    def test_windows_reparse_roots_ancestors_and_inputs_are_rejected(self):
+        roots = {mode: pathlib.PureWindowsPath('C:/Fixture/workspace/Temp') / mode for mode in self.roots}
+        for path in (roots['off'], roots['off'].parent, roots['off'] / 'project.bla', roots['off'] / 'workspace'):
+            with self.subTest(path=path), windows_filesystem(self.roots, {path: stat.FILE_ATTRIBUTE_REPARSE_POINT}):
+                with self.assertRaisesRegex(ValueError, 'symlink|reparse'):
+                    runner.freeze_inputs('protocol.json', 'plan.json', roots)
+
+    def test_relative_traversing_and_symlinked_roots_are_rejected(self):
+        original = self.roots['off']
+        link = self.root / 'linked'
+        link.symlink_to(original, target_is_directory=True)
+        for root in (pathlib.Path('off'), original / '..' / 'off', link, link / 'workspace'):
+            with self.subTest(root=root), self.assertRaisesRegex(ValueError, 'absolute nonsymlink'):
+                runner.freeze_inputs('protocol.json', 'plan.json', dict(self.roots, off=root))
+
+    def test_relative_input_traversal_is_rejected_before_dispatch(self):
+        with self.assertRaises(native.Failure):
+            runner.live_native('../protocol.json', 'plan.json', self.roots)
 
     def test_absolute_input_paths_are_not_reinterpreted_across_roots(self):
         with self.assertRaises(native.Failure):

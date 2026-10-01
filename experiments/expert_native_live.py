@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import pathlib
+import stat
 
 if __package__:
     from . import expert_eval
@@ -14,13 +15,22 @@ native = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(native)
 
 
+def is_link(path):
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return False
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
 def checked_path(root, relative):
     parts = native.evidence_path(relative)
     path = root
     for part in parts.parts:
         path /= part
-        if path.is_symlink():
-            raise ValueError('native input path contains a symlink')
+        if is_link(path):
+            raise ValueError('native input path contains a symlink or reparse point')
     return path
 
 
@@ -49,9 +59,11 @@ def freeze_inputs(protocol_path, native_plan_path, project_roots):
     for run_id, value in project_roots.items():
         native.identifier(run_id)
         root = pathlib.Path(value)
-        if not root.is_absolute() or not root.is_dir() or root != root.resolve():
+        if (not root.is_absolute() or '..' in root.parts or not root.is_dir()
+                or any(is_link(path) for path in (root, *root.parents))):
             raise ValueError('prepared project root must be an absolute nonsymlink directory')
-        if not (root / 'project.bla').is_file() or (root / 'project.bla').is_symlink():
+        root = root.resolve(strict=True)
+        if not checked_path(root, 'project.bla').is_file():
             raise ValueError('exact prepared project root needs project.bla')
         roots[run_id] = root
     values = list(roots.values())

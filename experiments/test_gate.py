@@ -84,12 +84,16 @@ class RunnerUsesTheSchedule(unittest.TestCase):
         self.assertLess(names.index("todo-python"), names.index("todo-c"))
         self.assertLess(names.index("todo-c"), names.index("self-hosting-finish"))
 
-    def test_the_expert_campaign_uses_the_current_source_bridge_at_the_canonical_budget(self):
+    def test_canonical_finish_owns_composed_behavior_without_standalone_campaigns(self):
         schedule = dict(checks(Path("."), True))
-        self.assertIn("expert-campaign", schedule)
-        self.assertEqual(schedule["expert-campaign"], ["cargo", "run", "--offline", "--quiet", "--bin", "blabla", "--", "run", "contracts/expert.bla", "--cases", "32", "--steps", "512", "--timeout-ms", "5000", "--", "target/debug/examples/structure-adapter"])
-        self.assertIn(("bridge", "expert-campaign"), REQUIRED_ORDER)
-        self.assertIn(("expert-campaign", "self-hosting-finish"), REQUIRED_ORDER)
+        self.assertEqual(schedule["self-hosting-finish"], ["cargo", "run", "--offline", "--quiet", "--bin", "blabla", "--", "finish"])
+        self.assertEqual(schedule["bridge"], ["cargo", "build", "--offline", "--quiet", "--example", "structure-adapter"])
+        self.assertEqual(schedule["bridge-tests"], ["cargo", "test", "--offline", "--quiet", "--example", "structure-adapter"])
+        self.assertNotIn("questions-campaign", schedule)
+        self.assertNotIn("expert-campaign", schedule)
+        self.assertFalse(any(command[:2] == ("@blabla", "run") for _, command in STEPS))
+        self.assertIn(("bridge", "self-hosting-finish"), REQUIRED_ORDER)
+        self.assertIn(("self-hosting-finish", "self-hosting-status"), REQUIRED_ORDER)
 
     def test_the_offline_flag_reaches_the_commands_that_declare_it(self):
         offline = dict(checks(Path("."), True))

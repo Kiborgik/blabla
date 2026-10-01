@@ -24,8 +24,6 @@ STEPS = (
     ("todo-c", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_todo_c.py")),
     ("bridge", ("cargo", "build", "@cargo", "--quiet", "--example", "structure-adapter")),
     ("bridge-tests", ("cargo", "test", "@cargo", "--quiet", "--example", "structure-adapter")),
-    ("questions-campaign", ("@blabla", "run", "contracts/questions.bla", "--cases", "32", "--steps", "512", "--timeout-ms", "5000", "--", "target/debug/examples/structure-adapter")),
-    ("expert-campaign", ("@blabla", "run", "contracts/expert.bla", "--cases", "32", "--steps", "512", "--timeout-ms", "5000", "--", "target/debug/examples/structure-adapter")),
     ("self-hosting-finish", ("@blabla", "finish")),
     ("self-hosting-status", ("@blabla", "status")),
     ("example-python", ("@blabla", "--project", "examples/todo", "finish")),
@@ -40,9 +38,6 @@ STEPS = (
 
 REQUIRED_ORDER = (
     ("bridge", "self-hosting-finish"),
-    ("bridge", "questions-campaign"),
-    ("bridge", "expert-campaign"),
-    ("expert-campaign", "self-hosting-finish"),
     ("self-hosting-finish", "self-hosting-status"),
 )
 

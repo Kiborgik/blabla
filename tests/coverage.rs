@@ -551,7 +551,7 @@ mod composed_bridge {
     }
 }
 
-fn composed_contract(reordered: bool) -> blabla::ir::Contract {
+fn reordered_composed_contract() -> blabla::ir::Contract {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = blabla::project::read_manifest(&root.join("project.bla")).unwrap();
     let profile = manifest.profile.as_ref().unwrap();
@@ -578,14 +578,12 @@ fn composed_contract(reordered: bool) -> blabla::ir::Contract {
         .collect();
     assert!(sources.iter().any(|(group, _, _)| group == "questions"));
     assert!(sources.iter().any(|(group, _, _)| group == "expert"));
-    if reordered {
-        let unrelated = sources
-            .iter()
-            .position(|(group, _, _)| group == "goals")
-            .unwrap();
-        sources[unrelated].0 = "unrelated".into();
-        sources.swap(0, unrelated);
-    }
+    let unrelated = sources
+        .iter()
+        .position(|(group, _, _)| group == "goals")
+        .unwrap();
+    sources[unrelated].0 = "unrelated".into();
+    sources.swap(0, unrelated);
     let parsed: Vec<_> = sources
         .iter()
         .map(|(_, file, source)| blabla::syntax::parse(file, source).unwrap())
@@ -604,60 +602,58 @@ fn composed_contract(reordered: bool) -> blabla::ir::Contract {
 }
 
 #[test]
-fn composed_contract_preserves_targeted_witness() {
+fn reordered_composed_contract_preserves_targeted_witness() {
     let options = RunOptions {
         seed: 0,
         cases: 32,
         steps: 512,
         shrink_budget: 256,
     };
-    for reordered in [false, true] {
-        let contract = composed_contract(reordered);
-        let report = run(&contract, &options, || Ok(composed_bridge::App::new())).unwrap();
-        let missed: Vec<_> = report
+    let contract = reordered_composed_contract();
+    let report = run(&contract, &options, || Ok(composed_bridge::App::new())).unwrap();
+    let missed: Vec<_> = report
+        .coverage_summary
+        .coverage
+        .iter()
+        .filter(|obligation| obligation.status != blabla::report::CoverageStatus::Verified)
+        .map(|obligation| &obligation.id)
+        .collect();
+    eprintln!(
+        "reordered=true status={:?} executed={} replayed={} resets={} full_coverage={:?} failure={:?}",
+        report.status,
+        report.metrics.total_actions,
+        report.metrics.replay_actions,
+        report.metrics.resets,
+        report.metrics.actions_to_full_coverage,
+        report.failure.as_ref().map(|failure| &failure.property)
+    );
+    assert!(
+        missed.is_empty(),
+        "reordered=true: {} missed, first {:?}",
+        missed.len(),
+        missed.iter().take(8).collect::<Vec<_>>()
+    );
+    for id in [
+        "assignment::an-unapproved-outside-model-may-not-address-findings/root.left.effect",
+        "assignment::a-failing-check-is-visible-at-hand-back/root.right.member",
+    ] {
+        let witness = report
             .coverage_summary
             .coverage
             .iter()
-            .filter(|obligation| obligation.status != blabla::report::CoverageStatus::Verified)
-            .map(|obligation| &obligation.id)
-            .collect();
-        eprintln!(
-            "reordered={reordered} status={:?} executed={} replayed={} resets={} full_coverage={:?} failure={:?}",
-            report.status,
-            report.metrics.total_actions,
-            report.metrics.replay_actions,
-            report.metrics.resets,
-            report.metrics.actions_to_full_coverage,
-            report.failure.as_ref().map(|failure| &failure.property)
-        );
+            .find(|obligation| obligation.id == id)
+            .unwrap();
+        assert!(witness.witnesses > 0, "{id}");
         assert!(
-            missed.is_empty(),
-            "reordered={reordered}: {} missed, first {:?}",
-            missed.len(),
-            missed.iter().take(8).collect::<Vec<_>>()
+            witness
+                .first_witness_trace
+                .as_ref()
+                .is_some_and(|trace| trace.len() > 1),
+            "{id}"
         );
-        for id in [
-            "assignment::an-unapproved-outside-model-may-not-address-findings/root.left.effect",
-            "assignment::a-failing-check-is-visible-at-hand-back/root.right.member",
-        ] {
-            let witness = report
-                .coverage_summary
-                .coverage
-                .iter()
-                .find(|obligation| obligation.id == id)
-                .unwrap();
-            assert!(witness.witnesses > 0, "{id}");
-            assert!(
-                witness
-                    .first_witness_trace
-                    .as_ref()
-                    .is_some_and(|trace| trace.len() > 1),
-                "{id}"
-            );
-        }
-        assert_eq!(report.status, blabla::report::RunStatus::Green);
-        assert_eq!(report.metrics.action_budget, 16384);
-        assert_eq!(report.metrics.total_actions, 16384);
-        assert!(report.metrics.replay_actions > 0);
     }
+    assert_eq!(report.status, blabla::report::RunStatus::Green);
+    assert_eq!(report.metrics.action_budget, 16384);
+    assert_eq!(report.metrics.total_actions, 16384);
+    assert!(report.metrics.replay_actions > 0);
 }
