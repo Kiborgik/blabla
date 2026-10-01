@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -6,6 +7,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parent.parent
+COMPILER_PREPARE_TIMEOUT_SECONDS = 120 if os.name == "nt" else 30
 
 
 class TodoCPersistenceTests(unittest.TestCase):
@@ -18,7 +20,7 @@ class TodoCPersistenceTests(unittest.TestCase):
             "gcc", "-std=c17", "-O1", "-I", str(ROOT / "adapters/c"),
             "-o", str(cls.executable), str(ROOT / "examples/todo-c/main.c"),
             str(ROOT / "adapters/c/blabla_adapter.c"),
-        ], check=True, capture_output=True, timeout=30)
+        ], check=True, capture_output=True, timeout=COMPILER_PREPARE_TIMEOUT_SECONDS)
 
     def run_app(self, directory, requests):
         payload = "".join(

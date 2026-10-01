@@ -1706,7 +1706,7 @@ pub fn digest_of(root: &Path, relative_path: &str) -> Option<String> {
 }
 
 fn relative(root: &Path, path: &Path) -> String {
-    relative_with_case(root, path, cfg!(windows))
+    relative_with_case(root, path, false)
 }
 
 fn relative_with_case(root: &Path, path: &Path, case_insensitive: bool) -> String {

@@ -539,7 +539,10 @@ pub(super) fn open(project: &Project, mut opening: Opening, json: bool) -> i32 {
                 Err(message) => return emit_error(error("task", message, None), json, 2),
             },
             inputs: opening.inputs,
-            deliverables: owed_paths(project, opening.deliverables),
+            deliverables: match owed_paths(project, opening.deliverables) {
+                Ok(paths) => paths,
+                Err(message) => return emit_error(error("task", message, None), json, 2),
+            },
             ..opening
         },
         now_unix(),
@@ -578,7 +581,7 @@ fn normalize(path: String) -> String {
     path.replace('\\', "/")
 }
 
-fn owed_paths(project: &Project, declared: Vec<String>) -> Vec<String> {
+fn owed_paths(project: &Project, declared: Vec<String>) -> Result<Vec<String>, String> {
     let root = &project.manifest.root;
     let mut tree: Option<Vec<String>> = None;
     let mut owed = Vec::new();
@@ -592,19 +595,18 @@ fn owed_paths(project: &Project, declared: Vec<String>) -> Vec<String> {
                 .into_keys()
                 .collect::<Vec<String>>()
         });
-        let prefix = format!("{path}/");
         let under: Vec<String> = files
             .iter()
-            .filter(|name| name.starts_with(&prefix))
-            .cloned()
-            .collect();
+            .filter(|name| task::covers(&path, name))
+            .map(|name| task::normalize_tracked_path(root, &project.ignore, "deliverable", name))
+            .collect::<Result<_, _>>()?;
         if under.is_empty() {
             owed.push(path);
         } else {
             owed.extend(under);
         }
     }
-    owed
+    Ok(owed)
 }
 
 pub(super) fn finding(project: &Project, name: &str, statement: &str, json: bool) -> i32 {
@@ -1176,7 +1178,11 @@ pub(super) fn owe(project: &Project, name: &str, add: Vec<String>, json: bool) -
         Ok(task) => task,
         Err(exit) => return exit,
     };
-    for path in owed_paths(project, add) {
+    let paths = match owed_paths(project, add) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    for path in paths {
         task::owe_path(&mut task, path);
     }
     task::attest(&mut task, "deliverable --add", None, now_unix());
