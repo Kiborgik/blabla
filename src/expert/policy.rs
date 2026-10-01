@@ -465,7 +465,7 @@ fn selected_references(
     Ok(references)
 }
 
-fn reference_resolves(packet: &ExpertPacket, id: &str) -> bool {
+pub(crate) fn reference_resolves(packet: &ExpertPacket, id: &str) -> bool {
     safe_identifier(id)
         && (packet.references.contains_key(id)
             || (id == packet.event.task

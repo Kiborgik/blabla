@@ -39,3 +39,10 @@ goal "bounded-expert-release-ready-for-review" {
     expect ["contract::expert", "contract::expert-seams", "contract::assignment", "contract::gate", "contract::schedule"]
     state "active"
 }
+
+goal "expert-loop-demonstrated-in-real-work" {
+    serves ["truthful-over-convenient", "steering-cost-over-token-cost", "bounded-workers-free-planners"]
+    statement "Complete the original 0.10 workflow: a shipped named host adapter observes real work boundaries, evaluates bounded expert judgments, delivers authorized advice to the same worker and records acknowledgment separately from observed correction. Exercise actual feature work and matched off/shadow/advisory runs. Publish concise human/agent documentation and accurate diagrams. Contract expectations are necessary checks, not proof of live delivery, benefit or user acceptance."
+    expect ["contract::expert", "contract::expert-seams", "contract::assignment", "contract::gate", "contract::schedule"]
+    state "active"
+}

@@ -59,21 +59,30 @@ class RunnerUsesTheSchedule(unittest.TestCase):
             "expert-host-probe": "test_expert_host_probe.py",
             "systemone-provider": "test_systemone_provider.py",
             "expert-evaluation": "test_expert_eval.py",
+            "native-expert": "test_native_expert.py",
+            "expert-calibrate-live": "test_expert_calibrate_live.py",
+            "expert-native-live": "test_expert_native_live.py",
+            "todo-c": "test_todo_c.py",
         }
         for name, pattern in expected.items():
             self.assertIn(name, schedule)
             self.assertEqual(schedule[name], [sys.executable, "-m", "unittest", "discover", "-s", "experiments", "-p", pattern])
+            self.assertEqual(sum(command == schedule[name] for _, command in checks(Path("."), True)), 1)
+        names = [name for name, _ in STEPS]
+        self.assertEqual(len(names), len(set(names)))
         tokens = [token for _, command in checks(Path("."), True) for token in command]
         self.assertNotIn("smoke_systemone_provider.py", tokens)
         self.assertNotIn("--allow-local-inference", tokens)
 
     def test_expert_check_stages_precede_completion_without_reordering_existing_steps(self):
         names = [name for name, _ in STEPS]
-        for name in ("expert-host-probe", "systemone-provider", "expert-evaluation"):
+        for name in ("expert-host-probe", "systemone-provider", "expert-evaluation", "native-expert", "expert-calibrate-live", "expert-native-live"):
             self.assertIn(name, names)
             self.assertLess(names.index("gate-schedule"), names.index(name))
             self.assertLess(names.index(name), names.index("todo-python"))
             self.assertLess(names.index(name), names.index("self-hosting-finish"))
+        self.assertLess(names.index("todo-python"), names.index("todo-c"))
+        self.assertLess(names.index("todo-c"), names.index("self-hosting-finish"))
 
     def test_the_expert_campaign_uses_the_current_source_bridge_at_the_canonical_budget(self):
         schedule = dict(checks(Path("."), True))

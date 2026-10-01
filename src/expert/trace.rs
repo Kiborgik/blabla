@@ -1,4 +1,6 @@
+use super::native::{ExecutionIdentity, run::Run};
 use super::packet::{self, ContextValue};
+use super::pilot::{self, IssuedPermit};
 use super::policy::{self, AdvisoryOutcome, ExpertResult, PolicySettings};
 use super::provider::{
     self, EvaluationRequest, EvaluationResponse, ProviderIdentity, ProviderUsage,
@@ -222,6 +224,7 @@ pub struct HostReceiptObservation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Receipt {
+    pub execution: ExecutionIdentity,
     pub state: DeliveryState,
     pub evidence: String,
     pub checkpoint_id: String,
@@ -231,6 +234,9 @@ pub struct Receipt {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TraceRecord {
+    pub execution: ExecutionIdentity,
+    #[serde(deserialize_with = "pilot::nullable")]
+    pub permit: Option<IssuedPermit>,
     pub request: EvaluationRequest,
     pub response: EvaluationResponse,
     pub settings: PolicySettings,
@@ -375,6 +381,8 @@ impl TraceRecord {
             result = policy::outcome(&request, AdvisoryOutcome::Abstain, "expertise_pair_missing");
         }
         Ok(Self {
+            execution: ExecutionIdentity::Ordinary,
+            permit: None,
             request,
             response,
             settings,
@@ -446,6 +454,24 @@ pub fn implementation_fingerprints() -> BTreeMap<String, String> {
             packet::digest(&include_str!("provider.rs")),
         ),
         ("trace".into(), packet::digest(&include_str!("trace.rs"))),
+        (
+            "pilot".into(),
+            packet::digest(&(
+                include_str!("pilot.rs"),
+                include_str!("pilot/wire.rs"),
+                include_str!("pilot/evidence.rs"),
+                include_str!("native.rs"),
+                include_str!("native/wire.rs"),
+                include_str!("native/run.rs"),
+                include_str!("native/capture.rs"),
+                include_str!("native/host.rs"),
+                include_str!("native/delivery.rs"),
+            )),
+        ),
+        (
+            "calibration".into(),
+            packet::digest(&include_str!("calibration.rs")),
+        ),
     ])
 }
 
@@ -522,6 +548,7 @@ fn clean_response(response: &mut EvaluationResponse) {
 }
 
 pub fn replay(record: &TraceRecord) -> Result<ExpertResult, ReplayError> {
+    super::native::validate_execution(record).map_err(|_| ReplayError::InvalidRecord)?;
     validate_selected(record).map_err(|_| ReplayError::InvalidRecord)?;
     if record.implementation_fingerprints != implementation_fingerprints() {
         return Err(ReplayError::ImplementationMismatch);
@@ -655,6 +682,7 @@ fn expertise_result(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TraceEntry {
+    pub execution: ExecutionIdentity,
     pub request_id: String,
     pub run_id: String,
     pub task: String,
@@ -667,6 +695,7 @@ pub struct TraceEntry {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CaptureRecord {
+    pub execution: ExecutionIdentity,
     pub event: EventStamp,
     pub binding_id: Option<String>,
     pub reason: String,
@@ -723,13 +752,13 @@ struct TraceIndex {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CorrectiveState {
-    paths: String,
-    facts: String,
-    action: Option<String>,
+pub(crate) struct CorrectiveState {
+    pub(crate) paths: String,
+    pub(crate) facts: String,
+    pub(crate) action: Option<String>,
 }
 
-fn corrective_state(packet: &packet::ExpertPacket, concern: &str) -> CorrectiveState {
+pub(crate) fn corrective_state(packet: &packet::ExpertPacket, concern: &str) -> CorrectiveState {
     let mut facts = BTreeMap::new();
     for observation in packet
         .context
@@ -776,38 +805,40 @@ fn corrective_state(packet: &packet::ExpertPacket, concern: &str) -> CorrectiveS
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SuppressionEntry {
-    request_id: String,
-    run_id: String,
-    task: String,
-    acceptance_epoch: u64,
-    binding_id: String,
-    relevant_revision: String,
-    material_revision: String,
-    concern: String,
-    target: String,
-    checkpoint_id: String,
-    state: DeliveryState,
-    idempotency_key: String,
-    reserved_unix_ms: u64,
-    receipts: Vec<Receipt>,
-    no_delivery_verified: bool,
-    corrective_state: CorrectiveState,
+pub(crate) struct SuppressionEntry {
+    pub(crate) execution: ExecutionIdentity,
+    pub(crate) request_id: String,
+    pub(crate) run_id: String,
+    pub(crate) task: String,
+    pub(crate) acceptance_epoch: u64,
+    pub(crate) binding_id: String,
+    pub(crate) relevant_revision: String,
+    pub(crate) material_revision: String,
+    pub(crate) concern: String,
+    pub(crate) target: String,
+    pub(crate) checkpoint_id: String,
+    pub(crate) state: DeliveryState,
+    pub(crate) idempotency_key: String,
+    pub(crate) reserved_unix_ms: u64,
+    pub(crate) receipts: Vec<Receipt>,
+    pub(crate) no_delivery_verified: bool,
+    pub(crate) corrective_state: CorrectiveState,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Ledger {
-    entries: BTreeMap<String, SuppressionEntry>,
-    checkpoints: BTreeMap<String, ObservedEvent>,
-    blocked_checkpoints: BTreeSet<String>,
+pub(crate) struct Ledger {
+    pub(crate) experimental_runs: BTreeMap<String, Run>,
+    pub(crate) entries: BTreeMap<String, SuppressionEntry>,
+    pub(crate) checkpoints: BTreeMap<String, ObservedEvent>,
+    pub(crate) blocked_checkpoints: BTreeSet<String>,
 }
 
 pub struct TraceStore {
-    root: PathBuf,
+    pub(crate) root: PathBuf,
     limits: TraceLimits,
 }
-struct StoreLock(File);
+pub(crate) struct StoreLock(File);
 impl Drop for StoreLock {
     fn drop(&mut self) {
         let _ = self.0.unlock();
@@ -822,16 +853,25 @@ fn now_ms() -> u64 {
         .min(u64::MAX as u128) as u64
 }
 
-fn atomic_write(path: &Path, value: &impl Serialize, max: usize) -> Result<(), TraceError> {
+pub(crate) fn atomic_write(
+    path: &Path,
+    value: &impl Serialize,
+    max: usize,
+) -> Result<(), TraceError> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    validate_selected(value)?;
+    super::native::validate_value(
+        &serde_json::to_value(value).map_err(|_| TraceError::InvalidInput)?,
+        "",
+        0,
+    )
+    .map_err(|_| TraceError::InvalidInput)?;
     reject_symlink(path)?;
     let bytes = serde_json::to_vec(value).map_err(|_| TraceError::InvalidInput)?;
     if bytes.len() > max {
         return Err(TraceError::LimitExceeded);
     }
     let directory = path.parent().ok_or(TraceError::InvalidInput)?;
-    std::fs::create_dir_all(directory)?;
+    durable_directory(directory)?;
     let temporary = directory.join(format!(
         ".{}-{}-{}.tmp",
         path.file_name()
@@ -849,6 +889,8 @@ fn atomic_write(path: &Path, value: &impl Serialize, max: usize) -> Result<(), T
         file.sync_all()?;
         drop(file);
         std::fs::rename(&temporary, path)?;
+        #[cfg(unix)]
+        File::open(directory)?.sync_all()?;
         Ok(())
     })();
     if result.is_err() {
@@ -872,10 +914,10 @@ impl TraceStore {
         store.ensure_storage()?;
         Ok(store)
     }
-    fn directory(&self) -> PathBuf {
+    pub(crate) fn directory(&self) -> PathBuf {
         self.root.join(".blabla/expert")
     }
-    fn ensure_storage(&self) -> Result<(), TraceError> {
+    pub(crate) fn ensure_storage(&self) -> Result<(), TraceError> {
         for path in [
             self.root.join(".blabla"),
             self.directory(),
@@ -898,9 +940,9 @@ impl TraceStore {
             Ok(self.limits.clone())
         }
     }
-    fn lock(&self) -> Result<StoreLock, TraceError> {
+    pub(crate) fn lock(&self) -> Result<StoreLock, TraceError> {
         self.ensure_storage()?;
-        std::fs::create_dir_all(self.directory())?;
+        durable_directory(&self.directory())?;
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -942,28 +984,82 @@ impl TraceStore {
         }
         Ok(index)
     }
-    fn ledger(&self) -> Result<Ledger, TraceError> {
+    pub(crate) fn ledger(&self) -> Result<Ledger, TraceError> {
         let path = self.directory().join("ledger.json");
         if !path.exists() {
+            if self.directory().join("experimental.initialized").exists()
+                || self.directory().join("experimental").exists()
+            {
+                return Err(TraceError::Missing);
+            }
             return Ok(Ledger::default());
         }
-        let ledger: Ledger = read_json(&path, MAX_LEDGER_BYTES)?;
+        let ledger: Ledger = read_experimental_json(&path, MAX_LEDGER_BYTES)?;
         if ledger.entries.len() > 16384
             || ledger.checkpoints.len() > 256
             || ledger.blocked_checkpoints.len() > 256
+            || ledger.experimental_runs.len() > 256
+            || ledger.experimental_runs.values().any(|run| run.enrollments.len() > 16 || run.operations.len() > 64 || run.reservations.len() > 64 || run.traces.len() > 256 || run.attempts.len() > 64 || run.observed_sequences.len() > 256 || run.invalidations.len() > 64
+                || run.reservations.values().any(|reservation| reservation.receipts.len() > 64
+                    || reservation.consume_nonce.is_some() != reservation.result_sha256.is_some()
+                    || (reservation.consume_nonce.is_some() && reservation.refusal.is_some())
+                    || reservation.refusal.as_ref().is_some_and(|refusal| refusal.exposure_attempted || refusal.kind != "consume_refusal" || refusal.key != reservation.checkpoint.key || refusal.request_id != reservation.request_id || refusal.wake_nonce != reservation.wake.wake_nonce)
+                    || reservation.receipts.iter().any(|receipt| matches!(&receipt.category, super::native::ReceiptCategory::ExposureAttempted { consume_nonce, result_sha256 } if reservation.consume_nonce.as_ref() != Some(consume_nonce) || reservation.result_sha256.as_ref() != Some(result_sha256))))
+                || run.attempts.values().any(|attempt| attempt.request_ids.len() > 4 || attempt.bindings.len() != attempt.request_ids.len()))
         {
             return Err(TraceError::LimitExceeded);
         }
+        for (run_id, run) in &ledger.experimental_runs {
+            if !policy::safe_identifier(run_id) {
+                return Err(TraceError::InvalidInput);
+            }
+            for (id, reference) in &run.traces {
+                self.validate_payload_reference(run_id, "traces", id, reference)?;
+            }
+            if let Some(frozen) = &run.frozen {
+                self.validate_payload_reference(run_id, "config", "runtime", &frozen.config_ref)?;
+            }
+            for enrolled in run.enrollments.values() {
+                if enrolled.key.run_id != *run_id || enrolled.enrollment.run_id != *run_id {
+                    return Err(TraceError::InvalidInput);
+                }
+                if let Some(reference) = &enrolled.capture {
+                    self.validate_payload_reference(run_id, "captures", &reference.id, reference)?;
+                }
+            }
+        }
+        if ledger.entries.values().any(|entry| matches!(&entry.execution, ExecutionIdentity::Experimental { run_id, .. } if !ledger.experimental_runs.contains_key(run_id))) { return Err(TraceError::InvalidInput); }
         Ok(ledger)
     }
-    fn save_ledger(&self, ledger: &Ledger) -> Result<(), TraceError> {
+    fn validate_payload_reference(
+        &self,
+        run: &str,
+        kind: &str,
+        id: &str,
+        reference: &super::calibration::EvidenceRef,
+    ) -> Result<(), TraceError> {
+        let path = self.experimental_path(run, kind, id)?;
+        if reference.id != id
+            || !pilot::hex(&reference.sha256, 64)
+            || path
+                .strip_prefix(&self.root)
+                .map_err(|_| TraceError::InvalidInput)?
+                .to_string_lossy()
+                .replace('\\', "/")
+                != reference.path
+        {
+            return Err(TraceError::InvalidInput);
+        }
+        Ok(())
+    }
+    pub(crate) fn save_ledger(&self, ledger: &Ledger) -> Result<(), TraceError> {
         atomic_write(
             &self.directory().join("ledger.json"),
             ledger,
             MAX_LEDGER_BYTES,
         )
     }
-    fn rewrite(&self, record: &TraceRecord) -> Result<(), TraceError> {
+    pub(crate) fn rewrite(&self, record: &TraceRecord) -> Result<(), TraceError> {
         atomic_write(
             &self.trace_path(&record.request.request_id),
             record,
@@ -977,7 +1073,7 @@ impl TraceStore {
             MAX_LEDGER_BYTES,
         )
     }
-    fn trace_path(&self, id: &str) -> PathBuf {
+    pub(crate) fn trace_path(&self, id: &str) -> PathBuf {
         self.directory()
             .join("traces")
             .join(format!("{}.json", packet::digest(&("trace", id))))
@@ -996,6 +1092,9 @@ impl TraceStore {
         read_json(&self.directory().join("runtime.json"), MAX_CONFIG_BYTES)
     }
     pub fn record(&self, record: &TraceRecord) -> Result<(), TraceError> {
+        if !matches!(record.execution, ExecutionIdentity::Ordinary) {
+            return Err(TraceError::InvalidInput);
+        }
         replay(record).map_err(|_| TraceError::InvalidInput)?;
         let _lock = self.lock()?;
         let mut clean = record.clone();
@@ -1015,6 +1114,7 @@ impl TraceStore {
         atomic_write(&path, &clean, MAX_TRACE_BYTES)?;
         let bytes = std::fs::metadata(&path)?.len() as usize;
         index.entries.push(TraceEntry {
+            execution: record.execution.clone(),
             request_id: record.request.request_id.clone(),
             run_id: record.request.packet.event.run_id.clone(),
             task: record.request.packet.event.task.clone(),
@@ -1112,7 +1212,16 @@ impl TraceStore {
                 self.save_ledger(&ledger)?;
             }
         }
+        let execution = self
+            .ledger()?
+            .experimental_runs
+            .get(&event.run_id)
+            .map(Run::execution)
+            .transpose()
+            .map_err(|_| TraceError::InvalidInput)?
+            .unwrap_or(ExecutionIdentity::Ordinary);
         index.captures.push(CaptureRecord {
+            execution,
             event: EventStamp::from(event),
             binding_id,
             reason: reason.into(),
@@ -1143,7 +1252,31 @@ impl TraceStore {
             &index,
             MAX_LEDGER_BYTES,
         )?;
-        Ok(index.entries)
+        let mut entries = index.entries;
+        let ledger = self.ledger()?;
+        for run in ledger.experimental_runs.values() {
+            if run.traces.is_empty() {
+                continue;
+            }
+            let execution = run.execution().map_err(|_| TraceError::InvalidInput)?;
+            let frozen = run.frozen.as_ref().ok_or(TraceError::InvalidInput)?;
+            for (request_id, reference) in &run.traces {
+                let path = self.root.join(&reference.path);
+                reject_symlink(&path)?;
+                let metadata = std::fs::metadata(&path).ok();
+                entries.push(TraceEntry {
+                    execution: execution.clone(),
+                    request_id: request_id.clone(),
+                    run_id: frozen.arm.run_id.clone(),
+                    task: frozen.arm.task.clone(),
+                    file: reference.path.clone(),
+                    created_unix_ms: run.started.unix_ms,
+                    bytes: metadata.as_ref().map_or(0, |m| m.len() as usize),
+                    payload_omitted: metadata.is_none(),
+                });
+            }
+        }
+        Ok(entries)
     }
     pub fn read(&self, request_id: &str) -> Result<TraceRecord, TraceError> {
         self.ensure_storage()?;
@@ -1166,6 +1299,17 @@ impl TraceStore {
                 index.omitted_payloads = index.omitted_payloads.saturating_add(1);
                 index.omitted_bytes = index.omitted_bytes.saturating_add(entry.bytes as u64);
                 deleted += 1;
+            }
+        }
+        let ledger = self.ledger()?;
+        if let Some(run) = ledger.experimental_runs.get(run_id) {
+            for reference in run.traces.values() {
+                let path = self.root.join(&reference.path);
+                reject_symlink(&path)?;
+                if path.exists() {
+                    std::fs::remove_file(path)?;
+                    deleted += 1;
+                }
             }
         }
         atomic_write(
@@ -1210,6 +1354,9 @@ impl TraceStore {
         }
         let _lock = self.lock()?;
         let mut ledger = self.ledger()?;
+        if ledger.experimental_runs.contains_key(&event.run_id) {
+            return Err(TraceError::InvalidInput);
+        }
         let key = packet::digest(&(&event.run_id, &event.task));
         if let Some(previous) = ledger.checkpoints.get(&key) {
             if (ledger.blocked_checkpoints.contains(&key) && event.sequence <= previous.sequence)
@@ -1242,28 +1389,12 @@ impl TraceStore {
     ) -> Result<Vec<InterventionSummary>, TraceError> {
         let _lock = self.lock()?;
         let ledger = self.ledger()?;
-        let mut entries = ledger
-            .entries
-            .iter()
-            .filter(|(_, entry)| {
-                entry.task == task_id
-                    && entry.acceptance_epoch == acceptance_epoch
-                    && !entry.no_delivery_verified
-            })
-            .collect::<Vec<_>>();
-        entries.sort_unstable_by(|(key_a, a), (key_b, b)| {
-            (a.reserved_unix_ms, key_a).cmp(&(b.reserved_unix_ms, key_b))
-        });
-        Ok(entries
-            .into_iter()
-            .map(|(_, entry)| InterventionSummary {
-                request_id: entry.request_id.clone(),
-                concern: entry.concern.clone(),
-                target: entry.target.clone(),
-                state: entry.state,
-                evidence_revision: entry.material_revision.clone(),
-            })
-            .collect())
+        Ok(ledger_history(
+            &ledger,
+            task_id,
+            acceptance_epoch,
+            &ExecutionIdentity::Ordinary,
+        ))
     }
 }
 
@@ -1333,7 +1464,10 @@ pub fn definitions(
     ))
 }
 
-fn rebuild(project: &Project, record: &TraceRecord) -> Result<packet::ExpertPacket, TraceError> {
+pub(crate) fn rebuild(
+    project: &Project,
+    record: &TraceRecord,
+) -> Result<packet::ExpertPacket, TraceError> {
     let task_name = record
         .request
         .packet
@@ -1370,7 +1504,10 @@ fn rebuild(project: &Project, record: &TraceRecord) -> Result<packet::ExpertPack
     .map_err(|_| TraceError::Stale)
 }
 
-fn selected_revision_matches(current: &packet::ExpertPacket, record: &TraceRecord) -> bool {
+pub(crate) fn selected_revision_matches(
+    current: &packet::ExpertPacket,
+    record: &TraceRecord,
+) -> bool {
     current.revision == record.request.packet.revision && current.hash == record.request.packet.hash
 }
 pub fn current_revision_matches(project: &Project, record: &TraceRecord) -> bool {
@@ -1388,176 +1525,48 @@ impl TraceStore {
         let _lock = self.lock()?;
         let mut record = self.read(request_id)?;
         let mut ledger = self.ledger()?;
-        let reject = |record: &TraceRecord, reason: &str, state| DeliveryProposal {
-            request_id: request_id.into(),
-            idempotency_key: None,
-            state,
-            result: policy::outcome(&record.request, AdvisoryOutcome::Abstain, reason),
-        };
-        if record.provenance != Provenance::LocalCheckpoint {
-            return Ok(reject(
-                &record,
-                "untrusted_provenance",
-                DeliveryState::Proposed,
-            ));
-        }
         let config = self.runtime()?;
         config.validate()?;
-        if config.mode != ExpertMode::Advisory || record.mode != ExpertMode::Advisory {
-            return Ok(reject(&record, "shadow_mode", DeliveryState::Proposed));
-        }
-        if config.limits != record.limits
-            || config
-                .policies
-                .iter()
-                .find(|settings| settings.binding_id == record.settings.binding_id)
-                != Some(&record.settings)
-            || record.runtime_fingerprint.as_ref() != Some(&packet::digest(&config))
-        {
-            return Ok(reject(&record, "runtime_changed", DeliveryState::Stale));
-        }
-        if replay(&record).is_err() {
-            return Ok(reject(&record, "invalid_record", DeliveryState::Stale));
-        }
-        if !matches!(
-            record.result.outcome,
-            AdvisoryOutcome::Nudge | AdvisoryOutcome::Escalation
-        ) {
-            return Ok(DeliveryProposal {
-                request_id: request_id.into(),
-                idempotency_key: None,
-                state: DeliveryState::Proposed,
-                result: record.result,
-            });
-        }
-        let current = match rebuild(project, &record) {
-            Ok(packet) => packet,
-            Err(_) => {
-                record.suppression_reasons.push("stale_revision".into());
-                record.result =
-                    policy::outcome(&record.request, AdvisoryOutcome::Abstain, "stale_revision");
-                self.rewrite(&record)?;
-                return Ok(reject(&record, "stale_revision", DeliveryState::Stale));
-            }
+        let rejected = |record: &TraceRecord, reason: &str| DeliveryProposal {
+            request_id: request_id.into(),
+            idempotency_key: None,
+            state: if reason.starts_with("stale") || reason == "runtime_changed" {
+                DeliveryState::Stale
+            } else if matches!(reason, "uncertain_delivery" | "duplicate_delivery") {
+                DeliveryState::Unknown
+            } else {
+                DeliveryState::Proposed
+            },
+            result: policy::outcome(&record.request, AdvisoryOutcome::Abstain, reason),
         };
-        if !selected_revision_matches(&current, &record) {
-            record.suppression_reasons.push("stale_revision".into());
-            record.result =
-                policy::outcome(&record.request, AdvisoryOutcome::Abstain, "stale_revision");
-            self.rewrite(&record)?;
-            return Ok(reject(&record, "stale_revision", DeliveryState::Stale));
+        if !matches!(record.execution, ExecutionIdentity::Ordinary) {
+            return Ok(rejected(&record, "untrusted_provenance"));
         }
-        let event = &record.request.packet.event;
-        let key = packet::digest(&(&event.run_id, &event.task));
-        if checkpoint != event.checkpoint_id
-            || ledger.blocked_checkpoints.contains(&key)
-            || ledger
-                .checkpoints
-                .get(&key)
-                .is_none_or(|current| EventStamp::from(current) != *event)
-        {
-            record.suppression_reasons.push("stale_checkpoint".into());
-            record.result = policy::outcome(
-                &record.request,
-                AdvisoryOutcome::Abstain,
-                "stale_checkpoint",
-            );
-            self.rewrite(&record)?;
-            return Ok(reject(&record, "stale_checkpoint", DeliveryState::Stale));
-        }
+        let (current, idempotency_key) =
+            match reserve_guard(project, &ledger, &config, &record, checkpoint, None) {
+                Ok(value) => value,
+                Err("non_actionable") => {
+                    return Ok(DeliveryProposal {
+                        request_id: request_id.into(),
+                        idempotency_key: None,
+                        state: DeliveryState::Proposed,
+                        result: record.result,
+                    });
+                }
+                Err(reason) => {
+                    if matches!(reason, "stale_revision" | "stale_checkpoint") {
+                        suppress(&mut record, reason);
+                        self.rewrite(&record)?;
+                    }
+                    return Ok(rejected(&record, reason));
+                }
+            };
         if !promotion_matches(&config, &record, &current) {
-            return Ok(reject(
-                &record,
-                "promotion_required",
-                DeliveryState::Proposed,
-            ));
-        }
-        let target = policy::concern_target(&current, &record.result);
-        let material = policy::material_fingerprint(&current);
-        let concern = record.settings.concern.code();
-        let idempotency_key = packet::digest(&(
-            "blabla.expert.delivery.v1",
-            &event.task,
-            current.revision.acceptance_epoch,
-            &current.binding_id,
-            current.revision.fingerprint(),
-            &material,
-            concern,
-            &target,
-        ));
-        if ledger.entries.values().any(|entry| {
-            !entry.no_delivery_verified
-                && entry.state == DeliveryState::Unknown
-                && entry.task == event.task
-                && entry.concern == concern
-                && entry.target == target
-                && entry.request_id != request_id
-        }) {
-            return Ok(reject(
-                &record,
-                "uncertain_delivery",
-                DeliveryState::Unknown,
-            ));
-        }
-        if ledger.entries.values().any(|entry| {
-            !entry.no_delivery_verified
-                && entry.task == event.task
-                && entry.acceptance_epoch == current.revision.acceptance_epoch
-                && ((entry.concern == concern
-                    && entry.target == target
-                    && entry.material_revision == material)
-                    || (entry.run_id == event.run_id && entry.checkpoint_id == event.checkpoint_id))
-        }) {
-            return Ok(reject(
-                &record,
-                "duplicate_delivery",
-                DeliveryState::Unknown,
-            ));
-        }
-        if ledger
-            .entries
-            .values()
-            .filter(|entry| {
-                entry.task == event.task
-                    && entry.state != DeliveryState::ObservedResolved
-                    && !entry.no_delivery_verified
-            })
-            .count()
-            >= config.trace_limits.unresolved_per_task
-        {
-            return Ok(reject(&record, "ledger_exhausted", DeliveryState::Proposed));
-        }
-        let original_key = idempotency_key;
-        let mut idempotency_key = original_key.clone();
-        let mut attempt = 0usize;
-        while ledger.entries.contains_key(&idempotency_key) {
-            if attempt >= ledger.entries.len() {
-                return Err(TraceError::LedgerExhausted);
-            }
-            attempt += 1;
-            idempotency_key =
-                packet::digest(&("blabla.expert.delivery.attempt.v1", &original_key, attempt));
+            return Ok(rejected(&record, "promotion_required"));
         }
         ledger.entries.insert(
             idempotency_key.clone(),
-            SuppressionEntry {
-                request_id: request_id.into(),
-                run_id: event.run_id.clone(),
-                task: event.task.clone(),
-                acceptance_epoch: current.revision.acceptance_epoch,
-                binding_id: current.binding_id.clone(),
-                relevant_revision: current.revision.fingerprint(),
-                material_revision: material,
-                concern: concern.into(),
-                target,
-                checkpoint_id: event.checkpoint_id.clone(),
-                state: DeliveryState::Unknown,
-                idempotency_key: idempotency_key.clone(),
-                reserved_unix_ms: now_ms(),
-                receipts: vec![],
-                no_delivery_verified: false,
-                corrective_state: corrective_state(&current, concern),
-            },
+            suppression_entry(&record, &current, idempotency_key.clone(), now_ms()),
         );
         self.save_ledger(&ledger)?;
         Ok(DeliveryProposal {
@@ -1586,6 +1595,9 @@ impl TraceStore {
             .find(|entry| entry.request_id == request_id)
             .cloned()
             .ok_or(TraceError::Missing)?;
+        if !matches!(entry.execution, ExecutionIdentity::Ordinary) {
+            return Err(TraceError::InvalidInput);
+        }
         let checkpoint = ledger
             .checkpoints
             .get(&packet::digest(&(&entry.run_id, &entry.task)))
@@ -1613,39 +1625,7 @@ impl TraceStore {
             return Err(TraceError::InvalidInput);
         }
         if state == DeliveryState::ObservedResolved {
-            let task_name = entry
-                .task
-                .strip_prefix("task::")
-                .ok_or(TraceError::InvalidInput)?;
-            let task = task::read(&self.root, task_name)
-                .map_err(|_| TraceError::Io)?
-                .ok_or(TraceError::Missing)?;
-            let index = evidence
-                .strip_prefix(&format!("evidence::{task_name}::"))
-                .and_then(|index| index.parse::<usize>().ok())
-                .and_then(|index| index.checked_sub(1))
-                .ok_or(TraceError::InvalidInput)?;
-            let observed = task.evidence.get(index).ok_or(TraceError::InvalidInput)?;
-            let tree = project::snapshot(&self.root, &project.ignore);
-            if observed.exit != 0
-                || observed.tool != "run"
-                || observed.unix.saturating_mul(1000) < entry.reserved_unix_ms.saturating_sub(1000)
-                || !task::evidence_matches(&task, observed)
-                || observed.inputs != task::evidence_inputs(&task, &tree)
-                || !matches!((&observed.identity, &observed.command), (Some(task::CheckIdentity::Argv { argv }), Some(command)) if argv == command)
-            {
-                return Err(TraceError::InvalidInput);
-            }
-            let record = self.read(request_id)?;
-            let current = rebuild(project, &record)?;
-            let corrective = corrective_state(&current, &entry.concern);
-            if corrective.paths == entry.corrective_state.paths
-                && corrective.facts == entry.corrective_state.facts
-                && (corrective.action.is_none()
-                    || corrective.action == entry.corrective_state.action)
-            {
-                return Err(TraceError::InvalidInput);
-            }
+            validate_resolution(project, &entry, &self.read(request_id)?, evidence)?;
         } else if !matches!(
             state,
             DeliveryState::Delivered
@@ -1664,6 +1644,7 @@ impl TraceStore {
             return Err(TraceError::Conflict);
         }
         let receipt = Receipt {
+            execution: entry.execution.clone(),
             state,
             evidence: evidence.into(),
             checkpoint_id: checkpoint.checkpoint_id.clone(),
@@ -1692,7 +1673,9 @@ impl TraceStore {
         let mut ledger = self.ledger()?;
         let before = ledger.entries.len();
         let id = format!("task::{task_name}");
-        ledger.entries.retain(|_, entry| entry.task != id);
+        ledger.entries.retain(|_, entry| {
+            entry.task != id || !matches!(entry.execution, ExecutionIdentity::Ordinary)
+        });
         let checkpoint_keys = ledger
             .checkpoints
             .iter()
@@ -2068,4 +2051,375 @@ pub fn status(project: &Project) -> Option<RuntimeStatus> {
         status.error = Some(error.to_string());
     }
     Some(status)
+}
+
+impl TraceStore {
+    pub(crate) fn experimental_transaction<T>(
+        &self,
+        initialize: bool,
+        operation: impl FnOnce(&mut Ledger, &pilot::Clock) -> Result<T, pilot::Error>,
+    ) -> Result<T, pilot::Error> {
+        let _tasks = task::store::lock(&self.root).map_err(|_| pilot::Error::Io)?;
+        let _store = self.lock()?;
+        let marker = self.directory().join("experimental.initialized");
+        reject_symlink(&marker)?;
+        let mut ledger = self.ledger().map_err(|error| match error {
+            TraceError::Missing => pilot::Error::Refused(pilot::Refusal::StorageMissing),
+            TraceError::InvalidInput | TraceError::LimitExceeded => {
+                pilot::Error::Refused(pilot::Refusal::StorageCorrupt)
+            }
+            other => other.into(),
+        })?;
+        if !marker.exists() {
+            if !initialize || self.directory().join("experimental").exists() {
+                return Err(pilot::Refusal::StorageMissing.into());
+            }
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&marker)?;
+            file.sync_all()?;
+            #[cfg(unix)]
+            File::open(self.directory())?.sync_all()?;
+        }
+        let clock = pilot::Clock::now()?;
+        let result = operation(&mut ledger, &clock);
+        self.save_ledger(&ledger).map_err(|error| match error {
+            TraceError::LimitExceeded => pilot::Error::Refused(pilot::Refusal::LedgerExhausted),
+            other => other.into(),
+        })?;
+        result
+    }
+    pub(crate) fn experimental_path(
+        &self,
+        run: &str,
+        kind: &str,
+        id: &str,
+    ) -> Result<PathBuf, TraceError> {
+        if !policy::safe_identifier(run)
+            || !policy::safe_identifier(id)
+            || !matches!(kind, "traces" | "captures" | "config")
+        {
+            return Err(TraceError::InvalidInput);
+        }
+        let path = self
+            .directory()
+            .join("experimental")
+            .join(super::calibration::sha256(run.as_bytes()))
+            .join(kind)
+            .join(format!("{}.json", packet::digest(&id)));
+        let mut parent = path.as_path();
+        while parent != self.root {
+            reject_symlink(parent)?;
+            parent = parent.parent().ok_or(TraceError::InvalidInput)?;
+        }
+        Ok(path)
+    }
+    pub(crate) fn save_experimental_payload(
+        &self,
+        run: &str,
+        kind: &str,
+        id: &str,
+        value: &impl Serialize,
+        max: usize,
+    ) -> Result<super::calibration::EvidenceRef, TraceError> {
+        let path = self.experimental_path(run, kind, id)?;
+        if path.exists() {
+            return Err(TraceError::Conflict);
+        }
+        atomic_write(&path, value, max)?;
+        Ok(super::calibration::EvidenceRef {
+            id: id.into(),
+            path: path
+                .strip_prefix(&self.root)
+                .map_err(|_| TraceError::InvalidInput)?
+                .to_string_lossy()
+                .replace('\\', "/"),
+            sha256: super::calibration::sha256(&std::fs::read(path)?),
+        })
+    }
+}
+
+pub fn selected_bindings(
+    project: &Project,
+    task: &task::Task,
+    event: &ObservedEvent,
+    config: &RuntimeConfig,
+) -> Result<(Vec<knowledge::Judgment>, Vec<process::JudgmentBinding>), TraceError> {
+    let (judgments, mut bindings) = definitions(project)?;
+    bindings.retain(|binding| {
+        binding
+            .roles
+            .iter()
+            .any(|role| role.trim_start_matches("role::") == task.role.trim_start_matches("role::"))
+            && binding.checkpoints.contains(&event.kind)
+    });
+    bindings.sort_by(|a, b| {
+        let priority = |binding: &process::JudgmentBinding| {
+            config
+                .policies
+                .iter()
+                .find(|settings| settings.binding_id == binding.id())
+                .map_or(policy::ConcernKind::Expertise, |settings| settings.concern)
+        };
+        (priority(a), a.id()).cmp(&(priority(b), b.id()))
+    });
+    Ok((judgments, bindings))
+}
+
+pub(crate) fn ledger_history(
+    ledger: &Ledger,
+    task: &str,
+    epoch: u64,
+    execution: &ExecutionIdentity,
+) -> Vec<InterventionSummary> {
+    let mut entries = ledger
+        .entries
+        .iter()
+        .filter(|(_, e)| {
+            e.task == task
+                && e.acceptance_epoch == epoch
+                && !e.no_delivery_verified
+                && match (execution, &e.execution) {
+                    (ExecutionIdentity::Ordinary, ExecutionIdentity::Ordinary) => true,
+                    (
+                        ExecutionIdentity::Experimental {
+                            experiment_id: a, ..
+                        },
+                        ExecutionIdentity::Experimental {
+                            experiment_id: b, ..
+                        },
+                    ) => a == b,
+                    _ => false,
+                }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_unstable_by(|(ka, a), (kb, b)| {
+        (a.reserved_unix_ms, ka).cmp(&(b.reserved_unix_ms, kb))
+    });
+    entries
+        .into_iter()
+        .map(|(_, e)| InterventionSummary {
+            request_id: e.request_id.clone(),
+            concern: e.concern.clone(),
+            target: e.target.clone(),
+            state: e.state,
+            evidence_revision: e.material_revision.clone(),
+        })
+        .collect()
+}
+
+pub(crate) fn reserve_guard(
+    project: &Project,
+    ledger: &Ledger,
+    config: &RuntimeConfig,
+    record: &TraceRecord,
+    checkpoint: &str,
+    own: Option<&str>,
+) -> Result<(packet::ExpertPacket, String), &'static str> {
+    if record.provenance != Provenance::LocalCheckpoint {
+        return Err("untrusted_provenance");
+    }
+    if config.mode != ExpertMode::Advisory || record.mode != ExpertMode::Advisory {
+        return Err("shadow_mode");
+    }
+    if config.limits != record.limits
+        || config
+            .policies
+            .iter()
+            .find(|s| s.binding_id == record.settings.binding_id)
+            != Some(&record.settings)
+        || record.runtime_fingerprint.as_ref() != Some(&packet::digest(config))
+    {
+        return Err("runtime_changed");
+    }
+    if replay(record).is_err() {
+        return Err("invalid_record");
+    }
+    if !matches!(
+        record.result.outcome,
+        AdvisoryOutcome::Nudge | AdvisoryOutcome::Escalation
+    ) {
+        return Err("non_actionable");
+    }
+    let current = rebuild(project, record).map_err(|_| "stale_revision")?;
+    if !selected_revision_matches(&current, record) {
+        return Err("stale_revision");
+    }
+    let event = &record.request.packet.event;
+    let key = packet::digest(&(&event.run_id, &event.task));
+    if checkpoint != event.checkpoint_id
+        || ledger.blocked_checkpoints.contains(&key)
+        || ledger
+            .checkpoints
+            .get(&key)
+            .is_none_or(|c| EventStamp::from(c) != *event)
+    {
+        return Err("stale_checkpoint");
+    }
+    let target = policy::concern_target(&current, &record.result);
+    let material = policy::material_fingerprint(&current);
+    let concern = record.settings.concern.code();
+    let entries = ledger
+        .entries
+        .values()
+        .filter(|e| own != Some(e.idempotency_key.as_str()))
+        .collect::<Vec<_>>();
+    if entries.iter().any(|e| {
+        !e.no_delivery_verified
+            && e.state == DeliveryState::Unknown
+            && e.task == event.task
+            && e.concern == concern
+            && e.target == target
+            && e.request_id != record.request.request_id
+    }) {
+        return Err("uncertain_delivery");
+    }
+    if entries.iter().any(|e| {
+        !e.no_delivery_verified
+            && e.task == event.task
+            && e.acceptance_epoch == current.revision.acceptance_epoch
+            && ((e.concern == concern && e.target == target && e.material_revision == material)
+                || (e.run_id == event.run_id && e.checkpoint_id == event.checkpoint_id))
+    }) {
+        return Err("duplicate_delivery");
+    }
+    if entries
+        .iter()
+        .filter(|e| {
+            e.task == event.task
+                && e.state != DeliveryState::ObservedResolved
+                && !e.no_delivery_verified
+        })
+        .count()
+        >= config.trace_limits.unresolved_per_task
+    {
+        return Err("ledger_exhausted");
+    }
+    if let Some(own) = own {
+        return Ok((current, own.into()));
+    }
+    let original = packet::digest(&(
+        "blabla.expert.delivery.v1",
+        &event.task,
+        current.revision.acceptance_epoch,
+        &current.binding_id,
+        current.revision.fingerprint(),
+        &material,
+        concern,
+        &target,
+    ));
+    let mut id = original.clone();
+    let mut attempt = 0;
+    while ledger.entries.contains_key(&id) {
+        if attempt >= ledger.entries.len() {
+            return Err("ledger_exhausted");
+        }
+        attempt += 1;
+        id = packet::digest(&("blabla.expert.delivery.attempt.v1", &original, attempt));
+    }
+    Ok((current, id))
+}
+pub(crate) fn suppression_entry(
+    record: &TraceRecord,
+    current: &packet::ExpertPacket,
+    idempotency_key: String,
+    now: u64,
+) -> SuppressionEntry {
+    let event = &record.request.packet.event;
+    let concern = record.settings.concern.code();
+    SuppressionEntry {
+        execution: record.execution.clone(),
+        request_id: record.request.request_id.clone(),
+        run_id: event.run_id.clone(),
+        task: event.task.clone(),
+        acceptance_epoch: current.revision.acceptance_epoch,
+        binding_id: current.binding_id.clone(),
+        relevant_revision: current.revision.fingerprint(),
+        material_revision: policy::material_fingerprint(current),
+        concern: concern.into(),
+        target: policy::concern_target(current, &record.result),
+        checkpoint_id: event.checkpoint_id.clone(),
+        state: DeliveryState::Unknown,
+        idempotency_key,
+        reserved_unix_ms: now,
+        receipts: vec![],
+        no_delivery_verified: false,
+        corrective_state: corrective_state(current, concern),
+    }
+}
+
+pub(crate) fn validate_resolution(
+    project: &Project,
+    entry: &SuppressionEntry,
+    record: &TraceRecord,
+    evidence: &str,
+) -> Result<(), TraceError> {
+    let task_name = entry
+        .task
+        .strip_prefix("task::")
+        .ok_or(TraceError::InvalidInput)?;
+    let task = task::read(&project.manifest.root, task_name)
+        .map_err(|_| TraceError::Io)?
+        .ok_or(TraceError::Missing)?;
+    let index = evidence
+        .strip_prefix(&format!("evidence::{task_name}::"))
+        .and_then(|index| index.parse::<usize>().ok())
+        .and_then(|index| index.checked_sub(1))
+        .ok_or(TraceError::InvalidInput)?;
+    let observed = task.evidence.get(index).ok_or(TraceError::InvalidInput)?;
+    let tree = project::snapshot(&project.manifest.root, &project.ignore);
+    if observed.exit != 0
+        || observed.tool != "run"
+        || observed.unix.saturating_mul(1000) < entry.reserved_unix_ms.saturating_sub(1000)
+        || !task::evidence_matches(&task, observed)
+        || observed.inputs != task::evidence_inputs(&task, &tree)
+        || !matches!((&observed.identity, &observed.command), (Some(task::CheckIdentity::Argv { argv }), Some(command)) if argv == command)
+    {
+        return Err(TraceError::InvalidInput);
+    }
+
+    let current = rebuild(project, record)?;
+    let corrective = corrective_state(&current, &entry.concern);
+    if corrective.paths == entry.corrective_state.paths
+        && corrective.facts == entry.corrective_state.facts
+        && (corrective.action.is_none() || corrective.action == entry.corrective_state.action)
+    {
+        return Err(TraceError::InvalidInput);
+    }
+
+    Ok(())
+}
+
+fn read_experimental_json<T: DeserializeOwned>(path: &Path, max: usize) -> Result<T, TraceError> {
+    reject_symlink(path)?;
+    let file = File::open(path)?;
+    if !file.metadata()?.is_file() || file.metadata()?.len() > max as u64 {
+        return Err(TraceError::LimitExceeded);
+    }
+    let mut bytes = Vec::new();
+    file.take(max as u64 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > max {
+        return Err(TraceError::LimitExceeded);
+    }
+    let StrictValue(value) =
+        serde_json::from_slice(&bytes).map_err(|_| TraceError::InvalidInput)?;
+    super::native::validate_value(&value, "", 0).map_err(|_| TraceError::InvalidInput)?;
+    serde_json::from_value(value).map_err(|_| TraceError::InvalidInput)
+}
+
+fn durable_directory(directory: &Path) -> Result<(), TraceError> {
+    let mut missing = Vec::new();
+    let mut path = directory;
+    while !path.exists() {
+        missing.push(path.to_path_buf());
+        path = path.parent().ok_or(TraceError::InvalidInput)?;
+    }
+    std::fs::create_dir_all(directory)?;
+    #[cfg(unix)]
+    for created in missing.iter().rev() {
+        File::open(created)?.sync_all()?;
+        File::open(created.parent().ok_or(TraceError::InvalidInput)?)?.sync_all()?;
+    }
+    Ok(())
 }

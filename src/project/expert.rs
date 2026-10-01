@@ -335,6 +335,22 @@ impl PacketMemory {
     }
 }
 
+pub fn resolve_references(
+    project: &Project,
+    identities: &BTreeSet<String>,
+) -> Result<BTreeMap<String, String>, PacketError> {
+    let memory = PacketMemory::load(project)?;
+    identities
+        .iter()
+        .map(|identity| {
+            memory
+                .resolve(project, identity)
+                .map(|source| (identity.clone(), source))
+                .ok_or(PacketError::UnresolvedReference)
+        })
+        .collect()
+}
+
 pub fn build_packet(
     project: &Project,
     task: &Task,

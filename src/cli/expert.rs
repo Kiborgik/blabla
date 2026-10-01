@@ -1,4 +1,6 @@
 use super::{emit_error, error, project as project_cli, write_json};
+use blabla::expert::calibration::{self, EvidenceRef, FitSavedRequest, MAX_FIT_BYTES};
+use blabla::expert::native::{self as native_core, ExecutionIdentity};
 use blabla::expert::packet::{self};
 use blabla::expert::policy::{self, AdvisoryOutcome, ExpertResult, PolicySettings};
 use blabla::expert::provider::{
@@ -9,10 +11,13 @@ use blabla::expert::trace::{
     self, ExpertisePair, Provenance, RuntimeConfig, TraceError, TraceLimits, TraceRecord,
     TraceStore,
 };
-use blabla::expert::{DeliveryState, ExpertMode, ObservedEvent};
+use blabla::expert::{ContextSlot, DeliveryState, ExpertMode, ObservedEvent};
 use blabla::project::{Project, task};
 use clap::Subcommand;
+mod native;
+mod pilot;
 use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,17 +25,35 @@ use std::time::{Duration, Instant};
 
 #[derive(Subcommand)]
 pub(super) enum Action {
+    PreflightDevelopmentCalibration {
+        #[arg(long)]
+        input: PathBuf,
+    },
+    FitSaved {
+        #[arg(long)]
+        input: PathBuf,
+    },
     Evaluate {
         #[arg(long)]
         config: Option<PathBuf>,
         #[arg(long, num_args = 1..)]
         provider_command: Vec<String>,
     },
+    Native {
+        #[command(subcommand)]
+        action: native::Action,
+    },
+    Pilot {
+        #[command(subcommand)]
+        action: pilot::Action,
+    },
     Checkpoint {
         #[arg(long)]
         event: PathBuf,
         #[arg(long)]
-        config: PathBuf,
+        config: Option<PathBuf>,
+        #[arg(long)]
+        experimental_run: Option<String>,
     },
     Delivery {
         request_id: String,
@@ -102,6 +125,403 @@ fn emit(value: &impl Serialize, json: bool) -> i32 {
             })
     };
     if result.is_ok() { 0 } else { 4 }
+}
+
+fn read_fit_bytes(path: &Path) -> Result<Vec<u8>, TraceError> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        if std::fs::symlink_metadata(&current)?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(TraceError::InvalidInput);
+        }
+    }
+    let metadata = std::fs::metadata(path)?;
+    if !metadata.is_file() {
+        return Err(TraceError::InvalidInput);
+    }
+    if metadata.len() > MAX_FIT_BYTES as u64 {
+        return Err(TraceError::LimitExceeded);
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(MAX_FIT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_FIT_BYTES {
+        return Err(TraceError::LimitExceeded);
+    }
+    Ok(bytes)
+}
+
+fn read_fit_evidence(root: &Path, evidence: &EvidenceRef) -> Result<Vec<u8>, TraceError> {
+    if evidence.path.is_empty()
+        || evidence.path.contains(['\\', ':', '\0'])
+        || evidence
+            .path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+        || Path::new(&evidence.path)
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err(TraceError::InvalidInput);
+    }
+    let bytes = read_fit_bytes(&root.join(&evidence.path))?;
+    if calibration::sha256(&bytes) != evidence.sha256 {
+        return Err(TraceError::InvalidInput);
+    }
+    Ok(bytes)
+}
+
+fn validate_fit_artifacts(root: &Path, input: &FitSavedRequest) -> Result<(), TraceError> {
+    let bytes = read_fit_evidence(root, &input.request_manifest.requests_jsonl)?;
+    let mut seen = BTreeSet::new();
+    for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+        if line.last() != Some(&b'\n') || seen.len() >= input.executions.len() {
+            return Err(TraceError::InvalidInput);
+        }
+        let request: EvaluationRequest = trace::decode_json(line, trace::MAX_EVENT_BYTES)?;
+        if !seen.insert(request.request_id.clone())
+            || !input
+                .executions
+                .iter()
+                .any(|execution| execution.request == request)
+        {
+            return Err(TraceError::InvalidInput);
+        }
+    }
+    if seen.len() != input.executions.len() {
+        return Err(TraceError::InvalidInput);
+    }
+    let mut commands = BTreeMap::new();
+    for execution in &input.executions {
+        let evidence = &execution.command_evidence;
+        if let Some(hash) = commands.get(&evidence.path) {
+            if *hash != &evidence.sha256 {
+                return Err(TraceError::InvalidInput);
+            }
+        } else {
+            read_fit_evidence(root, evidence)?;
+            commands.insert(&evidence.path, &evidence.sha256);
+        }
+    }
+    Ok(())
+}
+
+fn fit_reference(
+    identity: &str,
+    task: &task::Task,
+    memory: &mut BTreeSet<String>,
+) -> Result<(), TraceError> {
+    if let Some(name) = identity.strip_prefix("task::") {
+        if name != task.name {
+            return Err(TraceError::InvalidInput);
+        }
+    } else if identity.starts_with("evidence::") {
+        if !task.evidence.iter().enumerate().any(|(index, evidence)| {
+            identity == format!("evidence::{}::{}", task.name, index + 1)
+                && evidence.tool == "run"
+                && matches!((&evidence.identity, &evidence.command),
+                    (Some(task::CheckIdentity::Argv { argv }), Some(command)) if argv == command)
+        }) {
+            return Err(TraceError::InvalidInput);
+        }
+    } else {
+        memory.insert(identity.to_owned());
+    }
+    Ok(())
+}
+
+fn validate_fit_project<'a>(
+    project: &Project,
+    manifest: &calibration::CalibrationRequestManifest,
+    requests: impl IntoIterator<Item = &'a EvaluationRequest>,
+    current_limits: Option<&blabla::expert::ExpertLimits>,
+) -> Result<(), TraceError> {
+    if !blabla::project::expert::validate_bindings(project).is_empty() {
+        return Err(TraceError::InvalidInput);
+    }
+    let (judgments, bindings) = trace::definitions(project)?;
+    let mut references = BTreeSet::new();
+    for request in requests {
+        let packet = &request.packet;
+        let name = packet
+            .event
+            .task
+            .strip_prefix("task::")
+            .ok_or(TraceError::InvalidInput)?;
+        if name.is_empty()
+            || name.len() > 128
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(TraceError::InvalidInput);
+        }
+        let task = task::read(&project.manifest.root, name)
+            .map_err(|_| TraceError::Io)?
+            .ok_or(TraceError::InvalidInput)?;
+        let binding = bindings
+            .iter()
+            .find(|binding| binding.id() == packet.binding_id)
+            .ok_or(TraceError::InvalidInput)?;
+        if task.name != name
+            || !binding.roles.iter().any(|role| {
+                role.trim_start_matches("role::") == task.role.trim_start_matches("role::")
+            })
+            || !binding.checkpoints.contains(&packet.event.kind)
+            || packet.revision.identities.get(&binding.id()) != Some(&packet::digest(binding))
+            || judgments
+                .iter()
+                .find(|judgment| judgment.id() == binding.judgment)
+                != Some(&request.judgment)
+        {
+            return Err(TraceError::InvalidInput);
+        }
+        if let Some(limits) = current_limits {
+            if task.state != "accepted" || packet.revision.acceptance_epoch != task.acceptance_epoch
+            {
+                return Err(TraceError::InvalidInput);
+            }
+            let stamp = &packet.event;
+            let event = ObservedEvent {
+                event_id: stamp.event_id.clone(),
+                run_id: stamp.run_id.clone(),
+                task: stamp.task.clone(),
+                checkpoint_id: stamp.checkpoint_id.clone(),
+                sequence: stamp.sequence,
+                previous_sequence: stamp.previous_sequence,
+                unix_ms: stamp.unix_ms,
+                kind: stamp.kind,
+                host: stamp.host.clone(),
+                observations: packet
+                    .context
+                    .values()
+                    .flat_map(packet::ContextValue::observations)
+                    .filter(|observation| !observation.capture.starts_with("local:"))
+                    .cloned()
+                    .collect(),
+            };
+            let rebuilt = blabla::project::expert::build_packet(
+                project,
+                &task,
+                &event,
+                binding,
+                limits,
+                &packet.history,
+            )
+            .map_err(|_| TraceError::InvalidInput)?;
+            if rebuilt != *packet {
+                return Err(TraceError::InvalidInput);
+            }
+        }
+        for (slot, context) in &packet.context {
+            if matches!(
+                slot,
+                ContextSlot::Goal
+                    | ContextSlot::Mission
+                    | ContextSlot::System
+                    | ContextSlot::Candidates
+                    | ContextSlot::Rules
+            ) {
+                let declared = binding.context.get(slot).cloned().unwrap_or_else(|| {
+                    if *slot == ContextSlot::Goal {
+                        task.goal
+                            .as_ref()
+                            .map(|goal| {
+                                if goal.starts_with("goal::") {
+                                    goal.clone()
+                                } else {
+                                    format!("goal::{goal}")
+                                }
+                            })
+                            .into_iter()
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                });
+                if context
+                    .observations()
+                    .iter()
+                    .any(|observation| !declared.contains(&observation.id))
+                {
+                    return Err(TraceError::InvalidInput);
+                }
+            }
+        }
+        for identity in packet.references.keys() {
+            fit_reference(identity, &task, &mut references)?;
+        }
+        for case in manifest
+            .cases
+            .iter()
+            .filter(|case| case.primary_request_id == request.request_id)
+        {
+            for identity in case.gold.acceptable_reference_sets.iter().flatten() {
+                fit_reference(identity, &task, &mut references)?;
+            }
+        }
+    }
+    blabla::project::expert::resolve_references(project, &references)
+        .map_err(|_| TraceError::InvalidInput)?;
+    Ok(())
+}
+
+fn fit_saved(project: &Project, path: &Path) -> Result<Vec<u8>, TraceError> {
+    let input = calibration::decode_fit_saved(&read_fit_bytes(path)?)?;
+    let root = &project.manifest.root;
+    let protocol = read_fit_evidence(root, &input.protocol_evidence)?;
+    let plan = read_fit_evidence(root, &input.plan_evidence)?;
+    let manifest = read_fit_evidence(root, &input.manifest_evidence)?;
+    let context = calibration::validate_fit_context(&input, &protocol, &plan, &manifest)?;
+    validate_fit_artifacts(root, &input)?;
+    validate_fit_project(
+        project,
+        &input.request_manifest,
+        input.executions.iter().map(|execution| &execution.request),
+        None,
+    )?;
+    calibration::encode_fit_result(&calibration::fit_saved(&input, &context)?)
+}
+
+fn preflight_file(root: &Path, path: &Path) -> Result<EvidenceRef, TraceError> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| TraceError::InvalidInput)?;
+    let path = relative.to_string_lossy().replace('\\', "/");
+    if path.is_empty()
+        || path.contains([':', '\0'])
+        || path
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(TraceError::InvalidInput);
+    }
+    let bytes = read_fit_bytes(&root.join(&path))?;
+    Ok(EvidenceRef {
+        id: format!("file-{}", calibration::sha256(path.as_bytes())),
+        path,
+        sha256: calibration::sha256(&bytes),
+    })
+}
+
+fn preflight_project_files(
+    manifest: &blabla::project::Manifest,
+) -> Result<Vec<EvidenceRef>, TraceError> {
+    let root = &manifest.root;
+    let mut paths = BTreeSet::from([manifest.path.clone()]);
+    paths.extend(manifest.entries.iter().map(|entry| entry.path.clone()));
+    paths.extend(
+        manifest
+            .knowledge
+            .iter()
+            .chain(manifest.mission.iter())
+            .chain(manifest.system.iter())
+            .chain(manifest.process.iter())
+            .chain(manifest.goal.iter())
+            .map(|entry| entry.path.clone()),
+    );
+    paths.extend(
+        manifest
+            .ignores
+            .iter()
+            .filter_map(|declaration| match declaration {
+                blabla::project::ignore::IgnoreDeclaration::List { path, .. } => Some(path.clone()),
+                _ => None,
+            }),
+    );
+    paths
+        .iter()
+        .map(|path| preflight_file(root, path))
+        .collect()
+}
+
+fn preflight_development(
+    project: &Project,
+    path: &Path,
+    mut files: Vec<EvidenceRef>,
+) -> Result<calibration::PreflightDevelopmentResult, TraceError> {
+    let input: calibration::PreflightDevelopmentRequest =
+        trace::decode_json(&read_fit_bytes(path)?, MAX_FIT_BYTES)?;
+    let root = &project.manifest.root;
+    let protocol = read_fit_evidence(root, &input.protocol_evidence)?;
+    let plan = read_fit_evidence(root, &input.plan_evidence)?;
+    let manifest = read_fit_evidence(root, &input.manifest_evidence)?;
+    let config = read_fit_evidence(root, &input.runtime_config_evidence)?;
+    let inputs =
+        calibration::preflight_development_inputs(&input, &protocol, &plan, &manifest, &config)?;
+    let requests = read_fit_evidence(root, inputs.requests_evidence())?;
+    let mut preflight = calibration::preflight_development_calibration(inputs, &requests)?;
+    let mut paths = BTreeSet::new();
+    for request in &preflight.requests {
+        let name = request
+            .packet
+            .event
+            .task
+            .strip_prefix("task::")
+            .ok_or(TraceError::InvalidInput)?;
+        if name.is_empty()
+            || name.len() > 128
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(TraceError::InvalidInput);
+        }
+        paths.insert(root.join(format!(".blabla/tasks/{name}.json")));
+        for (path, digest) in &request.packet.revision.paths {
+            if digest.is_some() {
+                paths.insert(root.join(path));
+            }
+        }
+    }
+    for path in paths {
+        files.push(preflight_file(root, &path)?);
+    }
+    validate_fit_project(
+        project,
+        &preflight.request_manifest,
+        &preflight.requests,
+        Some(&preflight.plan.limits),
+    )?;
+    for evidence in &files {
+        read_fit_evidence(root, evidence)?;
+    }
+    preflight.result.referenced_files.extend(files);
+    preflight
+        .result
+        .referenced_files
+        .sort_by(|a, b| (&a.path, &a.id).cmp(&(&b.path, &b.id)));
+    let mut hashes = BTreeMap::new();
+    for evidence in &preflight.result.referenced_files {
+        if hashes
+            .insert(&evidence.path, &evidence.sha256)
+            .is_some_and(|old| old != &evidence.sha256)
+        {
+            return Err(TraceError::InvalidInput);
+        }
+    }
+    preflight
+        .result
+        .referenced_files
+        .dedup_by(|a, b| a.path == b.path);
+    Ok(preflight.result)
+}
+
+fn preflight_command(
+    explicit: Option<&Path>,
+    cwd: &Path,
+    input: &Path,
+) -> Result<calibration::PreflightDevelopmentResult, TraceError> {
+    let path = blabla::project::locate(explicit, cwd).map_err(|_| TraceError::InvalidInput)?;
+    read_fit_bytes(&path)?;
+    let manifest = blabla::project::read_manifest(&path).map_err(|_| TraceError::InvalidInput)?;
+    let files = preflight_project_files(&manifest)?;
+    let project = blabla::project::load(manifest).map_err(|_| TraceError::InvalidInput)?;
+    preflight_development(&project, input, files)
 }
 
 fn load_config(path: Option<&Path>) -> Result<RuntimeConfig, TraceError> {
@@ -253,6 +673,7 @@ fn evaluate_lines(config: &RuntimeConfig, command: &[String], json: bool) -> i32
 }
 
 struct CheckpointOutput {
+    execution: ExecutionIdentity,
     mode: ExpertMode,
     provider_calls: usize,
     results: Vec<CheckpointResult>,
@@ -271,7 +692,8 @@ impl Serialize for CheckpointOutput {
             .iter()
             .filter_map(|result| result.request_id.as_ref())
             .collect::<Vec<_>>();
-        let mut output = serializer.serialize_struct("CheckpointCapture", 7)?;
+        let mut output = serializer.serialize_struct("CheckpointCapture", 8)?;
+        output.serialize_field("execution", &self.execution)?;
         output.serialize_field("mode", &self.mode)?;
         output.serialize_field(
             "capture_status",
@@ -314,17 +736,45 @@ fn request_id(event: &ObservedEvent, binding: &str) -> String {
     )
 }
 
-fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json: bool) -> i32 {
+fn checkpoint(
+    project: &Project,
+    event_path: &Path,
+    config: &RuntimeConfig,
+    experimental_run: Option<&str>,
+    json: bool,
+) -> i32 {
     let store = match TraceStore::new(&project.manifest.root, config.trace_limits.clone()) {
         Ok(store) => store,
         Err(error) => return fail(error, json),
     };
-    if let Err(error) = store.set_runtime(config) {
-        return fail(error, json);
-    }
+    let experimental = if let Some(run) = experimental_run {
+        let event: ObservedEvent = match trace::read_json(event_path, trace::MAX_EVENT_BYTES) {
+            Ok(event) => event,
+            Err(error) => return fail(error, json),
+        };
+        match native_core::run::checkpoint_input(&store, project, run, &event, Some(config)) {
+            Ok((_, capture, execution)) => Some((capture, execution)),
+            Err(error) => return native::fail(error, json),
+        }
+    } else {
+        if let Err(error) = store.set_runtime(config) {
+            return fail(error, json);
+        }
+        None
+    };
+    let execution = experimental
+        .as_ref()
+        .map(|(_, e)| e.clone())
+        .unwrap_or(ExecutionIdentity::Ordinary);
     if config.mode == ExpertMode::Off {
+        if let Some(run) = experimental_run
+            && let Err(error) = native_core::run::store_records(&store, project, run, &mut [])
+        {
+            return native::fail(error, json);
+        }
         return emit(
             &CheckpointOutput {
+                execution: execution.clone(),
                 mode: ExpertMode::Off,
                 provider_calls: 0,
                 results: vec![],
@@ -359,11 +809,13 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
             return fail(error, json);
         }
         return emit(
-            &serde_json::json!({"mode":"shadow","capture_status":"abstained","provider_calls":0,"proposal_ids":[],"captured":1,"omitted_evaluations":0,"observation_gaps":event.host.gaps}),
+            &serde_json::json!({"execution":execution,"mode":"shadow","capture_status":"abstained","provider_calls":0,"proposal_ids":[],"captured":1,"omitted_evaluations":0,"observation_gaps":event.host.gaps}),
             json,
         );
     }
-    if let Err(error) = store.advance_checkpoint(&event) {
+    if experimental.is_none()
+        && let Err(error) = store.advance_checkpoint(&event)
+    {
         if matches!(error, TraceError::LedgerExhausted | TraceError::Stale) {
             let reason = if error == TraceError::LedgerExhausted {
                 "ledger_exhausted"
@@ -374,7 +826,7 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
                 return fail(error, json);
             }
             return emit(
-                &serde_json::json!({"mode":"shadow","capture_status":"abstained","provider_calls":0,"proposal_ids":[],"captured":1,"omitted_evaluations":0}),
+                &serde_json::json!({"execution":execution,"mode":"shadow","capture_status":"abstained","provider_calls":0,"proposal_ids":[],"captured":1,"omitted_evaluations":0}),
                 json,
             );
         }
@@ -391,6 +843,7 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
     if task.state != "accepted" {
         return emit(
             &CheckpointOutput {
+                execution: execution.clone(),
                 mode: ExpertMode::Shadow,
                 provider_calls: 0,
                 results: vec![CheckpointResult {
@@ -407,27 +860,10 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
             json,
         );
     }
-    let (judgments, mut bindings) = match trace::definitions(project) {
-        Ok(definitions) => definitions,
+    let (judgments, bindings) = match trace::selected_bindings(project, &task, &event, config) {
+        Ok(value) => value,
         Err(error) => return fail(error, json),
     };
-    bindings.retain(|binding| {
-        binding
-            .roles
-            .iter()
-            .any(|role| role.trim_start_matches("role::") == task.role.trim_start_matches("role::"))
-            && binding.checkpoints.contains(&event.kind)
-    });
-    bindings.sort_by(|a, b| {
-        let priority = |binding: &blabla::memory::process::JudgmentBinding| {
-            config
-                .policies
-                .iter()
-                .find(|settings| settings.binding_id == binding.id())
-                .map_or(policy::ConcernKind::Expertise, |settings| settings.concern)
-        };
-        (priority(a), a.id()).cmp(&(priority(b), b.id()))
-    });
     let history = match store.history(&event.task, task.acceptance_epoch) {
         Ok(history) => history,
         Err(error) => return fail(error, json),
@@ -449,13 +885,34 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
             });
             continue;
         }
+        let mut projected_event = event.clone();
+        let projected_history;
+        let selected_history = if let Some((capture, _)) = &experimental {
+            let Some(projection) = capture
+                .projections
+                .iter()
+                .find(|p| p.binding_id == binding.id())
+            else {
+                results.push(CheckpointResult {
+                    binding_id: binding.id(),
+                    request_id: None,
+                    reason: Some("judgment_budget".into()),
+                });
+                continue;
+            };
+            projected_event.observations = projection.observations.clone();
+            projected_history = projection.history.clone();
+            &projected_history
+        } else {
+            &history
+        };
         let packet = match blabla::project::expert::build_packet(
             project,
             &task,
-            &event,
+            &projected_event,
             binding,
             &config.limits,
-            &history,
+            selected_history,
         ) {
             Ok(packet) => packet,
             Err(error) => {
@@ -467,8 +924,36 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
                 continue;
             }
         };
+        if let Some((capture, _)) = &experimental
+            && capture
+                .projections
+                .iter()
+                .find(|p| p.binding_id == binding.id())
+                .is_none_or(|p| p.revision != packet.revision || p.packet_hash != packet.hash)
+        {
+            return native::fail(
+                blabla::expert::pilot::Error::Refused(
+                    blabla::expert::pilot::Refusal::StaleRevision,
+                ),
+                json,
+            );
+        }
         let request = EvaluationRequest {
-            request_id: request_id(&event, &binding.id()),
+            request_id: if experimental.is_some() {
+                format!(
+                    "native-request-{}",
+                    packet::digest(&(
+                        &event.run_id,
+                        &event.event_id,
+                        &event.task,
+                        &event.checkpoint_id,
+                        &binding.id(),
+                        packet.revision.acceptance_epoch
+                    ))
+                )
+            } else {
+                request_id(&event, &binding.id())
+            },
             packet,
             judgment: judgment.clone(),
             question_fingerprint: policy::question_fingerprint(judgment),
@@ -578,6 +1063,30 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
             )
         );
         let responses = if let Some(configured) = &config.provider {
+            let timeout = if let Some(run) = experimental_run {
+                match native_core::run::reserve_provider(&store, project, run, &group) {
+                    Ok((_, deadline)) => match blabla::expert::pilot::Clock::now() {
+                        Ok(clock) => match deadline
+                            .checked_sub(clock.boottime_ms)
+                            .filter(|remaining| *remaining > 0)
+                        {
+                            Some(remaining) => remaining,
+                            None => {
+                                return native::fail(
+                                    blabla::expert::pilot::Error::Refused(
+                                        blabla::expert::pilot::Refusal::Expired,
+                                    ),
+                                    json,
+                                );
+                            }
+                        },
+                        Err(error) => return native::fail(error, json),
+                    },
+                    Err(error) => return native::fail(error, json),
+                }
+            } else {
+                config.limits.request_timeout_ms
+            };
             let mut provider = match CommandProvider::new(
                 configured.argv.clone(),
                 configured.identity.clone(),
@@ -587,7 +1096,7 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
                 Err(_) => return fail(TraceError::InvalidInput, json),
             };
             provider_calls += 1;
-            let deadline = Instant::now() + Duration::from_millis(config.limits.request_timeout_ms);
+            let deadline = Instant::now() + Duration::from_millis(timeout);
             if group.len() == 1 {
                 vec![provider.evaluate(&group[0], deadline, &AtomicBool::new(false))]
             } else {
@@ -652,7 +1161,8 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
                     trace::suppress(&mut record, "expertise_pair_missing");
                 }
             }
-            if config.mode == ExpertMode::Advisory
+            if experimental.is_none()
+                && config.mode == ExpertMode::Advisory
                 && trace::promotion_matches(config, &record, &record.request.packet)
             {
                 record.mode = ExpertMode::Advisory;
@@ -676,7 +1186,9 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
                 proposed = true;
             }
         }
-        if let Err(error) = store.record(record) {
+        if experimental.is_none()
+            && let Err(error) = store.record(record)
+        {
             return fail(error, json);
         }
         results.push(CheckpointResult {
@@ -684,6 +1196,11 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
             request_id: Some(record.request.request_id.clone()),
             reason: None,
         });
+    }
+    if let Some(run) = experimental_run
+        && let Err(error) = native_core::run::store_records(&store, project, run, &mut records)
+    {
+        return native::fail(error, json);
     }
     for result in &results {
         if let Some(reason) = &result.reason
@@ -710,6 +1227,7 @@ fn checkpoint(project: &Project, event_path: &Path, config: &RuntimeConfig, json
     };
     emit(
         &CheckpointOutput {
+            execution: execution.clone(),
             mode,
             provider_calls,
             usage: trace::aggregate_usage(&records),
@@ -728,6 +1246,12 @@ fn settings_for<'a>(
 
 pub(super) fn execute(action: Action, explicit: Option<&Path>, cwd: &Path, json: bool) -> i32 {
     match action {
+        Action::PreflightDevelopmentCalibration { input } => {
+            match preflight_command(explicit, cwd, &input) {
+                Ok(result) => emit(&result, json),
+                Err(error) => fail(error, json),
+            }
+        }
         Action::Evaluate {
             config,
             provider_command,
@@ -740,7 +1264,7 @@ pub(super) fn execute(action: Action, explicit: Option<&Path>, cwd: &Path, json:
                 Ok(record) => record,
                 Err(error) => return fail(error, json),
             };
-            match trace::replay(&record) {
+            match native_core::replay_report(&record) {
                 Ok(result) => emit(&result, json),
                 Err(_) => fail(TraceError::InvalidInput, json),
             }
@@ -750,11 +1274,79 @@ pub(super) fn execute(action: Action, explicit: Option<&Path>, cwd: &Path, json:
                 Ok(project) => project,
                 Err(exit) => return exit,
             };
-            if let Action::Checkpoint { event, config } = action {
-                return match load_config(Some(&config)) {
-                    Ok(config) => checkpoint(&project, &event, &config, json),
+            if let Action::FitSaved { input } = action {
+                return match fit_saved(&project, &input) {
+                    Ok(bytes) => {
+                        use std::io::Write;
+                        if io::stdout().lock().write_all(&bytes).is_ok() {
+                            0
+                        } else {
+                            4
+                        }
+                    }
                     Err(error) => fail(error, json),
                 };
+            }
+            match action {
+                Action::Native { action } => return native::run(&project, action, json),
+                Action::Pilot { action } => return pilot::run(&project, action, json),
+                Action::Checkpoint {
+                    event,
+                    config,
+                    experimental_run,
+                } => {
+                    let selected = if let Some(run) = &experimental_run {
+                        let store =
+                            match TraceStore::new(&project.manifest.root, TraceLimits::default()) {
+                                Ok(s) => s,
+                                Err(e) => return fail(e, json),
+                            };
+                        let frozen = match native_core::run::runtime_config(&store, run) {
+                            Ok(c) => c,
+                            Err(e) => return native::fail(e, json),
+                        };
+                        if let Some(path) = &config {
+                            let supplied = match load_config(Some(path)) {
+                                Ok(c) => c,
+                                Err(e) => return fail(e, json),
+                            };
+                            let raw_hash = match std::fs::read(path) {
+                                Ok(bytes) => calibration::sha256(&bytes),
+                                Err(_) => return fail(TraceError::Io, json),
+                            };
+                            let expected_hash =
+                                match native_core::run::runtime_config_sha256(&store, run) {
+                                    Ok(hash) => hash,
+                                    Err(error) => return native::fail(error, json),
+                                };
+                            if supplied != frozen || raw_hash != expected_hash {
+                                return native::fail(
+                                    blabla::expert::pilot::Error::Refused(
+                                        blabla::expert::pilot::Refusal::RuntimeChanged,
+                                    ),
+                                    json,
+                                );
+                            }
+                        }
+                        frozen
+                    } else {
+                        let Some(path) = config else {
+                            return fail(TraceError::InvalidInput, json);
+                        };
+                        match load_config(Some(&path)) {
+                            Ok(c) => c,
+                            Err(e) => return fail(e, json),
+                        }
+                    };
+                    return checkpoint(
+                        &project,
+                        &event,
+                        &selected,
+                        experimental_run.as_deref(),
+                        json,
+                    );
+                }
+                _ => (),
             }
             let store = match TraceStore::new(&project.manifest.root, TraceLimits::default()) {
                 Ok(store) => store,

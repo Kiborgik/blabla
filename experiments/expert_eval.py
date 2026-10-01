@@ -606,26 +606,57 @@ def main(argv=None):
     calibration_parser.add_argument("--development", type=Path, required=True)
     calibration_parser.add_argument("--protocol", type=Path, default=DEFAULT_DATA / "protocol.json")
     calibration_parser.add_argument("--policy", type=Path, required=True)
+    live_calibration_parser = commands.add_parser("calibrate-live")
+    for flag in ("--protocol", "--development", "--requests", "--fit-plan", "--config", "--project", "--policy"):
+        live_calibration_parser.add_argument(flag, type=Path, required=True)
+    live_calibration_parser.add_argument("--timeout", type=float, default=120)
+    live_calibration_parser.add_argument("--max-wall-seconds", type=float, default=600)
     live_parser = commands.add_parser("live")
     live_parser.add_argument("--protocol", type=Path, required=True)
     live_parser.add_argument("--out", type=Path, required=True)
+    live_parser.add_argument("--native-plan", type=Path)
+    live_parser.add_argument("--native-projects", type=Path, help="JSON file mapping run IDs to absolute prepared project roots")
     args = parser.parse_args(argv)
+    if args.command == "live" and (args.native_plan is None) != (args.native_projects is None):
+        parser.error("--native-plan and --native-projects are required together")
     try:
-        protocol = load_protocol(args.protocol)
-        if args.command == "replay":
-            result = replay(args.data / args.split, protocol)
-            if args.runtime_trace is not None:
-                result["runtime_replay"] = runtime_replay(args.runtime_trace)
-        elif args.command == "calibrate":
-            result = calibrate(args.development, protocol)
+        if args.command == "calibrate-live":
+            if __package__:
+                from .expert_calibrate_live import calibrate_live
+            else:
+                from expert_calibrate_live import calibrate_live
+            result = calibrate_live(args.protocol, args.development, args.requests, args.fit_plan,
+                args.config, args.project, args.policy, timeout=args.timeout, max_wall_seconds=args.max_wall_seconds)
+            print(json.dumps({"status": result["status"], "kind": result["kind"], "output": str(args.policy), "promotion_records": len(result["promotion_records"])}))
+            return 4 if result["status"] == "incomplete" else 0
+        exit_code = None
+        if args.command == "live" and args.native_plan is not None:
+            if __package__:
+                from . import expert_native_live
+            else:
+                import expert_native_live
+            try:
+                result = expert_native_live.live_native(args.protocol, args.native_plan, read_json(args.native_projects))
+            except expert_native_live.native.Failure as error:
+                parser.exit(error.exit_code, "expert evaluation failed: " + str(error)[:2048] + "\n")
+            exit_code = (result.get("uncertainty") or {}).get("exit_code", 0)
         else:
-            result = live(protocol, args.protocol.parent)
+            protocol = load_protocol(args.protocol)
+            if args.command == "replay":
+                result = replay(args.data / args.split, protocol)
+                if args.runtime_trace is not None:
+                    result["runtime_replay"] = runtime_replay(args.runtime_trace)
+            elif args.command == "calibrate":
+                result = calibrate(args.development, protocol)
+            else:
+                result = live(protocol, args.protocol.parent)
         output = args.policy if args.command == "calibrate" else args.out
         write_record(output, result)
         print(json.dumps({"status": result.get("status", "recorded"), "evidence_kind": result["evidence_kind"], "output": str(output), "promotion_records": len(result["promotion_records"])}))
+        return exit_code
     except (ValueError, KeyError, TypeError, OSError) as error:
         parser.exit(2, "expert evaluation failed: " + str(error) + "\n")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

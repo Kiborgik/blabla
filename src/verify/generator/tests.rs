@@ -102,14 +102,24 @@ fn four_thousand_ninety_six_calls_cover_boundaries_random_values_and_json_types(
     assert!(floats.iter().any(|value| {
         value.abs() < 16.0 && ![0.0, 1.0, -1.0].contains(value) && value.fract() != 0.0
     }));
-    for boundary in ["", "a", " ", "\"\\\n", "é"] {
-        assert!(strings.iter().any(|value| value == boundary));
+    for boundary in [
+        "",
+        "a",
+        " ",
+        "\"\\\n",
+        "é",
+        "constructor",
+        "__proto__",
+        "toString",
+    ] {
+        assert!(
+            strings.iter().any(|value| value == boundary),
+            "missing String boundary {boundary:?}"
+        );
     }
-    assert!(
-        strings.iter().any(|value| {
-            value.len() >= 2 && value.bytes().all(|byte| byte.is_ascii_lowercase())
-        })
-    );
+    assert!(strings.iter().any(|value| {
+        (2..=5).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_lowercase())
+    }));
 }
 
 #[test]
@@ -295,6 +305,39 @@ when operate { expect "owned": any(before.items, i => i.id == input.item and i.o
     assert!(matched > 100, "matched {matched}");
     assert!(calls.iter().any(|c| c.args[0] == "X" && c.args[1] != "OX"));
     assert!(calls.iter().any(|c| c.args[0] != "X" && c.args[0] != "Y"));
+}
+
+#[test]
+fn a_deliberately_missing_identity_preserves_its_companion_fields() {
+    let contract = crate::semantics::compile(
+        "ownership.bla",
+        r#"
+type Item { key: string, owner: string }
+state items: [Item]
+action operate(item: string, owner: string)
+when operate { expect "owned": any(before.items, i => i.key == input.item and i.owner == input.owner) or after.items == before.items }
+always "unique" { unique(items, i => i.key) }
+"#,
+    )
+    .unwrap();
+    let guidance = Guidance::new(&contract);
+    let state = json!({"items":[{"key":"item-key","owner":"owner-key"}]});
+    let mut rng = SplitMix64::new(91);
+    let mut missing_identity = 0;
+    let mut wrong_owner = 0;
+    for _ in 0..512 {
+        let call = guidance
+            .candidate(&contract.actions[0], &state, &mut rng)
+            .unwrap();
+        if call.args[0] != "item-key" {
+            missing_identity += 1;
+            assert_eq!(call.args[1], "owner-key", "{call:?}");
+        } else if call.args[1] != "owner-key" {
+            wrong_owner += 1;
+        }
+    }
+    assert!(missing_identity > 0);
+    assert!(wrong_owner > 0);
 }
 
 #[test]

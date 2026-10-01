@@ -115,6 +115,7 @@ impl Guidance {
         let mut pools = CandidatePools::default();
         collect_record(state, &self.schema, &mut pools);
         let mut primary = None;
+        let mut preserve_companions = false;
         let mut args = Vec::new();
         for parameter in &action.params {
             let field = self
@@ -138,13 +139,19 @@ impl Guidance {
                     }
                     record[field].clone()
                 } else {
+                    if primary.is_none() {
+                        primary = Some(
+                            matching[rng.sample_below_rejecting_modulo_bias(matching.len())].0,
+                        );
+                    }
+                    preserve_companions = true;
                     self.wrong(&parameter.ty, &pools, rng)?
                 }
             } else if matches!(parameter.ty, Type::String | Type::Optional(_))
                 && let Some(record) = primary.and_then(|i| records.get(i))
                 && let Some(value) = record.get(field).filter(|v| compatible(v, &parameter.ty))
             {
-                if category < 8 {
+                if preserve_companions || category < 8 {
                     value.clone()
                 } else {
                     different(value, &parameter.ty)

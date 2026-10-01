@@ -1,5 +1,6 @@
 import copy
-import importlib.util
+import contextlib
+import io
 import json
 import math
 import subprocess
@@ -9,14 +10,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+if __package__:
+    from . import expert_calibrate_live as CALIBRATION
+    from . import expert_eval as EVAL
+    from . import expert_native_live as NATIVE
+else:
+    import expert_calibrate_live as CALIBRATION
+    import expert_eval as EVAL
+    import expert_native_live as NATIVE
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "experiments" / "expert_eval.py"
 DATA = ROOT / "evals" / "expert-loop"
-SPEC = importlib.util.spec_from_file_location("expert_eval", SOURCE) if SOURCE.exists() else None
-EVAL = importlib.util.module_from_spec(SPEC) if SPEC else None
-if SPEC:
-    SPEC.loader.exec_module(EVAL)
 
 
 def case(name, nudge=True, judgment="claim-support"):
@@ -548,15 +554,174 @@ class EvaluationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 EVAL.runtime_replay(path, capture_fn=never)
 
-    def test_cli_replay_and_blocked_live_emit_self_contained_records(self):
+    def test_legacy_cli_modes_emit_self_contained_records(self):
         with tempfile.TemporaryDirectory() as directory:
-            for command in (("replay", "--split", "holdout"), ("live", "--protocol", str(DATA / "protocol.json"))):
+            for command in (("replay", "--split", "holdout"), ("calibrate", "--development", str(DATA / "development")),
+                            ("live", "--protocol", str(DATA / "protocol.json"))):
                 out = Path(directory) / (command[0] + ".json")
-                completed = subprocess.run([sys.executable, str(SOURCE), *command, "--out", str(out)], cwd=ROOT, capture_output=True, text=True)
+                output_flag = "--policy" if command[0] == "calibrate" else "--out"
+                completed = subprocess.run([sys.executable, str(SOURCE), *command, output_flag, str(out)], cwd=ROOT, capture_output=True, text=True)
                 self.assertEqual(completed.returncode, 0, completed.stderr)
                 record = json.loads(out.read_text())
                 self.assertEqual(record["promotion_records"], [])
                 self.assertIn("protocol_fingerprint", record)
+
+
+class LiveCommandTests(unittest.TestCase):
+    def calibration_arguments(self, output):
+        paths = ("protocol.json", "development", "requests.json", "fit-plan.json", "config.json", "project", str(output))
+        flags = ("--protocol", "--development", "--requests", "--fit-plan", "--config", "--project", "--policy")
+        return ["calibrate-live", *[value for pair in zip(flags, paths) for value in pair]]
+
+    def invoke(self, arguments):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            exit_code = EVAL.main(arguments)
+        return exit_code, json.loads(output.getvalue())
+
+    def test_calibrate_live_dispatches_exact_paths_and_keeps_collector_owned_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "policy.json"
+            record = {"kind": "real_provider_development_calibration", "status": "eligible", "promotion_records": []}
+
+            def collect(*paths, **limits):
+                with paths[-1].open("x", encoding="utf-8") as stream:
+                    json.dump(record, stream)
+                return record
+
+            with patch.object(CALIBRATION, "calibrate_live", side_effect=collect) as collector, \
+                    patch.object(EVAL, "load_protocol", side_effect=AssertionError("legacy protocol loading reached")), \
+                    patch.object(EVAL, "write_record", side_effect=AssertionError("collector output rewritten")):
+                exit_code, summary = self.invoke(self.calibration_arguments(output) + ["--timeout", "12.5", "--max-wall-seconds", "45"])
+            collector.assert_called_once_with(Path("protocol.json"), Path("development"), Path("requests.json"),
+                Path("fit-plan.json"), Path("config.json"), Path("project"), output, timeout=12.5, max_wall_seconds=45)
+            self.assertEqual(json.loads(output.read_text()), record)
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(summary, {"status": "eligible", "kind": record["kind"], "output": str(output), "promotion_records": 0})
+
+    def test_calibrate_live_retains_incomplete_and_no_feasible_statuses(self):
+        for status, expected_exit in (("incomplete", 4), ("no_feasible_policy", 0)):
+            with self.subTest(status=status):
+                record = {"kind": "real_provider_development_calibration", "status": status, "promotion_records": []}
+                with patch.object(CALIBRATION, "calibrate_live", return_value=record) as collector, \
+                        patch.object(EVAL, "write_record", side_effect=AssertionError("collector output rewritten")):
+                    exit_code, summary = self.invoke(self.calibration_arguments("policy.json"))
+                self.assertEqual(exit_code, expected_exit)
+                self.assertEqual(summary["status"], status)
+                self.assertEqual(collector.call_args.kwargs, {"timeout": 120, "max_wall_seconds": 600})
+
+    def test_calibrate_live_requires_every_frozen_input_and_output_path(self):
+        arguments = self.calibration_arguments("policy.json")
+        for index in range(1, len(arguments), 2):
+            with self.subTest(flag=arguments[index]), contextlib.redirect_stderr(io.StringIO()), \
+                    patch.object(CALIBRATION, "calibrate_live") as collector:
+                with self.assertRaises(SystemExit) as stopped:
+                    EVAL.main(arguments[:index] + arguments[index + 2:])
+                self.assertEqual(stopped.exception.code, 2)
+                collector.assert_not_called()
+
+    def test_calibrate_live_rejects_invalid_limits_before_transport(self):
+        for flag, value in (("--timeout", "0"), ("--timeout", "nan"), ("--timeout", "inf"),
+                            ("--timeout", "120.1"), ("--max-wall-seconds", "0"), ("--max-wall-seconds", "600.1")):
+            with self.subTest(flag=flag, value=value), contextlib.redirect_stderr(io.StringIO()), \
+                    patch.object(CALIBRATION, "exchange", side_effect=AssertionError("transport reached")):
+                with self.assertRaises(SystemExit) as stopped:
+                    EVAL.main(self.calibration_arguments("policy.json") + [flag, value])
+                self.assertEqual(stopped.exception.code, 2)
+
+    def test_native_live_resolves_relative_plan_in_module_and_preserves_uncertainty_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            roots = {"off-run": str(Path(directory) / "off"), "shadow-run": str(Path(directory) / "shadow")}
+            projects = Path(directory) / "projects.json"
+            projects.write_text(json.dumps(roots))
+            output = Path(directory) / "report.json"
+            for exit_code in (0, 2, 4):
+                with self.subTest(exit_code=exit_code):
+                    record = {"status": "pending_host" if not exit_code else "uncertain", "evidence_kind": "matched_live_pilot",
+                              "uncertainty": {"exit_code": exit_code} if exit_code else None, "promotion_records": []}
+                    with patch.object(NATIVE, "live_native", return_value=record) as native, \
+                            patch.object(EVAL, "load_protocol", side_effect=AssertionError("legacy protocol loading reached")):
+                        actual_exit, summary = self.invoke(["live", "--protocol", "frozen/protocol.json", "--native-plan", "frozen/plan.json",
+                            "--native-projects", str(projects), "--out", str(output)])
+                    native.assert_called_once_with(Path("frozen/protocol.json"), Path("frozen/plan.json"), roots)
+                    self.assertEqual(json.loads(output.read_text()), record)
+                    self.assertEqual(actual_exit, exit_code)
+                    self.assertEqual(summary["status"], record["status"])
+                    self.assertEqual(summary["evidence_kind"], record["evidence_kind"])
+
+    def test_native_live_requires_both_native_flags(self):
+        for flag in ("--native-plan", "--native-projects"):
+            with self.subTest(flag=flag), contextlib.redirect_stderr(io.StringIO()), \
+                    patch.object(NATIVE, "live_native") as native, patch.object(EVAL, "load_protocol") as legacy:
+                with self.assertRaises(SystemExit) as stopped:
+                    EVAL.main(["live", "--protocol", "protocol.json", "--out", "report.json", flag, "native.json"])
+                self.assertEqual(stopped.exception.code, 2)
+                native.assert_not_called()
+                legacy.assert_not_called()
+
+    def test_invalid_native_inputs_fail_cleanly_in_direct_and_package_commands(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "project.bla").write_text("synthetic invalid native input project")
+            (root / "protocol.json").write_bytes((DATA / "protocol.json").read_bytes())
+            (root / "plan.json").write_text("{}")
+            projects = root / "projects.json"
+            output = root / "report.json"
+            for command in ([sys.executable, str(SOURCE)], [sys.executable, "-m", "experiments.expert_eval"]):
+                for protocol, mapping in ((str(root / "protocol.json"), {}), ("protocol.json", {"synthetic-run": str(root)})):
+                    with self.subTest(command=command, protocol=protocol):
+                        projects.write_text(json.dumps(mapping))
+                        completed = subprocess.run([*command, "live", "--protocol", protocol, "--native-plan", "plan.json",
+                            "--native-projects", str(projects), "--out", str(output)], cwd=ROOT, capture_output=True, text=True)
+                        self.assertEqual(completed.returncode, 2, completed.stderr)
+                        self.assertNotIn("Traceback", completed.stderr)
+                        self.assertTrue(completed.stderr)
+                        self.assertEqual(completed.stdout, "")
+                        self.assertFalse(output.exists())
+
+    def test_native_failure_retains_its_exit_code_and_bounds_the_diagnostic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            projects = Path(directory) / "projects.json"
+            projects.write_text("{}")
+            output = Path(directory) / "report.json"
+            diagnostic = io.StringIO()
+            failure = NATIVE.native.Failure("uncertain_output", "x" * 4096, 4)
+            with patch.object(NATIVE, "live_native", side_effect=failure), contextlib.redirect_stderr(diagnostic):
+                with self.assertRaises(SystemExit) as stopped:
+                    EVAL.main(["live", "--protocol", "protocol.json", "--native-plan", "plan.json",
+                        "--native-projects", str(projects), "--out", str(output)])
+            self.assertEqual(stopped.exception.code, 4)
+            self.assertLessEqual(len(diagnostic.getvalue()), 2100)
+            self.assertTrue(diagnostic.getvalue())
+            self.assertFalse(output.exists())
+
+    def test_direct_and_package_entry_points_propagate_selected_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            projects = Path(directory) / "projects.json"
+            projects.write_text(json.dumps({"synthetic-run": directory}))
+            output = Path(directory) / "report.json"
+            arguments = ["live", "--protocol", "synthetic/protocol.json", "--native-plan", "synthetic/plan.json",
+                         "--native-projects", str(projects), "--out", str(output)]
+            for package in (False, True):
+                for exit_code in (0, 4):
+                    native_record = {"status": "uncertain", "evidence_kind": "matched_live_pilot", "promotion_records": [],
+                                     "uncertainty": {"exit_code": exit_code}}
+                    calibration_record = {"status": "incomplete" if exit_code else "eligible",
+                                          "kind": "real_provider_development_calibration", "promotion_records": []}
+                    for name, function, command, record in (
+                            ("expert_native_live", "live_native", arguments, native_record),
+                            ("expert_calibrate_live", "calibrate_live", self.calibration_arguments(output), calibration_record)):
+                        with self.subTest(package=package, exit_code=exit_code, command=command[0]):
+                            module = "experiments." + name if package else name
+                            launch = "runpy.run_module('experiments.expert_eval', run_name='__main__')" if package else f"runpy.run_path({str(SOURCE)!r}, run_name='__main__')"
+                            script = ("import runpy, sys, types\n"
+                                f"synthetic = types.ModuleType({module!r})\n"
+                                f"synthetic.{function} = lambda *args, **kwargs: {record!r}\n"
+                                f"sys.modules[{module!r}] = synthetic\n"
+                                f"sys.argv = [{str(SOURCE)!r}, *{command!r}]\n{launch}\n")
+                            completed = subprocess.run([sys.executable, "-c", script], cwd=ROOT if package else SOURCE.parent, capture_output=True, text=True)
+                            self.assertEqual(completed.returncode, exit_code, completed.stderr)
+                            self.assertEqual(json.loads(completed.stdout)["status"], record["status"])
 
 
 if __name__ == "__main__":
