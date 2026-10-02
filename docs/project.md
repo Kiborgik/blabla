@@ -171,7 +171,7 @@ Goals are judged from the current project view on every display, never cached:
 | `unverified` | behavior STALE, UNVERIFIED, VERIFYING or INTERRUPTED |
 | `unresolved` | identity does not exist |
 
-`status` lists active goals and points to those ready to mark done. A done goal with an unmet expectation can ground project-only `goal-outcome-unmet`; active/dropped goals do not. Missing/unreadable/invalid goal memory is reported without judging goals. `finish` never judges goals for completion.
+`status` lists active goals and routes those whose contract expectations hold to outcome review. Inspect the goal statement and its outcome evidence before deciding whether to mark it done; held contracts do not establish arbitrary prose, visual quality or player experience. `explain` distinguishes contract results from outcome acceptance. The stored state is owner-declared; no persisted outcome-signoff record or automatic prose evaluation is implemented. A done goal with an unmet expectation can ground project-only `goal-outcome-unmet`; active/dropped goals do not. Missing/unreadable/invalid goal memory is reported without judging goals. `finish` never judges goals for completion.
 
 `task open NAME --goal GOAL_NAME` must name a declared goal; views link the task and goal. Editing in-root goal memory, including marking done, stales the behavior record just like other tracked source. Rerun `finish` for current behavior expectations.
 

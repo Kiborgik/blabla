@@ -1,6 +1,6 @@
 # BlaBla
 
-**Executable, queryable project intent for humans and coding agents.**
+**Short feedback loops from project intent to observable results.**
 
 [![Release](https://github.com/Kiborgik/blabla/actions/workflows/release.yml/badge.svg)](https://github.com/Kiborgik/blabla/actions/workflows/release.yml)
 ![status: pre-1.0](https://img.shields.io/badge/status-pre--1.0-yellow)
@@ -10,9 +10,11 @@
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22761364.svg)](https://doi.org/10.5281/zenodo.22761364)
 
-Keep what the software must do, how its code is constrained, and why the project works that way in the repository. Agents query the relevant identity instead of rebuilding context from chat. BlaBla verifies declared **Behavior** and **Structure**; Mission, System, Process, Knowledge and Goals guide the work without deciding completion.
+BlaBla helps humans and coding agents keep development aimed at the actual goal. The goal might be reliable behavior, richer content, readable artwork or maintainable code. Make the desired result explicit, choose a small observation that would show progress or expose a miss, and give the next worker that feedback while it can still change the work.
 
-**0.10.0 is a release candidate, not yet published.** It adds revision-bound handoffs and an experimental expert layer. [Upgrade notes](CHANGELOG.md#0100-unreleased) · [release evidence](docs/design/0.10-release-evidence.md)
+Keep that intent in the repository. Agents query the relevant identity instead of rebuilding context from chat; contracts produce rule-level verdicts and witnesses, and bounded tasks carry checks, questions, findings and review. The aim is cheap, actionable success signals for every kind of development goal. Today, executable **Behavior** and **Structure** supply automatic verdicts; content and quality goals also need well-chosen checks and human or reviewer judgment.
+
+**0.10.0 is a release candidate, not yet published.** It makes recorded feedback harder to reuse after the work changes, and adds an experimental expert layer. Product-readiness acceptance is on hold pending a concrete goal-to-outcome demonstration. [Upgrade notes](CHANGELOG.md#0100-unreleased) · [release evidence](docs/design/0.10-release-evidence.md) · [product feedback plan](docs/design/0.10-product-goal-feedback.md)
 
 ## Start here
 
@@ -44,6 +46,17 @@ To install this candidate locally instead, run `cargo install --path . --locked`
 
 The first command may report UNVERIFIED/BLOCKED; the second runs the example's canonical campaign. The same [Todo behavior contract](examples/todo.bla) drives [Python](examples/todo), [TypeScript](examples/todo-ts), [Go](examples/todo-go), [C](examples/todo-c), [C++](examples/todo-cpp) and [Java](examples/todo-java) applications through small reusable [JSON Lines adapters](adapters/README.md).
 
+## From a goal to useful feedback
+
+For a creature-game expansion, “more passing tests” misses the point. Useful acceptance questions are: can each new species reach a real first fight and survive save/replay, does each identity have distinct art in the actual renderer, and do new environments change reachable paths and preparation decisions?
+
+1. Name the player-visible result and the smallest evidence that could contradict it: an exact species journey, a rendered contact sheet, or a route witness with the actual hazard consequence
+2. Link formal obligations to a goal; put the broader acceptance questions in the task and review. Query that context before editing
+3. Run the focused check, inspect its result or artifact, and turn a specific miss into a correction. Keep the check and its declared inputs attached to the revision being handed back
+4. Independently review the result against the original goal, then run the canonical project verification at integration. Report what became possible for the player and what remains untested
+
+A private dogfooding exercise used these forms of evidence and caught real route and integration failures. The owner and reviewers supplied the product questions; BlaBla supplied task records and freshness/scope safeguards. It did not autonomously judge visual quality or invent those checks. The [anonymized case and acceptance plan](docs/design/0.10-product-goal-feedback.md#worked-example-from-a-creature-game) separate observations from claims still to test.
+
 ## What is checked
 
 ![Owner intent separates into queryable memory and executable Behavior/Structure contracts. Agents query and edit ordinary code; finish checks the implementation. Only the active contracts decide completion.](docs/assets/concept.svg)
@@ -55,7 +68,7 @@ The first command may report UNVERIFIED/BLOCKED; the second runs the example's c
 | Project memory | purpose, architecture, roles, expertise and goals | queryable intent; validated internally, not against the code |
 | Tasks / expert | bounded handoffs / selected-context advice | development records and optional advice; neither changes `OVERALL` |
 
-`project.bla` registers these surfaces and one canonical verification profile. `status` discovers it; `explain` opens one printed identity; `finish` reruns verification rather than trusting a cached GREEN.
+`project.bla` registers these surfaces and one canonical verification profile. `status` discovers it; `explain` opens one printed identity; `finish` reruns verification rather than trusting a cached GREEN. Goal `expect` entries resolve only to declared rule or contract identities. A held expectation says that named check holds; it does not automatically accept the goal's prose, artwork or player experience. Memory, goals, tasks and expert advice never decide `OVERALL`.
 
 - **GREEN:** every active declared obligation was exercised and satisfied under the configured verifier
 - **YELLOW:** no violation found, but required behavior was not exercised
@@ -74,12 +87,15 @@ A project can use bounded tasks to carry scope, deliverables, questions and find
 
 ## New in 0.10
 
-- **Fresh evidence and review:** exact check identity, declared inputs and acceptance epochs prevent old evidence, lens assessments or reviews from approving changed work
-- **Explicit ownership:** live write scopes cannot overlap; withdrawal releases ownership while retaining unresolved changes
-- **Bounded expert evaluation:** fixed Choice/Noul/Score questions, selected packets, provider transport, deterministic policy, replay and calibration tooling; optional cooperative native between-turn experiments
+Goals, questions and lens assessments were already available before 0.10. This candidate strengthens the trustworthiness of the feedback carried through that workflow:
+
+- **Honest goal routing:** held contract expectations lead to outcome review, rather than a suggestion to mark the broader goal done. Goal state remains owner-declared; no outcome signoff is inferred
+- **Fresh evidence and review:** exact check identity, declared inputs and acceptance epochs prevent a previous result from approving relevant changed work. A useful success signal must describe the revision being delivered
+- **Explicit ownership:** live write scopes cannot overlap; withdrawal releases ownership while retaining unresolved changes. Workers can divide a goal without silently claiming the same write scope
+- **Bounded expert evaluation:** fixed Choice/Noul/Score questions, selected packets, provider transport, deterministic policy, replay and calibration tooling; optional cooperative native between-turn experiments. This is infrastructure for evaluating advice, not an established source of useful product judgment
 - **Verifier and adapter repairs:** broader String boundaries, preserved companion fields for missing-identity witnesses, C persistence and Python UTF-8 fixes; see the [changelog](CHANGELOG.md#0100-unreleased)
 
-The expert layer can flag goal drift, unsupported claims, repeated approaches or useful expertise at an observed host boundary. It cannot read arbitrary work continuously, grant scope or change verdicts. Repository bindings remain shadow-only; no judgment is promoted. Real Kev calibration selected **no feasible policy**, so runtime expert benefit is unestablished. [Expert setup, host boundaries and qualification limits](docs/expert.md)
+The expert layer is designed to evaluate goal drift, unsupported claims, repeated approaches or useful expertise at an observed host boundary. It cannot read arbitrary work continuously, grant scope or change verdicts. Repository bindings remain shadow-only; no judgment is promoted. Real Kev calibration selected **no feasible policy**, so runtime expert benefit is unestablished. [Expert setup, host boundaries and qualification limits](docs/expert.md)
 
 ## Reference
 
@@ -92,6 +108,7 @@ The expert layer can flag goal drift, unsupported claims, repeated approaches or
 | Expert definitions, commands and host integration | [Expert](docs/expert.md) |
 | Implementation map and stable interfaces | [Architecture](docs/architecture.md) |
 | Project invariants and non-goals | [BLA_BLA.md](BLA_BLA.md) |
+| Product purpose, outcome evidence and next acceptance step | [Product feedback plan](docs/design/0.10-product-goal-feedback.md), [release evidence](docs/design/0.10-release-evidence.md) |
 | What experiments actually established | [Research](docs/research.md), [RTS dogfooding](docs/evidence/rts-dogfooding.md) |
 
 BlaBla does not generate a specification, plan or implementation. It complements ordinary tests and development tools; it is not a Spec Kit replacement, theorem prover or autonomous agent runner. Pre-1.0 syntax, CLI, JSON and exit-code changes ship in minor releases with Breaking notes; patches preserve those interfaces.

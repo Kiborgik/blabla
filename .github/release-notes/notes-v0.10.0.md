@@ -1,6 +1,10 @@
 # BlaBla 0.10.0
 
-BlaBla keeps project intent queryable and verifies declared Behavior and Structure contracts. Version 0.10 adds revision-bound task handoffs, explicit write ownership and an optional experimental expert layer.
+BlaBla's purpose is to give coding agents cheap, actionable feedback on progress toward the owner's development goals, including behavior, content and quality. Keep the goal queryable, choose evidence that could expose a miss, correct the work and review the resulting outcome. Behavior and Structure contracts provide automatic verdicts; broader goals also require focused checks and owner or reviewer judgment.
+
+Version 0.10 strengthens that loop with revision-bound task evidence and review, explicit write ownership and experimental expert-evaluation tooling. Goals, questions and lens assessments predate this release. Freshness makes a result trustworthy for the work being delivered; it does not make a poorly chosen check a useful product signal.
+
+**Unpublished release candidate. Product-readiness recommendation: HOLD** until the bounded [goal-to-outcome acceptance](https://github.com/Kiborgik/blabla/blob/release/0.10-expert-loop/docs/design/0.10-product-goal-feedback.md#acceptance-for-a-future-010-release) is reviewed. Passing package checks and CI establish engineering readiness on the recorded revisions, not completion of every product goal.
 
 ## Breaking changes and upgrade
 
@@ -16,11 +20,18 @@ The [upgrade procedure](https://github.com/Kiborgik/blabla/blob/release/0.10-exp
 
 ## Added and improved
 
+- All-held goal expectations now route to outcome review rather than telling the owner to mark the goal done. Goal explanations distinguish contract results from broader outcome acceptance; stored goal states, JSON structure and `OVERALL` semantics are unchanged. This does not add persisted outcome signoff or infer truth from goal prose
 - Fixed Choice/Noul/ordered Score judgments, selected bounded context packets, explicit missing/truncated context, validated provider transports, deterministic policy and saved-response replay.
 - Real-response calibration, preflight and policy-fitting tools; cooperative native completed-idle-turn experiments with scoped revocable permits and matched-run tooling.
 - Stronger exact-check, in-flight assignment/input, stale-review, withdrawal and model-proposal safeguards.
 - Broader String generation boundaries and companion-field-preserving witnesses, Python adapter strict UTF-8, C persistence for space-only items, and a separate Windows C compiler preparation timeout.
 - Current-source self-hosting and portable verification, with deterministic expert seams kept separate from live expert-quality evidence.
+
+## What useful progress looks like
+
+For a content expansion, the outcome is reachable, mechanically distinct choices with legible in-game art. A real first-fight/save/replay witness, an inspected contact sheet from the actual renderer and a route that changes an observable preparation consequence say more about that goal than a rising test count. An anonymized private dogfooding case exposed route and integration failures through such checks. Human direction and review supplied the questions; BlaBla recorded the workflow and enforced current-evidence and scope prerequisites. This does not demonstrate autonomous product judgment or faster development.
+
+Goal expectations resolve to rule/contract identities. Nonformal acceptance remains an explicit owner/reviewer decision; goals, tasks and experts do not alter `OVERALL`.
 
 ## Expert qualification limits
 

@@ -863,6 +863,10 @@ fn write_goal_explain(view: &GoalExplainView) -> io::Result<()> {
             expectation.identity
         )?;
     }
+    writeln!(
+        output,
+        "\nOutcome acceptance: not established by these contract checks. Review the goal statement and outcome evidence separately; the recorded state is owner-declared."
+    )?;
     writeln!(output, "\n{}", view.authority)
 }
 
@@ -1925,7 +1929,7 @@ fn write_goal_memory(output: &mut impl Write, memory: Option<&GoalStatus>) -> io
     writeln!(output, "  {}", memory.authority)
 }
 
-fn write_goals_to_close(output: &mut impl Write, memory: Option<&GoalStatus>) -> io::Result<()> {
+fn write_goals_to_review(output: &mut impl Write, memory: Option<&GoalStatus>) -> io::Result<()> {
     let Some(memory) = memory else {
         return Ok(());
     };
@@ -1936,8 +1940,8 @@ fn write_goals_to_close(output: &mut impl Write, memory: Option<&GoalStatus>) ->
     {
         writeln!(
             output,
-            "  blabla explain {}   every expectation holds; set its state to \"done\" in {}",
-            outcome.goal, memory.file
+            "  blabla explain {}   every contract expectation holds; outcome review required before marking done",
+            outcome.goal
         )?;
     }
     Ok(())
@@ -2069,7 +2073,7 @@ pub(super) fn write_next(
 ) -> io::Result<()> {
     writeln!(output, "\nNext:")?;
     write_next_steps(output, view, views)?;
-    write_goals_to_close(output, views.goal.as_ref())
+    write_goals_to_review(output, views.goal.as_ref())
 }
 
 fn write_next_steps(

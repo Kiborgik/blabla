@@ -287,6 +287,69 @@ fn next_points_at_an_active_goal_whose_expectations_all_hold() {
 }
 
 #[test]
+fn held_contracts_route_to_outcome_review_without_completing_the_goal() {
+    let goals = GOALS.replace(
+        "the structure the project needs is in place",
+        "A live host delivers useful advice in matched real-work runs, still unverified.",
+    );
+    let temp = project_with(MANIFEST, &goals);
+    let original = std::fs::read(temp.path().join("goals.bla")).unwrap();
+    let (before, before_code) = json_of(&temp, &["status", "--json"]);
+    let status = text_of(&temp, &["status"]);
+    let route = status
+        .lines()
+        .find(|line| line.contains("blabla explain goal::ready") && line.contains("holds"))
+        .unwrap_or_else(|| panic!("missing ready goal route in {status}"));
+    assert!(route.contains("outcome review required"), "{route}");
+    assert!(!route.contains("set its state to"), "{route}");
+    let explain = text_of(&temp, &["explain", "goal::ready"]);
+    assert!(
+        explain.contains("Outcome acceptance: not established"),
+        "{explain}"
+    );
+    let (view, code) = json_of(&temp, &["explain", "goal::ready", "--json"]);
+    assert_eq!(code, 0);
+    assert_eq!(view["state"], "active");
+    assert_eq!(view["outcome"]["held"], 2);
+    assert_eq!(view["outcome"]["expected"], 2);
+    assert!(
+        view["statement"]
+            .as_str()
+            .unwrap()
+            .contains("still unverified")
+    );
+    let (after, after_code) = json_of(&temp, &["status", "--json"]);
+    assert_eq!(after["goal_memory"], before["goal_memory"]);
+    assert_eq!(after["overall"], before["overall"]);
+    assert_eq!(after["completion"], before["completion"]);
+    assert_eq!(after_code, before_code);
+    assert_eq!(
+        std::fs::read(temp.path().join("goals.bla")).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn goal_states_do_not_claim_an_observed_outcome_acceptance() {
+    let temp = project();
+    for (name, state) in [
+        ("ready", "active"),
+        ("shipped", "done"),
+        ("abandoned", "dropped"),
+    ] {
+        let identity = format!("goal::{name}");
+        let explain = text_of(&temp, &["explain", &identity]);
+        assert!(
+            explain.contains("Outcome acceptance: not established"),
+            "{explain}"
+        );
+        let (view, code) = json_of(&temp, &["explain", &identity, "--json"]);
+        assert_eq!(code, 0);
+        assert_eq!(view["state"], state);
+    }
+}
+
+#[test]
 fn explain_gives_the_statement_the_priorities_served_and_each_verdict() {
     let temp = project();
     let (view, code) = json_of(&temp, &["explain", "goal::verdicts", "--json"]);
