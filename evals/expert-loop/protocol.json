@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "protocol_id": "expert-loop-foundations-2026-09-30",
+  "status": "frozen",
+  "approved_by": "root orchestrator before first calibration",
+  "approved_utc": "2026-09-30T12:54:03Z",
+  "evidence_kind": "predeclared_protocol",
+  "datasets": {
+    "development": {
+      "manifest_sha256": "f0fa01a226de49a40fd01d9ecee35c80c02bfddfecd9859a419604f3a07c8c21"
+    },
+    "holdout": {
+      "manifest_sha256": "d6d2d7467d6ce5b51a45a4a299b2ea7d0faa85ecde98a37faf1550ac0850546e"
+    }
+  },
+  "budgets": {
+    "goal-drift": {
+      "false_nudge_max": 0.05,
+      "p95_delivery_ms": 3000,
+      "min_delivered_nudges": 60,
+      "min_justified_opportunities": 20,
+      "min_evaluable_coverage": 0.9
+    },
+    "expertise": {
+      "false_nudge_max": 0.1,
+      "p95_delivery_ms": 3000,
+      "min_delivered_nudges": 30,
+      "min_justified_opportunities": 20,
+      "min_evaluable_coverage": 0.9
+    },
+    "claim-support": {
+      "false_nudge_max": 0.05,
+      "p95_delivery_ms": 1500,
+      "min_delivered_nudges": 60,
+      "min_justified_opportunities": 20,
+      "min_evaluable_coverage": 0.9
+    },
+    "failed-approach": {
+      "false_nudge_max": 0.05,
+      "p95_delivery_ms": 1500,
+      "min_delivered_nudges": 60,
+      "min_justified_opportunities": 20,
+      "min_evaluable_coverage": 0.9
+    }
+  },
+  "quality_interval": {
+    "method": "exact-one-sided-clopper-pearson",
+    "confidence": 0.95,
+    "zero_denominator": "unknown; cannot pass",
+    "ungraded_nudges": "cannot pass"
+  },
+  "latency_quantile": "nearest-rank",
+  "calibration": {
+    "allowed_split": "development",
+    "candidate_thresholds": [
+      0.5,
+      0.7,
+      0.8,
+      0.9,
+      0.95
+    ],
+    "signal": "probability of justified intervention; no self-report confidence",
+    "holdout_access": false
+  },
+  "budget_rationale": {
+    "false_nudge": "Goal, claim and retry nudges can wrongly redirect or nag: <=1 in 20. Optional expertise reading: <=1 in 10. Minimum sample and exact one-sided upper bound prevent tiny fixtures earning quality credit.",
+    "latency": "Task8 CPU transport Choice1936/2047/2086ms; Noul387/506/550; Score384/423/438; shared three-question batch951/1013/1011. 3000ms leaves about914ms beyond worst measured Choice;1500ms leaves950ms beyond worst Noul and1062ms beyond Score for retrieval, queueing and delivery. These are frozen service budgets, not measured workload p95 or isolated inference benchmarks.",
+    "timing_evidence_kind": "local_transport_smoke; synthetic questions; no workload quality",
+    "timing_evidence_sha256": "125efe9abd371121037eb3c9780d8a14c678dcd5071565a021f9b107610e4dfd"
+  },
+  "host": {
+    "status": "blocked",
+    "capabilities": {
+      "host": "codex-cli",
+      "version": "0.159.0-alpha.7",
+      "adapter": "unverified",
+      "checkpoints": [],
+      "pauses_worker": false,
+      "same_task_delivery": false,
+      "delivery_receipts": false,
+      "pre_tool_control": false,
+      "gaps": [
+        "No live checkpoint observed",
+        "No same-task advisory marker receipt"
+      ]
+    },
+    "stop_reason": "protected_runtime_socket_directory; Task1 found mode000 and did not alter it",
+    "evidence_path": "docs/design/0.10-host-capabilities.md",
+    "evidence_sha256": "50c39fe70a4017c1bb1771ca00d6798104d78a58d806aa2bfbaefee9c6f24c5e"
+  },
+  "pilot": {
+    "phase": "pilot",
+    "task_id": "task::expert-host-capability-pilot",
+    "task": "Task1 same-thread checkpoint and marker receipt feasibility; no quality conclusion",
+    "arms": [
+      "off",
+      "shadow",
+      "advisory"
+    ],
+    "order": [
+      "off",
+      "shadow",
+      "advisory"
+    ],
+    "runs_per_arm": 1,
+    "max_wall_ms": 600000,
+    "call_limit_per_arm": 20,
+    "cost_limit_per_arm": 0,
+    "snapshot_files": {
+      "experiments/probe_expert_host.py": "a1d7465468a8acd2888c4af51ca9e1d89c8c8a5ece8e0f862a3dea310dd8550c",
+      "experiments/test_expert_host_probe.py": "8b7d15584bd899c731c2383a84b580bc03eca83c4282a7ecd6114763a1e14434",
+      "docs/design/0.10-host-capabilities.md": "50c39fe70a4017c1bb1771ca00d6798104d78a58d806aa2bfbaefee9c6f24c5e"
+    },
+    "controls": {
+      "worker": "gpt-6-luna/low requested; actual subprocess unverified",
+      "tools": "same frozen Task1 discovery and task fixture",
+      "host": "codex-cli0.159.0-alpha.7; adapter unverified",
+      "onboarding": "same AGENTS/task inputs",
+      "rules": "same frozen Task1 fixture",
+      "environment": "same Linux CPU environment"
+    },
+    "grading": {
+      "correctness": "independent grader checks actual event+same-task marker receipts; missing evidence unknown",
+      "scope": "independent grader checks only frozen task paths and authorized commands",
+      "owner_interventions": "count user/orchestrator steering messages from event receipts",
+      "steering_ms": "timestamped owner intervention work only; absence unknown",
+      "rework_ms": "timestamped corrective work after independent observed failure only",
+      "acknowledgment": "not observed correction"
+    },
+    "stop_reasons": [
+      "host_unsupported",
+      "protected_runtime",
+      "snapshot_changed",
+      "timeout",
+      "call_budget",
+      "cost_budget",
+      "missing_receipt",
+      "scope_violation"
+    ],
+    "promotion_eligible": false
+  },
+  "expanded": {
+    "status": "not_predeclared",
+    "stop_reason": "actual pilot runtime/cost unavailable; exact tasks/repeats/budgets and counterbalanced order must be frozen before expanded collection",
+    "promotion_eligible": false
+  },
+  "promotion": {
+    "required_evidence_kind": "matched_live_expanded",
+    "requires_independent_correctness_and_scope": true,
+    "requires_observed_steering_reduction": true,
+    "replay_fixture_pilot_allowed": false
+  }
+}

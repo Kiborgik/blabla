@@ -14,7 +14,7 @@ pub const LIMITS: [&str; 3] = [
     include_str!("cli/text/skeptic-limit-source.md"),
 ];
 
-pub const CLASSES: [&str; 16] = [
+pub const CLASSES: [&str; 19] = [
     "unresolved-finding",
     "deliverable-unchanged",
     "scope-breach",
@@ -31,12 +31,16 @@ pub const CLASSES: [&str; 16] = [
     "decision-unanswered",
     "orchestrator-record-during-carry",
     "question-unpicked",
+    "withdrawal-residue",
+    "review-target-stale",
+    "unobservable-task-input",
 ];
 
-pub const OUTSIDE_THE_ASSIGNMENT: [&str; 3] = [
+pub const OUTSIDE_THE_ASSIGNMENT: [&str; 4] = [
     "verification-not-current",
     "vacuous-rule",
     "orchestrator-record-during-carry",
+    "withdrawal-residue",
 ];
 
 pub const GOAL_CLASSES: [&str; 1] = ["goal-outcome-unmet"];
@@ -61,6 +65,9 @@ pub enum Class {
     OrchestratorRecordDuringCarry,
     QuestionUnpicked,
     GoalOutcomeUnmet,
+    WithdrawalResidue,
+    ReviewTargetStale,
+    UnobservableTaskInput,
 }
 
 impl Class {
@@ -83,6 +90,9 @@ impl Class {
             Class::OrchestratorRecordDuringCarry => CLASSES[14],
             Class::QuestionUnpicked => CLASSES[15],
             Class::GoalOutcomeUnmet => GOAL_CLASSES[0],
+            Class::WithdrawalResidue => CLASSES[16],
+            Class::ReviewTargetStale => CLASSES[17],
+            Class::UnobservableTaskInput => CLASSES[18],
         }
     }
 }
@@ -102,6 +112,8 @@ pub struct ChallengeReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub challenge: Option<Challenge>,
     pub grounded: Vec<&'static str>,
+    pub assignment_blockers: Vec<&'static str>,
+    pub project_challenges: Vec<&'static str>,
     pub ungrounded: Vec<(&'static str, &'static str)>,
     pub authority: &'static str,
     pub limits: [&'static str; 3],
@@ -113,11 +125,7 @@ impl ChallengeReport {
     }
 
     pub fn assignment_blockers(&self) -> Vec<&'static str> {
-        self.grounded
-            .iter()
-            .copied()
-            .filter(|class| !OUTSIDE_THE_ASSIGNMENT.contains(class))
-            .collect()
+        self.assignment_blockers.clone()
     }
 }
 
@@ -200,7 +208,44 @@ pub fn challenge_against(
     evidence: &Evidence<'_>,
     goals: Result<&[Outcome], &'static str>,
 ) -> ChallengeReport {
+    challenge_against_tracking(evidence, goals, None)
+}
+
+pub fn challenge_tracked_against(
+    evidence: &Evidence<'_>,
+    goals: Result<&[Outcome], &'static str>,
+    root: &std::path::Path,
+    ignore: &crate::project::ignore::Ignore,
+) -> ChallengeReport {
+    challenge_against_tracking(evidence, goals, Some((root, ignore)))
+}
+
+fn challenge_against_tracking(
+    evidence: &Evidence<'_>,
+    goals: Result<&[Outcome], &'static str>,
+    tracking: Option<(&std::path::Path, &crate::project::ignore::Ignore)>,
+) -> ChallengeReport {
+    let tracking_error = evidence.task.and_then(|task| {
+        tracking.and_then(|(root, ignore)| task::tracking_error(task, root, ignore))
+    });
     let mut outcomes: Vec<(&'static str, Result<Challenge, &'static str>)> = Vec::new();
+    outcomes.push((
+        CLASSES[18],
+        match (evidence.task, tracking_error) {
+            (Some(task), Some(problem)) => Ok(Challenge {
+                class: Class::UnobservableTaskInput,
+                statement: format!("I don't believe this result has observable inputs. {problem}"),
+                evidence: vec![format!("task: {}", task.name), problem.clone()],
+                reconcile: task::tracking_recovery(task, &problem),
+            }),
+            (Some(_), None) if tracking.is_some() => {
+                Err("every declared evidence path is observable in change tracking")
+            }
+            (Some(_), None) => Err("path observability was not evaluated against project tracking"),
+            (None, _) => Err(NO_TASK),
+        },
+    ));
+    outcomes.push((CLASSES[16], withdrawal_residue(evidence, tracking)));
     type Grounding = fn(&Task, &Evidence<'_>) -> Result<Challenge, &'static str>;
     let against_the_task: [(&'static str, Grounding); 11] = [
         (CLASSES[12], |task, evidence| {
@@ -237,9 +282,10 @@ pub fn challenge_against(
         ));
     }
     type RoleGrounding = fn(&Task, Option<&Resolution>) -> Result<Challenge, &'static str>;
-    let against_the_role: [(&'static str, RoleGrounding); 2] = [
+    let against_the_role: [(&'static str, RoleGrounding); 3] = [
         (CLASSES[6], model_outside_role_policy),
         (CLASSES[8], lens_unassessed),
+        (CLASSES[17], review_target_stale),
     ];
     for (class, grounding) in against_the_role {
         outcomes.push((
@@ -258,7 +304,9 @@ pub fn challenge_against(
         },
     ));
     outcomes.push((GOAL_CLASSES[0], goal_outcome_unmet(goals, evidence.task)));
-    let standing = outcomes.iter().any(|(_, outcome)| outcome.is_ok());
+    let standing = outcomes
+        .iter()
+        .any(|(class, outcome)| *class != CLASSES[16] && outcome.is_ok());
     outcomes.push((
         CLASSES[3],
         if standing {
@@ -294,11 +342,57 @@ pub fn challenge_against(
     ChallengeReport {
         task: evidence.task.map(|task| task.name.clone()),
         challenge: found,
+        assignment_blockers: grounded
+            .iter()
+            .copied()
+            .filter(|class| !OUTSIDE_THE_ASSIGNMENT.contains(class))
+            .collect(),
+        project_challenges: grounded
+            .iter()
+            .copied()
+            .filter(|class| OUTSIDE_THE_ASSIGNMENT.contains(class))
+            .collect(),
         grounded,
         ungrounded,
         authority: AUTHORITY,
         limits: LIMITS,
     }
+}
+
+fn withdrawal_residue(
+    evidence: &Evidence<'_>,
+    tracking: Option<(&std::path::Path, &crate::project::ignore::Ignore)>,
+) -> Result<Challenge, &'static str> {
+    for task in evidence.other_tasks {
+        let paths = match tracking {
+            Some((root, ignore)) => task::tracked_withdrawal_residue(
+                task,
+                evidence.other_tasks,
+                evidence.tree,
+                root,
+                ignore,
+            ),
+            None => task::withdrawal_residue(task, evidence.other_tasks, evidence.tree),
+        };
+        if !paths.is_empty() {
+            return Ok(Challenge {
+                class: Class::WithdrawalResidue,
+                statement: format!(
+                    "Withdrawn task {} still has unresolved changed paths",
+                    task.name
+                ),
+                evidence: paths
+                    .iter()
+                    .map(|path| format!("task::{} captured changed path {path}", task.name))
+                    .collect(),
+                reconcile: format!(
+                    "Restore each path to its pre-task content, or record task reconcile-withdrawal {} PATH --successor TASK --model MODEL against a CLOSED successor with current evidence",
+                    task.name
+                ),
+            });
+        }
+    }
+    Err("no unresolved withdrawal residue remains")
 }
 
 fn unresolved_finding(task: &Task) -> Result<Challenge, &'static str> {
@@ -673,7 +767,7 @@ fn exception_unresolved(task: &Task) -> Result<Challenge, &'static str> {
     let Some(exception) = task
         .exceptions
         .iter()
-        .find(|exception| exception.approval.is_none())
+        .find(|exception| !exception.superseded && exception.approval.is_none())
     else {
         return Err("no model exception is waiting on the owner");
     };
@@ -744,7 +838,8 @@ fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
     } else {
         (
             format!(
-                "I don't believe this hand-back is supported. Every result recorded against this assignment answers a different check than {declared}."
+                "I don't believe this hand-back is supported. No recorded result binds {declared} to the current acceptance epoch {}.",
+                task.acceptance_epoch
             ),
             format!("evidence recorded, for: {}", seen.join(", ")),
         )
@@ -755,6 +850,7 @@ fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
         evidence: vec![
             format!("state: {}", task.state),
             format!("declared check: {declared}"),
+            format!("acceptance epoch: {}", task.acceptance_epoch),
             observed,
         ],
         reconcile: include_str!("cli/text/skeptic-readiness-without-evidence.md").to_owned(),
@@ -842,11 +938,9 @@ fn model_outside_role_policy(
     if role.models.iter().any(|model| model == &accepted.model) {
         return Err("the accepted model is one the role permits");
     }
-    if task
-        .exceptions
-        .iter()
-        .any(|exception| exception.model == accepted.model && exception.approval.is_some())
-    {
+    if task.exceptions.iter().any(|exception| {
+        !exception.superseded && exception.model == accepted.model && exception.approval.is_some()
+    }) {
         return Err("an owner ruling approved this model for this assignment");
     }
     Ok(Challenge {
@@ -871,11 +965,16 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
     let Some(role) = role else {
         return Err("no role memory is registered, so no lens is expected");
     };
-    let Some(missing) = role
-        .lenses
-        .iter()
-        .find(|lens| !task.assessments.iter().any(|entry| &&entry.ruling == lens))
-    else {
+    let Some(missing) = role.lenses.iter().find(|lens| {
+        !role
+            .knowledge_fingerprints
+            .get(*lens)
+            .is_some_and(|fingerprint| {
+                task.assessments.iter().any(|entry| {
+                    &entry.ruling == *lens && task::assessment_current(task, entry, fingerprint)
+                })
+            })
+    }) else {
         return Err("every lens the role consults carries an assessment");
     };
     Ok(Challenge {
@@ -889,6 +988,30 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
             format!("assessments recorded: {}", task.assessments.len()),
         ],
         reconcile: include_str!("cli/text/skeptic-lens-unassessed.md").to_owned(),
+    })
+}
+
+fn review_target_stale(task: &Task, role: Option<&Resolution>) -> Result<Challenge, &'static str> {
+    let Some(target) = &task.review_of else {
+        return Err("the task is not an explicit review");
+    };
+    if role.is_some_and(|role| role.review_current == Some(true)) {
+        return Err("the review inspects the current target revision");
+    }
+    Ok(Challenge {
+        class: Class::ReviewTargetStale,
+        statement: format!(
+            "Review {} no longer establishes approval of task {} at its current revision",
+            task.name, target.task
+        ),
+        evidence: vec![format!(
+            "reviewed revision: {}",
+            target.revision.fingerprint()
+        )],
+        reconcile: format!(
+            "Reaccept {} to inspect the target again, record current evidence and assessments, challenge and hand back. A CLOSED review stays historical; open a new review task",
+            task.name
+        ),
     })
 }
 

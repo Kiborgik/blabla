@@ -1,6 +1,6 @@
 pub mod primitives;
-mod process_tree;
-mod strict_json;
+pub(crate) mod process_tree;
+pub(crate) mod strict_json;
 
 use crate::application::{AppConfig, Application};
 use crate::diagnostic::AppError;

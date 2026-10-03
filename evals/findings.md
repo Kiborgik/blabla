@@ -1,10 +1,82 @@
 # Agent integration findings
 
+## 0.10 carryover: composed state and witness steering, 2026-09-30
+
+Same-name, same-type state declarations still observe one shared value. Project `check` and
+`status` now expose a nonfatal `shared_state` list containing the resolved type and every active
+declaring contract identity. Intentional sharing and an unrelated same-name collision receive
+the same diagnostic; incompatible types still fail with `E_INCOMPATIBLE_STATE`. Draft declarations
+are excluded. `shared_state_reports_all_contract_sources` covers unchanged execution and reordered
+composition; `shared_state_reports_resolved_types` covers scalar, list and optional-record types.
+The first diagnostic test failed because the field was absent; suppressing the production
+diagnostic after implementation makes both tests fail.
+
+Adding the already-shipped questions contract to the full behavior composition reproduced current
+witness starvation. With seed 0, 32 cases, 512 steps, timeout 5000 ms and shrink budget 256, the
+current-source CLI executed all 16,384 actions but returned YELLOW: 331 obligations witnessed,
+two unexercised, no violations. The missing obligations were
+`assignment::an-unapproved-outside-model-may-not-address-findings/root.left.effect` and
+`assignment::a-failing-check-is-visible-at-hand-back/root.right.member`. The smaller
+Assignment+Goals+Questions composition was already GREEN and is not evidence of this defect.
+
+Future-state guards previously scored as satisfied for preparation, so corpus selection favored
+the empty reset state even when an approved exception or ready task was needed. Preparation now
+ranks those guards against observed state and uses their missing fields to find related actions.
+Predicate evaluation, witness accounting, the random lane and campaign budgets are unchanged.
+The full native bridge regression fails before the repair with the same two missing obligations
+and passes after it, including a renamed/reordered goals contract. The matching current-source
+CLI campaign is GREEN at the original budget: 333 obligations witnessed, zero unexercised and
+zero violations. Full coverage is reached at action 2768; the two formerly missing obligations
+have 12 and 10 witnesses with multi-action traces. One before/after run is no general speed claim.
+
+A temporary mutation of the actual unapproved-model addressing action to report no refusal
+produces RED at action 19 for
+`assignment::an-unapproved-outside-model-may-not-address-findings`. The action was restored and
+its SHA-256 verified unchanged. This is a witnessed violation, rather than acceptance of an
+unexercised YELLOW result. `contract::questions` is now registered as active in `project.bla`;
+the goal expectation, goal state and canonical profile are unchanged. The orchestrator still
+owns canonical `finish` and release evidence.
+
+The existing unfinished-task status fixture opened two tasks over `src`. The new ownership
+rejection correctly refused the second opening, so that fixture now gives each task a distinct
+subdirectory while retaining its unfinished-task and explicit-choice assertions. All evidence
+here is from Linux and the fixed bounded campaigns above; it does not prove every future
+composition or seed will find every witness.
+
+## 0.10 carryover and evaluation boundary
+
+All 100 historical observation strings below are retained in their original order. They record
+past product defects, harness corrections and worker behavior, rather than 100 currently missing
+features. The release carryover audit classified eight rows as reproduced/new 0.10 repairs,
+56 as already-shipped mechanisms or harness corrections, 25 as historical observations and 11
+as limited or awaiting behavioral revalidation at audited source `34e5c6`. Related rows can refer
+to one defect; these counts are not independent bug or model-quality samples.
+
+Exact-check/epoch evidence, withdrawal/ownership, current lens/review credit, superseded proposals,
+decision/check display and the named composition-search case have concrete current-source
+repairs. Model aliases, typed questions/decisions, attestation, empty-contract rejection, project
+timeout inheritance and the direct evaluation driver already shipped in 0.9. Final release
+revalidation must name their retained suites; implementing them again is not required.
+
+The later `8d268c1` recovery-copy correction requires restoration of safe, identifiable own
+out-of-scope changes and preserves uncertain evidence for owner reconciliation. It addresses the
+restore-or-block wording noted by the audit, including F99; passing copy-route tests do not prove
+historical workers now restore correctly. Actor authenticity, restored-byte authorship blindness,
+general reviewer/steering quality, all 45 explicit missing opportunities and seven excluded
+categories in `coverage.json` remain separate limitations or unmeasured work.
+
+The new expert evaluation splits contain authored fixed outputs, not model samples. Replay tests
+scoring and deterministic saved-response behavior; it does not establish advisory benefit.
+Repository bindings remain shadow-only, the actual host pilot is blocked/unexecuted, and no
+judgment is promoted. [Release evidence](../docs/design/0.10-release-evidence.md) separates each
+baseline, core/platform, provider, host, replay and live claim with its own evidence boundary.
+
 Working triage, not a published comparison. [Run guide](README.md).
 Raw reports and transcripts are retained under ignored `artifacts/agent-evals/`. The suite runs
 `qwen3.5:4b` as the worker and `qwen3.5:9b` as the reviewer through Ollama, Claude Code and
-Codex CLI; the arms are with BlaBla and without BlaBla as the run guide defines them. No suite
-has been run under those arms yet; this ledger holds what preparing it found.
+Codex CLI; the arms are with BlaBla and without BlaBla as the run guide defines them. The first
+preparation section predates the later dated historical shakedowns and runs retained below.
+Those observations are not fresh 0.10 evaluations.
 
 ## Preparing the suite: 2026-09-21, dogfooding the workflow and the harness
 

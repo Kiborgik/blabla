@@ -102,14 +102,24 @@ fn four_thousand_ninety_six_calls_cover_boundaries_random_values_and_json_types(
     assert!(floats.iter().any(|value| {
         value.abs() < 16.0 && ![0.0, 1.0, -1.0].contains(value) && value.fract() != 0.0
     }));
-    for boundary in ["", "a", " ", "\"\\\n", "é"] {
-        assert!(strings.iter().any(|value| value == boundary));
+    for boundary in [
+        "",
+        "a",
+        " ",
+        "\"\\\n",
+        "é",
+        "constructor",
+        "__proto__",
+        "toString",
+    ] {
+        assert!(
+            strings.iter().any(|value| value == boundary),
+            "missing String boundary {boundary:?}"
+        );
     }
-    assert!(
-        strings.iter().any(|value| {
-            value.len() >= 2 && value.bytes().all(|byte| byte.is_ascii_lowercase())
-        })
-    );
+    assert!(strings.iter().any(|value| {
+        (2..=5).contains(&value.len()) && value.bytes().all(|byte| byte.is_ascii_lowercase())
+    }));
 }
 
 #[test]
@@ -298,6 +308,39 @@ when operate { expect "owned": any(before.items, i => i.id == input.item and i.o
 }
 
 #[test]
+fn a_deliberately_missing_identity_preserves_its_companion_fields() {
+    let contract = crate::semantics::compile(
+        "ownership.bla",
+        r#"
+type Item { key: string, owner: string }
+state items: [Item]
+action operate(item: string, owner: string)
+when operate { expect "owned": any(before.items, i => i.key == input.item and i.owner == input.owner) or after.items == before.items }
+always "unique" { unique(items, i => i.key) }
+"#,
+    )
+    .unwrap();
+    let guidance = Guidance::new(&contract);
+    let state = json!({"items":[{"key":"item-key","owner":"owner-key"}]});
+    let mut rng = SplitMix64::new(91);
+    let mut missing_identity = 0;
+    let mut wrong_owner = 0;
+    for _ in 0..512 {
+        let call = guidance
+            .candidate(&contract.actions[0], &state, &mut rng)
+            .unwrap();
+        if call.args[0] != "item-key" {
+            missing_identity += 1;
+            assert_eq!(call.args[1], "owner-key", "{call:?}");
+        } else if call.args[1] != "owner-key" {
+            wrong_owner += 1;
+        }
+    }
+    assert!(missing_identity > 0);
+    assert!(wrong_owner > 0);
+}
+
+#[test]
 fn string_literals_are_generated_and_distinguish_behavioral_frontiers() {
     let c = crate::semantics::compile(
         "roles.bla",
@@ -342,4 +385,43 @@ fn name_affinity_does_not_coerce_integer_ids_to_float_arguments() {
             .unwrap();
         assert!(call.args[0].is_f64(), "{:?}", call.args);
     }
+}
+
+#[test]
+fn parameterless_candidate_preserves_rng_and_future_parameterized_calls() {
+    let contract = crate::semantics::compile(
+        "mixed.bla",
+        "state value: int\naction inspect()\naction set(value: int)\nwhen set { expect \"set\": after.value == input.value }",
+    )
+    .unwrap();
+    let guidance = Guidance::new(&contract);
+    let state = json!({"value":99,"nested":[{"id":"A","owner":"B"}]});
+    let original = state.clone();
+    for seed in [0, 1, 99, u64::MAX] {
+        let mut actual = SplitMix64::new(seed);
+        let mut expected = SplitMix64::new(seed);
+        for _ in 0..64 {
+            let call = guidance
+                .candidate(&contract.actions[0], &state, &mut actual)
+                .unwrap();
+            assert_eq!(
+                call,
+                Call {
+                    action: "inspect".into(),
+                    args: Vec::new()
+                }
+            );
+            assert_eq!(actual.state, expected.state);
+            assert_eq!(
+                guidance
+                    .candidate(&contract.actions[1], &state, &mut actual)
+                    .unwrap(),
+                guidance
+                    .candidate(&contract.actions[1], &state, &mut expected)
+                    .unwrap()
+            );
+            assert_eq!(actual.next_u64(), expected.next_u64());
+        }
+    }
+    assert_eq!(state, original);
 }

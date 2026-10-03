@@ -1,4 +1,5 @@
 import unittest
+import sys
 from pathlib import Path
 
 from gate import REQUIRED_ORDER, STEPS, checks, ordered, steps_of
@@ -51,6 +52,48 @@ class RunnerUsesTheSchedule(unittest.TestCase):
     def test_every_placeholder_is_expanded(self):
         for _, command in checks(Path("."), True):
             self.assertEqual(PLACEHOLDERS.intersection(command), set())
+
+    def test_credential_free_expert_checks_are_exact_product_gate_stages(self):
+        schedule = dict(checks(Path("."), True))
+        expected = {
+            "expert-host-probe": "test_expert_host_probe.py",
+            "systemone-provider": "test_systemone_provider.py",
+            "expert-evaluation": "test_expert_eval.py",
+            "native-expert": "test_native_expert.py",
+            "expert-calibrate-live": "test_expert_calibrate_live.py",
+            "expert-native-live": "test_expert_native_live.py",
+            "todo-c": "test_todo_c.py",
+        }
+        for name, pattern in expected.items():
+            self.assertIn(name, schedule)
+            self.assertEqual(schedule[name], [sys.executable, "-m", "unittest", "discover", "-s", "experiments", "-p", pattern])
+            self.assertEqual(sum(command == schedule[name] for _, command in checks(Path("."), True)), 1)
+        names = [name for name, _ in STEPS]
+        self.assertEqual(len(names), len(set(names)))
+        tokens = [token for _, command in checks(Path("."), True) for token in command]
+        self.assertNotIn("smoke_systemone_provider.py", tokens)
+        self.assertNotIn("--allow-local-inference", tokens)
+
+    def test_expert_check_stages_precede_completion_without_reordering_existing_steps(self):
+        names = [name for name, _ in STEPS]
+        for name in ("expert-host-probe", "systemone-provider", "expert-evaluation", "native-expert", "expert-calibrate-live", "expert-native-live"):
+            self.assertIn(name, names)
+            self.assertLess(names.index("gate-schedule"), names.index(name))
+            self.assertLess(names.index(name), names.index("todo-python"))
+            self.assertLess(names.index(name), names.index("self-hosting-finish"))
+        self.assertLess(names.index("todo-python"), names.index("todo-c"))
+        self.assertLess(names.index("todo-c"), names.index("self-hosting-finish"))
+
+    def test_canonical_finish_owns_composed_behavior_without_standalone_campaigns(self):
+        schedule = dict(checks(Path("."), True))
+        self.assertEqual(schedule["self-hosting-finish"], ["cargo", "run", "--offline", "--quiet", "--bin", "blabla", "--", "finish"])
+        self.assertEqual(schedule["bridge"], ["cargo", "build", "--offline", "--quiet", "--example", "structure-adapter"])
+        self.assertEqual(schedule["bridge-tests"], ["cargo", "test", "--offline", "--quiet", "--example", "structure-adapter"])
+        self.assertNotIn("questions-campaign", schedule)
+        self.assertNotIn("expert-campaign", schedule)
+        self.assertFalse(any(command[:2] == ("@blabla", "run") for _, command in STEPS))
+        self.assertIn(("bridge", "self-hosting-finish"), REQUIRED_ORDER)
+        self.assertIn(("self-hosting-finish", "self-hosting-status"), REQUIRED_ORDER)
 
     def test_the_offline_flag_reaches_the_commands_that_declare_it(self):
         offline = dict(checks(Path("."), True))

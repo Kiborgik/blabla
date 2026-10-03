@@ -3,7 +3,7 @@ mod support;
 
 use blabla::memory::Memory;
 use blabla::memory::goal::{self, Goal, GoalMemory, Outcome, Verdict};
-use blabla::project::runstate::marker_path;
+use blabla::project::{runstate::marker_path, task};
 use blabla::skeptic::{self, Evidence};
 use blabla::structure::falsify::FalsifyReport;
 use blabla::voice::{self, Voice};
@@ -284,6 +284,69 @@ fn next_points_at_an_active_goal_whose_expectations_all_hold() {
         .filter(|id| id.starts_with("goal::"))
         .collect();
     assert_eq!(pointed, ["goal::ready"], "{text}");
+}
+
+#[test]
+fn held_contracts_route_to_outcome_review_without_completing_the_goal() {
+    let goals = GOALS.replace(
+        "the structure the project needs is in place",
+        "A live host delivers useful advice in matched real-work runs, still unverified.",
+    );
+    let temp = project_with(MANIFEST, &goals);
+    let original = std::fs::read(temp.path().join("goals.bla")).unwrap();
+    let (before, before_code) = json_of(&temp, &["status", "--json"]);
+    let status = text_of(&temp, &["status"]);
+    let route = status
+        .lines()
+        .find(|line| line.contains("blabla explain goal::ready") && line.contains("holds"))
+        .unwrap_or_else(|| panic!("missing ready goal route in {status}"));
+    assert!(route.contains("outcome review required"), "{route}");
+    assert!(!route.contains("set its state to"), "{route}");
+    let explain = text_of(&temp, &["explain", "goal::ready"]);
+    assert!(
+        explain.contains("Outcome acceptance: not established"),
+        "{explain}"
+    );
+    let (view, code) = json_of(&temp, &["explain", "goal::ready", "--json"]);
+    assert_eq!(code, 0);
+    assert_eq!(view["state"], "active");
+    assert_eq!(view["outcome"]["held"], 2);
+    assert_eq!(view["outcome"]["expected"], 2);
+    assert!(
+        view["statement"]
+            .as_str()
+            .unwrap()
+            .contains("still unverified")
+    );
+    let (after, after_code) = json_of(&temp, &["status", "--json"]);
+    assert_eq!(after["goal_memory"], before["goal_memory"]);
+    assert_eq!(after["overall"], before["overall"]);
+    assert_eq!(after["completion"], before["completion"]);
+    assert_eq!(after_code, before_code);
+    assert_eq!(
+        std::fs::read(temp.path().join("goals.bla")).unwrap(),
+        original
+    );
+}
+
+#[test]
+fn goal_states_do_not_claim_an_observed_outcome_acceptance() {
+    let temp = project();
+    for (name, state) in [
+        ("ready", "active"),
+        ("shipped", "done"),
+        ("abandoned", "dropped"),
+    ] {
+        let identity = format!("goal::{name}");
+        let explain = text_of(&temp, &["explain", &identity]);
+        assert!(
+            explain.contains("Outcome acceptance: not established"),
+            "{explain}"
+        );
+        let (view, code) = json_of(&temp, &["explain", &identity, "--json"]);
+        assert_eq!(code, 0);
+        assert_eq!(view["state"], state);
+    }
 }
 
 #[test]
@@ -837,6 +900,7 @@ fn task_open_refuses_a_goal_the_goal_memory_does_not_declare() {
     let temp = project();
     let (refusal, code) = open_task(&temp, "serving", Some("nope"));
     assert_eq!(code, 2, "{refusal}");
+    assert_eq!(refusal["category"], "task");
     let message = refusal["message"].as_str().unwrap();
     let words: BTreeSet<&str> = message
         .split(|character: char| !(character.is_alphanumeric() || "-_".contains(character)))
@@ -845,15 +909,26 @@ fn task_open_refuses_a_goal_the_goal_memory_does_not_declare() {
         assert!(words.contains(declared), "{declared}: {message}");
     }
     assert!(!recorded(&temp, "serving"));
+    assert!(task::read(temp.path(), "serving").unwrap().is_none());
 
     let (opened, code) = open_task(&temp, "serving", Some("ready"));
     assert_eq!(code, 0, "{opened}");
     assert_eq!(opened["task"]["goal"], "ready");
 
-    let unregistered = without_goal_file(WITHOUT_GOALS);
-    let (refusal, code) = open_task(&unregistered, "serving", Some("ready"));
-    assert_eq!(code, 2, "{refusal}");
-    assert!(!recorded(&unregistered, "serving"));
+    for unregistered in [
+        without_goal_file(WITHOUT_GOALS),
+        project_with(WITHOUT_GOALS, GOALS),
+    ] {
+        let (refusal, code) = open_task(&unregistered, "serving", Some("ready"));
+        assert_eq!(code, 2, "{refusal}");
+        assert_eq!(refusal["category"], "task");
+        assert!(!recorded(&unregistered, "serving"));
+        assert!(
+            task::read(unregistered.path(), "serving")
+                .unwrap()
+                .is_none()
+        );
+    }
 }
 
 #[test]

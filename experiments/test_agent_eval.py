@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import agent_eval_common as common
 import agent_eval_traces
@@ -247,12 +248,37 @@ class EvaluationEvidenceTests(unittest.TestCase):
     def test_model_set_rejected_when_backend_is_ollama(self):
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(
-                ['python3', str(common.ROOT / 'experiments/claude_eval.py'),
+                [sys.executable, str(common.ROOT / 'experiments/claude_eval.py'),
                  '--backend', 'ollama', '--model-set', 'haiku',
                  '--case', 'carries-an-assigned-task', '--runs', '1', '--prepare-only'],
                 cwd=directory, capture_output=True, text=True)
             self.assertEqual(result.returncode, 2)
             self.assertIn('--model-set can only be used with --backend anthropic', result.stderr)
+
+    def test_backend_argument_validation_precedes_the_platform_execution_guard(self):
+        cases = (
+            (['--backend', 'ollama', '--model-set', 'haiku'], '--model-set can only be used with --backend anthropic'),
+            (['--backend', 'anthropic'], '--model-set is required when using --backend anthropic'),
+        )
+        for platform in ('linux', 'win32', 'darwin'):
+            for arguments, error in cases:
+                with self.subTest(platform=platform, arguments=arguments):
+                    stderr = io.StringIO()
+                    with patch.object(sys, 'platform', platform), patch.object(sys, 'argv', ['claude_eval.py', *arguments]):
+                        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                            claude_eval.main()
+                    self.assertEqual(raised.exception.code, 2)
+                    self.assertIn(error, stderr.getvalue())
+
+    def test_valid_backend_arguments_still_require_linux_and_a_positive_run_count(self):
+        for platform, runs in (('win32', '1'), ('darwin', '1'), ('linux', '0')):
+            with self.subTest(platform=platform, runs=runs):
+                stderr = io.StringIO()
+                with patch.object(sys, 'platform', platform), patch.object(sys, 'argv', ['claude_eval.py', '--runs', runs]):
+                    with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                        claude_eval.main()
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn('Use Linux/WSL and a positive run count', stderr.getvalue())
 
     @unittest.skipUnless(sys.platform == 'linux', 'The evaluation runner executes Linux tools')
     def test_post_challenge_cannot_mutate_the_subjects_task_record(self):

@@ -1,0 +1,9 @@
+module bridge "bridge/expert.rs"
+module trace "src/expert/trace.rs"
+module packets "src/project/expert.rs"
+module revision "src/project/task/revision.rs"
+
+require "the-bridge-uses-product-policy": dependency bridge -> "blabla.expert.policy"
+require "the-bridge-uses-product-trace-freshness": dependency bridge -> "blabla.expert.trace"
+require "packet-selection-uses-the-shared-task-revision": dependency packets -> revision
+require "the-final-guard-has-one-selected-revision-comparison": symbol trace::selected_revision_matches

@@ -115,4 +115,10 @@ four cases.
 
 BlaBla's long-term hypothesis is not simply "tests for agents." It is that selected project intent can live outside transient chat context as executable, queryable memory.
 
-The current implementation covers behavior and structure. Higher-level process/orchestrator and mission layers remain research directions rather than shipped features.
+Behavior and Structure are the shipped completion layers. Mission, System, Process, Knowledge
+and Goals are shipped queryable, non-gating memory; bounded task records carry development state.
+Their general utility across fresh contexts and model sizes remains a research question.
+
+The unreleased 0.10 expert layer implements typed selected-context evaluation, deterministic policy/replay, calibration tooling and a cooperative native host protocol. Real Kev calibration selected no feasible policy; no judgment is promoted and runtime expert benefit remains unestablished. Fixtures and transport success cannot substitute for matched live quality evidence. [Expert limits](expert.md) · [release evidence](design/0.10-release-evidence.md)
+
+The [RTS dogfooding report](evidence/rts-dogfooding.md) records independent-review corrections and subsequent product changes, without attributing them to runtime experts or claiming measured speedup. Historical methods/results above are unchanged; additional languages and memory mechanisms do not themselves perform the listed replications.

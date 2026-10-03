@@ -43,6 +43,7 @@ pub struct IgnoreError {
 
 #[derive(Clone, Debug, Default)]
 pub struct Ignore {
+    case_insensitive: bool,
     rules: Vec<Rule>,
     protected: BTreeSet<String>,
 }
@@ -74,13 +75,31 @@ impl Ignore {
     pub fn new(
         root: &Path,
         declarations: &[IgnoreDeclaration],
+        protected: BTreeSet<String>,
+    ) -> Result<Ignore, IgnoreError> {
+        Self::new_with_case(root, declarations, protected, cfg!(windows))
+    }
+
+    fn new_with_case(
+        root: &Path,
+        declarations: &[IgnoreDeclaration],
         mut protected: BTreeSet<String>,
+        case_insensitive: bool,
     ) -> Result<Ignore, IgnoreError> {
         let mut rules = Vec::new();
+        protected = protected
+            .into_iter()
+            .map(|path| super::path_identity_with_case(&path, case_insensitive))
+            .collect();
         for declaration in declarations {
             match declaration {
                 IgnoreDeclaration::Pattern { written, .. } => {
-                    rules.extend(rule(written, "", format!("ignore \"{written}\"")));
+                    rules.extend(rule(
+                        written,
+                        "",
+                        format!("ignore \"{written}\""),
+                        case_insensitive,
+                    ));
                 }
                 IgnoreDeclaration::List {
                     written,
@@ -109,16 +128,22 @@ impl Ignore {
                         .unwrap_or_default();
                     for (number, line) in text.lines().enumerate() {
                         let origin = format!("{relative}:{}: {}", number + 1, line.trim_end());
-                        rules.extend(rule(line, &base, origin));
+                        rules.extend(rule(line, &base, origin, case_insensitive));
                     }
-                    protected.insert(relative);
+                    protected.insert(super::path_identity_with_case(&relative, case_insensitive));
                 }
             }
         }
-        Ok(Ignore { rules, protected })
+        Ok(Ignore {
+            case_insensitive,
+            rules,
+            protected,
+        })
     }
 
     pub fn rule_for(&self, relative: &str, is_dir: bool) -> Option<&str> {
+        let normalized = super::path_identity_with_case(relative, self.case_insensitive);
+        let relative = normalized.as_str();
         if self.protected.contains(relative) {
             return None;
         }
@@ -133,7 +158,10 @@ impl Ignore {
     }
 
     pub fn skips_directory(&self, relative: &str) -> bool {
-        let prefix = format!("{relative}/");
+        let prefix = format!(
+            "{}/",
+            super::path_identity_with_case(relative, self.case_insensitive)
+        );
         self.rule_for(relative, true).is_some()
             && !self.protected.iter().any(|path| path.starts_with(&prefix))
     }
@@ -198,8 +226,9 @@ fn trim_trailing_spaces(line: &str) -> &str {
     &line[..end]
 }
 
-fn rule(line: &str, base: &str, origin: String) -> Option<Rule> {
-    let line = trim_trailing_spaces(line.strip_suffix('\r').unwrap_or(line));
+fn rule(line: &str, base: &str, origin: String, case_insensitive: bool) -> Option<Rule> {
+    let normalized = super::path_identity_with_case(line, case_insensitive);
+    let line = trim_trailing_spaces(normalized.strip_suffix('\r').unwrap_or(&normalized));
     if line.is_empty() || line.starts_with('#') {
         return None;
     }
@@ -218,7 +247,7 @@ fn rule(line: &str, base: &str, origin: String) -> Option<Rule> {
     }
     Some(Rule {
         origin,
-        base: base.to_owned(),
+        base: super::path_identity_with_case(base, case_insensitive),
         tokens: tokens(line),
         negated,
         directory_only,
@@ -392,6 +421,105 @@ mod tests {
             protected.iter().map(|path| (*path).to_owned()).collect(),
         )
         .unwrap()
+    }
+
+    fn patterns_with_case(written: &[&str], protected: &[&str], case_insensitive: bool) -> Ignore {
+        let declarations: Vec<_> = written
+            .iter()
+            .map(|written| IgnoreDeclaration::Pattern {
+                written: (*written).to_owned(),
+                span: span(),
+            })
+            .collect();
+        Ignore::new_with_case(
+            Path::new("."),
+            &declarations,
+            protected.iter().map(|path| (*path).to_owned()).collect(),
+            case_insensitive,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn case_insensitive_rules_match_native_and_normalized_path_identities() {
+        let ignore = patterns_with_case(&["Deps/", "*.LOG", "!Keep.LOG", "[A-Z].tmp"], &[], true);
+        for path in ["Deps/value.txt", "deps/value.txt", "DEPS/VALUE.TXT"] {
+            assert_eq!(ignore.rule_for(path, false), Some("ignore \"Deps/\""));
+        }
+        assert!(ignore.skips_file("debug.log"));
+        assert!(!ignore.skips_file("keep.log"));
+        assert!(ignore.skips_file("Q.TMP"));
+    }
+
+    #[test]
+    fn case_insensitive_protection_survives_parent_ignores_and_list_bases() {
+        let ignore = patterns_with_case(
+            &["*", "Contracts/"],
+            &["Project.bla", "Contracts/App.bla"],
+            true,
+        );
+        assert!(!ignore.skips_file("PROJECT.BLA"));
+        assert!(!ignore.skips_file("contracts/app.bla"));
+        assert!(!ignore.skips_directory("CONTRACTS"));
+        assert!(ignore.skips_file("contracts/other.bla"));
+        let directory = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(directory.path().join("Sub")).unwrap();
+        std::fs::write(
+            directory.path().join("Sub/.GitIgnore"),
+            "/Temp/\n*.LOG\n!Keep.LOG\n/.GitIgnore\n",
+        )
+        .unwrap();
+        let listed = Ignore::new_with_case(
+            directory.path(),
+            &[IgnoreDeclaration::List {
+                written: "Sub/.GitIgnore".into(),
+                path: directory.path().join("Sub/.GitIgnore"),
+                span: span(),
+            }],
+            BTreeSet::new(),
+            true,
+        )
+        .unwrap();
+        assert!(listed.skips_file("sub/temp/value.txt"));
+        assert!(listed.skips_file("SUB/debug.log"));
+        assert!(!listed.skips_file("sub/keep.log"));
+        assert!(!listed.skips_file("sub/.gitignore"));
+        assert!(!listed.skips_file("debug.log"));
+    }
+
+    #[test]
+    fn snapshot_keys_and_ignore_rules_share_the_selected_case_domain() {
+        let root = Path::new("project");
+        let mixed = root.join("SRC/Foo.rs");
+        assert_eq!(
+            super::super::relative_with_case(root, &mixed, true),
+            "src/foo.rs"
+        );
+        assert_eq!(
+            super::super::relative_with_case(root, &mixed, false),
+            "SRC/Foo.rs"
+        );
+        assert_eq!(
+            super::super::path_identity_with_case("SRC/Foo.rs", true),
+            "src/foo.rs"
+        );
+        let folded = patterns_with_case(&["SRC/"], &[], true);
+        let native = super::super::relative_with_case(root, &mixed, true);
+        assert!(folded.skips_file(&native));
+        let sensitive = patterns_with_case(&["SRC/"], &[], false);
+        assert!(sensitive.skips_file(&super::super::relative_with_case(root, &mixed, false)));
+        assert!(!sensitive.skips_file(&native));
+    }
+
+    #[test]
+    fn case_sensitive_rules_and_protection_keep_distinct_paths_distinct() {
+        let ignore = patterns_with_case(&["Deps/", "*.LOG"], &["Project.bla"], false);
+        assert!(ignore.skips_file("Deps/value.txt"));
+        assert!(!ignore.skips_file("deps/value.txt"));
+        assert!(!ignore.skips_file("debug.log"));
+        let protected = patterns_with_case(&["*"], &["Project.bla"], false);
+        assert!(!protected.skips_file("Project.bla"));
+        assert!(protected.skips_file("project.bla"));
     }
 
     #[test]

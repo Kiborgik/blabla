@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value};
 use std::fmt;
 
-pub(super) struct StrictValue(pub Value);
+pub(crate) struct StrictValue(pub Value);
 
 impl<'de> Deserialize<'de> for StrictValue {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

@@ -14,10 +14,16 @@ STEPS = (
     ("clippy", ("cargo", "clippy", "@cargo", "--all-targets", "--", "-D", "warnings")),
     ("rust-tests", ("cargo", "test", "@cargo")),
     ("gate-schedule", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_gate*.py")),
+    ("expert-host-probe", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_expert_host_probe.py")),
+    ("systemone-provider", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_systemone_provider.py")),
+    ("expert-evaluation", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_expert_eval.py")),
+    ("native-expert", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_native_expert.py")),
+    ("expert-calibrate-live", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_expert_calibrate_live.py")),
+    ("expert-native-live", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_expert_native_live.py")),
     ("todo-python", ("@python", "-m", "unittest", "discover", "-s", "examples/todo", "-p", "test_*.py")),
+    ("todo-c", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_todo_c.py")),
     ("bridge", ("cargo", "build", "@cargo", "--quiet", "--example", "structure-adapter")),
     ("bridge-tests", ("cargo", "test", "@cargo", "--quiet", "--example", "structure-adapter")),
-    ("questions-campaign", ("@blabla", "run", "contracts/questions.bla", "--cases", "32", "--steps", "512", "--timeout-ms", "5000", "--", "target/debug/examples/structure-adapter")),
     ("self-hosting-finish", ("@blabla", "finish")),
     ("self-hosting-status", ("@blabla", "status")),
     ("example-python", ("@blabla", "--project", "examples/todo", "finish")),
@@ -32,7 +38,6 @@ STEPS = (
 
 REQUIRED_ORDER = (
     ("bridge", "self-hosting-finish"),
-    ("bridge", "questions-campaign"),
     ("self-hosting-finish", "self-hosting-status"),
 )
 

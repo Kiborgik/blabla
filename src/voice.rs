@@ -27,7 +27,7 @@ impl Voice {
     }
 }
 
-pub const BLUNT: [(&str, &str); 17] = [
+pub const BLUNT: [(&str, &str); 20] = [
     (
         "declared-check-failed",
         "This is not fucking ready. Fix the check or record the actual blocker.",
@@ -91,6 +91,18 @@ pub const BLUNT: [(&str, &str); 17] = [
     (
         "question-unpicked",
         "You were asked a straight question. Pick an answer and say how sure you are; silence is not a fucking answer.",
+    ),
+    (
+        "withdrawal-residue",
+        "Withdrawing the assignment did not settle its changed files. Restore them or reconcile them against current successful evidence from a CLOSED successor.",
+    ),
+    (
+        "review-target-stale",
+        "That review no longer covers the current target. Reaccept and review it again; a CLOSED review is history, so open a new one.",
+    ),
+    (
+        "unobservable-task-input",
+        "Those declared paths are outside change tracking. Correct the inputs or deliverables, then rerun evidence and challenge; the old result remains history.",
     ),
     (
         "goal-outcome-unmet",

@@ -458,3 +458,202 @@ fn absent_binding_context_does_not_retain_disjunctive_numeric_atoms() {
     assert!(unexercised.is_empty(), "{unexercised:?}");
     assert_eq!(report["status"], "green");
 }
+
+#[allow(dead_code)]
+mod composed_bridge {
+    include!("../bridge/structure_adapter.rs");
+
+    pub(super) struct App {
+        scenario: Scenario,
+        assignment: assignment::Assignment,
+        tone: voice::Tone,
+        lifecycle: lifecycle::Lifecycle,
+        goals: goals::Goals,
+        decisions: decisions::Decisions,
+        attestation: attestation::Attestation,
+        questions: questions::Questions,
+        expert: expert::Expert,
+    }
+
+    impl App {
+        pub(super) fn new() -> Self {
+            Self {
+                scenario: Scenario::CollectionHit,
+                assignment: assignment::Assignment::new(),
+                tone: voice::Tone::new(),
+                lifecycle: lifecycle::Lifecycle::new(),
+                goals: goals::Goals::new(),
+                decisions: decisions::Decisions::new(),
+                attestation: attestation::Attestation::new(),
+                questions: questions::Questions::new(),
+                expert: expert::Expert::new(),
+            }
+        }
+    }
+
+    impl blabla::application::Application for App {
+        fn reset(&mut self) -> Result<(), blabla::diagnostic::AppError> {
+            self.lifecycle.reset();
+            *self = Self::new();
+            Ok(())
+        }
+
+        fn call(
+            &mut self,
+            call: &blabla::report::Call,
+        ) -> Result<(), blabla::diagnostic::AppError> {
+            if let Some(scenario) = Scenario::from_action(&call.action) {
+                self.scenario = scenario;
+            } else if !(self.assignment.call(&call.action)
+                || self.tone.call(&call.action)
+                || self.lifecycle.call(&call.action)
+                || self.goals.call(&call.action)
+                || self.decisions.call(&call.action)
+                || self.attestation.call(&call.action)
+                || self.questions.call(&call.action)
+                || self.expert.call(&call.action))
+            {
+                return Err(blabla::diagnostic::AppError::new(
+                    "E_ACTION",
+                    "unknown composed action",
+                ));
+            }
+            Ok(())
+        }
+
+        fn observe(
+            &mut self,
+            _: &[blabla::ir::Field],
+        ) -> Result<Value, blabla::diagnostic::AppError> {
+            let mut state = observe(self.scenario);
+            for extra in [
+                self.assignment.observe(),
+                self.tone.observe(&self.assignment.report()),
+                self.lifecycle.observe(),
+                self.goals.observe(),
+                self.decisions.observe(),
+                self.attestation.observe(),
+                self.questions.observe(),
+                self.expert.observe(),
+            ] {
+                state
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+            }
+            Ok(state)
+        }
+
+        fn finish(&mut self) -> Result<(), blabla::diagnostic::AppError> {
+            self.lifecycle.reset();
+            Ok(())
+        }
+    }
+}
+
+fn reordered_composed_contract() -> blabla::ir::Contract {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = blabla::project::read_manifest(&root.join("project.bla")).unwrap();
+    let profile = manifest.profile.as_ref().unwrap();
+    assert_eq!(
+        (
+            profile.seed,
+            profile.cases,
+            profile.steps,
+            profile.shrink_budget
+        ),
+        (0, 32, 512, 256)
+    );
+    let mut sources: Vec<_> = manifest
+        .entries
+        .iter()
+        .filter(|entry| !entry.draft && entry.layer == blabla::project::Layer::Behavior)
+        .map(|entry| {
+            (
+                entry.group.clone(),
+                entry.display.clone(),
+                std::fs::read_to_string(&entry.path).unwrap(),
+            )
+        })
+        .collect();
+    assert!(sources.iter().any(|(group, _, _)| group == "questions"));
+    assert!(sources.iter().any(|(group, _, _)| group == "expert"));
+    let unrelated = sources
+        .iter()
+        .position(|(group, _, _)| group == "goals")
+        .unwrap();
+    sources[unrelated].0 = "unrelated".into();
+    sources.swap(0, unrelated);
+    let parsed: Vec<_> = sources
+        .iter()
+        .map(|(_, file, source)| blabla::syntax::parse(file, source).unwrap())
+        .collect();
+    let units: Vec<_> = sources
+        .iter()
+        .zip(&parsed)
+        .map(|((group, file, source), syntax)| blabla::semantics::Unit {
+            file,
+            source,
+            group: Some(group),
+            declarations: &syntax.declarations,
+        })
+        .collect();
+    blabla::semantics::compile_units(&units).unwrap()
+}
+
+#[test]
+fn reordered_composed_contract_preserves_targeted_witness() {
+    let options = RunOptions {
+        seed: 0,
+        cases: 32,
+        steps: 512,
+        shrink_budget: 256,
+    };
+    let contract = reordered_composed_contract();
+    let report = run(&contract, &options, || Ok(composed_bridge::App::new())).unwrap();
+    let missed: Vec<_> = report
+        .coverage_summary
+        .coverage
+        .iter()
+        .filter(|obligation| obligation.status != blabla::report::CoverageStatus::Verified)
+        .map(|obligation| &obligation.id)
+        .collect();
+    eprintln!(
+        "reordered=true status={:?} executed={} replayed={} resets={} full_coverage={:?} failure={:?}",
+        report.status,
+        report.metrics.total_actions,
+        report.metrics.replay_actions,
+        report.metrics.resets,
+        report.metrics.actions_to_full_coverage,
+        report.failure.as_ref().map(|failure| &failure.property)
+    );
+    assert!(
+        missed.is_empty(),
+        "reordered=true: {} missed, first {:?}",
+        missed.len(),
+        missed.iter().take(8).collect::<Vec<_>>()
+    );
+    for id in [
+        "assignment::an-unapproved-outside-model-may-not-address-findings/root.left.effect",
+        "assignment::a-failing-check-is-visible-at-hand-back/root.right.member",
+    ] {
+        let witness = report
+            .coverage_summary
+            .coverage
+            .iter()
+            .find(|obligation| obligation.id == id)
+            .unwrap();
+        assert!(witness.witnesses > 0, "{id}");
+        assert!(
+            witness
+                .first_witness_trace
+                .as_ref()
+                .is_some_and(|trace| trace.len() > 1),
+            "{id}"
+        );
+    }
+    assert_eq!(report.status, blabla::report::RunStatus::Green);
+    assert_eq!(report.metrics.action_budget, 16384);
+    assert_eq!(report.metrics.total_actions, 16384);
+    assert!(report.metrics.replay_actions > 0);
+}

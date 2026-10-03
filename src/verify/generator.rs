@@ -153,7 +153,16 @@ fn boundary_value(ty: &Type, rng: &mut SplitMix64) -> Value {
             Value::from(values[rng.sample_below_rejecting_modulo_bias(values.len())])
         }
         Type::String => {
-            let values = ["", "a", " ", "\"\\\n", "é"];
+            let values = [
+                "",
+                "a",
+                " ",
+                "\"\\\n",
+                "é",
+                "constructor",
+                "__proto__",
+                "toString",
+            ];
             Value::String(values[rng.sample_below_rejecting_modulo_bias(values.len())].into())
         }
         Type::Float => {

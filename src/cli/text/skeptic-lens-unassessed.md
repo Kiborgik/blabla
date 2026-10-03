@@ -1,1 +1,1 @@
-Record what the assessment was with blabla task lens, including that the lens does not apply, which is a complete answer. Recording an assessment says the question was asked; it never establishes that the design is correct.
+Record a fresh assessment with blabla task lens for each resolved pack the role consults, including that it does not apply. The accepted model, assignment epoch and current pack/rulings must match; old assessments remain history. Recording an assessment says the question was asked and never establishes that the design is correct.

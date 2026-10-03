@@ -1,3 +1,4 @@
+from functools import cache
 import os
 from pathlib import Path
 import json
@@ -6,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 import uuid
 
 
@@ -19,9 +21,17 @@ STARTING_STATE = {
 }
 
 
+@cache
+def working_tree_cli(built):
+    subprocess.run(["cargo", "build", "--quiet", "--locked", "--bin", "blabla",
+                    "--target-dir", str(built.parent)], cwd=ROOT, check=True)
+    return built / ("blabla.exe" if os.name == "nt" else "blabla")
+
+
 def working_tree_environment(**overrides):
+    executable = working_tree_cli(BUILT)
     environment = dict(os.environ, **overrides)
-    environment["PATH"] = str(BUILT) + os.pathsep + environment.get("PATH", "")
+    environment["PATH"] = str(executable.parent) + os.pathsep + environment.get("PATH", "")
     return environment
 
 
@@ -38,6 +48,48 @@ class TestDirectory:
 
 
 class EvalMaterialsTests(unittest.TestCase):
+    def test_fixture_environment_builds_a_missing_or_stale_source_cli(self):
+        for initial in (None, b"stale installed binary"):
+            with self.subTest(initial=initial):
+                temporary = TestDirectory()
+                self.addCleanup(temporary.cleanup)
+                built = temporary.path / "target" / "debug"
+                built.mkdir(parents=True)
+                executable = built / ("blabla.exe" if os.name == "nt" else "blabla")
+                if initial is not None:
+                    executable.write_bytes(initial)
+                    executable.chmod(0o755)
+
+                def build(command, **options):
+                    self.assertEqual(command, ["cargo", "build", "--quiet", "--locked", "--bin", "blabla",
+                                               "--target-dir", str(built.parent)])
+                    self.assertEqual(options, {"cwd": ROOT, "check": True})
+                    executable.write_bytes(b"fresh source binary")
+                    executable.chmod(0o755)
+                    return subprocess.CompletedProcess(command, 0)
+
+                with patch(__name__ + ".BUILT", built), patch("subprocess.run", side_effect=build):
+                    environment = working_tree_environment()
+                selected = shutil.which("blabla", path=environment["PATH"])
+                self.assertIsNotNone(selected)
+                self.assertTrue(Path(selected).samefile(executable))
+                self.assertEqual(executable.read_bytes(), b"fresh source binary")
+
+    def test_fixture_environment_propagates_build_failure_instead_of_using_a_stale_cli(self):
+        temporary = TestDirectory()
+        self.addCleanup(temporary.cleanup)
+        built = temporary.path / "target" / "debug"
+        built.mkdir(parents=True)
+        executable = built / ("blabla.exe" if os.name == "nt" else "blabla")
+        executable.write_bytes(b"stale installed binary")
+        executable.chmod(0o755)
+        failure = subprocess.CalledProcessError(1, ["cargo", "build"])
+        with patch(__name__ + ".BUILT", built), patch("subprocess.run", side_effect=failure):
+            with self.assertRaises(subprocess.CalledProcessError) as raised:
+                working_tree_environment()
+        self.assertIs(raised.exception, failure)
+        self.assertEqual(executable.read_bytes(), b"stale installed binary")
+
     def make_probe(self, root):
         binary = root / "bin"
         binary.mkdir()
@@ -374,8 +426,7 @@ class EvalMaterialsTests(unittest.TestCase):
 
     def blabla_json(self, destination, *arguments):
         environment = working_tree_environment()
-        executable = shutil.which("blabla", path=environment["PATH"])
-        completed = subprocess.run([executable, *arguments, "--json"], cwd=destination, env=environment,
+        completed = subprocess.run([str(working_tree_cli(BUILT)), *arguments, "--json"], cwd=destination, env=environment,
                                    capture_output=True, text=True)
         return completed.returncode, json.loads(completed.stdout)
 
@@ -420,7 +471,7 @@ class EvalMaterialsTests(unittest.TestCase):
         (project / "app.py").write_text("", encoding="utf-8")
 
         def blabla(*arguments):
-            return subprocess.run(["blabla", *arguments], cwd=project, env=working_tree_environment(),
+            return subprocess.run([str(working_tree_cli(BUILT)), *arguments], cwd=project, env=working_tree_environment(),
                                   capture_output=True, text=True)
 
         opened = blabla("task", "open", "probe", "--role", "worker", "--statement", "Probe.", "--scope", "app.py", "--check", "true")

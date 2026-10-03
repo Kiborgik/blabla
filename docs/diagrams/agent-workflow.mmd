@@ -1,22 +1,16 @@
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#eef2ff","primaryTextColor":"#0f172a","primaryBorderColor":"#4338ca","lineColor":"#0f172a","secondaryColor":"#f1f5f9","tertiaryColor":"#f8fafc","clusterBkg":"#f8fafc","clusterBorder":"#64748b","edgeLabelBackground":"#ffffff"},"themeCSS":".edgePath path.path, path.flowchart-link { stroke-width: 3px; } marker path { fill: #0f172a; stroke: #0f172a; } .node rect, .node polygon, .node circle { stroke-width: 2px; }"}}%%
-flowchart TD
-    accTitle: BlaBla agent workflow
-    accDescr: An agent starts from the AGENTS.md block and runs blabla status, then blabla explain to recover only the relevant memory and rules. Where a project uses the development loop, the orchestrator opens a bounded task recording write scope and deliverables; a worker implements inside that scope and runs the focused checks that cover the change. blabla challenge then checks the recorded account against deterministic evidence, which is separate from the independent reviewer role that reads the diff and records findings. The orchestrator resolves findings and integrates. Only blabla finish decides project completion, and a challenge does not change its verdict or its exit code.
-    agents["AGENTS.md block<br/>Start with: blabla status"]
-    status["blabla status<br/>BEHAVIOR · STRUCTURE · OVERALL<br/>memory identities · open tasks"]
-    explain["blabla explain &lt;identity&gt;<br/>one rule, system, role or flow"]
-    task["blabla task open<br/>write scope · deliverables"]
-    implement["worker: implement inside scope<br/>ordinary code, never the contracts"]
-    focused["focused checks<br/>only what changed"]
-    challenge["blabla challenge<br/>deterministic evidence check<br/>decides no completion"]
-    review["reviewer: independent review<br/>reads the task and the diff"]
-    findings["blabla task finding<br/>recorded, outlives the context"]
-    integrate["orchestrator: resolve and integrate<br/>blabla task resolve"]
-    finish["blabla finish<br/>VERIFYING → progress → verdict"]
-    red["RED or YELLOW<br/>NOT COMPLETE"]
-    green["OVERALL GREEN<br/>the only completion signal"]
-    agents --> status --> explain --> task --> implement --> focused --> challenge
-    challenge -.unreconciled.-> implement
-    challenge --> review --> findings --> integrate --> finish
-    finish --> red --> explain
-    finish --> green
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"18px","primaryColor":"#eef2ff","primaryTextColor":"#0f172a","primaryBorderColor":"#4338ca","lineColor":"#475569","secondaryColor":"#f0fdfa","tertiaryColor":"#f8fafc","clusterBkg":"#f8fafc","clusterBorder":"#94a3b8","edgeLabelBackground":"#ffffff"},"flowchart":{"nodeSpacing":35,"rankSpacing":32,"curve":"linear"},"themeCSS":".edgePath path.path, path.flowchart-link { stroke-width: 2px; } .node rect, .node polygon { stroke-width: 2px; }"}}%%
+flowchart TB
+    accTitle: BlaBla development workflow
+    accDescr: The orchestrator recovers relevant intent with status and explain, then opens a bounded task. The worker accepts, implements within scope, records focused evidence and lens assessments, challenges the record and hands back ready. An independent reviewer inspects the diff and evidence and records findings; corrections return through acceptance and renewed evidence. The orchestrator resolves findings, integrates, confirms owner records and closes when current, then runs finish. Optional expert advice enters only at observed eligible checkpoints and has no scope or gate authority.
+    plan["ORCHESTRATOR<br/>recover → assign"]
+    work["WORKER<br/>accept → implement<br/>check + lenses<br/>challenge → ready"]
+    review["INDEPENDENT REVIEW<br/>inspect → record findings"]
+    finish["ORCHESTRATOR<br/>resolve → integrate → close<br/>finish: OVERALL GREEN"]
+    expert["Optional expert<br/>observed checkpoints only<br/>no scope / gate authority"]
+    plan --> work --> review --> finish
+    review -. "corrections" .-> work
+    finish -. "BLOCKED" .-> plan
+    work -. "observed boundary" .-> expert
+    expert -. "advice" .-> work
+    classDef gate fill:#dcfce7,stroke:#15803d,color:#14532d;
+    class finish gate;

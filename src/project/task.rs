@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub mod revision;
+pub mod store;
+
+pub use revision::{RelevantRevision, relevant_revision};
+
 pub const TASK_DIRECTORY: &str = "tasks";
 
 pub const AUTHORITY: &str = include_str!("../cli/text/authority-task.md");
@@ -94,6 +99,24 @@ pub struct Decision {
 impl Decision {
     pub fn unanswered_below_floor(&self) -> bool {
         self.below_floor && self.answer.is_none()
+    }
+
+    pub fn current_pick(&self) -> &str {
+        self.answer
+            .as_ref()
+            .map_or(&self.pick, |answer| &answer.pick)
+    }
+
+    pub fn current_status(&self) -> &'static str {
+        if self.overruled() {
+            "overruled"
+        } else if self.answer.is_some() {
+            "answered"
+        } else if self.below_floor {
+            "blocked"
+        } else {
+            "stands"
+        }
     }
 
     pub fn overruled(&self) -> bool {
@@ -461,7 +484,14 @@ pub fn calibration(tasks: &[Task], model_named_by: impl Fn(&str) -> String) -> V
         .collect()
 }
 
-pub const STATES: [&str; 5] = ["open", "accepted", "blocked", "ready", "closed"];
+pub const STATES: [&str; 6] = [
+    "open",
+    "accepted",
+    "blocked",
+    "ready",
+    "closed",
+    "withdrawn",
+];
 
 pub const SCRATCH_DIRECTORY: &str = "scratch";
 
@@ -475,21 +505,135 @@ pub struct Acceptance {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Assessment {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knowledge_fingerprint: Option<String>,
     pub ruling: String,
     pub statement: String,
     pub unix: u64,
 }
 
+pub fn knowledge_fingerprint(
+    memory: &crate::memory::knowledge::KnowledgeMemory,
+    name: &str,
+) -> Option<String> {
+    let pack = memory.packs.iter().find(|pack| pack.name == name)?;
+    let rulings: BTreeMap<_, _> = memory
+        .rulings
+        .iter()
+        .filter(|ruling| ruling.pack == name)
+        .map(|ruling| (ruling.id(), ruling))
+        .collect();
+    let mut hash = super::Fnv::new();
+    hash.write_str("task-memory-v1");
+    hash.write_str(&serde_json::to_string(&(pack, rulings)).expect("knowledge serializes"));
+    Some(hash.finish())
+}
+
+pub fn assessment_current(
+    task: &Task,
+    assessment: &Assessment,
+    knowledge_fingerprint: &str,
+) -> bool {
+    task.accepted
+        .as_ref()
+        .is_some_and(|accepted| assessment.model.as_deref() == Some(&accepted.model))
+        && assessment.acceptance_epoch == Some(task.acceptance_epoch)
+        && assessment.knowledge_fingerprint.as_deref() == Some(knowledge_fingerprint)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewTarget {
+    pub task: String,
+    pub revision: RelevantRevision,
+}
+
+pub fn review_revision(
+    review: &Task,
+    reviewed: &Task,
+    tree: &BTreeMap<String, String>,
+    identities: BTreeMap<String, String>,
+) -> RelevantRevision {
+    let mut revision = relevant_revision(reviewed, tree, identities);
+    for input in &review.check_inputs {
+        revision
+            .paths
+            .insert(input.clone(), observed_digest(tree, input));
+    }
+    revision
+}
+
+pub fn review_current(
+    review: &Task,
+    reviewed: &Task,
+    tree: &BTreeMap<String, String>,
+    identities: BTreeMap<String, String>,
+) -> bool {
+    review.accepted.is_some()
+        && reviewed.state != "withdrawn"
+        && review.name != reviewed.name
+        && review.review_of.as_ref().is_some_and(|target| {
+            target.task == reviewed.name
+                && target.revision == review_revision(review, reviewed, tree, identities)
+        })
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Exception {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_epoch: Option<u64>,
+    #[serde(default)]
+    pub superseded: bool,
     pub model: String,
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approval: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CheckIdentity {
+    Text { command: String },
+    Argv { argv: Vec<String> },
+}
+
+pub fn declared_check(task: &Task) -> Option<CheckIdentity> {
+    match (&task.check_argv, &task.check) {
+        (Some(argv), _) => Some(CheckIdentity::Argv { argv: argv.clone() }),
+        (None, Some(command)) => Some(CheckIdentity::Text {
+            command: command.clone(),
+        }),
+        (None, None) => None,
+    }
+}
+
+pub fn evidence_matches(task: &Task, evidence: &Evidence) -> bool {
+    if evidence.acceptance_epoch != Some(task.acceptance_epoch) {
+        return false;
+    }
+    match (declared_check(task), evidence.identity.as_ref()) {
+        (
+            Some(CheckIdentity::Argv { argv: declared }),
+            Some(CheckIdentity::Argv { argv: observed }),
+        ) => declared == *observed && evidence.command.as_ref() == Some(observed),
+        (
+            Some(CheckIdentity::Text { command: declared }),
+            Some(CheckIdentity::Text { command: observed }),
+        ) => declared == *observed && evidence.check == *observed && evidence.command.is_none(),
+        _ => false,
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Evidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<CheckIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_epoch: Option<u64>,
     pub check: String,
     pub exit: i32,
     pub tree: String,
@@ -529,6 +673,8 @@ pub struct Attribution {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Resolution {
+    pub knowledge_fingerprints: BTreeMap<String, String>,
+    pub review_current: Option<bool>,
     pub models: Vec<String>,
     pub lenses: Vec<String>,
     pub requirements: Vec<String>,
@@ -552,6 +698,8 @@ pub fn resolve(
         .map(|(identity, _)| identity.clone())
         .collect();
     Resolution {
+        knowledge_fingerprints: BTreeMap::new(),
+        review_current: None,
         models: models.to_vec(),
         lenses: lenses.to_vec(),
         requirements,
@@ -630,26 +778,17 @@ pub struct Readiness {
 }
 
 pub fn latest_evidence(task: &Task) -> Option<&Evidence> {
-    match &task.check {
-        Some(declared) => task
-            .evidence
-            .iter()
-            .rev()
-            .find(|entry| &entry.check == declared),
-        None => task.evidence.last(),
-    }
+    task.evidence
+        .iter()
+        .rev()
+        .find(|entry| evidence_matches(task, entry))
 }
 
 pub fn readiness(task: &Task, tree: &BTreeMap<String, String>) -> Readiness {
     let recorded = !task.evidence.is_empty();
     let latest = latest_evidence(task);
     let answers_declared_check = latest.is_some_and(|entry| entry.exit == 0);
-    let current = latest.is_some_and(|entry| {
-        !stale(entry, tree)
-            && evidence_inputs(task, tree)
-                .keys()
-                .all(|path| entry.inputs.contains_key(path))
-    });
+    let current = latest.is_some_and(|entry| evidence_inputs(task, tree) == entry.inputs);
     Readiness {
         recorded,
         current,
@@ -690,6 +829,7 @@ fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String
     record.challenged = None;
     record.state.clear();
     record.closed_unix = None;
+    record.closed_paths.clear();
     record.result = None;
     record.build = None;
     for finding in &mut record.findings {
@@ -737,7 +877,7 @@ pub fn handback(task: &Task, tree: &BTreeMap<String, String>) -> Result<(), &'st
     match task.state.as_str() {
         "open" | "blocked" => return Err("accept"),
         "ready" => return Err("review"),
-        "closed" => return Err("closed"),
+        "closed" | "withdrawn" => return Err("closed"),
         "accepted" => {}
         _ => return Err("invalid-state"),
     }
@@ -803,6 +943,23 @@ pub fn mark_ready(
 }
 
 pub fn record_acceptance(task: &mut Task, tree: &BTreeMap<String, String>, model: &str, unix: u64) {
+    let replacement = task
+        .accepted
+        .as_ref()
+        .is_some_and(|accepted| accepted.model != model);
+    for exception in &mut task.exceptions {
+        if exception.approval.is_none() && !exception.superseded {
+            if replacement && exception.acceptance_epoch.is_some() && exception.model != model {
+                exception.superseded = true;
+            } else {
+                exception.acceptance_epoch = Some(task.acceptance_epoch + 1);
+            }
+        }
+    }
+    task.acceptance_epoch = task
+        .acceptance_epoch
+        .checked_add(1)
+        .expect("acceptance epoch exhausted");
     let changed_paths = changed(task, tree);
     let changed_at_acceptance = if changed_paths.is_empty() {
         None
@@ -856,7 +1013,401 @@ pub struct RemovedDeliverable {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Withdrawal {
+    pub reason: String,
+    pub model: String,
+    pub unix: u64,
+    pub unresolved_paths: BTreeMap<String, Option<String>>,
+    #[serde(default)]
+    pub reconciliations: Vec<WithdrawalReconciliation>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WithdrawalReconciliation {
+    pub path: String,
+    pub successor: String,
+    pub revision: revision::RelevantRevision,
+    pub model: String,
+    pub unix: u64,
+}
+
+pub fn withdraw(
+    task: &mut Task,
+    tree: &BTreeMap<String, String>,
+    reason: &str,
+    model: &str,
+    unix: u64,
+) -> Result<(), String> {
+    if !task.open() || reason.trim().is_empty() {
+        return Err("withdrawal requires a nonterminal task and a nonempty reason".to_owned());
+    }
+    let unresolved_paths = changed(task, tree)
+        .into_iter()
+        .filter(|path| task.in_scope(path) || attribute(task, tree, path) == ATTRIBUTIONS[0])
+        .map(|path| (path.to_owned(), observed_digest(tree, path)))
+        .collect();
+    task.withdrawal = Some(Withdrawal {
+        reason: reason.to_owned(),
+        model: model.to_owned(),
+        unix,
+        unresolved_paths,
+        reconciliations: Vec::new(),
+    });
+    task.state = "withdrawn".to_owned();
+    task.result = None;
+    task.closed_unix = None;
+    task.closed_paths.clear();
+    task.challenged = None;
+    Ok(())
+}
+
+pub fn successor_revision(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    path: &str,
+) -> revision::RelevantRevision {
+    let mut revision = revision::relevant_revision(task, tree, BTreeMap::new());
+    let mut fingerprint = super::Fnv::new();
+    fingerprint.write_str("withdrawal-successor-v1");
+    fingerprint.write_str(
+        &serde_json::to_string(&(
+            revision.task_digest,
+            &task.accepted,
+            &task.result,
+            &task.evidence,
+            &task.challenged,
+        ))
+        .expect("successor serializes"),
+    );
+    revision.task_digest = fingerprint.finish();
+    revision
+        .paths
+        .insert(path.to_owned(), observed_digest(tree, path));
+    revision
+}
+
+pub fn successor_covers(task: &Task, path: &str) -> bool {
+    task.check_inputs.iter().any(|input| covers(input, path))
+        || task
+            .deliverables
+            .iter()
+            .any(|deliverable| covers(&deliverable.path, path))
+}
+
+pub fn successful_successor(task: &Task, tree: &BTreeMap<String, String>, path: &str) -> bool {
+    task.state == "closed"
+        && task.result.is_some()
+        && readiness(task, tree).supported
+        && challenge_current(task, tree)
+        && successor_covers(task, path)
+}
+
+pub fn withdrawal_residue(
+    task: &Task,
+    tasks: &[Task],
+    tree: &BTreeMap<String, String>,
+) -> Vec<String> {
+    withdrawal_residue_by(task, tasks, tree, |_| true)
+}
+
+pub fn tracked_withdrawal_residue(
+    task: &Task,
+    tasks: &[Task],
+    tree: &BTreeMap<String, String>,
+    root: &Path,
+    ignore: &Ignore,
+) -> Vec<String> {
+    withdrawal_residue_by(task, tasks, tree, |successor| {
+        tracking_error(successor, root, ignore).is_none()
+    })
+}
+
+fn withdrawal_residue_by(
+    task: &Task,
+    tasks: &[Task],
+    tree: &BTreeMap<String, String>,
+    observable: impl Fn(&Task) -> bool,
+) -> Vec<String> {
+    let Some(withdrawal) = &task.withdrawal else {
+        return Vec::new();
+    };
+    withdrawal
+        .unresolved_paths
+        .keys()
+        .filter(|path| {
+            if observed_digest(tree, path) == observed_digest(&task.opened_tree, path) {
+                return false;
+            }
+            !withdrawal.reconciliations.iter().any(|record| {
+                record.path == **path
+                    && tasks.iter().any(|successor| {
+                        successor.name == record.successor
+                            && observable(successor)
+                            && successful_successor(successor, tree, path)
+                            && successor_revision(successor, tree, path) == record.revision
+                            && record.revision.paths.get(*path)
+                                == Some(&observed_digest(tree, path))
+                    })
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+pub fn normalize_scope(root: &Path, path: &str) -> Result<String, String> {
+    let path = path.replace('\\', "/");
+    if path.starts_with('/') || path.as_bytes().get(1) == Some(&b':') {
+        return Err(format!("write scope {path:?} must be project-relative"));
+    }
+    let mut components = Vec::new();
+    let mut current = root.to_path_buf();
+    for component in path.split('/') {
+        if component.is_empty() || component == "." {
+            continue;
+        }
+        if component == ".." || component.contains('\0') {
+            return Err(format!(
+                "write scope {path:?} contains an invalid component"
+            ));
+        }
+        if components.is_empty() && component.as_bytes().get(1) == Some(&b':') {
+            return Err(format!("write scope {path:?} must be project-relative"));
+        }
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!("write scope {path:?} traverses a symlink"));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("cannot inspect write scope {path:?}: {error}")),
+        }
+        components.push(component);
+    }
+    if components.is_empty() {
+        return Err("write scope must name a project path".to_owned());
+    }
+    let normalized = components.join("/");
+    Ok(super::path_identity(&normalized))
+}
+
+fn case_identity_error(
+    root: &Path,
+    ignore: &Ignore,
+    path: &str,
+    case_insensitive: bool,
+) -> Option<String> {
+    if !case_insensitive {
+        return None;
+    }
+    fn entries(directory: &Path) -> Result<BTreeMap<String, Vec<std::fs::DirEntry>>, String> {
+        let mut groups: BTreeMap<String, Vec<std::fs::DirEntry>> = BTreeMap::new();
+        let children = std::fs::read_dir(directory).map_err(|_| {
+            format!(
+                "cannot inspect filesystem aliases in {}",
+                directory.display()
+            )
+        })?;
+        for child in children {
+            let child = child.map_err(|_| {
+                format!(
+                    "cannot inspect filesystem aliases in {}",
+                    directory.display()
+                )
+            })?;
+            let key = super::path_identity_with_case(&child.file_name().to_string_lossy(), true);
+            groups.entry(key).or_default().push(child);
+        }
+        Ok(groups)
+    }
+    fn unique(
+        directory: &Path,
+        key: &str,
+        aliases: &[std::fs::DirEntry],
+    ) -> Result<PathBuf, String> {
+        if aliases.len() != 1 {
+            return Err(format!(
+                "ambiguous Windows path identity {key:?} in {}; case-fold aliases include regular files, directories and symlinks",
+                directory.display()
+            ));
+        }
+        let canonical = directory.join(key);
+        if std::fs::symlink_metadata(&canonical).is_err() {
+            return Err(format!(
+                "Windows path identity {key:?} does not resolve in {}; case-sensitive filesystem mappings are unsupported for this task path",
+                directory.display()
+            ));
+        }
+        Ok(canonical)
+    }
+    let inspect = || -> Result<(), String> {
+        let mut current = root.to_path_buf();
+        if path != "." {
+            for component in path.split('/') {
+                if !current.is_dir() {
+                    return Ok(());
+                }
+                let groups = entries(&current)?;
+                let Some(aliases) = groups.get(component) else {
+                    return Ok(());
+                };
+                current = unique(&current, component, aliases)?;
+            }
+        }
+        if !current.is_dir() {
+            return Ok(());
+        }
+        let mut pending = vec![current];
+        while let Some(directory) = pending.pop() {
+            for (key, aliases) in entries(&directory)? {
+                let relative = super::relative_with_case(root, &directory.join(&key), true);
+                let mut tracked = false;
+                for alias in &aliases {
+                    let kind = alias.file_type().map_err(|_| {
+                        format!("cannot inspect filesystem alias {}", alias.path().display())
+                    })?;
+                    if kind.is_file() && !ignore.skips_file(&relative)
+                        || kind.is_dir()
+                            && !super::skipped_directory(&key)
+                            && !ignore.skips_directory(&relative)
+                    {
+                        tracked = true;
+                    }
+                }
+                if !tracked {
+                    continue;
+                }
+                let child = unique(&directory, &key, &aliases)?;
+                if aliases[0]
+                    .file_type()
+                    .map_err(|_| format!("cannot inspect filesystem alias {}", child.display()))?
+                    .is_dir()
+                {
+                    pending.push(child);
+                }
+            }
+        }
+        Ok(())
+    };
+    inspect().err()
+}
+
+pub fn normalize_tracked_path(
+    root: &Path,
+    ignore: &Ignore,
+    kind: &str,
+    path: &str,
+) -> Result<String, String> {
+    let normalized =
+        normalize_scope(root, path).map_err(|error| error.replace("write scope", kind))?;
+    let mut current = root.to_path_buf();
+    for component in normalized.split('/') {
+        current.push(component);
+        if super::skipped_directory(component) && !current.is_file() {
+            return Err(format!(
+                "{kind} {path:?} is left out of change tracking by built-in skipped directory {component:?}; declare a tracked project path"
+            ));
+        }
+    }
+    let path_on_disk = root.join(&normalized);
+    if let Some(rule) = ignore.rule_for(&normalized, !path_on_disk.is_file()) {
+        return Err(format!(
+            "{kind} {path:?} is left out of change tracking by {rule}, so BlaBla could never observe it; drop that ignore rule or declare a path it does not cover"
+        ));
+    }
+    if let Some(problem) = case_identity_error(root, ignore, &normalized, cfg!(windows)) {
+        return Err(format!(
+            "{kind} {path:?} is not safely observable: {problem}"
+        ));
+    }
+    Ok(normalized)
+}
+
+pub fn tracking_error(task: &Task, root: &Path, ignore: &Ignore) -> Option<String> {
+    let declared = if task.check_inputs.is_empty() {
+        &task.scope
+    } else {
+        &task.check_inputs
+    };
+    declared
+        .iter()
+        .map(|path| ("input", path))
+        .chain(
+            task.deliverables
+                .iter()
+                .map(|deliverable| ("deliverable", &deliverable.path)),
+        )
+        .find_map(
+            |(kind, path)| match normalize_tracked_path(root, ignore, kind, path) {
+                Err(message) => Some(message),
+                Ok(normalized) if normalized != *path => Some(format!(
+                    "{kind} {path:?} is not normalized for change tracking; declare {normalized:?}"
+                )),
+                Ok(_) => None,
+            },
+        )
+}
+
+pub fn tracking_recovery(task: &Task, problem: &str) -> String {
+    format!(
+        "{problem}. Correct inputs with blabla task check {name} --input <tracked-path> and the exact check; remove invalid deliverables with blabla task deliverable {name} --remove <path> --reason <reason> --model <id>, then add tracked replacements. Resume READY work with task accept, rerun evidence and challenge. CLOSED records remain history; open a new assignment for current credit",
+        name = task.name
+    )
+}
+
+pub fn tracked_readiness(
+    task: &Task,
+    root: &Path,
+    ignore: &Ignore,
+    tree: &BTreeMap<String, String>,
+) -> Readiness {
+    let mut readiness = readiness(task, tree);
+    if tracking_error(task, root, ignore).is_some() {
+        readiness.current = false;
+        readiness.supported = false;
+    }
+    readiness
+}
+
+pub fn scopes_intersect(a: &str, b: &str) -> bool {
+    covers(a, b) || covers(b, a)
+}
+
+pub fn validate_scope(
+    root: &Path,
+    name: &str,
+    scopes: &[String],
+    tasks: &[Task],
+) -> Result<Vec<String>, String> {
+    let scopes = scopes
+        .iter()
+        .map(|path| normalize_scope(root, path))
+        .collect::<Result<Vec<_>, _>>()?;
+    for other in tasks
+        .iter()
+        .filter(|other| other.name != name && other.open())
+    {
+        for owned in &other.scope {
+            let owned = normalize_scope(root, owned)?;
+            if let Some(path) = scopes.iter().find(|path| scopes_intersect(path, &owned)) {
+                return Err(format!(
+                    "write scope {path:?} overlaps task::{} at {owned:?}; withdraw the old assignment before transferring ownership",
+                    other.name
+                ));
+            }
+        }
+    }
+    Ok(scopes)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_of: Option<ReviewTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withdrawal: Option<Withdrawal>,
     pub name: String,
     pub role: String,
     pub statement: String,
@@ -879,6 +1430,8 @@ pub struct Task {
     pub check_inputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accepted: Option<Acceptance>,
+    #[serde(default)]
+    pub acceptance_epoch: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Acceptance>,
     #[serde(default)]
@@ -916,6 +1469,8 @@ fn open_state() -> String {
 impl Default for Task {
     fn default() -> Task {
         Task {
+            review_of: None,
+            withdrawal: None,
             name: String::new(),
             role: String::new(),
             statement: String::new(),
@@ -930,6 +1485,7 @@ impl Default for Task {
             check_argv: None,
             check_inputs: Vec::new(),
             accepted: None,
+            acceptance_epoch: 0,
             result: None,
             assessments: Vec::new(),
             exceptions: Vec::new(),
@@ -950,7 +1506,7 @@ impl Default for Task {
 
 impl Task {
     pub fn open(&self) -> bool {
-        self.state != "closed"
+        !matches!(self.state.as_str(), "closed" | "withdrawn")
     }
 
     pub fn declares_check(&self) -> bool {
@@ -1005,6 +1561,15 @@ pub fn replaceable(existing: Option<&Task>) -> bool {
 }
 
 pub fn covers(allowed: &str, path: &str) -> bool {
+    let allowed_case;
+    let path_case;
+    let (allowed, path) = if cfg!(windows) {
+        allowed_case = super::path_identity(allowed);
+        path_case = super::path_identity(path);
+        (allowed_case.as_str(), path_case.as_str())
+    } else {
+        (allowed, path)
+    };
     let allowed = allowed.trim_end_matches('/');
     path == allowed
         || path
@@ -1022,6 +1587,7 @@ pub fn path_of(root: &Path, name: &str) -> PathBuf {
 
 #[derive(Default)]
 pub struct Opening {
+    pub review_of: Option<String>,
     pub name: String,
     pub role: String,
     pub statement: String,
@@ -1050,6 +1616,15 @@ pub fn record_from(
     digests: Vec<Option<String>>,
 ) -> Task {
     Task {
+        review_of: opening.review_of.map(|task| ReviewTarget {
+            task,
+            revision: RelevantRevision {
+                acceptance_epoch: 0,
+                task_digest: String::new(),
+                paths: BTreeMap::new(),
+                identities: BTreeMap::new(),
+            },
+        }),
         name: opening.name,
         role: opening.role,
         statement: opening.statement,
@@ -1074,13 +1649,7 @@ pub fn record_from(
 }
 
 pub fn write(root: &Path, task: &Task) -> std::io::Result<PathBuf> {
-    let path = path_of(root, &task.name);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let text = serde_json::to_vec_pretty(task).map_err(std::io::Error::other)?;
-    std::fs::write(&path, text)?;
-    Ok(path)
+    store::replace(root, task)
 }
 
 pub fn read(root: &Path, name: &str) -> Result<Option<Task>, String> {
@@ -1165,10 +1734,9 @@ pub fn can_address_finding(task: &Task, model: &str, permitted: &[String]) -> bo
     task.accepted
         .as_ref()
         .is_some_and(|accepted| accepted.model == model)
-        && task
-            .exceptions
-            .iter()
-            .any(|exception| exception.model == model && exception.approval.is_some())
+        && task.exceptions.iter().any(|exception| {
+            !exception.superseded && exception.model == model && exception.approval.is_some()
+        })
 }
 
 pub fn apply_evidence(task: &mut Task, evidence: Evidence) {
@@ -1238,6 +1806,81 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(unix)]
+    fn case_identity_guard_rejects_colliding_regular_and_symlink_aliases() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/Foo.rs"), "first").unwrap();
+        std::fs::write(root.join("src/foo.rs"), "second").unwrap();
+        let ignore = Ignore::default();
+        for path in ["src", "src/foo.rs", "."] {
+            assert!(
+                case_identity_error(root, &ignore, path, true).is_some(),
+                "{path}"
+            );
+        }
+        assert!(case_identity_error(root, &ignore, "src", false).is_none());
+        std::fs::remove_file(root.join("src/Foo.rs")).unwrap();
+        std::os::unix::fs::symlink(root.join("outside.rs"), root.join("src/Foo.rs")).unwrap();
+        for path in ["src", "src/foo.rs"] {
+            assert!(
+                case_identity_error(root, &ignore, path, true).is_some(),
+                "symlink alias: {path}"
+            );
+        }
+        assert!(case_identity_error(root, &ignore, "src/absent.rs", true).is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn case_identity_guard_refuses_unresolvable_case_mapping_but_keeps_safe_absence() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/Foo.rs"), "upper-only").unwrap();
+        let ignore = Ignore::default();
+        assert!(case_identity_error(root, &ignore, "src/foo.rs", true).is_some());
+        assert!(case_identity_error(root, &ignore, "src", true).is_some());
+        assert!(case_identity_error(root, &ignore, "src/Foo.rs", false).is_none());
+        assert!(case_identity_error(root, &ignore, "future/nested.rs", true).is_none());
+        std::fs::create_dir(root.join("node_modules")).unwrap();
+        std::fs::write(root.join("node_modules/A"), "a").unwrap();
+        std::fs::write(root.join("node_modules/a"), "b").unwrap();
+        std::fs::remove_file(root.join("src/Foo.rs")).unwrap();
+        std::fs::write(root.join("src/foo.rs"), "safe").unwrap();
+        assert!(case_identity_error(root, &ignore, ".", true).is_none());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn case_identity_guard_skips_fully_excluded_alias_groups() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/Foo.LOG"), "ignored first").unwrap();
+        std::fs::write(root.join("src/foo.log"), "ignored second").unwrap();
+        let ignore = Ignore::new(
+            root,
+            &[super::super::ignore::IgnoreDeclaration::Pattern {
+                written: "*.log".to_owned(),
+                span: crate::diagnostic::Span {
+                    start: 0,
+                    end: 1,
+                    line: 1,
+                    column: 1,
+                },
+            }],
+            Default::default(),
+        )
+        .unwrap();
+        assert!(case_identity_error(root, &ignore, "src", true).is_none());
+        std::fs::write(root.join("src/foo.rs"), "tracked").unwrap();
+        std::os::unix::fs::symlink(root.join("external"), root.join("src/Foo.rs")).unwrap();
+        assert!(case_identity_error(root, &ignore, "src", true).is_some());
+    }
+
+    #[test]
     fn task_without_closed_paths_serializes_without_field() {
         let task = Task {
             name: "test-task".to_owned(),
@@ -1297,6 +1940,7 @@ mod tests {
                 "opened_unix": 0,
                 "opened_tree": {},
                 "state": "open",
+                "acceptance_epoch": 0,
                 "check_inputs": [],
                 "assessments": [],
                 "exceptions": [],
@@ -1321,6 +1965,7 @@ mod tests {
                 check_argv: Some(vec!["cargo".to_owned(), "test".to_owned()]),
                 inputs: vec!["shared".to_owned()],
                 goal: Some("ship".to_owned()),
+                review_of: None,
             },
             7,
             BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),
@@ -1338,6 +1983,7 @@ mod tests {
                 "opened_unix": 7,
                 "opened_tree": { "src/a.rs": "old" },
                 "state": "open",
+                "acceptance_epoch": 0,
                 "check": "check",
                 "check_argv": ["cargo", "test"],
                 "check_inputs": ["shared"],

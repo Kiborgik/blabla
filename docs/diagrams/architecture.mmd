@@ -1,69 +1,17 @@
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#eef2ff","primaryTextColor":"#0f172a","primaryBorderColor":"#4338ca","lineColor":"#0f172a","secondaryColor":"#f1f5f9","tertiaryColor":"#f8fafc","clusterBkg":"#f8fafc","clusterBorder":"#64748b","edgeLabelBackground":"#ffffff"},"themeCSS":".edgePath path.path, path.flowchart-link { stroke-width: 3px; } marker path { fill: #0f172a; stroke: #0f172a; } .node rect, .node polygon, .node circle { stroke-width: 2px; }"}}%%
+%%{init: {"theme":"base","themeVariables":{"fontFamily":"Arial, sans-serif","fontSize":"18px","primaryColor":"#eef2ff","primaryTextColor":"#0f172a","primaryBorderColor":"#4338ca","lineColor":"#475569","secondaryColor":"#f0fdfa","tertiaryColor":"#f8fafc","clusterBkg":"#f8fafc","clusterBorder":"#94a3b8","edgeLabelBackground":"#ffffff"},"flowchart":{"nodeSpacing":35,"rankSpacing":32,"curve":"linear"},"themeCSS":".edgePath path.path, path.flowchart-link { stroke-width: 2px; } .node rect, .node polygon { stroke-width: 2px; }"}}%%
 flowchart TB
     accTitle: BlaBla architecture
-    accDescr: project.bla composes behavior and structure contracts and registers project memory. Mission, System, Process and Knowledge are parsed by the memory subsystem and answered through status and explain; they never reach completion. Behavior contracts are parsed and type-checked into one typed contract IR that the behavior verifier runs as a coverage-guided campaign against the application through the trusted runtime, with counterexample shrinking. Structure contracts are parsed into a structure IR that the structure verifier evaluates against facts from a Python or Rust provider. Bounded task records under .blabla/tasks hold scope, deliverables and findings, and the skeptic forms one deterministic challenge from them. The behavior result is recorded with a run-state marker; structure is evaluated live. blabla status, explain, task, challenge and finish render these surfaces, and only finish decides the OVERALL gate.
-    manifest["project.bla<br/>use behavior · use structure · verify behavior<br/>mission · system · process · knowledge"]
-    behavior["behavior.bla files"]
-    structure["structure.bla files"]
-    manifest --> behavior
-    manifest --> structure
-    subgraph smemory["Project memory · src/memory — never gating"]
-        memory["Mission · System · Process · Knowledge<br/>parsed, validated within memory, routed to packs"]
-    end
-    manifest --> memory
-    subgraph compile["Parsers and typed IR"]
-        bparse["behavior parser + semantic checks<br/>src/syntax, src/semantics"] --> bir["Contract IR<br/>src/ir"]
-        sparse["structure parser<br/>src/structure/syntax.rs"] --> sir["StructureContract IR<br/>src/structure"]
-    end
-    behavior --> bparse
-    structure --> sparse
-    subgraph bverify["Behavior verifier · src/verify"]
-        campaign["coverage-guided campaign<br/>generator · corpus · coverage"]
-        shrink["counterexample shrinking"]
-        runtime["trusted runtime<br/>src/runtime · JSON Lines adapter · runtime::restart"]
-        campaign --> shrink
-        campaign --> runtime
-    end
-    subgraph sverify["Structure verifier · src/structure"]
-        evaluator["rule evaluator<br/>GREEN · RED · ERROR"]
-        registry["provider registry by file extension"]
-        python["Python provider<br/>isolated interpreter + embedded ast extractor"]
-        rustp["Rust provider<br/>syn, parsed in-process"]
-        evaluator --> registry --> python
-        registry --> rustp
-    end
-    bir --> campaign
-    sir --> evaluator
-    app["application under verification"]
-    runtime <--> app
-    python -. reads source text only .-> repo["repository files"]
-    rustp -. reads source text only .-> repo
-    record[".blabla/status.json record<br/>.blabla/verifying.json run state<br/>src/project/status.rs · runstate.rs"]
-    campaign --> record
-    subgraph sdev["Development state — never gating"]
-        task[".blabla/tasks/*.json<br/>scope · deliverables · findings · snapshot<br/>src/project/task.rs"]
-        skeptic["skeptic · src/skeptic.rs<br/>one grounded challenge"]
-        task --> skeptic
-    end
-    evaluator -. falsification verdict .-> skeptic
-    record -. completion state .-> skeptic
-    subgraph cli["CLI · src/cli"]
-        status["blabla status"]
-        explain["blabla explain"]
-        taskcmd["blabla task"]
-        challengecmd["blabla challenge"]
-        guide["blabla guide"]
-        finishcmd["blabla finish"]
-    end
-    record --> status
-    evaluator --> status
-    memory --> status
-    memory --> explain
-    record --> explain
-    evaluator --> explain
-    taskcmd <--> task
-    skeptic --> challengecmd
-    finishcmd --> evaluator
-    finishcmd --> campaign
-    status --> overall["BEHAVIOR · STRUCTURE · OVERALL"]
-    finishcmd --> overall
+    accDescr: The CLI and project layer compose two independent verification pipelines: behavior parsing and typed IR feed a finite campaign through the trusted application adapter; structure parsing feeds static source providers and one fact evaluator. finish combines fresh canonical behavior and live structure into OVERALL. Alongside them, memory feeds queries, task records feed deterministic challenge, and explicit host checkpoints feed bounded expert policy and optional advice. These non-gating surfaces never decide completion.
+    entry["CLI + project composition"]
+    entry --> behavior["Behavior<br/>parser → typed IR"]
+    entry --> structure["Structure<br/>parser → fact evaluator"]
+    behavior --> campaign["Finite campaign<br/>coverage + shrinking"]
+    campaign <--> app["Trusted adapter<br/>JSON Lines application"]
+    structure <--> providers["Static source providers<br/>Python · Rust · TS/JS<br/>Go · Java · C/C++"]
+    campaign --> result["finish → OVERALL<br/>fresh behavior + live structure"]
+    structure --> result
+    entry -. "non-gating" .-> memory["Registered memory<br/>status / explain"]
+    memory --> tasks["Task records<br/>deterministic challenge"]
+    tasks -. "selected context" .-> expert["Observed host checkpoint<br/>packet → provider → policy<br/>optional bounded advice"]
+    classDef gate fill:#dcfce7,stroke:#15803d,color:#14532d;
+    class result gate;

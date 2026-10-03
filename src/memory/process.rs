@@ -1,8 +1,11 @@
 use super::syntax::Block;
-use super::{Memory, expect_fields, expect_keywords, list, safe_references, text};
+use super::{
+    Memory, expect_fields, expect_keywords, field_error, list, safe_references, string_list, text,
+};
 use crate::diagnostic::Diagnostic;
-use serde::Serialize;
-use std::collections::BTreeMap;
+use crate::expert::{CheckpointKind, ContextSlot};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const FILE_NAME: &str = "process.bla";
 
@@ -54,6 +57,22 @@ pub struct Alias {
     pub model: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JudgmentBinding {
+    pub name: String,
+    pub judgment: String,
+    pub roles: Vec<String>,
+    pub checkpoints: Vec<CheckpointKind>,
+    pub context: BTreeMap<ContextSlot, Vec<String>>,
+}
+
+impl JudgmentBinding {
+    pub fn id(&self) -> String {
+        format!("binding::{}", self.name)
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct ProcessMemory {
     pub roles: Vec<Role>,
@@ -61,6 +80,7 @@ pub struct ProcessMemory {
     pub flows: Vec<Flow>,
     pub steps: Vec<Step>,
     pub aliases: Vec<Alias>,
+    pub bindings: Vec<JudgmentBinding>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -75,6 +95,9 @@ pub struct ProcessStatus {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub flows: Vec<String>,
     pub steps: usize,
+    pub bindings: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub binding_ids: Vec<String>,
     pub authority: &'static str,
 }
 
@@ -103,11 +126,22 @@ pub struct ProcessExplainView {
     pub flow: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding: Option<JudgmentBinding>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub bindings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     pub authority: &'static str,
 }
 
 pub fn build(blocks: &[Block]) -> Result<ProcessMemory, Diagnostic> {
-    expect_keywords(blocks, &["role", "policy", "flow", "step", "alias"])?;
+    expect_keywords(
+        blocks,
+        &["role", "policy", "flow", "step", "alias", "binding"],
+    )?;
     let mut memory = ProcessMemory::default();
     for block in blocks {
         match block.keyword.as_str() {
@@ -166,6 +200,7 @@ pub fn build(blocks: &[Block]) -> Result<ProcessMemory, Diagnostic> {
                         .transpose()?,
                 });
             }
+            "binding" => memory.bindings.push(build_binding(block)?),
             "alias" => {
                 expect_fields(block, &["model"], &[])?;
                 memory.aliases.push(Alias {
@@ -222,11 +257,37 @@ pub fn validate(memory: &ProcessMemory) -> Vec<String> {
             .iter()
             .map(|alias| (alias.name.as_str(), "an alias")),
     );
+    declared.extend(
+        memory
+            .bindings
+            .iter()
+            .map(|binding| (binding.name.as_str(), "a binding")),
+    );
     let mut seen: BTreeMap<&str, &'static str> = BTreeMap::new();
     for (name, kind) in declared {
         if let Some(previous) = seen.insert(name, kind) {
             problems.push(format!(
                 "the name {name:?} is declared twice, as {previous} and as {kind}; every name must resolve to one entry"
+            ));
+        }
+    }
+    for binding in &memory.bindings {
+        if binding.roles.is_empty() || binding.checkpoints.is_empty() {
+            problems.push(format!("{} needs roles and checkpoints", binding.id()));
+        }
+        for role in &binding.roles {
+            if !memory.roles.iter().any(|declared| declared.name == *role) {
+                problems.push(format!("{} names undeclared role {role:?}", binding.id()));
+            }
+        }
+        if binding
+            .context
+            .get(&ContextSlot::Candidates)
+            .is_some_and(|candidates| candidates.len() > 4)
+        {
+            problems.push(format!(
+                "{} has more than four candidate identities",
+                binding.id()
             ));
         }
     }
@@ -335,6 +396,14 @@ pub fn status(memory: &Memory<ProcessMemory>, file: &str) -> Option<ProcessStatu
             .present()
             .map(|memory| memory.steps.len())
             .unwrap_or(0),
+        binding_ids: memory
+            .present()
+            .map(|memory| memory.bindings.iter().map(JudgmentBinding::id).collect())
+            .unwrap_or_default(),
+        bindings: memory
+            .present()
+            .map(|memory| memory.bindings.len())
+            .unwrap_or(0),
         authority: AUTHORITY,
     })
 }
@@ -388,6 +457,11 @@ pub fn canonical(memory: &Memory<ProcessMemory>, query: &str) -> Vec<String> {
     {
         found.push(format!("step::{name}"));
     }
+    if wanted.is_none_or(|kind| kind == "binding")
+        && memory.bindings.iter().any(|binding| binding.name == name)
+    {
+        found.push(format!("binding::{name}"));
+    }
     found
 }
 
@@ -408,6 +482,10 @@ pub fn explain(memory: &Memory<ProcessMemory>, query: &str) -> Option<ProcessExp
         steps: Vec::new(),
         flow: None,
         command: None,
+        binding: None,
+        references: Vec::new(),
+        bindings: Vec::new(),
+        source: None,
         authority: AUTHORITY,
     };
     if wanted.is_none_or(|kind| kind == "role")
@@ -444,6 +522,12 @@ pub fn explain(memory: &Memory<ProcessMemory>, query: &str) -> Option<ProcessExp
                 .map(|policy| format!("policy::{}  {}", policy.name, policy.statement))
                 .collect(),
             consult: packs(&role.consult),
+            bindings: memory
+                .bindings
+                .iter()
+                .filter(|binding| binding.roles.contains(&role.name))
+                .map(JudgmentBinding::id)
+                .collect(),
             steps: memory
                 .steps
                 .iter()
@@ -508,6 +592,21 @@ pub fn explain(memory: &Memory<ProcessMemory>, query: &str) -> Option<ProcessExp
             ..blank
         });
     }
+    if wanted.is_none_or(|kind| kind == "binding")
+        && let Some(binding) = memory.bindings.iter().find(|binding| binding.name == name)
+    {
+        let mut references = vec![binding.judgment.clone()];
+        references.extend(binding.roles.iter().map(|role| format!("role::{role}")));
+        references.extend(binding.context.values().flatten().cloned());
+        return Some(ProcessExplainView {
+            kind: "binding",
+            id: binding.id(),
+            statement: binding.judgment.clone(),
+            binding: Some(binding.clone()),
+            references,
+            ..blank
+        });
+    }
     None
 }
 
@@ -523,7 +622,7 @@ fn packs(names: &[String]) -> Vec<String> {
 }
 
 fn split(query: &str) -> (Option<&str>, &str) {
-    for kind in ["role", "policy", "flow", "step"] {
+    for kind in ["role", "policy", "flow", "step", "binding"] {
         if let Some(name) = query
             .strip_prefix(kind)
             .and_then(|rest| rest.strip_prefix("::"))
@@ -532,4 +631,45 @@ fn split(query: &str) -> (Option<&str>, &str) {
         }
     }
     (None, query)
+}
+
+fn unique_list(block: &Block, name: &str) -> Result<Vec<String>, Diagnostic> {
+    let values = string_list(block, name)?;
+    if values.iter().collect::<BTreeSet<_>>().len() != values.len() {
+        return Err(field_error(block, name, "contains duplicate values"));
+    }
+    Ok(values)
+}
+
+fn build_binding(block: &Block) -> Result<JudgmentBinding, Diagnostic> {
+    expect_fields(
+        block,
+        &["judgment", "roles", "checkpoints"],
+        &["goal", "mission", "candidates", "rules", "system"],
+    )?;
+    safe_references(block.field("roles"))?;
+    let checkpoints = unique_list(block, "checkpoints")?
+        .iter()
+        .map(|value| {
+            CheckpointKind::from_authored(value).ok_or_else(|| {
+                field_error(block, "checkpoints", "contains an unsupported checkpoint")
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut context = BTreeMap::new();
+    for name in ["goal", "mission", "candidates", "rules", "system"] {
+        if block.field(name).is_some() {
+            context.insert(
+                ContextSlot::from_authored(name).unwrap(),
+                unique_list(block, name)?,
+            );
+        }
+    }
+    Ok(JudgmentBinding {
+        name: block.name.clone(),
+        judgment: text(block, "judgment")?,
+        roles: unique_list(block, "roles")?,
+        checkpoints,
+        context,
+    })
 }

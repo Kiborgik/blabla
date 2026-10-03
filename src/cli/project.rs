@@ -11,6 +11,7 @@ use blabla::memory::mission::{MissionExplainView, MissionMemory, MissionStatus};
 use blabla::memory::process::{ProcessExplainView, ProcessMemory, ProcessStatus};
 use blabla::memory::system::{SystemExplainView, SystemMemory, SystemStatus};
 use blabla::memory::{self, Memory, goal, knowledge, mission, process, routing, system};
+use blabla::project::expert::{self, ExpertStatus};
 use blabla::project::runstate::{
     Classification, Marker, new_run_id, profile_identity, read_marker, remove_marker, write_marker,
 };
@@ -68,7 +69,12 @@ struct StatusWithMemory<'a> {
     goal_memory: Option<GoalStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bounded_tasks: Option<TaskStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expert: Option<ExpertStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expert_runtime: Option<blabla::expert::trace::RuntimeStatus>,
     capabilities: CapabilityReport,
+    shared_state: &'a [project::SharedState],
 }
 
 #[derive(Default)]
@@ -78,6 +84,7 @@ pub(super) struct MemoryViews {
     process: Option<ProcessStatus>,
     knowledge: Option<KnowledgeStatus>,
     goal: Option<GoalStatus>,
+    expert: Option<ExpertStatus>,
 }
 
 struct Memories {
@@ -101,6 +108,7 @@ impl Memories {
             process: process::status(&self.process, &self.process_file),
             knowledge: knowledge::status(&self.knowledge, &self.knowledge_files),
             goal: goal::status(&self.goal, &self.goal_file, goals),
+            expert: expert::status(&self.knowledge, &self.process),
         }
     }
 }
@@ -182,10 +190,13 @@ fn memories(project: &Project) -> Memories {
         .present()
         .map(|memory| routing::system_problems(memory, &knowledge_memory))
         .unwrap_or_default();
-    let process_routing = process_memory
+    let mut process_routing = process_memory
         .present()
         .map(|memory| routing::process_problems(memory, &knowledge_memory))
         .unwrap_or_default();
+    if process_memory.present().is_some() {
+        process_routing.extend(expert::validate_bindings(project));
+    }
     Memories {
         mission: mission_memory,
         mission_file,
@@ -303,10 +314,25 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             knowledge_memory: views.knowledge,
             goal_memory: views.goal,
             bounded_tasks: tasks,
+            expert: views.expert,
+            expert_runtime: blabla::expert::trace::status(project),
             capabilities,
+            shared_state: &project.shared_state,
         })
     } else {
-        write_status(&view, &views, tasks.as_ref(), &capabilities)
+        write_status(
+            &view,
+            &views,
+            tasks.as_ref(),
+            &capabilities,
+            &project.shared_state,
+        ).and_then(|()| {
+            if let Some(runtime) = blabla::expert::trace::status(project) {
+                let mut output = io::stdout().lock();
+                writeln!(output, "EXPERT RUNTIME {:?}  trace retention {} days  payload limit {} bytes  unresolved limit {}/task  retained {:?} bytes  unknown deliveries {:?}  error {:?}", runtime.mode, runtime.trace_limits.retention_days, runtime.trace_limits.payload_bytes, runtime.trace_limits.unresolved_per_task, runtime.payload_bytes, runtime.unknown_deliveries, runtime.error)?;
+            }
+            Ok(())
+        })
     };
     if result.is_ok() { view.exit } else { 4 }
 }
@@ -325,7 +351,10 @@ pub(super) fn explain(project: &Project, query: &str, json: bool) -> i32 {
                 } else {
                     write_mission_explain(&view)
                 }
-            } else if let Some(view) = knowledge::explain(&loaded.knowledge, &id) {
+            } else if let Some(mut view) = knowledge::explain(&loaded.knowledge, &id) {
+                if view.kind == "judgment" {
+                    view.source = expert::judgment_source(project, &id);
+                }
                 if json {
                     write_json(&view)
                 } else {
@@ -344,9 +373,12 @@ pub(super) fn explain(project: &Project, query: &str, json: bool) -> i32 {
                     write_goal_explain(&view)
                 }
             } else {
-                let Some(view) = process::explain(&loaded.process, &id) else {
+                let Some(mut view) = process::explain(&loaded.process, &id) else {
                     unreachable!("resolve matched a memory identity")
                 };
+                if view.kind == "binding" {
+                    view.source = expert::binding_source(project).map(str::to_owned);
+                }
                 let calibration = role_calibration(project, &loaded.process, &view);
                 if json {
                     write_json(&CalibratedExplainView {
@@ -694,6 +726,22 @@ Consult:
             view.consult.join("  ")
         )?;
     }
+    if let Some(binding) = &view.binding {
+        writeln!(
+            output,
+            "\nDefinition:\n  {}",
+            serde_json::to_string(binding).map_err(io::Error::other)?
+        )?;
+    }
+    if !view.bindings.is_empty() {
+        writeln!(output, "\nBindings:\n  {}", view.bindings.join("  "))?;
+    }
+    if !view.references.is_empty() {
+        writeln!(output, "\nReferences:\n  {}", view.references.join("  "))?;
+    }
+    if let Some(source) = &view.source {
+        writeln!(output, "\nSource:\n  {source}")?;
+    }
     if !calibration.is_empty() {
         writeln!(
             output,
@@ -815,6 +863,10 @@ fn write_goal_explain(view: &GoalExplainView) -> io::Result<()> {
             expectation.identity
         )?;
     }
+    writeln!(
+        output,
+        "\nOutcome acceptance: not established by these contract checks. Review the goal statement and outcome evidence separately; the recorded state is owner-declared."
+    )?;
     writeln!(output, "\n{}", view.authority)
 }
 
@@ -834,6 +886,22 @@ fn write_knowledge_explain(view: &KnowledgeExplainView) -> io::Result<()> {
             output,
             "\nEach ruling is explained on demand; this view lists identities so a pack costs one line per ruling instead of one paragraph."
         )?;
+    }
+    if !view.judgments.is_empty() {
+        writeln!(output, "\nJudgments:\n  {}", view.judgments.join("  "))?;
+    }
+    if let Some(judgment) = &view.judgment {
+        writeln!(
+            output,
+            "\nDefinition:\n  {}",
+            serde_json::to_string(judgment).map_err(io::Error::other)?
+        )?;
+    }
+    if !view.references.is_empty() {
+        writeln!(output, "\nReferences:\n  {}", view.references.join("  "))?;
+    }
+    if let Some(source) = &view.source {
+        writeln!(output, "\nSource:\n  {source}")?;
     }
     writeln!(output, "\n{}", view.authority)
 }
@@ -909,6 +977,7 @@ struct CheckView {
     postconditions: usize,
     invariants: usize,
     forbidden: usize,
+    shared_state: Vec<project::SharedState>,
 }
 
 pub(super) fn check(project: &Project, json: bool) -> i32 {
@@ -965,6 +1034,7 @@ pub(super) fn check(project: &Project, json: bool) -> i32 {
         forbidden: contract
             .map(|c| c.invariants.iter().filter(|p| p.forbidden).count())
             .unwrap_or(0),
+        shared_state: project.shared_state.clone(),
     };
     let result = if json {
         write_json(&view)
@@ -1017,11 +1087,32 @@ fn write_check(view: &CheckView) -> io::Result<()> {
             }
         }
     }
+    write_shared_state(&mut output, &view.shared_state)?;
     writeln!(
         output,
         "{} actions\n{} postconditions\n{} invariants\n{} forbidden conditions",
         view.actions, view.postconditions, view.invariants, view.forbidden
     )
+}
+
+fn write_shared_state(output: &mut impl Write, states: &[project::SharedState]) -> io::Result<()> {
+    if !states.is_empty() {
+        writeln!(output, "\nShared state:")?;
+        for state in states {
+            writeln!(
+                output,
+                "  {}: {}  {}",
+                state.name,
+                state.ty,
+                state.contracts.join(", ")
+            )?;
+        }
+        writeln!(
+            output,
+            "  Same-name, same-type declarations observe one shared value."
+        )?;
+    }
+    Ok(())
 }
 
 fn manifest_diagnostic(project: &Project, code: &str, message: &str) -> Diagnostic {
@@ -1737,9 +1828,10 @@ fn write_knowledge_line(
     match memory.state {
         "present" => writeln!(
             output,
-            "KNOWLEDGE  {} packs  {} rulings   (memory only; never part of completion)",
+            "KNOWLEDGE  {} packs  {} rulings  {} judgments   (memory only; never part of completion)",
             memory.packs.len(),
-            memory.rulings
+            memory.rulings,
+            memory.judgments
         ),
         _ => writeln!(
             output,
@@ -1837,7 +1929,7 @@ fn write_goal_memory(output: &mut impl Write, memory: Option<&GoalStatus>) -> io
     writeln!(output, "  {}", memory.authority)
 }
 
-fn write_goals_to_close(output: &mut impl Write, memory: Option<&GoalStatus>) -> io::Result<()> {
+fn write_goals_to_review(output: &mut impl Write, memory: Option<&GoalStatus>) -> io::Result<()> {
     let Some(memory) = memory else {
         return Ok(());
     };
@@ -1848,8 +1940,8 @@ fn write_goals_to_close(output: &mut impl Write, memory: Option<&GoalStatus>) ->
     {
         writeln!(
             output,
-            "  blabla explain {}   every expectation holds; set its state to \"done\" in {}",
-            outcome.goal, memory.file
+            "  blabla explain {}   every contract expectation holds; outcome review required before marking done",
+            outcome.goal
         )?;
     }
     Ok(())
@@ -1869,11 +1961,12 @@ fn write_process_line(output: &mut impl Write, memory: Option<&ProcessStatus>) -
     match memory.state {
         "present" => writeln!(
             output,
-            "PROCESS    {} roles  {} policies  {} flows  {} steps   (memory only; never part of completion)",
+            "PROCESS    {} roles  {} policies  {} flows  {} steps  {} bindings   (memory only; never part of completion)",
             memory.roles.len(),
             memory.policies,
             memory.flows.len(),
-            memory.steps
+            memory.steps,
+            memory.bindings
         ),
         _ => writeln!(
             output,
@@ -1905,6 +1998,9 @@ Process memory ({}):",
         );
     }
     writeln!(output, "  {}", memory.roles.join("  "))?;
+    if !memory.binding_ids.is_empty() {
+        writeln!(output, "  {}", memory.binding_ids.join("  "))?;
+    }
     if !memory.flows.is_empty() {
         writeln!(output, "  {}", memory.flows.join("  "))?;
     }
@@ -1977,7 +2073,7 @@ pub(super) fn write_next(
 ) -> io::Result<()> {
     writeln!(output, "\nNext:")?;
     write_next_steps(output, view, views)?;
-    write_goals_to_close(output, views.goal.as_ref())
+    write_goals_to_review(output, views.goal.as_ref())
 }
 
 fn write_next_steps(
@@ -2098,6 +2194,7 @@ fn write_status(
     views: &MemoryViews,
     tasks: Option<&TaskStatus>,
     capabilities: &CapabilityReport,
+    shared_state: &[project::SharedState],
 ) -> io::Result<()> {
     let mut output = io::stdout().lock();
     writeln!(output, "BlaBla: executable project memory\n")?;
@@ -2112,10 +2209,18 @@ fn write_status(
     write_process_line(&mut output, views.process.as_ref())?;
     write_knowledge_line(&mut output, views.knowledge.as_ref())?;
     write_goal_line(&mut output, views.goal.as_ref())?;
+    if let Some(expert) = &views.expert {
+        writeln!(
+            output,
+            "EXPERT     {:?}  {} bindings  host {}  provider {}   (advisory memory; never part of completion)",
+            expert.mode, expert.bindings, expert.host, expert.provider
+        )?;
+    }
     if let Some(failure) = &view.record_error {
         writeln!(output, "Recorded run unreadable: {failure}")?;
     }
     write_contracts(&mut output, view)?;
+    write_shared_state(&mut output, shared_state)?;
     write_mission_memory(&mut output, views.mission.as_ref())?;
     write_system_memory(&mut output, views.system.as_ref())?;
     write_process_memory(&mut output, views.process.as_ref())?;

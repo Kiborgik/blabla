@@ -353,6 +353,121 @@ fn multi_contract_project_shares_state_across_files_and_aggregates_groups() {
 }
 
 #[test]
+fn shared_state_reports_all_contract_sources() {
+    for (accidental, reordered) in [(false, false), (true, false), (false, true), (true, true)] {
+        let temp = fixture("multi");
+        let root = temp.path();
+        let mut contracts = vec!["contract::core", "contract::feature"];
+        if accidental {
+            let manifest = root.join("project.bla");
+            let mut source = std::fs::read_to_string(&manifest).unwrap();
+            source.push_str("\nuse behavior \"contracts/behavior/unrelated.bla\"\n");
+            write(&manifest, &source);
+            write(
+                &root.join("contracts/behavior/unrelated.bla"),
+                "state count: int\nalways \"collision-remains-shared\" { count >= 0 }\n",
+            );
+            contracts.push("contract::unrelated");
+        }
+        if reordered {
+            let manifest = root.join("project.bla");
+            let source = std::fs::read_to_string(&manifest).unwrap();
+            let mut entries: Vec<_> = source
+                .lines()
+                .filter(|line| line.starts_with("use "))
+                .collect();
+            entries.reverse();
+            write(
+                &manifest,
+                &format!("project Multi\n{}\n", entries.join("\n")),
+            );
+        }
+        let expected = serde_json::json!([{
+            "name": "count",
+            "type": "int",
+            "contracts": contracts,
+        }]);
+        let check = run_in(Some(root), &args(&["--json", "check"]));
+        assert_eq!(check.status.code(), Some(0));
+        assert_eq!(json(&check.stdout)["shared_state"], expected);
+        let (exit, report) = run_project(root, "persistent", &["--cases", "2", "--steps", "12"]);
+        assert_eq!(exit, 0, "{report}");
+        let (exit, status) = status_json(root);
+        assert_eq!(exit, 0, "{status}");
+        assert_eq!(status["shared_state"], expected);
+        assert_eq!(status["actions"]["total"], 2);
+        assert_eq!(status["rules"]["total"], if accidental { 5 } else { 4 });
+        for command in ["check", "status"] {
+            let output = run_in(Some(root), &args(&[command]));
+            assert_eq!(output.status.code(), Some(0));
+            let human = text(&output.stdout);
+            assert!(human.contains("Shared state:"), "{human}");
+            for contract in &contracts {
+                assert!(human.contains(contract), "{human}");
+            }
+        }
+    }
+    let collision = fixture("collision");
+    let output = run_in(Some(collision.path()), &args(&["--json", "check"]));
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        json(&output.stdout)["diagnostic"]["code"],
+        "E_INCOMPATIBLE_STATE"
+    );
+
+    let draft = fixture("draft");
+    let output = run_in(Some(draft.path()), &args(&["--json", "check"]));
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(json(&output.stdout)["shared_state"], serde_json::json!([]));
+}
+
+#[test]
+fn shared_state_reports_resolved_types() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write(
+        &root.join("project.bla"),
+        "project Types\nuse behavior \"one.bla\"\nuse behavior \"two.bla\"\n",
+    );
+    for (file, entry) in [("one.bla", "Item"), ("two.bla", "Renamed")] {
+        write(
+            &root.join(file),
+            &format!(
+                "type {entry} {{ id: string, valid: bool }}\nstate flag: bool\nstate ratio: float\nstate label: string\nstate item: optional<{entry}>\nstate values: [int]\naction inspect()\nalways \"nonempty\" {{ count(values) >= 0 }}\n"
+            ),
+        );
+    }
+    let output = run_in(Some(root), &args(&["--json", "check"]));
+    assert_eq!(output.status.code(), Some(0));
+    let check = json(&output.stdout);
+    let types: Vec<_> = check["shared_state"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|state| {
+            assert_eq!(
+                state["contracts"],
+                serde_json::json!(["contract::one", "contract::two"])
+            );
+            (
+                state["name"].as_str().unwrap(),
+                state["type"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        types,
+        [
+            ("flag", "bool"),
+            ("ratio", "float"),
+            ("label", "string"),
+            ("item", "optional<{ id: string, valid: bool }>"),
+            ("values", "[int]")
+        ]
+    );
+}
+
+#[test]
 fn collision_fixture_fails_naming_every_conflicting_file() {
     let temp = fixture("collision");
     let root = temp.path();
@@ -879,6 +994,8 @@ fn green_status_keeps_unfinished_tasks_separate_and_requires_an_explicit_choice(
     assert_eq!(exit, 0, "{finished}");
 
     for name in ["one", "two"] {
+        let scope = format!("src/{name}");
+        let deliverable = format!("{scope}/thing.py");
         let output = run_in(
             Some(root),
             &args(&[
@@ -890,15 +1007,21 @@ fn green_status_keeps_unfinished_tasks_separate_and_requires_an_explicit_choice(
                 "--statement",
                 "a bounded change",
                 "--scope",
-                "src",
+                &scope,
                 "--deliverable",
-                "src/thing.py",
+                &deliverable,
                 "--check",
                 "cargo test --lib",
                 "--json",
             ]),
         );
-        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{} {}",
+            text(&output.stdout),
+            text(&output.stderr)
+        );
     }
 
     let human = text(&run_in(Some(root), &args(&["status"])).stdout);

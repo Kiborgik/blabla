@@ -579,6 +579,8 @@ fn a_question_asked_after_hand_back_stands_and_refuses_the_close() {
         0
     );
     assert_eq!(pick(&temp, "q1", "no", "90").status.code(), Some(0));
+    assert_eq!(code(&temp, &["challenge", "work"]), 1);
+    change_the_deliverable_and_record_evidence(&temp);
     assert_eq!(code(&temp, &["challenge", "work"]), 0);
     assert_eq!(code(&temp, &["task", "ready", "work"]), 0);
 }
@@ -805,6 +807,8 @@ fn library_task() -> (task::Task, BTreeMap<String, String>) {
         changed_at_acceptance: None,
     });
     work.evidence.push(Evidence {
+        identity: task::declared_check(&work),
+        acceptance_epoch: Some(work.acceptance_epoch),
         check: "check".to_owned(),
         exit: 0,
         tree: "tree".to_owned(),

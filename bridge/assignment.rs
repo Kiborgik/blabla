@@ -23,6 +23,17 @@ role "worker" {
 
 alias "haiku45-host-id" { model "haiku-4.5" }
 "#;
+const KNOWLEDGE_TEXT: &str = r#"
+knowledge "engineering" { purpose "review the bounded probe implementation" }
+knowledge "testing" { purpose "review the bounded probe evidence" }
+knowledge "reviewing" { purpose "review the bounded probe independently" }
+knowledge "design" { purpose "review the bounded probe design" }
+ruling "bounded" { pack "engineering" statement "keep the probe implementation inside its assignment" }
+ruling "observed" { pack "testing" statement "record the check observed on the current assignment" }
+ruling "current" { pack "reviewing" statement "review only current assignment evidence" }
+ruling "limited" { pack "design" statement "keep the probe design bounded" }
+"#;
+
 const OTHER_CHECK: &str = "cargo test --doc";
 const DELIVERABLE: &str = "src/deliverable.rs";
 const SHARED_INPUT: &str = "src/shared.rs";
@@ -84,6 +95,8 @@ impl Assignment {
             },
             tree: BTreeMap::new(),
             resolution: task::Resolution {
+                knowledge_fingerprints: BTreeMap::new(),
+                review_current: None,
                 models: Vec::new(),
                 lenses: Vec::new(),
                 requirements: Vec::new(),
@@ -162,15 +175,24 @@ impl Assignment {
             "focused",
             &[("contract::probe".to_owned(), vec![DELIVERABLE.to_owned()])],
         );
+        let blocks = blabla::memory::syntax::parse("knowledge.bla", KNOWLEDGE_TEXT)
+            .expect("knowledge text parses");
+        let knowledge = blabla::memory::knowledge::build(&blocks).expect("knowledge builds");
+        assert!(blabla::memory::knowledge::validate(&knowledge).is_empty());
+        self.resolution.knowledge_fingerprints = self
+            .resolution
+            .lenses
+            .iter()
+            .filter_map(|name| {
+                task::knowledge_fingerprint(&knowledge, name)
+                    .map(|fingerprint| (name.clone(), fingerprint))
+            })
+            .collect();
     }
 
     fn accept_on(&mut self, model: &str) {
-        if self.task.state == "accepted" || task::apply(&mut self.task, "accepted") {
-            self.task.accepted = Some(Acceptance {
-                model: model.to_owned(),
-                unix: 1,
-                changed_at_acceptance: None,
-            });
+        if task::apply(&mut self.task, "accepted") {
+            task::record_acceptance(&mut self.task, &self.tree, model, 1);
         }
     }
 
@@ -180,6 +202,10 @@ impl Assignment {
 
     fn record_result(&mut self, check: &str, exit: i32) {
         self.task.evidence.push(Evidence {
+            identity: Some(task::CheckIdentity::Text {
+                command: check.to_owned(),
+            }),
+            acceptance_epoch: Some(self.task.acceptance_epoch),
             check: check.to_owned(),
             exit,
             tree: digest("tree"),
@@ -209,6 +235,15 @@ impl Assignment {
         }
     }
 
+    fn assessment_current(&self, assessment: &Assessment) -> bool {
+        self.resolution
+            .knowledge_fingerprints
+            .get(&assessment.ruling)
+            .is_some_and(|fingerprint| {
+                task::assessment_current(&self.task, assessment, fingerprint)
+            })
+    }
+
     fn reconcile(&mut self) {
         for exception in &mut self.task.exceptions {
             if exception.approval.is_none() {
@@ -224,12 +259,19 @@ impl Assignment {
                     .task
                     .assessments
                     .iter()
-                    .any(|entry| &&entry.ruling == lens)
+                    .any(|entry| self.assessment_current(entry) && &&entry.ruling == lens)
             })
             .cloned()
             .collect();
         for ruling in unassessed {
             self.task.assessments.push(Assessment {
+                model: self
+                    .task
+                    .accepted
+                    .as_ref()
+                    .map(|accepted| accepted.model.clone()),
+                acceptance_epoch: Some(self.task.acceptance_epoch),
+                knowledge_fingerprint: self.resolution.knowledge_fingerprints.get(&ruling).cloned(),
                 ruling,
                 statement: "assessed".to_owned(),
                 unix: 3,
@@ -336,6 +378,8 @@ impl Assignment {
         let evidence_inputs = task::evidence_inputs(&concurrent_task, &self.tree);
 
         concurrent_task.evidence = vec![Evidence {
+            identity: task::declared_check(&concurrent_task),
+            acceptance_epoch: Some(concurrent_task.acceptance_epoch),
             check: DECLARED_CHECK.to_owned(),
             exit: 0,
             tree: digest("tree"),
@@ -417,6 +461,12 @@ impl Assignment {
             "accept_with_an_alias_of_a_permitted_model" => self.accept_on(ALIAS),
             "accept_with_an_outside_policy_model" => self.accept_on(OUTSIDE_POLICY),
             "propose_an_outside_policy_model" => self.task.exceptions.push(Exception {
+                acceptance_epoch: self
+                    .task
+                    .accepted
+                    .as_ref()
+                    .map(|_| self.task.acceptance_epoch),
+                superseded: false,
                 model: OUTSIDE_POLICY.to_owned(),
                 reason: "the work is design heavy".to_owned(),
                 approval: None,
@@ -428,21 +478,30 @@ impl Assignment {
             }
             "change_a_deliverable" => self.bump(DELIVERABLE, "deliverable"),
             "record_a_lens_assessment" => {
-                let next = self
-                    .resolution
-                    .lenses
-                    .iter()
-                    .find(|lens| {
-                        !self
-                            .task
-                            .assessments
-                            .iter()
-                            .any(|entry| &&entry.ruling == lens)
-                    })
-                    .cloned();
+                let next =
+                    self.resolution
+                        .lenses
+                        .iter()
+                        .find(|lens| {
+                            !self.task.assessments.iter().any(|entry| {
+                                self.assessment_current(entry) && &&entry.ruling == lens
+                            })
+                        })
+                        .cloned();
                 self.revision += 1;
                 let ruling = next.unwrap_or_else(|| format!("extra-{}", self.revision));
                 self.task.assessments.push(Assessment {
+                    model: self
+                        .task
+                        .accepted
+                        .as_ref()
+                        .map(|accepted| accepted.model.clone()),
+                    acceptance_epoch: Some(self.task.acceptance_epoch),
+                    knowledge_fingerprint: self
+                        .resolution
+                        .knowledge_fingerprints
+                        .get(&ruling)
+                        .cloned(),
                     ruling,
                     statement: "assessed".to_owned(),
                     unix: 3,
@@ -535,6 +594,8 @@ impl Assignment {
                 task::apply_evidence(
                     &mut self.task,
                     Evidence {
+                        identity: task::declared_check(&copy),
+                        acceptance_epoch: Some(copy.acceptance_epoch),
                         check: DECLARED_CHECK.to_owned(),
                         exit: 0,
                         tree: "tree".to_owned(),
@@ -597,6 +658,7 @@ impl Assignment {
             "role": self.task.role,
             "lenses": self.resolution.lenses.iter().map(|id| json!({ "id": id })).collect::<Vec<Value>>(),
             "assessed": self.task.assessments.iter().map(|entry| json!({ "id": entry.ruling })).collect::<Vec<Value>>(),
+            "current_assessed": self.task.assessments.iter().filter(|entry| self.assessment_current(entry)).map(|entry| json!({ "id": entry.ruling })).collect::<Vec<Value>>(),
             "standing": standing,
             "assignment_accepted": self.task.accepted.is_some(),
             "result_accepted": self.task.result.is_some(),
@@ -605,7 +667,7 @@ impl Assignment {
             "evidence_answers_the_declared_check": readiness.answers_declared_check,
             "readiness_supported": readiness.supported,
             "challenge_current": task::challenge_current(&self.task, &self.tree),
-            "exception_approved": self.task.exceptions.iter().any(|entry| entry.approval.is_some()),
+            "exception_approved": self.task.exceptions.iter().any(|entry| !entry.superseded && entry.approval.is_some()),
             "breach_in_scope": self.task.in_scope(BREACHED),
             "deliverables": self.task.deliverables.len(),
             "findings": self.task.findings.len(),
@@ -620,6 +682,77 @@ impl Assignment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bridge_reacceptance_expires_the_prior_workers_lens_credit() {
+        let mut assignment = Assignment::new();
+        assignment.call("accept_with_a_permitted_model");
+        assignment.bump(DELIVERABLE, "current-deliverable");
+        assignment.reconcile();
+        let epoch = assignment.task.acceptance_epoch;
+        assert!(!assignment.report().grounded.contains(&"lens-unassessed"));
+        assert_eq!(
+            assignment.observe()["current_assessed"]
+                .as_array()
+                .unwrap()
+                .len(),
+            assignment.resolution.lenses.len()
+        );
+        assignment.call("accept_with_a_permitted_model");
+        assert!(assignment.task.acceptance_epoch > epoch);
+        assert!(assignment.report().grounded.contains(&"lens-unassessed"));
+        assert!(
+            assignment.observe()["current_assessed"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            assignment.observe()["assessed"].as_array().unwrap().len(),
+            assignment.resolution.lenses.len()
+        );
+        assignment.record_evidence(DECLARED_CHECK);
+        let blockers = assignment.assignment_blockers();
+        assert!(blockers > 0);
+        assert!(!task::record_challenge(
+            &mut assignment.task,
+            &assignment.tree,
+            blockers,
+            4
+        ));
+        assert!(task::mark_ready(&mut assignment.task, &assignment.tree, blockers).is_err());
+        assignment.reconcile();
+        assert!(!assignment.report().grounded.contains(&"lens-unassessed"));
+    }
+
+    #[test]
+    fn check_result_bindings_preserve_the_observed_check_and_acceptance() {
+        let mut assignment = Assignment::new();
+        assignment.call("accept_with_a_permitted_model");
+        task::record_acceptance(&mut assignment.task, &assignment.tree, PERMITTED, 1);
+        assignment.call("record_a_check_result");
+        let evidence = assignment.task.evidence.last().unwrap();
+        assert_eq!(evidence.identity, task::declared_check(&assignment.task));
+        assert_eq!(
+            evidence.acceptance_epoch,
+            Some(assignment.task.acceptance_epoch)
+        );
+        assert!(task::evidence_matches(&assignment.task, evidence));
+        assignment.task.evidence.clear();
+        assignment.call("record_a_result_for_a_different_check");
+        let evidence = assignment.task.evidence.last().unwrap();
+        assert_eq!(
+            evidence.identity,
+            Some(task::CheckIdentity::Text {
+                command: OTHER_CHECK.to_owned()
+            })
+        );
+        assert_eq!(
+            evidence.acceptance_epoch,
+            Some(assignment.task.acceptance_epoch)
+        );
+        assert!(!task::evidence_matches(&assignment.task, evidence));
+    }
 
     #[test]
     fn resumed_work_exercises_both_guarded_handback_and_result_acceptance() {

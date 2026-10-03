@@ -80,6 +80,8 @@ impl Questions {
         });
         let tree = BTreeMap::from([(DELIVERABLE.to_owned(), "asked-1".to_owned())]);
         task.evidence.push(Evidence {
+            identity: task::declared_check(&task),
+            acceptance_epoch: Some(task.acceptance_epoch),
             check: CHECK.to_owned(),
             exit: 0,
             tree: "tree".to_owned(),
@@ -346,6 +348,9 @@ mod tests {
         questions.call("pick_at_or_above_the_questions_floor");
         questions.call("try_to_hand_back_the_asked_task");
         let observed = questions.observe();
-        assert_eq!(observed["asked_task_handed_back"], true, "{observed}");
+        assert_eq!(observed["asked_task_handed_back"], false, "{observed}");
+        assert!(standing(&questions).contains(&"readiness-without-evidence".to_owned()));
+        assert_eq!(questions.task.acceptance_epoch, 1);
+        assert_eq!(questions.task.evidence[0].acceptance_epoch, Some(0));
     }
 }
