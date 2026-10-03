@@ -1058,26 +1058,41 @@ pub(super) fn confirm(project: &Project, name: &str, model: &str, json: bool) ->
     store(project, &mut task, json)
 }
 
-pub(super) fn widen(project: &Project, name: &str, add: Vec<String>, json: bool) -> i32 {
-    let mut task = match mutate(project, name, json) {
-        Ok(task) => task,
-        Err(exit) => return exit,
-    };
-    let add = match task::validate_scope(
+fn widen_scope(project: &Project, task: &mut Task, add: &[String]) -> Result<(), String> {
+    let add = task::validate_scope(
         &project.manifest.root,
-        name,
-        &add,
+        &task.name,
+        add,
         &task::read_all(&project.manifest.root),
-    ) {
-        Ok(scope) => scope,
-        Err(message) => return emit_error(error("task", message, None), json, 2),
-    };
+    )?;
     for path in add {
         if !task.scope.contains(&path) {
             task.scope.push(path);
         }
     }
-    task::attest(&mut task, "scope", None, now_unix());
+    Ok(())
+}
+
+pub(super) fn widen(
+    project: &Project,
+    name: &str,
+    add: Vec<String>,
+    model: Option<&str>,
+    json: bool,
+) -> i32 {
+    if let Some(model) = model
+        && let Err(exit) = validate_orchestrator_model(project, model, json)
+    {
+        return exit;
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    if let Err(message) = widen_scope(project, &mut task, &add) {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    task::attest(&mut task, "scope", model, now_unix());
     store(project, &mut task, json)
 }
 
@@ -1248,14 +1263,32 @@ pub(super) fn unowe(
     store(project, &mut task, json)
 }
 
+pub(super) struct CheckAmendment {
+    pub command: Option<String>,
+    pub argv: Vec<String>,
+    pub inputs: Vec<String>,
+    pub add_scope: Vec<String>,
+    pub model: Option<String>,
+}
+
 pub(super) fn declare_check(
     project: &Project,
     name: &str,
-    command: Option<String>,
-    argv: Vec<String>,
-    inputs: Vec<String>,
+    amendment: CheckAmendment,
     json: bool,
 ) -> i32 {
+    let CheckAmendment {
+        command,
+        argv,
+        inputs,
+        add_scope,
+        model,
+    } = amendment;
+    if let Some(model) = model.as_deref()
+        && let Err(exit) = validate_orchestrator_model(project, model, json)
+    {
+        return exit;
+    }
     let inputs = match tracked_declarations(project, "input", inputs) {
         Ok(paths) => paths,
         Err(message) => return emit_error(error("task", message, None), json, 2),
@@ -1264,6 +1297,11 @@ pub(super) fn declare_check(
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if !add_scope.is_empty()
+        && let Err(message) = widen_scope(project, &mut task, &add_scope)
+    {
+        return emit_error(error("task", message, None), json, 2);
+    }
     if let Some(cmd) = command {
         task.check = Some(cmd);
         task.check_argv = None;
@@ -1279,7 +1317,12 @@ pub(super) fn declare_check(
     }
     task.check_inputs = inputs;
     task.challenged = None;
-    task::attest(&mut task, "check", None, now_unix());
+    let verb = if add_scope.is_empty() {
+        "check"
+    } else {
+        "check --add-scope"
+    };
+    task::attest(&mut task, verb, model.as_deref(), now_unix());
     store(project, &mut task, json)
 }
 

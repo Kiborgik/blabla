@@ -85,14 +85,31 @@ A task under `.blabla/tasks/` is a machine record, not authored memory or proof 
 | Record unsettled work / stop | `task finding NAME "…"` / `task block NAME "…"` |
 | Describe a repair | `task addressed NAME ID "…" --model MODEL`; an addressed finding no longer blocks hand-back, but resolution stays the orchestrator's |
 | Resolve a finding | `task resolve NAME ID --evidence "…" --model MODEL` |
-| Correct check/dependencies | `task check NAME --input PATH --argv PROGRAM ARG…`; omitting inputs restores scope defaults |
+| Correct check/dependencies | `task check NAME --model MODEL --input PATH --argv PROGRAM ARG…`; omitting inputs restores scope defaults |
+| Amend scope and check together | `task check NAME --add-scope PATH… --model MODEL --input PATH… --argv PROGRAM ARG…`; validates and stores one task amendment atomically |
 | Change owed files | `task deliverable NAME --add PATH`, or `--remove PATH --reason "…" --model MODEL` |
-| Widen scope / attribute changes | `task scope NAME --add PATH`; `task attribute NAME PATH… --kind task\|concurrent\|unknown --model MODEL` |
+| Widen scope / attribute changes | `task scope NAME --add PATH --model MODEL`; `task attribute NAME PATH… --kind task\|concurrent\|unknown --model MODEL` |
 | Propose another model | `task propose-model NAME MODEL --reason "…"`; owner rules with `task approve-model` |
 | Withdraw | `task withdraw NAME --reason "…" --model MODEL` |
 | Settle withdrawal residue | Restore original bytes, or `task reconcile-withdrawal NAME PATH --successor TASK --model MODEL` against current successful evidence from a CLOSED successor |
 
 Declaration changes, attribution, withdrawal and reconciliation are orchestrator decisions. A withdrawn task releases scope, but its changed paths remain project challenges until settled; reconciliation can become stale. Restoration cannot prove authorship. Restore identifiable own out-of-scope edits when safe, preserve uncertain evidence and block for owner reconciliation. Merely blocking does not settle a changed path.
+
+### One coherent amendment, one hand-back
+
+When a bounded slice needs both more write scope and a corrected check, combine the declarations:
+
+```sh
+blabla task check fix-cache --add-scope tests/cache.rs --model ORCHESTRATOR_MODEL \
+  --input src/cache.rs tests/cache.rs Cargo.toml --argv cargo test --release --test cache
+blabla task evidence fix-cache --run
+```
+
+Put BlaBla options before `--argv`; everything after it belongs to the exact check. `--input` still replaces the complete dependency list, and omitting it restores the amended write scope as the default. This command does not discover dependencies or authorize a worker to widen its own assignment. Unsafe or overlapping scope, unobservable inputs and a model outside the declared orchestrator role reject the whole amendment without changing the task. Existing deliverables remain included.
+
+`--model` on `task check` and `task scope` records the actual caller's attested model, separately from the accepted worker. It is optional for compatibility with older commands; omitting it keeps an unattributed record, never an inferred identity. The combined command records one `check --add-scope` entry. A carry-time entry remains unconfirmed, and the command neither accepts a task nor advances its acceptance epoch. Changed declarations invalidate applicable evidence, challenge and review credit through the existing freshness rules.
+
+Use the existing `task evidence --run` to execute the declared argv check and capture its real exit code and log. For text checks, run the exact declared command and record its real exit code with `--exit` and `--tool`; `--run` does not invent shell parsing. Collect required declaration changes for the coherent slice rather than interrupting after each one. After current evidence, lenses and challenge, the worker hands back with `task ready`. The orchestrator inspects all carry-time records and calls `task confirm` once for that hand-back before deciding `task close`. Confirmation during carry and automatic acceptance remain forbidden; another carry can create new records requiring later review.
 
 ## Asking instead of guessing
 
@@ -158,6 +175,8 @@ Unavailable evidence is named rather than treated as clean. The skeptic reads no
 - [Expert judgments and bindings](expert.md) add optional checkpoint advice. Reading `status`, `explain` or `check` never calls a provider. Advice grants no write permission, deterministic evidence or task-completion credit
 
 ## Upgrading task records to 0.10
+
+Back up the task store before changing versions. Adopt 0.10 prospectively for new or genuinely amended work; do not reopen completed 0.9 tasks solely to obtain newer metadata. Historical records remain readable without a data migration. Finish unaffected in-flight work with its existing version, or explicitly reaccept and revalidate when current 0.10 credit is actually needed. Do not alternate versions while mutating the same task: an older writer may discard fields it does not understand.
 
 Legacy unobservable input/deliverable declarations also lose current credit, including unchanged null digests and historical CLOSED reviews. `challenge NAME` reports `unobservable-task-input` with the offending path and correction route. On an open assignment, correct dependencies with `task check NAME --input TRACKED_PATH --argv PROGRAM ARG…` (or the exact text check); omitting inputs restores observable scope defaults. Remove invalid deliverables with `task deliverable NAME --remove OLD_PATH --reason "…" --model MODEL`, then add tracked replacements. Resume READY work with `task accept`, rerun evidence and challenge. Existing evidence and removal history are retained. CLOSED records stay historical; open a new assignment and explicit review for current approval.
 

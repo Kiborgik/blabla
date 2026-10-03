@@ -383,6 +383,12 @@ enum TaskAction {
             help = "A path to add to the write scope; repeat or list several"
         )]
         add: Vec<String>,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The orchestrator model recording the amendment; an attestation, not proof"
+        )]
+        model: Option<String>,
     },
     #[command(
         about = "Accept the result of a bounded task and close it; refused while a grounded challenge stands"
@@ -462,6 +468,14 @@ enum TaskAction {
         argv: Vec<String>,
         #[arg(long, value_name = "PATH", num_args = 1.., help = "Check inputs; defaults to write scope. Deliverables are always included")]
         input: Vec<String>,
+        #[arg(long, value_name = "PATH", num_args = 1.., help = "Also add write-scope paths in the same atomic check amendment")]
+        add_scope: Vec<String>,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The orchestrator model recording the amendment; an attestation, not proof"
+        )]
+        model: Option<String>,
     },
     #[command(
         about = "Add or remove a deliverable the task owes; a record that lost one owes it again once it is named"
@@ -1127,7 +1141,9 @@ fn execute(cli: Cli) -> i32 {
                     TaskAction::Note { name, statement } => {
                         task::note(&loaded, &name, &statement, json)
                     }
-                    TaskAction::Scope { name, add } => task::widen(&loaded, &name, add, json),
+                    TaskAction::Scope { name, add, model } => {
+                        task::widen(&loaded, &name, add, model.as_deref(), json)
+                    }
                     TaskAction::Close { name, model } => task::close(&loaded, &name, &model, json),
                     TaskAction::Withdraw {
                         name,
@@ -1176,7 +1192,20 @@ fn execute(cli: Cli) -> i32 {
                         command,
                         argv,
                         input,
-                    } => task::declare_check(&loaded, &name, command, argv, input, json),
+                        add_scope,
+                        model,
+                    } => task::declare_check(
+                        &loaded,
+                        &name,
+                        task::CheckAmendment {
+                            command,
+                            argv,
+                            inputs: input,
+                            add_scope,
+                            model,
+                        },
+                        json,
+                    ),
                     TaskAction::Deliverable {
                         name,
                         add,
