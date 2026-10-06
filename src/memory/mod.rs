@@ -288,3 +288,24 @@ fn listed(names: &[&str]) -> String {
         .collect::<Vec<String>>()
         .join(", ")
 }
+
+pub(crate) fn string_list(block: &Block, name: &str) -> Result<Vec<String>, Diagnostic> {
+    let Some(field) = block.field(name) else {
+        return Ok(Vec::new());
+    };
+    if !field.list {
+        return Err(field_error(block, name, "takes a list of quoted values"));
+    }
+    Ok(field.values.clone())
+}
+
+pub(crate) fn field_error(block: &Block, name: &str, reason: &str) -> Diagnostic {
+    Diagnostic {
+        location: block
+            .field(name)
+            .map_or(&block.location, |field| &field.location)
+            .clone(),
+        code: "E_MEMORY_FIELD".into(),
+        message: format!("`{name}` in `{} {:?}` {reason}", block.keyword, block.name),
+    }
+}

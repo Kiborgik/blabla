@@ -200,6 +200,7 @@ fn observe(scenario: Scenario) -> Value {
 mod assignment;
 mod attestation;
 mod decisions;
+mod expert;
 mod goals;
 mod lifecycle;
 mod questions;
@@ -214,6 +215,7 @@ fn main() {
     let mut ledger = decisions::Decisions::new();
     let mut attested = attestation::Attestation::new();
     let mut asked = questions::Questions::new();
+    let mut expert = expert::Expert::new();
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -243,6 +245,7 @@ fn main() {
                 ledger = decisions::Decisions::new();
                 attested = attestation::Attestation::new();
                 asked = questions::Questions::new();
+                expert = expert::Expert::new();
                 json!({ "ok": true })
             }
             "call" => {
@@ -262,6 +265,7 @@ fn main() {
                     None if ledger.call(name) => json!({ "ok": true }),
                     None if attested.call(name) => json!({ "ok": true }),
                     None if asked.call(name) => json!({ "ok": true }),
+                    None if expert.call(name) => json!({ "ok": true }),
                     None => json!({ "ok": false, "error": format!("unknown action: {name}") }),
                 }
             }
@@ -276,6 +280,7 @@ fn main() {
                     ledger.observe(),
                     attested.observe(),
                     asked.observe(),
+                    expert.observe(),
                 ] {
                     if let (Some(state), Some(extra)) = (state.as_object_mut(), source.as_object())
                     {

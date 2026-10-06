@@ -392,6 +392,10 @@ for line in sys.stdin:
     let run_args = vec![
         OsStr::new("run"),
         OsStr::new("test_contract.bla"),
+        OsStr::new("--cases"),
+        OsStr::new("1"),
+        OsStr::new("--steps"),
+        OsStr::new("1"),
         OsStr::new("--json"),
         OsStr::new("--"),
         OsStr::new("python3"),

@@ -1,11 +1,11 @@
 system "cli" {
     purpose "Parse arguments, choose a command, and render every human and JSON surface."
-    paths ["src/main.rs", "src/cli/mod.rs", "src/cli/project.rs", "src/cli/guide.rs", "src/cli/init.rs", "src/cli/heartbeat.rs", "src/cli/task.rs", "src/cli/recovery.rs"]
+    paths ["src/main.rs", "src/cli/mod.rs", "src/cli/project.rs", "src/cli/guide.rs", "src/cli/init.rs", "src/cli/heartbeat.rs", "src/cli/task.rs", "src/cli/recovery.rs", "src/cli/expert.rs"]
 }
 
 system "project" {
     purpose "Compose a manifest's contracts into one project, fingerprint the implementation, and decide staleness and completion."
-    paths ["src/project/mod.rs", "src/project/status.rs", "src/project/runstate.rs", "src/project/task.rs", "src/project/ignore.rs"]
+    paths ["src/project/mod.rs", "src/project/status.rs", "src/project/runstate.rs", "src/project/task.rs", "src/project/task/revision.rs", "src/project/task/store.rs", "src/project/ignore.rs", "src/project/expert.rs"]
     knowledge ["testing"]
 }
 
@@ -66,6 +66,41 @@ system "report" {
     knowledge ["engineering"]
 }
 
+system "expert" {
+    purpose "Validate fixed provider answers, apply deterministic advisory policy, and retain bounded current-revision replay and delivery state without deciding project completion."
+    paths ["src/expert/mod.rs", "src/expert/packet.rs", "src/expert/provider.rs", "src/expert/policy.rs", "src/expert/trace.rs", "adapters/systemone/provider.py"]
+    knowledge ["engineering", "testing", "expert-review"]
+}
+
+responsibility "expert-context-selection" {
+    owner "project"
+    statement "Resolve registered judgments and Process bindings into bounded selected packets using actual task evidence and the shared relevant revision. No unrestricted transcript or unselected file enters the packet."
+}
+
+responsibility "expert-advisory-runtime" {
+    owner "expert"
+    statement "Validate typed answers and provider identity, map pure policy, replay saved responses and recheck current revisions before any reservation. Own bounded runtime settings, selected traces and delivery/suppression records under .blabla/expert/. Unknown delivery remains unresolved across restart; acknowledgment is not observed correction. Provider failure leaves deterministic verification available."
+}
+
+responsibility "expert-command-surfaces" {
+    owner "cli"
+    statement "Expose opt-in expert inspection, checkpoint evaluation, saved-response replay and trace operations without adding an expert call to ordinary project verification. Repository bindings remain shadow-only; no live host is certified."
+}
+
+seam "selected-expert-packet" {
+    between ["project", "expert"]
+    value "ExpertPacket"
+    statement "Only resolved identities, bounded selected observations and the shared task revision cross into a fixed judgment. Missing, unknown, unavailable or truncated required context cannot yield actionable advice. The same selected-revision comparison is used by current-result and actual reservation guards."
+    moves_with ["src/project/expert.rs", "src/project/task/revision.rs", "src/expert/packet.rs", "src/expert/policy.rs", "src/expert/trace.rs", "bridge/expert.rs", "contracts/expert.bla", "contracts/expert-seams.bla", "docs/project.md"]
+}
+
+seam "expert-proposal" {
+    between ["expert", "cli"]
+    value "ExpertResult"
+    statement "A validated answer becomes silence, abstention, a proposed nudge or escalation through deterministic policy. Rendering resolves only packet references. The proposal never changes verifier outcomes, exit codes or OVERALL. Local SystemOne transport exists; live checkpoint observation, same-task advisory insertion and tied receipts remain unverified."
+    moves_with ["src/expert/provider.rs", "src/expert/policy.rs", "src/expert/trace.rs", "src/cli/expert.rs", "adapters/systemone/provider.py", "docs/expert.md", "docs/design/0.10-host-capabilities.md"]
+}
+
 responsibility "inspect-source" {
     owner "structure-providers"
     statement "Read a declared source file and produce ModuleFacts from it. No other system reads project source for structural facts, and no system executes it."
@@ -73,7 +108,7 @@ responsibility "inspect-source" {
 
 responsibility "hold-project-memory" {
     owner "memory"
-    statement "Parse, validate and answer queries about authored project memory: Mission, Knowledge, System and Process. Validation covers project memory against itself, including the knowledge packs System and Process route to, never against the repository, and no result of it reaches completion."
+    statement "Parse, validate and answer queries about authored project memory: Mission, Knowledge, System, Process and Goals. Validation covers project memory against itself, including the knowledge packs System and Process route to, never against the repository, and no result of it reaches completion."
 }
 
 responsibility "decide-structure-rule" {
@@ -108,7 +143,7 @@ responsibility "decide-staleness" {
 
 responsibility "hold-persistent-state" {
     owner "project"
-    statement "Write and read everything under .blabla/: the status record, the in-flight run marker and the bounded task records. All of it is machine state rather than authored memory: it is written by BlaBla, never registered by the manifest, never validated for truth, and no state of it reaches OVERALL."
+    statement "Write and read project status, in-flight run markers and bounded task records under .blabla/. The expert subsystem separately owns .blabla/expert/. These records are machine state rather than authored memory: written by BlaBla, never registered by the manifest and never validated for truth. Task and expert state do not determine OVERALL."
 }
 
 responsibility "form-a-challenge" {

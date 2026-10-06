@@ -32,3 +32,17 @@ goal "hand-backs-survive-concurrent-work" {
     expect ["assignment::reconciling-concurrent-work-keeps-the-challenge-receipt", "assignment::a-closed-concurrent-task-still-accounts-for-its-change", "assignment::a-note-keeps-the-challenge-receipt"]
     state "done"
 }
+
+goal "bounded-expert-release-ready-for-review" {
+    serves ["truthful-over-convenient", "steering-cost-over-token-cost", "bounded-workers-free-planners"]
+    statement "Prepare the bounded 0.10 expert foundation for independent user review while preserving deterministic completion and stating unverified live delivery and benefit honestly. Contract expectations do not replace release checks or user acceptance."
+    expect ["contract::expert", "contract::expert-seams", "contract::assignment", "contract::gate", "contract::schedule"]
+    state "active"
+}
+
+goal "expert-loop-demonstrated-in-real-work" {
+    serves ["truthful-over-convenient", "steering-cost-over-token-cost", "bounded-workers-free-planners"]
+    statement "Complete the original 0.10 workflow: a shipped named host adapter observes real work boundaries, evaluates bounded expert judgments, delivers authorized advice to the same worker and records acknowledgment separately from observed correction. Exercise actual feature work and matched off/shadow/advisory runs. Publish concise human/agent documentation and accurate diagrams. Contract expectations are necessary checks, not proof of live delivery, benefit or user acceptance."
+    expect ["contract::expert", "contract::expert-seams", "contract::assignment", "contract::gate", "contract::schedule"]
+    state "active"
+}

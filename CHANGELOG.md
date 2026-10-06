@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.10.0 (2026-10-06)
+
+Revision-bound handoffs and an experimental bounded expert layer. [Release evidence](docs/design/0.10-release-evidence.md) lists the checks and their limits.
+
+### Breaking and upgrade
+
+- Task evidence now binds exact text/argv boundaries, acceptance epoch and declared inputs. Old evidence remains history without current credit. Reaccept, rerun the exact check, reassess consulted lenses and challenge before hand-back; even same-model reacceptance starts a new epoch
+- Lens credit binds model/epoch/knowledge. Explicit `task open --review-of` binds review to its target revision; historical CLOSED may have `approval_current = false`. Legacy unlinked reviews gain no inferred approval. [Revalidation procedure](docs/agent-workflow.md#upgrading-task-records-to-010)
+- Windows task/snapshot/ignore identities now share case-insensitive normalization, preserving mixed-case tracked input credit and normalized directory deliverables; Unix matching remains case-sensitive
+- Windows task matching preserves observed filename spelling in snapshots/withdrawal history while normalizing declarations; C persistence checks give Windows compiler preparation 120 seconds without changing the 10-second runtime limit
+- Task input/deliverable declarations reject unsafe, symlink, ignored and built-in-skipped paths atomically. Safe aliases normalize; ordinary absent in-root dependencies remain supported. Legacy invalid declarations keep their history but lose evidence, readiness, review/approval and expert-resolution freshness credit; `unobservable-task-input` gives the correction route
+- Live write scopes reject overlaps and unsafe paths. New terminal `WITHDRAWN` releases ownership without completion credit; changed paths require restoration or explicit current CLOSED-successor reconciliation
+- Task/challenge JSON and text expose exact checks, freshness/current picks and separate assignment/project blockers. Clients enumerating states or consuming old report shapes must update
+- `judgment::<pack>::<name>` and `binding::<name>` add typed Knowledge/Process definitions; `judgment` and `binding` are reserved contract groups (rename collisions with `as`). Status/check JSON adds expert-definition and shared-state fields
+- Public expert packet/provider/policy/trace APIs use strict bounded schemas; CLI/trace/native surfaces remain experimental. Questions join composed self-hosting. Generator changes alter seeded trajectories across verifier versions
+
+### Added
+
+- Fixed Choice/Noul/ordered Score judgments, project-local bindings, selected bounded packets and explicit missing/truncated context
+- Validated subprocess/SystemOne HTTP transport, fixed policy, saved-response replay, stale/duplicate/uncertain-delivery safeguards and real-response calibration/preflight/fitting tools
+- Cooperative native completed-idle-turn adapter, scoped revocable experimental permits and resumable matched-run tooling; no general host interception or automatic promotion
+- Deterministic self-hosting expert policy/revision seams and credential-free provider/host/evaluation tests. Full [expert reference](docs/expert.md)
+
+### Fixed and improved
+
+- An active goal whose expectations all hold now routes to outcome review instead of suggesting it be marked done; stored goal states, JSON structure and `OVERALL` are unchanged
+- `task check --add-scope PATH… --model MODEL` combines one task's scope and exact-check amendment atomically; standalone `task scope` and `task check` also accept model attestations. Existing ownership, input/epoch/review freshness and post-handback confirmation remain required; task records need no new fields
+- Exact-check substitution, in-flight input/assignment changes, stale lens/review credit, withdrawal residue and model-proposal accounting
+- Python adapter strict UTF-8; C example preserves space-only items across restart
+- Generic String generation includes inherited mapping keys. Missing-identity guidance preserves valid companion fields; composed witness regression reaches all named obligations at the unchanged budget
+- Parameter-free actions avoid redundant candidate scoring without changing RNG/tie semantics or parameterized paths; measured results remain source/environment-specific
+- Expert child cleanup, chronological history selection, canonical task-goal expansion and request/key-matched verified non-delivery retries
+- Current-source historical fixtures, portable argument validation, bounded test stdin setup and recovery guidance for identifiable out-of-scope edits
+
+### Qualification limits
+
+Repository bindings remain shadow-only; zero judgments are promoted. Kev transport worked, but real calibration selected no feasible policy. Codex CLI delivery remains blocked; Luna repository inference and Jev remain unverified. Implemented native tooling, offline fixtures and replay do not establish runtime expert benefit or reduced steering.
+
+Model aliases, questions/decisions, attestation and the direct evaluation driver already shipped in 0.9. Historical studies and opt-in research/stress routes remain available and are not counted as revalidated.
+
 ## 0.9.0 (2026-09-24)
 
 Version 0.9 is built for an orchestrator running small workers. A worker states how sure it is and stops when it is not sure enough, the orchestrator asks the questions it doubts, every record made under an orchestrator model while a worker holds the task is shown and challenged, and the owner's goals are judged against the rules they name.

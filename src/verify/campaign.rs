@@ -94,15 +94,14 @@ pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
                         continue;
                     }
                     let action = target_action(contract, &coverage, index, &mut rng);
-                    let mut score: f64 = 0.0;
-                    for _ in 0..4 {
+                    let score = prefix_score(action, || {
                         let call = guidance.candidate(action, &entry.state, &mut rng)?;
-                        score = score.max(coverage.score(
+                        Ok(coverage.preparation_score(
                             index,
                             &entry.state,
                             &action_input(action, &call)?,
-                        ));
-                    }
+                        ))
+                    })?;
                     if score > best_score
                         || (score == best_score
                             && best.is_some_and(|i: usize| {
@@ -205,7 +204,11 @@ pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
                     } else {
                         best_call(wanted, &before, &guidance, &coverage, index, &mut rng)?
                     };
-                    let score = coverage.score(index, &before, &action_input(wanted, &candidate)?);
+                    let score = coverage.preparation_score(
+                        index,
+                        &before,
+                        &action_input(wanted, &candidate)?,
+                    );
                     if population.is_some()
                         || score >= 0.999
                         || rng.sample_below_rejecting_modulo_bias(3) == 0
@@ -405,6 +408,18 @@ fn changed_fields(before: &Value, after: &Value, fields: &mut BTreeSet<String>) 
     }
 }
 
+fn prefix_score(
+    action: &Action,
+    mut candidate_score: impl FnMut() -> Result<f64, VerifyError>,
+) -> Result<f64, VerifyError> {
+    let mut score = 0.0_f64;
+    let attempts = if action.params.is_empty() { 1 } else { 4 };
+    for _ in 0..attempts {
+        score = score.max(candidate_score()?);
+    }
+    Ok(score)
+}
+
 fn preparation_call(
     action: &Action,
     state: &Value,
@@ -413,6 +428,9 @@ fn preparation_call(
     rng: &mut SplitMix64,
 ) -> Result<Call, VerifyError> {
     let mut best = guidance.candidate(action, state, rng)?;
+    if action.params.is_empty() {
+        return Ok(best);
+    }
     let mut score = coverage.action_score(&action.name, state, &action_input(action, &best)?);
     for _ in 0..15 {
         let candidate = guidance.candidate(action, state, rng)?;
@@ -449,6 +467,9 @@ fn best_call(
     rng: &mut SplitMix64,
 ) -> Result<Call, VerifyError> {
     let mut best = guidance.candidate(action, state, rng)?;
+    if action.params.is_empty() {
+        return Ok(best);
+    }
     let mut score = coverage.score(target, state, &action_input(action, &best)?);
     for _ in 0..15 {
         let candidate = guidance.candidate(action, state, rng)?;
@@ -469,3 +490,6 @@ fn best_call(
     }
     Ok(best)
 }
+
+#[cfg(test)]
+mod tests;

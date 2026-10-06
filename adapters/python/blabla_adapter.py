@@ -74,8 +74,12 @@ class Adapter:
         raise ProtocolError(f"unknown op: {operation}")
 
     def serve(self, source=None, sink=None, logs=None):
-        source = sys.stdin if source is None else source
-        sink = sys.stdout if sink is None else sink
+        if source is None:
+            sys.stdin.reconfigure(encoding="utf-8", errors="strict")
+            source = sys.stdin
+        if sink is None:
+            sys.stdout.reconfigure(encoding="utf-8", errors="strict")
+            sink = sys.stdout
         logs = sys.stderr if logs is None else logs
         for line in source:
             if not line.strip():

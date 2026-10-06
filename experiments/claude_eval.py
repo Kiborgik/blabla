@@ -171,13 +171,12 @@ def main():
                         help='Driver to use for evaluation')
     parser.add_argument('--prepare-only', action='store_true')
     arguments = parser.parse_args()
-    if sys.platform != 'linux' or arguments.runs < 1:
-        parser.error('Use Linux/WSL and a positive run count')
-
     if arguments.model_set and arguments.backend != 'anthropic':
         parser.error('--model-set can only be used with --backend anthropic')
     if arguments.backend == 'anthropic' and not arguments.model_set:
         parser.error('--model-set is required when using --backend anthropic')
+    if sys.platform != 'linux' or arguments.runs < 1:
+        parser.error('Use Linux/WSL and a positive run count')
 
     case_dir = ROOT / 'evals' / arguments.case
     if arguments.model_set:

@@ -1,139 +1,66 @@
 # Architecture
 
-The current implementation, so that a later restructuring does not have to be reconstructed from source. This describes what exists. It invents no future layer.
+Two independent verification pipelines meet in the project/report layer. Authored memory, task state and optional expert advice sit alongside them; only Behavior and Structure decide completion.
 
-Three concerns live in this repository. Keeping them apart is the point of the layout: only one of them decides completion.
+![Project composition feeds typed behavior verification and live static structure evaluation. Memory is queried; task records feed the skeptic; explicit host checkpoints feed bounded expert policy. Only the two verification pipelines reach finish and OVERALL.](assets/architecture.svg)
 
-## Authored project memory
-
-```text
-project.bla  ->  src/memory/*  ->  Mission | System | Process | Knowledge
-                                            |
-                                   status | explain
-```
-
-Registered by the manifest, parsed and validated within project memory, never checked against the repository. It answers what the project is for, how it is divided, who does what and what expertise applies. **It does not participate in `OVERALL`.**
-
-## Completion
-
-```text
-                          blabla (src/main.rs -> src/cli)
-                                      |
-                        project layer (src/project)
-                     manifest, discovery, composition,
-                     identity, fingerprint, run state
-                        /                        \
-        BEHAVIOR pipeline                     STRUCTURE pipeline
-        src/syntax                            src/structure/syntax.rs
-            |  parser                              |  parser
-        src/semantics                         structure IR
-            |  checking, project composition       |
-        src/ir                                src/structure/mod.rs
-            |  typed contract IR                   |  rule evaluator
-        src/verify                            Provider trait
-            |  coverage-guided campaign        /       |       \
-        src/application (Application trait)  python  rust   treesitter.rs
-            |  adapter boundary               |       |        |  one harness
-        src/runtime                          isolated syn,   typescript, go,
-            process, JSON Lines, containment interp.  in-proc java, cfamily
-                        \                        /
-                          src/report, src/project/status.rs
-                                      |
-                                  completion
-```
-
-The two pipelines are independent. They meet only in the project layer, which composes both into one completion answer, and in the report layer, which renders both.
-
-## Development state
-
-```text
-.blabla/tasks/*.json  <->  src/project/task.rs  ->  src/skeptic.rs  ->  blabla challenge
-```
-
-A bounded task is machine state written by BlaBla: write scope, deliverables, findings and the tree snapshot a task opened against. The skeptic reads that record plus the current tree, the completion state and a falsification verdict, and forms at most one grounded challenge. **This is neither authored memory nor a completion layer.**
-
-## CLI surfaces
-
-```text
-status | explain | check | run | finish | task | challenge | guide | init
-```
+[Diagram text alternatives](diagrams/README.md#architecture) · queryable map: `blabla explain system::<name>`
 
 ## Components
 
 | Path | Responsibility |
 | --- | --- |
-| `src/main.rs`, `src/cli/mod.rs` | argument parsing (`Cli`, `Command`), single-file commands, JSON and human emission, and `run_guarded`, which turns an internal panic into exit 4 instead of a behavioral failure |
-| `src/cli/project.rs` | the project-mode commands: `status`, `explain`, `check`, `finish` |
-| `src/cli/task.rs` | the `task` subcommands and the `challenge` rendering |
-| `src/memory/mod.rs`, `syntax.rs` | the shared `.bla` memory parser, the `Memory<T>` states and the field/reference validation every kind reuses |
-| `src/memory/mission.rs`, `system.rs`, `process.rs`, `knowledge.rs` | one memory kind each: its declarations, its validation and its `status` and `explain` views |
-| `src/memory/routing.rs` | the one-way references from System and Process into Knowledge packs |
-| `src/project/task.rs` | the bounded task record: scope, deliverables, findings, the tree snapshot and the per-file digests it is compared against |
-| `src/skeptic.rs` | the challenge classes, the evidence they rest on and the single grounded challenge chosen from them |
-| `src/cli/guide.rs`, `src/cli/init.rs` | the canonical onboarding texts, and project scaffolding including the managed `AGENTS.md` block and the portable skill |
-| `src/cli/heartbeat.rs` | progress lines during a long campaign, through an observer that leaves the logical campaign untouched |
-| `src/project/mod.rs` | `Manifest`, `Profile`, `Project`; manifest parsing, upward discovery, multi-contract composition, rule identity, command resolution, and the FNV-1a implementation fingerprint |
-| `src/project/status.rs` | the status record, the layer views and the completion computation |
-| `src/project/runstate.rs` | the `.blabla/verifying.json` marker: run id, pid, start time, project and profile identity |
-| `src/syntax/mod.rs` | the behavior parser, producing a syntax AST |
-| `src/semantics/mod.rs` | semantic and type checking; compiles a list of units against one project environment, so single-file compilation is the one-unit case |
-| `src/ir/mod.rs` | the typed, normalized contract IR |
-| `src/verify/mod.rs` | executes multi-action sequences with fresh before and after observations, checks rules, and shrinks failures |
-| `src/verify/coverage.rs` | derives stable semantic obligations from typed expressions and labels |
-| `src/verify/campaign.rs`, `generator.rs`, `corpus.rs`, `evaluator.rs` | campaign loop, seeded generation with typed-literal guidance, the bounded prefix corpus, and predicate evaluation |
-| `src/application.rs` | the `Application` trait: the adapter boundary |
-| `src/runtime/mod.rs` | the real adapter: isolated temporary working directory per case, one JSON object per line, correlated request ids |
-| `src/runtime/process_tree.rs` | process containment, Windows Job Objects and Unix process groups |
-| `src/runtime/primitives.rs` | the single canonical source for BlaBla-controlled runtime primitive semantics |
-| `src/structure/syntax.rs` | the structure contract parser and layer detection |
-| `src/structure/mod.rs` | the structure IR, the inspection step, the rule evaluator, the `Provider` trait and the provider registry |
-| `src/structure/falsify.rs` | the counterfactual fact map and the per-rule falsification verdict behind `blabla check --falsify` |
-| `src/structure/python.rs`, `python_facts.py` | the Python provider and its embedded extractor |
-| `src/structure/rust.rs` | the Rust provider |
-| `src/structure/treesitter.rs` | the shared tree-sitter harness: the read/parse/error preamble, the line index and the one `Facts` accumulator every language walk fills |
-| `src/structure/typescript.rs`, `go.rs`, `java.rs`, `cfamily.rs` | one language walk each over its own grammar's node kinds; `cfamily.rs` carries both C providers because the C++ node kinds are a superset of the C ones |
-| `src/voice.rs` | the diagnostic voice: the catalogue of blunt renderings and the one function that appends one to a neutral statement |
-| `src/report.rs`, `src/diagnostic.rs` | the report and diagnostic shapes both renderings read from |
+| `src/cli/` | argument parsing, status/explain/check/run/finish, task and expert commands, managed onboarding and progress; human/JSON output from shared views |
+| `src/project/` | manifest discovery/composition, profile resolution, identities, fingerprints, status and run markers |
+| `src/syntax/` → `src/semantics/` → `src/ir/` | parse and type-check behavior into normalized IR; single-file compilation is one-unit composition |
+| `src/verify/` | seeded generation, typed-literal guidance, prefix corpus, semantic coverage, predicate evaluation and counterexample shrinking |
+| `src/application.rs`, `src/runtime/` | observation boundary, UTF-8 JSON Lines, per-case temporary directory, trusted restart, response/startup timeouts and process-tree containment |
+| `src/structure/` | structure parser/IR, inspection, one fact evaluator, provider registry and in-memory falsification |
+| `src/structure/python.rs`, `python_facts.py` | isolated Python interpreter with embedded `ast` extractor |
+| `src/structure/rust.rs` | in-process `syn` parsing |
+| `src/structure/treesitter.rs` | shared parse/error/line/fact harness for TypeScript/JavaScript, Go, Java, C and C++ walks |
+| `src/memory/` | `.bla` parsing, each memory kind, internal validation and routing into knowledge packs |
+| `src/project/task.rs`, `task/revision.rs`, `task/store.rs` | bounded assignments, shared relevant-revision identity, exact evidence/review bindings and atomic ownership transactions |
+| `src/skeptic.rs` | one grounded challenge from records, tree, completion and falsification; no semantic code review |
+| `src/project/expert.rs`, `src/expert/packet.rs` | registered judgment/binding resolution and selected packets with bounded context/provenance |
+| `src/expert/provider.rs`, `adapters/systemone/provider.py` | strict typed response validation, subprocess exchange and local SystemOne HTTP transport |
+| `src/expert/policy.rs`, `trace.rs` | pure policy/templates, replay, bounded payload retention, final freshness checks, reservation and suppression ledger |
+| `src/expert/calibration.rs` | pure development preflight and fitting over saved validated responses |
+| `src/expert/native/`, `pilot/`, `adapters/native/` | scoped experimental authority and cooperative completed-idle-turn host protocol; Python validates projections, the host skill calls native tools |
+| `experiments/expert_calibrate_live.py`, `expert_native_live.py` | bounded real-response collection and resumable native-run orchestration; no independent policy implementation |
+| `src/report.rs`, `diagnostic.rs`, `voice.rs` | shared report/diagnostic shapes and presentation-only voice |
 
 ## Stable seams
 
-Changing one of these is an interface change with consequences beyond its own file.
+- **`Application`**: `reset`, `call`, `observe`, `restart`, `finish`. The verifier consumes observations, not process details. Unsupported trusted restart defaults to `APP_LIFECYCLE`
+- **`Provider`**: `id`, `extensions`, `symbol_depth`, `handles`, `inspect`, `external_target_error`. First matching extension selects it. A successful inspection must return a record for every requested module; silence is ERROR, not absence
+- **`ModuleFacts`**: existence/error, symbols/imports, literal collections, key/payload entries and unsupported values. Python serializes it; in-process providers construct it. All share one evaluator and fact grammar
+- **Typed IR / `RunReport`**: coverage, failures, shrinking and IDs are defined over IR; human and JSON render the same report value
+- **`Task` / relevant revision**: assignment declarations and observed tree/evidence enter the skeptic and freshness checks here. New challenge classes need grounded data, not agent narrative
+- **Expert request/response/result**: selected `EvaluationRequest` plus validated `EvaluationResponse` enters pure policy. `ExpertResult` is advice, never a verifier verdict. Reservation/consume recheck the current selected revision and execution authority
+- **Native wire / permit**: closed operation, observation, Wake and receipt types preserve experimental identity and uncertain delivery. General host capabilities cannot be inferred from this narrower cooperative protocol
+- **`runtime/primitives.rs`**: the single table every agent-facing surface uses for runtime primitive semantics; dependencies are derived from typed IR
 
-**`Application`** (`src/application.rs`) — `reset`, `call`, `observe`, `restart`, `finish`. Everything above it works in terms of observations, so the verifier never knows whether it is driving a real process. `restart` defaults to an `APP_LIFECYCLE` error, so an adapter that cannot provide trusted process restart says so rather than faking it.
+Public definitions and exact host admission: [expert reference](expert.md) · [native schema](design/0.10-native-host-schema.md).
 
-**`Provider`** (`src/structure/mod.rs`) — `id`, `handles`, `symbol_depth`, `inspect`, `external_target_error`. A provider adds a language. It never adds a fact, and the contract grammar does not change when one is added. `handles` selects by file extension and the first match wins. A successful `inspect` reports one entry for every module it was handed; a module left unreported is ERROR for every rule naming it, never an absent fact that a `forbid` could pass on.
-
-**`ModuleFacts`** (`src/structure/mod.rs`) — the fact shape every provider produces: existence, a parse error, symbols, imports, literal collections, key/payload entries, and unsupported names. It derives `Deserialize` because the Python provider delivers it as JSON over a pipe; the Rust provider constructs it directly in process. Both go through the same evaluator, so rule semantics cannot drift between languages.
-
-**The typed IR** (`src/ir/mod.rs`) — the verifier consumes IR, never the syntax AST. Coverage obligations, failures, shrinking and rule ids are all defined over it.
-
-**`RunReport`** (`src/report.rs`) — the human rendering and the `--json` rendering are two views of one value. Neither computes anything the other does not see.
-
-**`Task`** (`src/project/task.rs`) — everything the skeptic knows about a change in flight crosses as this record. The skeptic reads no chat, no agent report and no diff of its own, so a challenge can rest only on what was written down at assignment and what the tree says now. A new class of challenge therefore cannot be added without first adding its evidence to the record. This is `seam::bounded-task` in `system.bla`.
-
-**The on-disk state** — everything BlaBla writes lives under `.blabla/`:
+## State and trust
 
 ```text
-.blabla/status.json      the verifier version, project identity, implementation fingerprint,
-                         application command, options and run report
-.blabla/verifying.json   the in-flight campaign marker: run id, pid, start time, identities
-.blabla/tasks/*.json     one bounded task record each
+project.bla + registered *.bla    authored intent and contract definitions
+.blabla/status.json              recorded behavior campaign and audit data
+.blabla/verifying.json           in-flight process/run identity
+.blabla/tasks/*.json             assignments, snapshots, findings and evidence
+.blabla/expert/                  runtime settings, bounded traces, reservations and receipts
 ```
 
-`status` compares identities and reports STALE on any difference. Structure results are stored in the record for audit only and are never read back as current. None of this is authored memory and none of it reaches `OVERALL`.
+Behavior records receive freshness/canonical checks; structure is always evaluated live. Memory validity, task lifecycle and expert policy have separate authorities described in [Project](project.md), [Agent workflow](agent-workflow.md) and [BLA_BLA.md](../BLA_BLA.md#trust-boundaries).
 
-**`runtime/primitives.rs`** — every agent-facing surface renders runtime primitive semantics from this one table. No surface carries its own prose copy, and a rule's dependency on a primitive is derived from the typed IR rather than annotated in the contract.
+Inspection is separate from decision: providers build facts once; the evaluator decides rules. Falsification changes only that in-memory fact map and reruns the same evaluator, without source edits or a second inspection. It tests rule sensitivity, not semantic intent.
 
-## Three properties worth keeping
+Expert calls are explicit at supported host boundaries. They are absent from deterministic verification. Ordinary advisory promotion and scoped native experiments share policy/freshness logic but have distinct admission. Neither route supplies universal hooks, authenticated worker identity or autonomous remediation.
 
-**Structure is never cached.** It is evaluated live on every `status`, `check` and `finish`. This is why a stale structure GREEN cannot exist, and it is the reason the structure pipeline needs no verification profile.
+## Self-hosting
 
-**Inspection and decision are separate steps.** `inspect` materialises one `ModuleFacts` map per invocation; `verify` decides every rule against it. Because deciding is a pure function of that map, `blabla check --falsify` can decide a rule a second time against a counterfactual map built from the same facts, with no second inspection, no subprocess and nothing written. Falsification adds no fact and no rule semantics of its own — it calls the one evaluator with a different input.
+`project.bla` registers the current inventory; use `status` rather than a copied count. The current-source `structure-adapter` bridge translates contracts into calls to real evaluator, task, goal and expert functions. Expert fixtures exercise pure decision/revision seams without a model or network. They are not host-delivery or quality evidence.
 
-**Single-file and project modes share one path.** A project compiles a list of units against one environment; a single file is the one-unit case with bare labels. There is no second compiler, so a diagnostic cannot differ between the two modes.
-
-## Self-hosting contracts
-
-The repository's own `project.bla` binds six structure contracts over BlaBla's Python tooling, its structure subsystem and its skeptic. `contracts/rust.bla` constrains the seams above: the `Provider` trait and its four required methods, the provider registry, the inspected extensions, both providers' entry points, the challenge entry point, classes and evidence seam, and the layering boundaries.
-
-The `forbid dependency` rules are what keep the three concerns apart — the structure pipeline independent of the behavior pipeline, and the skeptic below the CLI, reading no source provider and running no campaign. They are checked on every `blabla status`.
+Structural dependency rules keep verification pipelines, skeptic and expert concerns separated. The orchestrator's product gate rebuilds the bridge, runs composed canonical `finish` and reads current `status`. [Verification ownership](test-ownership.md) · [contribution checks](../CONTRIBUTING.md#verification)

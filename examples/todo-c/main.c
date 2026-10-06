@@ -53,7 +53,7 @@ static void store_load(Store *store) {
         long long id = 0;
         int done = 0;
         size_t size = 0;
-        if (fscanf(file, "%lld %d %zu\n", &id, &done, &size) != 3) {
+        if (fscanf(file, "%lld %d %zu", &id, &done, &size) != 3 || fgetc(file) != '\n') {
             break;
         }
         char *text = (char *)malloc(size + 1);

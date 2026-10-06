@@ -2,7 +2,7 @@ role "orchestrator" {
     purpose "Decide what the work is, divide it, integrate what comes back, and decide completion."
     owns ["decomposition and worker assignment", "shared and hot files", "integration of every worker's result", "contract semantics and the manifest", "project-wide falsification", "the product gate and blabla finish", "every commit"]
     verification "product"
-    model ["opus-5", "claude-fable-5-1", "gpt-6-astra"]
+    model ["opus-5", "claude-fable-5-1", "gpt-6-astra", "gpt-6.1-sol"]
     consult ["engineering", "testing", "design"]
 }
 
@@ -11,7 +11,7 @@ role "worker" {
     owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
     verification "focused"
     block_below "70"
-    model ["haiku-4.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5"]
+    model ["haiku-4.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["engineering", "testing"]
 }
 
@@ -19,7 +19,7 @@ role "reviewer" {
     purpose "Independently review one bounded worker patch and report the defects that block its integration."
     owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
     verification "focused"
-    model ["qwen3.5:4b", "opus-5", "gpt-5.6-sol", "haiku-4.5"]
+    model ["qwen3.5:4b", "opus-5", "gpt-5.6-sol", "haiku-4.5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["reviewing", "engineering", "testing", "design"]
 }
 
@@ -189,4 +189,39 @@ step "gate" {
     role ["orchestrator"]
     statement "Decide completion. Structure is checked live and the canonical behavior profile is run; only OVERALL GREEN is completion, and a contract or profile is never weakened to obtain it. Any challenge still standing is printed beside the verdict and changes none of it."
     command "blabla finish"
+}
+
+
+binding "goal-alignment" {
+    judgment "judgment::expert-review::goal-drift"
+    roles ["worker", "reviewer"]
+    checkpoints ["plan", "tool-result", "turn-end", "review"]
+    mission ["mission::blabla"]
+}
+
+binding "expertise-usefulness" {
+    judgment "judgment::expert-review::expertise-useful"
+    roles ["worker", "reviewer"]
+    checkpoints ["plan", "tool-result", "turn-end", "review"]
+    candidates ["knowledge::engineering", "knowledge::testing", "knowledge::reviewing", "knowledge::design"]
+}
+
+binding "expertise-choice" {
+    judgment "judgment::expert-review::expertise-selection"
+    roles ["worker", "reviewer"]
+    checkpoints ["plan", "tool-result", "turn-end", "review"]
+    candidates ["knowledge::engineering", "knowledge::testing", "knowledge::reviewing", "knowledge::design"]
+}
+
+binding "claim-check" {
+    judgment "judgment::expert-review::claim-support"
+    roles ["worker", "reviewer"]
+    checkpoints ["tool-result", "claim", "turn-end", "review"]
+    rules ["ruling::expert-review::evidence-before-claim"]
+}
+
+binding "retry-review" {
+    judgment "judgment::expert-review::failed-approach"
+    roles ["worker", "reviewer"]
+    checkpoints ["plan", "tool-result", "turn-end", "review"]
 }

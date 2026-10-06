@@ -1,5 +1,6 @@
 use super::{emit_error, error, recovery, write_json};
 use blabla::memory::goal::Outcome;
+use blabla::memory::{self, goal, knowledge, mission, process, system};
 use blabla::project::Project;
 use blabla::project::status::{RECORD_DIRECTORY, StatusView, now_unix, status_view};
 use blabla::project::task::{self, Finding, Opening, Task};
@@ -8,24 +9,81 @@ use blabla::structure::default_providers;
 use blabla::structure::falsify;
 use blabla::voice::{Voice, contradiction};
 use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Write};
 
 #[derive(Serialize)]
 struct TaskView<'a> {
     task: &'a Task,
+    review_current: Option<bool>,
+    approval_current: Option<bool>,
+    decisions: Vec<DecisionStateView<'a>>,
+    assessment_current: Vec<bool>,
     open: bool,
     unresolved: usize,
     possibly_incomplete: bool,
     authority: &'static str,
 }
 
-fn view(task: &Task) -> TaskView<'_> {
+#[derive(Serialize)]
+struct DecisionStateView<'a> {
+    id: usize,
+    status: &'static str,
+    current_pick: &'a str,
+}
+
+fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
+    let review_current = review_freshness(project, task);
+    let fingerprints = knowledge_fingerprints(project);
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     TaskView {
+        review_current,
+        approval_current: review_current.map(|current| {
+            current
+                && task.state == "closed"
+                && task.result.is_some()
+                && task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree)
+                    .supported
+                && task::challenge_current(task, &tree)
+        }),
+        decisions: task
+            .decisions
+            .iter()
+            .map(|decision| DecisionStateView {
+                id: decision.id,
+                status: decision.current_status(),
+                current_pick: decision.current_pick(),
+            })
+            .collect(),
+        assessment_current: task
+            .assessments
+            .iter()
+            .map(|assessment| {
+                fingerprints
+                    .get(&assessment.ruling)
+                    .is_some_and(|fingerprint| {
+                        task::assessment_current(task, assessment, fingerprint)
+                    })
+            })
+            .collect(),
         open: task.open(),
         unresolved: task.unresolved().count(),
         possibly_incomplete: recovery::foreign(recovery::running(), task.build.as_deref()),
         authority: task::AUTHORITY,
         task,
+    }
+}
+
+pub(super) fn locked(project: &Project, json: bool, f: impl FnOnce() -> i32) -> i32 {
+    match task::store::lock(&project.manifest.root) {
+        Ok(_lock) => {
+            let unreadable = task::unreadable(&project.manifest.root);
+            if !unreadable.is_empty() {
+                return emit_error(error("task", unreadable.join("; "), None), json, 2);
+            }
+            f()
+        }
+        Err(message) => emit_error(error("task", message, None), json, 2),
     }
 }
 
@@ -55,14 +113,223 @@ fn mutate(project: &Project, name: &str, json: bool) -> Result<Task, i32> {
     Err(emit_error(
         error(
             "task",
-            format!(
-                "task {name:?} is closed; what it holds is history rather than open evidence, and amending it would rewrite an account that was already decided. Open a new task for the follow-on work"
-            ),
+            include_str!("text/task-recovery.md").replace("{{name}}", name),
             None,
         ),
         json,
         2,
     ))
+}
+
+fn fingerprint(value: &impl Serialize) -> String {
+    let mut hash = blabla::project::Fnv::new();
+    hash.write_str("task-memory-v1");
+    hash.write_str(&serde_json::to_string(value).expect("memory serializes"));
+    hash.finish()
+}
+
+fn knowledge_fingerprints(project: &Project) -> BTreeMap<String, String> {
+    let entries: Vec<_> = project
+        .manifest
+        .knowledge
+        .iter()
+        .map(|entry| (entry.path.as_path(), entry.display.as_str()))
+        .collect();
+    let memory = memory::read_all(&entries, knowledge::build, knowledge::validate);
+    let Some(memory) = memory.present() else {
+        return BTreeMap::new();
+    };
+    memory
+        .packs
+        .iter()
+        .map(|pack| {
+            (
+                pack.name.clone(),
+                task::knowledge_fingerprint(memory, &pack.name)
+                    .expect("resolved pack fingerprints"),
+            )
+        })
+        .collect()
+}
+
+fn review_target(project: &Project, name: &str, target: &str) -> Result<Task, String> {
+    let root = &project.manifest.root;
+    let reviewed = task::read(root, target)?
+        .ok_or_else(|| format!("no review target task {target:?} exists"))?;
+    if reviewed.state == "withdrawn" {
+        return Err(format!("review target {target:?} is withdrawn"));
+    }
+    let mut visited = vec![name.to_owned()];
+    let mut next = Some(reviewed.clone());
+    while let Some(current) = next {
+        if visited.contains(&current.name) {
+            return Err(format!("review target {target:?} creates a review cycle"));
+        }
+        visited.push(current.name.clone());
+        next = match current.review_of {
+            Some(target) => task::read(root, &target.task)?,
+            None => None,
+        };
+    }
+    Ok(reviewed)
+}
+
+fn review_dependencies(
+    project: &Project,
+    review: &Task,
+    reviewed: &Task,
+) -> BTreeMap<String, String> {
+    let mut identities = review_identities(project, reviewed);
+    identities.extend(review_identities(project, review));
+    identities
+}
+
+fn review_freshness(project: &Project, review: &Task) -> Option<bool> {
+    review.review_of.as_ref()?;
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    let mut current = review.clone();
+    let mut visited = BTreeSet::new();
+    while let Some(target) = &current.review_of {
+        if !visited.insert(current.name.clone()) {
+            return Some(false);
+        }
+        let Ok(Some(reviewed)) = task::read(&project.manifest.root, &target.task) else {
+            return Some(false);
+        };
+        if task::tracking_error(&current, &project.manifest.root, &project.ignore).is_some()
+            || task::tracking_error(&reviewed, &project.manifest.root, &project.ignore).is_some()
+            || !task::review_current(
+                &current,
+                &reviewed,
+                &tree,
+                review_dependencies(project, &current, &reviewed),
+            )
+        {
+            return Some(false);
+        }
+        current = reviewed;
+    }
+    Some(true)
+}
+
+fn review_identities(project: &Project, task: &Task) -> BTreeMap<String, String> {
+    let mut identities = BTreeMap::new();
+    let mut packs = Vec::new();
+    if let Some(entry) = &project.manifest.process {
+        let memory = memory::read(
+            &entry.path,
+            &entry.display,
+            process::build,
+            process::validate,
+        );
+        if let Some(memory) = memory.present() {
+            if let Some(role) = memory.roles.iter().find(|role| role.name == task.role) {
+                identities.insert(format!("role::{}", role.name), fingerprint(role));
+                packs.extend(role.consult.clone());
+            }
+            for policy in memory
+                .policies
+                .iter()
+                .filter(|policy| policy.applies_to.contains(&task.role))
+            {
+                identities.insert(format!("policy::{}", policy.name), fingerprint(policy));
+                packs.extend(policy.consult.clone());
+            }
+            let models = process::permitted_models(memory, &task.role);
+            identities.insert(format!("models::{}", task.role), fingerprint(&models));
+        } else {
+            identities.insert(
+                "memory::process".to_owned(),
+                fingerprint(&(memory.state(), memory.problems())),
+            );
+        }
+    }
+    if let Some(entry) = &project.manifest.system {
+        let memory = memory::read(&entry.path, &entry.display, system::build, system::validate);
+        if let Some(memory) = memory.present() {
+            let paths = task.scope.iter().chain(&task.check_inputs).chain(
+                task.deliverables
+                    .iter()
+                    .map(|deliverable| &deliverable.path),
+            );
+            let paths: Vec<_> = paths.collect();
+            let systems: Vec<_> = memory
+                .systems
+                .iter()
+                .filter(|system| {
+                    system.paths.iter().any(|path| {
+                        paths
+                            .iter()
+                            .any(|input| task::covers(path, input) || task::covers(input, path))
+                    })
+                })
+                .collect();
+            for system in &systems {
+                identities.insert(format!("system::{}", system.name), fingerprint(system));
+                packs.extend(system.knowledge.clone());
+            }
+            for responsibility in memory.responsibilities.iter().filter(|responsibility| {
+                systems
+                    .iter()
+                    .any(|system| system.name == responsibility.owner)
+            }) {
+                identities.insert(
+                    format!("responsibility::{}", responsibility.name),
+                    fingerprint(responsibility),
+                );
+            }
+            for seam in memory.seams.iter().filter(|seam| {
+                seam.between
+                    .iter()
+                    .any(|name| systems.iter().any(|system| &system.name == name))
+            }) {
+                identities.insert(format!("seam::{}", seam.name), fingerprint(seam));
+            }
+        } else {
+            identities.insert(
+                "memory::system".to_owned(),
+                fingerprint(&(memory.state(), memory.problems())),
+            );
+        }
+    }
+    if let Some(name) = &task.goal
+        && let Some(entry) = &project.manifest.goal
+    {
+        let memory = memory::read(&entry.path, &entry.display, goal::build, goal::validate);
+        if let Some(goal) = memory.present().and_then(|memory| {
+            memory
+                .goals
+                .iter()
+                .find(|goal| goal.id() == *name || goal.name == *name)
+        }) {
+            identities.insert(goal.id(), fingerprint(goal));
+        } else {
+            identities.insert(
+                name.clone(),
+                fingerprint(&(memory.state(), memory.problems())),
+            );
+        }
+    }
+    if let Some(entry) = &project.manifest.mission {
+        let memory = memory::read(
+            &entry.path,
+            &entry.display,
+            mission::build,
+            mission::validate,
+        );
+        identities.insert("memory::mission".to_owned(), fingerprint(&memory.present()));
+    }
+    let fingerprints = knowledge_fingerprints(project);
+    for pack in packs {
+        identities.insert(
+            format!("knowledge::{pack}"),
+            fingerprints
+                .get(&pack)
+                .cloned()
+                .unwrap_or_else(|| "unresolved".to_owned()),
+        );
+    }
+    identities
 }
 
 fn declared_role(project: &Project, role_name: &str) -> Option<blabla::memory::process::Role> {
@@ -181,12 +448,13 @@ fn write_record(project: &Project, task: &mut Task, json: bool, whole_view: bool
         );
     }
     let result = if json {
-        write_json(&view(task))
+        write_json(&view(project, task))
     } else if whole_view {
         write_task(
             task,
             &project.manifest.root,
             role_floor(project, &task.role),
+            &view(project, task),
         )
     } else {
         write_task_line(task)
@@ -205,7 +473,7 @@ fn write_task_line(task: &Task) -> io::Result<()> {
     )
 }
 
-pub(super) fn open(project: &Project, opening: Opening, json: bool) -> i32 {
+pub(super) fn open(project: &Project, mut opening: Opening, json: bool) -> i32 {
     let name = &opening.name;
     if !blabla::memory::syntax::is_identity_safe(name) {
         return emit_error(
@@ -219,6 +487,11 @@ pub(super) fn open(project: &Project, opening: Opening, json: bool) -> i32 {
             json,
             2,
         );
+    }
+    if let Some(target) = &opening.review_of
+        && let Err(message) = review_target(project, &opening.name, target)
+    {
+        return emit_error(error("task", message, None), json, 2);
     }
     if let Some(goal) = &opening.goal
         && let Some(message) = super::project::undeclared_goal(project, goal)
@@ -243,44 +516,72 @@ pub(super) fn open(project: &Project, opening: Opening, json: bool) -> i32 {
             2,
         );
     }
-    let ignored = ignored_declaration(project, "deliverable", &opening.deliverables)
-        .or_else(|| ignored_declaration(project, "input", &opening.inputs));
-    if let Some(message) = ignored {
-        return emit_error(error("task", message, None), json, 2);
-    }
+    opening.inputs = match tracked_declarations(project, "input", opening.inputs) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    opening.deliverables = match tracked_declarations(project, "deliverable", opening.deliverables)
+    {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
     let mut recorded = task::record(
         root,
         &project.ignore,
         Opening {
-            scope: opening.scope.into_iter().map(normalize).collect(),
-            inputs: opening.inputs.into_iter().map(normalize).collect(),
-            deliverables: owed_paths(project, opening.deliverables),
+            scope: match task::validate_scope(
+                root,
+                &opening.name,
+                &opening.scope,
+                &task::read_all(root),
+            ) {
+                Ok(scope) => scope,
+                Err(message) => return emit_error(error("task", message, None), json, 2),
+            },
+            inputs: opening.inputs,
+            deliverables: match owed_paths(project, opening.deliverables) {
+                Ok(paths) => paths,
+                Err(message) => return emit_error(error("task", message, None), json, 2),
+            },
             ..opening
         },
         now_unix(),
     );
+    if let Err(exit) = require_tracking(project, &recorded, json) {
+        return exit;
+    }
     create(project, &mut recorded, json)
 }
 
-fn ignored_declaration(project: &Project, kind: &str, declared: &[String]) -> Option<String> {
-    let root = &project.manifest.root;
-    declared.iter().map(|path| normalize(path.clone())).find_map(|path| {
-        project
-            .ignore
-            .rule_for(&path, root.join(&path).is_dir())
-            .map(|rule| {
-                format!(
-                    "{kind} {path:?} is left out of change tracking by {rule}, so BlaBla could never observe it; drop that ignore rule or declare a path it does not cover"
-                )
-            })
-    })
+fn tracked_declarations(
+    project: &Project,
+    kind: &str,
+    declared: Vec<String>,
+) -> Result<Vec<String>, String> {
+    declared
+        .into_iter()
+        .map(|path| {
+            task::normalize_tracked_path(&project.manifest.root, &project.ignore, kind, &path)
+        })
+        .collect()
+}
+
+fn require_tracking(project: &Project, task: &Task, json: bool) -> Result<(), i32> {
+    match task::tracking_error(task, &project.manifest.root, &project.ignore) {
+        Some(problem) => Err(emit_error(
+            error("task", task::tracking_recovery(task, &problem), None),
+            json,
+            2,
+        )),
+        None => Ok(()),
+    }
 }
 
 fn normalize(path: String) -> String {
     path.replace('\\', "/")
 }
 
-fn owed_paths(project: &Project, declared: Vec<String>) -> Vec<String> {
+fn owed_paths(project: &Project, declared: Vec<String>) -> Result<Vec<String>, String> {
     let root = &project.manifest.root;
     let mut tree: Option<Vec<String>> = None;
     let mut owed = Vec::new();
@@ -294,19 +595,18 @@ fn owed_paths(project: &Project, declared: Vec<String>) -> Vec<String> {
                 .into_keys()
                 .collect::<Vec<String>>()
         });
-        let prefix = format!("{path}/");
         let under: Vec<String> = files
             .iter()
-            .filter(|name| name.starts_with(&prefix))
-            .cloned()
-            .collect();
+            .filter(|name| task::covers(&path, name))
+            .map(|name| task::normalize_tracked_path(root, &project.ignore, "deliverable", name))
+            .collect::<Result<_, _>>()?;
         if under.is_empty() {
             owed.push(path);
         } else {
             owed.extend(under);
         }
     }
-    owed
+    Ok(owed)
 }
 
 pub(super) fn finding(project: &Project, name: &str, statement: &str, json: bool) -> i32 {
@@ -758,29 +1058,146 @@ pub(super) fn confirm(project: &Project, name: &str, model: &str, json: bool) ->
     store(project, &mut task, json)
 }
 
-pub(super) fn widen(project: &Project, name: &str, add: Vec<String>, json: bool) -> i32 {
-    let mut task = match mutate(project, name, json) {
-        Ok(task) => task,
-        Err(exit) => return exit,
-    };
-    for path in add.into_iter().map(normalize) {
+fn widen_scope(project: &Project, task: &mut Task, add: &[String]) -> Result<(), String> {
+    let add = task::validate_scope(
+        &project.manifest.root,
+        &task.name,
+        add,
+        &task::read_all(&project.manifest.root),
+    )?;
+    for path in add {
         if !task.scope.contains(&path) {
             task.scope.push(path);
         }
     }
-    task::attest(&mut task, "scope", None, now_unix());
-    store(project, &mut task, json)
+    Ok(())
 }
 
-pub(super) fn owe(project: &Project, name: &str, add: Vec<String>, json: bool) -> i32 {
-    if let Some(message) = ignored_declaration(project, "deliverable", &add) {
-        return emit_error(error("task", message, None), json, 2);
+pub(super) fn widen(
+    project: &Project,
+    name: &str,
+    add: Vec<String>,
+    model: Option<&str>,
+    json: bool,
+) -> i32 {
+    if let Some(model) = model
+        && let Err(exit) = validate_orchestrator_model(project, model, json)
+    {
+        return exit;
     }
     let mut task = match mutate(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
     };
-    for path in owed_paths(project, add) {
+    if let Err(message) = widen_scope(project, &mut task, &add) {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    task::attest(&mut task, "scope", model, now_unix());
+    store(project, &mut task, json)
+}
+
+pub(super) fn withdraw(
+    project: &Project,
+    name: &str,
+    reason: &str,
+    model: &str,
+    json: bool,
+) -> i32 {
+    if let Err(exit) = validate_orchestrator_model(project, model, json) {
+        return exit;
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    if let Err(message) = task::withdraw(&mut task, &tree, reason, model, now_unix()) {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    task::attest(&mut task, "withdraw", Some(model), now_unix());
+    store(project, &mut task, json)
+}
+
+pub(super) fn reconcile_withdrawal(
+    project: &Project,
+    name: &str,
+    path: &str,
+    successor: &str,
+    model: &str,
+    json: bool,
+) -> i32 {
+    if let Err(exit) = validate_orchestrator_model(project, model, json) {
+        return exit;
+    }
+    let root = &project.manifest.root;
+    let path = match task::normalize_scope(root, path) {
+        Ok(path) => path,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    let mut task = match load(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let captured = task.withdrawal.as_ref().and_then(|record| {
+        record
+            .unresolved_paths
+            .keys()
+            .find(|captured| task::covers(&path, captured) && task::covers(captured, &path))
+            .cloned()
+    });
+    let path = match (task.state.as_str(), captured) {
+        ("withdrawn", Some(path)) => path,
+        _ => {
+            return emit_error(
+                error(
+                    "task",
+                    "reconciliation requires a captured path on a WITHDRAWN task".to_owned(),
+                    None,
+                ),
+                json,
+                2,
+            );
+        }
+    };
+    let successor = match load(project, successor, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let tree = blabla::project::snapshot(root, &project.ignore);
+    if task::tracking_error(&successor, root, &project.ignore).is_some()
+        || !task::successful_successor(&successor, &tree, &path)
+    {
+        return emit_error(error("task", "reconciliation requires a CLOSED successor with current successful evidence and explicit input or deliverable coverage".to_owned(), None), json, 2);
+    }
+    task.withdrawal
+        .as_mut()
+        .expect("withdrawal checked")
+        .reconciliations
+        .push(task::WithdrawalReconciliation {
+            revision: task::successor_revision(&successor, &tree, &path),
+            path,
+            successor: successor.name.clone(),
+            model: model.to_owned(),
+            unix: now_unix(),
+        });
+    task::attest(&mut task, "reconcile-withdrawal", Some(model), now_unix());
+    store(project, &mut task, json)
+}
+
+pub(super) fn owe(project: &Project, name: &str, add: Vec<String>, json: bool) -> i32 {
+    let add = match tracked_declarations(project, "deliverable", add) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    let paths = match owed_paths(project, add) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    for path in paths {
         task::owe_path(&mut task, path);
     }
     task::attest(&mut task, "deliverable --add", None, now_unix());
@@ -846,21 +1263,45 @@ pub(super) fn unowe(
     store(project, &mut task, json)
 }
 
+pub(super) struct CheckAmendment {
+    pub command: Option<String>,
+    pub argv: Vec<String>,
+    pub inputs: Vec<String>,
+    pub add_scope: Vec<String>,
+    pub model: Option<String>,
+}
+
 pub(super) fn declare_check(
     project: &Project,
     name: &str,
-    command: Option<String>,
-    argv: Vec<String>,
-    inputs: Vec<String>,
+    amendment: CheckAmendment,
     json: bool,
 ) -> i32 {
-    if let Some(message) = ignored_declaration(project, "input", &inputs) {
-        return emit_error(error("task", message, None), json, 2);
+    let CheckAmendment {
+        command,
+        argv,
+        inputs,
+        add_scope,
+        model,
+    } = amendment;
+    if let Some(model) = model.as_deref()
+        && let Err(exit) = validate_orchestrator_model(project, model, json)
+    {
+        return exit;
     }
+    let inputs = match tracked_declarations(project, "input", inputs) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
     let mut task = match mutate(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if !add_scope.is_empty()
+        && let Err(message) = widen_scope(project, &mut task, &add_scope)
+    {
+        return emit_error(error("task", message, None), json, 2);
+    }
     if let Some(cmd) = command {
         task.check = Some(cmd);
         task.check_argv = None;
@@ -869,9 +1310,19 @@ pub(super) fn declare_check(
         task.check_argv = Some(argv);
         task.check = None;
     }
-    task.check_inputs = inputs.into_iter().map(normalize).collect();
+    if inputs.is_empty()
+        && let Err(message) = tracked_declarations(project, "input", task.scope.clone())
+    {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    task.check_inputs = inputs;
     task.challenged = None;
-    task::attest(&mut task, "check", None, now_unix());
+    let verb = if add_scope.is_empty() {
+        "check"
+    } else {
+        "check --add-scope"
+    };
+    task::attest(&mut task, verb, model.as_deref(), now_unix());
     store(project, &mut task, json)
 }
 
@@ -880,6 +1331,9 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     if task.state == "ready" && !task::challenge_current(&task, &tree) {
         return emit_error(
@@ -903,7 +1357,11 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
         Some(&task),
         Err(skeptic::GOALS_NOT_JUDGED),
     );
-    let standing = report.grounded.len();
+    let standing = report
+        .grounded
+        .iter()
+        .filter(|class| **class != "withdrawal-residue")
+        .count();
     if !task::accept_result(&mut task, &tree, standing, model, now_unix()) {
         return emit_error(
             error(
@@ -944,7 +1402,7 @@ fn unconfirmed_guidance(task: &Task) -> String {
 pub(super) fn show(project: &Project, name: Option<&str>, json: bool) -> i32 {
     let Some(name) = name else {
         let tasks = task::read_all(&project.manifest.root);
-        let views: Vec<TaskView<'_>> = tasks.iter().map(view).collect();
+        let views: Vec<TaskView<'_>> = tasks.iter().map(|task| view(project, task)).collect();
         let result = if json {
             write_json(&views)
         } else {
@@ -957,12 +1415,13 @@ pub(super) fn show(project: &Project, name: Option<&str>, json: bool) -> i32 {
         Err(exit) => return exit,
     };
     let result = if json {
-        write_json(&view(&task))
+        write_json(&view(project, &task))
     } else {
         write_task(
             &task,
             &project.manifest.root,
             role_floor(project, &task.role),
+            &view(project, &task),
         )
         .and_then(|()| write_resolution(&resolved(project, &task)))
     };
@@ -1032,6 +1491,22 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
         return emit_error(error("task", reason, None), json, 2);
     }
     let current_tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    if let Some(target) = task.review_of.as_ref().map(|target| target.task.clone()) {
+        let reviewed = match review_target(project, name, &target) {
+            Ok(reviewed) => reviewed,
+            Err(message) => return emit_error(error("task", message, None), json, 2),
+        };
+        let revision = task::review_revision(
+            &task,
+            &reviewed,
+            &current_tree,
+            review_dependencies(project, &task, &reviewed),
+        );
+        task.review_of = Some(task::ReviewTarget {
+            task: target,
+            revision,
+        });
+    }
     task::record_acceptance(&mut task, &current_tree, model, now_unix());
     store(project, &mut task, json)
 }
@@ -1069,6 +1544,9 @@ pub(super) fn ready(project: &Project, name: &str, json: bool) -> i32 {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
     let evaluation = super::project::evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let status = status_view(project, &evaluation, &structure);
@@ -1144,7 +1622,27 @@ pub(super) fn lens(project: &Project, name: &str, lens: &str, statement: &str, j
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    let fingerprint = knowledge_fingerprints(project).get(lens).cloned();
+    let consulted = declared_role(project, &task.role)
+        .is_some_and(|role| role.consult.iter().any(|pack| pack == lens));
+    if task.state != "accepted" || task.accepted.is_none() || !consulted || fingerprint.is_none() {
+        return emit_error(
+            error(
+                "task",
+                "a lens must name a resolved pack consulted by the accepted task's role",
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     task.assessments.push(task::Assessment {
+        model: task
+            .accepted
+            .as_ref()
+            .map(|accepted| accepted.model.clone()),
+        acceptance_epoch: Some(task.acceptance_epoch),
+        knowledge_fingerprint: fingerprint,
         ruling: lens.to_owned(),
         statement: statement.to_owned(),
         unix: now_unix(),
@@ -1164,6 +1662,8 @@ pub(super) fn propose_model(
         Err(exit) => return exit,
     };
     task.exceptions.push(task::Exception {
+        acceptance_epoch: task.accepted.as_ref().map(|_| task.acceptance_epoch),
+        superseded: false,
         model: model.to_owned(),
         reason: reason.to_owned(),
         approval: None,
@@ -1182,11 +1682,9 @@ pub(super) fn approve_model(
         Ok(task) => task,
         Err(exit) => return exit,
     };
-    let Some(exception) = task
-        .exceptions
-        .iter_mut()
-        .find(|exception| exception.model == model && exception.approval.is_none())
-    else {
+    let Some(exception) = task.exceptions.iter_mut().find(|exception| {
+        !exception.superseded && exception.model == model && exception.approval.is_none()
+    }) else {
         return emit_error(
             error(
                 "E_NO_PROPOSAL",
@@ -1268,6 +1766,21 @@ pub(super) fn attribute(
     store(project, &mut task, json)
 }
 
+fn require_current_review(project: &Project, task: &Task, json: bool) -> Result<(), i32> {
+    if review_freshness(project, task) == Some(false) {
+        return Err(emit_error(
+            error(
+                "task",
+                "the reviewed target changed; reaccept this review before recording evidence",
+                None,
+            ),
+            json,
+            2,
+        ));
+    }
+    Ok(())
+}
+
 fn accepted_for_evidence(project: &Project, name: &str, json: bool) -> Result<Task, i32> {
     let task = mutate(project, name, json)?;
     if task.state != "accepted" || task.accepted.is_none() {
@@ -1310,6 +1823,8 @@ fn record_evidence(
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     let inputs = task::evidence_inputs(task, &tree);
     task.evidence.push(task::Evidence {
+        identity: task::declared_check(task),
+        acceptance_epoch: Some(task.acceptance_epoch),
         check,
         exit,
         tree: tree_fingerprint(&tree),
@@ -1327,6 +1842,12 @@ pub(super) fn evidence(project: &Project, name: &str, exit: i32, tool: &str, jso
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
+    if let Err(exit) = require_current_review(project, &task, json) {
+        return exit;
+    }
     let Some(check) = task.check.clone() else {
         let message = if task.check_argv.is_some() {
             format!(
@@ -1344,10 +1865,20 @@ pub(super) fn evidence(project: &Project, name: &str, exit: i32, tool: &str, jso
 }
 
 pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
+    let initial_lock = match task::store::lock(&project.manifest.root) {
+        Ok(lock) => lock,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
     let task = match accepted_for_evidence(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
+    if let Err(exit) = require_current_review(project, &task, json) {
+        return exit;
+    }
     let Some(argv) = task.check_argv.clone().filter(|argv| !argv.is_empty()) else {
         return emit_error(
             error(
@@ -1364,6 +1895,8 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
     let root = &project.manifest.root;
     let tree = blabla::project::snapshot(root, &project.ignore);
     let input_digests = task::evidence_inputs(&task, &tree);
+    let identity = task::declared_check(&task);
+    let acceptance_epoch = task.acceptance_epoch;
     let scratch = root
         .join(RECORD_DIRECTORY)
         .join(task::SCRATCH_DIRECTORY)
@@ -1379,7 +1912,16 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
             2,
         );
     }
-    let log_name = format!("evidence-{}.log", task.evidence.len() + 1);
+    let log_name = format!(
+        "evidence-{}-{}-{}.log",
+        task.evidence.len() + 1,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    drop(initial_lock);
     let output = match std::process::Command::new(&argv[0])
         .args(&argv[1..])
         .current_dir(root)
@@ -1422,11 +1964,28 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         "{RECORD_DIRECTORY}/{}/{name}/{log_name}",
         task::SCRATCH_DIRECTORY
     );
+    let _completion_lock = match task::store::lock(root) {
+        Ok(lock) => lock,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
     let mut reloaded = match accepted_for_evidence(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if reloaded.opened_unix != task.opened_unix || reloaded.opened_tree != task.opened_tree {
+        return emit_error(
+            error(
+                "task",
+                format!("task {name:?} was replaced while its check ran; nothing is recorded"),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     let evidence = task::Evidence {
+        identity,
+        acceptance_epoch: Some(acceptance_epoch),
         check: argv.join(" "),
         exit,
         tree: tree_fingerprint(&tree),
@@ -1452,7 +2011,13 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
                 .into_iter()
                 .filter(Task::open)
                 .collect();
-            if open.len() > 1 {
+            let tasks = task::read_all(root);
+            let tree = blabla::project::snapshot(root, &project.ignore);
+            let residue = tasks.iter().any(|task| {
+                !task::tracked_withdrawal_residue(task, &tasks, &tree, root, &project.ignore)
+                    .is_empty()
+            });
+            if open.len() > 1 && !residue {
                 let names: Vec<String> = open
                     .iter()
                     .map(|task| format!("blabla challenge {}", task.name))
@@ -1471,7 +2036,7 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
                     2,
                 );
             }
-            open.pop()
+            if open.len() > 1 { None } else { open.pop() }
         }
     };
     let evaluation = super::project::evaluate_with_run_state(project);
@@ -1507,11 +2072,17 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
                 );
             }
             assignment_clear = Some(recorded);
-        } else if task.state != "closed" {
+        } else if task.open() {
             assignment_clear = Some(
                 task.state == "ready"
                     && blockers.is_empty()
-                    && task::readiness(task, &tree).supported
+                    && task::tracked_readiness(
+                        task,
+                        &project.manifest.root,
+                        &project.ignore,
+                        &tree,
+                    )
+                    .supported
                     && task::challenge_current(task, &tree),
             );
         }
@@ -1575,7 +2146,7 @@ pub(super) fn report_for(
         role: resolution.as_ref(),
         other_tasks: &other_tasks,
     };
-    skeptic::challenge_against(&evidence, goals)
+    skeptic::challenge_tracked_against(&evidence, goals, root, &project.ignore)
 }
 
 pub(super) fn standing(project: &Project, status: &StatusView) -> ChallengeReport {
@@ -1699,7 +2270,12 @@ fn write_failing_evidence(
     Ok(())
 }
 
-fn write_task(task: &Task, root: &std::path::Path, floor: Option<u8>) -> io::Result<()> {
+fn write_task(
+    task: &Task,
+    root: &std::path::Path,
+    floor: Option<u8>,
+    view: &TaskView<'_>,
+) -> io::Result<()> {
     let mut output = io::stdout().lock();
     writeln!(output, "task::{}   {}", task.name, state_label(task))?;
     writeln!(output, "\nStatement:\n  {}", task.statement)?;
@@ -1765,6 +2341,26 @@ fn write_task(task: &Task, root: &std::path::Path, floor: Option<u8>) -> io::Res
             }
         }
     }
+    if let Some(current) = view.review_current {
+        let target = task.review_of.as_ref().expect("review target");
+        writeln!(
+            output,
+            "\nReview of task::{}: {}; current approval: {}",
+            target.task,
+            if current { "CURRENT" } else { "STALE" },
+            if view.approval_current == Some(true) {
+                "YES"
+            } else {
+                "NO"
+            }
+        )?;
+        if !current {
+            writeln!(
+                output,
+                "  Reaccept an open review to inspect the changed target; a CLOSED review remains historical and new work needs a new review task"
+            )?;
+        }
+    }
     write_questions(&mut output, task)?;
     write_decisions(&mut output, task, floor)?;
     write_orchestrator_records(&mut output, task)?;
@@ -1779,6 +2375,34 @@ fn write_task(task: &Task, root: &std::path::Path, floor: Option<u8>) -> io::Res
         for removed in &task.removed_deliverables {
             writeln!(output, "  {} — {}", removed.path, removed.reason)?;
         }
+    }
+    if let Some(withdrawal) = &task.withdrawal {
+        writeln!(
+            output,
+            "\nWITHDRAWN by {}: {}",
+            withdrawal.model, withdrawal.reason
+        )?;
+        for (path, digest) in &withdrawal.unresolved_paths {
+            writeln!(
+                output,
+                "  captured residue {path}: {}",
+                digest.as_deref().unwrap_or("absent")
+            )?;
+        }
+        for record in &withdrawal.reconciliations {
+            writeln!(
+                output,
+                "  reconciliation {} -> {} by {} at revision {}",
+                record.path,
+                record.successor,
+                record.model,
+                record.revision.fingerprint()
+            )?;
+        }
+        writeln!(
+            output,
+            "  Withdrawal releases ownership and grants no completion credit; restore captured paths or reconcile them against a current CLOSED successor"
+        )?;
     }
     if let Some(latest_evidence) = task.evidence.last() {
         write_failing_evidence(&mut output, root, latest_evidence)?;
@@ -1850,10 +2474,11 @@ fn write_decisions(output: &mut impl Write, task: &Task, floor: Option<u8>) -> i
             decision.pick,
             decision.confidence,
             decision.model,
-            if decision.below_floor {
-                format!("BLOCKS THE TASK, below {}%", decision.floor)
-            } else {
-                "STANDS".to_owned()
+            match decision.current_status() {
+                "blocked" => format!("BLOCKS THE TASK, below {}%", decision.floor),
+                "answered" => "ANSWERED".to_owned(),
+                "overruled" => "OVERRULED".to_owned(),
+                _ => "STANDS".to_owned(),
             }
         )?;
         match &decision.answer {
@@ -1941,7 +2566,15 @@ pub(super) const ROUTES: [&str; 10] = [
 fn route_states(route: &str) -> &'static [&'static str] {
     match route {
         "accept" => &["open", "blocked", "ready"],
-        "check" | "blocker" | "note" | "addressed" | "decide" | "hand-back" => {
+        "check" => &[
+            "open",
+            "accepted",
+            "blocked",
+            "ready",
+            "closed",
+            "withdrawn",
+        ],
+        "blocker" | "note" | "addressed" | "decide" | "hand-back" => {
             &["open", "accepted", "blocked"]
         }
         "finding" | "challenge" => &["open", "accepted", "blocked", "ready"],
@@ -1985,6 +2618,10 @@ fn render_route(
                 "take the assignment before changing anything; unaccepted work is challenged as work done outside BlaBla"
             }
         )],
+        "check" if matches!(state, Some("ready" | "closed" | "withdrawn")) => {
+            let declared = check_lines(name, check, check_argv);
+            vec![declared[0].clone()]
+        }
         "check" => check_lines(name, check, check_argv),
         "blocker" => vec![format!(
             "  blabla task block {name} \"...\"   record the blocker and stop"
@@ -2139,7 +2776,7 @@ pub(super) fn resolved(project: &Project, task: &Task) -> task::Resolution {
             )
         })
         .collect();
-    match role {
+    let mut resolution = match role {
         Some(role) => {
             let permitted = declared_permitted_models(project, &task.role);
             task::resolve(
@@ -2151,7 +2788,10 @@ pub(super) fn resolved(project: &Project, task: &Task) -> task::Resolution {
             )
         }
         None => task::resolve(task, &[], &[], "unstated", &contracts),
-    }
+    };
+    resolution.knowledge_fingerprints = knowledge_fingerprints(project);
+    resolution.review_current = review_freshness(project, task);
+    resolution
 }
 
 #[cfg(test)]
@@ -2196,6 +2836,7 @@ mod tests {
         assert!(
             ROUTES
                 .iter()
+                .filter(|route| **route != "check")
                 .all(|route| route_lines(route, &task).is_empty())
         );
         assert!(route_lines("no-such-route", &task).is_empty());

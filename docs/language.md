@@ -63,4 +63,8 @@ One UTF-8 JSON object per line on stdin and stdout, correlated by an opaque `id`
 | `{"id":"r2","op":"call","name":"add","args":["milk"]}` | `{"id":"r2","result":{"ok":true}}` |
 | `{"id":"r3","op":"observe"}` | `{"id":"r3","result":{"todos":[...]}}` |
 
+Return `{"ok":false,"error":"message"}` inside `result` for adapter failures. Crashes, timeouts and protocol errors are application failures, separate from contract violations.
+
 Flush every response, log to stderr, keep data in the current directory (each case runs in a fresh temporary directory), persist each completed operation, and exit cleanly when stdin closes. `blabla run --help` prints the same protocol.
+
+Use absolute script paths when launching an interpreter. Reuse the [language adapters](../adapters/README.md); the application supplies storage, domain logic and an action table. The verifier trusts these observations to describe the real application.

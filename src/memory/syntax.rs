@@ -40,9 +40,9 @@ pub fn is_identity_safe(name: &str) -> bool {
 }
 
 pub const SYSTEM_KEYWORDS: &[&str] = &["system", "responsibility", "seam"];
-pub const PROCESS_KEYWORDS: &[&str] = &["role", "policy", "flow", "step"];
+pub const PROCESS_KEYWORDS: &[&str] = &["role", "policy", "flow", "step", "alias", "binding"];
 pub const MISSION_KEYWORDS: &[&str] = &["mission", "priority"];
-pub const KNOWLEDGE_KEYWORDS: &[&str] = &["knowledge", "ruling"];
+pub const KNOWLEDGE_KEYWORDS: &[&str] = &["knowledge", "ruling", "judgment"];
 pub const GOAL_KEYWORDS: &[&str] = &["goal"];
 
 pub fn kind(file: &str, source: &str) -> Option<&'static str> {
@@ -94,7 +94,7 @@ impl Parser<'_> {
             return Err(self.error(
                 start.span,
                 "E_MEMORY_SYNTAX",
-                "expected a declaration keyword such as `mission`, `priority`, `knowledge`, `ruling`, `system`, `responsibility`, `seam`, `role`, `policy`, `flow`, `step` or `goal`",
+                "expected a declaration keyword such as `mission`, `priority`, `knowledge`, `ruling`, `judgment`, `binding`, `system`, `responsibility`, `seam`, `role`, `policy`, `flow`, `step` or `goal`",
             ));
         };
         let keyword = keyword.clone();
