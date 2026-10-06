@@ -2,7 +2,7 @@
 
 The expert layer asks fixed questions about selected project context: goal drift, useful expertise, claim support and repeated failed approaches. A validated answer passes through deterministic policy into silence, abstention or fixed-template advice. It never changes task acceptance, verifier verdicts, exits or `OVERALL`.
 
-**Current status: experimental, 0.10 unreleased.** The core, provider transports, saved-policy fitting and cooperative native host protocol are implemented. Repository bindings remain shadow-only, with **zero promoted judgments**. Real Kev calibration completed but selected **no feasible policy**; a smaller rendering diagnostic also failed to qualify one. Runtime expert benefit, improved correctness and reduced owner steering are not established. [Evidence and limits](design/0.10-release-evidence.md) · [dogfooding boundary](evidence/rts-dogfooding.md#runtime-expert-boundary)
+**Current status: experimental.** The core, provider transports, saved-policy fitting and cooperative native host protocol are implemented. Repository bindings remain shadow-only, with **zero promoted judgments**. Real Kev calibration completed but selected **no feasible policy**; a smaller rendering diagnostic also failed to qualify one. Runtime expert benefit, improved correctness and reduced owner steering are not established. [Evidence and limits](design/0.10-release-evidence.md)
 
 ## Where it runs
 

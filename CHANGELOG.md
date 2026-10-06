@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.10.0 (Unreleased)
+## 0.10.0 (2026-10-06)
 
-Release candidate: revision-bound handoffs and an experimental bounded expert layer. Source preparation is not a published release; [release evidence](docs/design/0.10-release-evidence.md) identifies completed checks and remaining qualification.
+Revision-bound handoffs and an experimental bounded expert layer. [Release evidence](docs/design/0.10-release-evidence.md) lists the checks and their limits.
 
 ### Breaking and upgrade
 
@@ -25,19 +25,20 @@ Release candidate: revision-bound handoffs and an experimental bounded expert la
 
 ### Fixed and improved
 
+- An active goal whose expectations all hold now routes to outcome review instead of suggesting it be marked done; stored goal states, JSON structure and `OVERALL` are unchanged
 - `task check --add-scope PATH… --model MODEL` combines one task's scope and exact-check amendment atomically; standalone `task scope` and `task check` also accept model attestations. Existing ownership, input/epoch/review freshness and post-handback confirmation remain required; task records need no new fields
 - Exact-check substitution, in-flight input/assignment changes, stale lens/review credit, withdrawal residue and model-proposal accounting
 - Python adapter strict UTF-8; C example preserves space-only items across restart
-- Generic String generation includes inherited mapping keys. Missing-identity guidance preserves valid companion fields; composed witness regression reaches all named obligations at the unchanged budget. [Causal limits](docs/evidence/rts-string-boundaries.md)
+- Generic String generation includes inherited mapping keys. Missing-identity guidance preserves valid companion fields; composed witness regression reaches all named obligations at the unchanged budget
 - Parameter-free actions avoid redundant candidate scoring without changing RNG/tie semantics or parameterized paths; measured results remain source/environment-specific
 - Expert child cleanup, chronological history selection, canonical task-goal expansion and request/key-matched verified non-delivery retries
 - Current-source historical fixtures, portable argument validation, bounded test stdin setup and recovery guidance for identifiable out-of-scope edits
 
 ### Qualification limits
 
-Repository bindings remain shadow-only; zero judgments are promoted. Kev transport worked, but real calibration selected no feasible policy. Codex CLI delivery remains blocked; Luna repository inference and Jev remain unverified. Implemented native tooling, offline fixtures, replay and dogfooding do not establish runtime expert benefit or reduced steering. RTS/adventure corrections are independent-review/workflow evidence, not expert nudges.
+Repository bindings remain shadow-only; zero judgments are promoted. Kev transport worked, but real calibration selected no feasible policy. Codex CLI delivery remains blocked; Luna repository inference and Jev remain unverified. Implemented native tooling, offline fixtures and replay do not establish runtime expert benefit or reduced steering.
 
-Model aliases, questions/decisions, attestation and the direct evaluation driver already shipped in 0.9. Earlier gates certify their own source only. Historical studies and opt-in research/stress routes remain available and are not silently counted as revalidated. No merge, tag or publication is claimed here.
+Model aliases, questions/decisions, attestation and the direct evaluation driver already shipped in 0.9. Historical studies and opt-in research/stress routes remain available and are not counted as revalidated.
 
 ## 0.9.0 (2026-09-24)
 

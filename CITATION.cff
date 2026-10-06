@@ -3,6 +3,7 @@ message: If you use BlaBla or its benchmark artifacts, please cite this reposito
 title: "BlaBla: executable project memory for coding agents"
 type: software
 version: 0.10.0
+date-released: 2026-10-06
 license: MIT
 repository-code: "https://github.com/Kiborgik/blabla"
 identifiers:

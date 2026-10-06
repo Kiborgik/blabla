@@ -4,8 +4,6 @@ BlaBla's purpose is to give coding agents cheap, actionable feedback on progress
 
 Version 0.10 strengthens that loop with revision-bound task evidence and review, explicit write ownership and experimental expert-evaluation tooling. Goals, questions and lens assessments predate this release. Freshness makes a result trustworthy for the work being delivered; it does not make a poorly chosen check a useful product signal.
 
-**Unpublished release candidate. Product-readiness recommendation: HOLD** until the bounded [goal-to-outcome acceptance](https://github.com/Kiborgik/blabla/blob/release/0.10-expert-loop/docs/design/0.10-product-goal-feedback.md#acceptance-for-a-future-010-release) is reviewed. Passing package checks and CI establish engineering readiness on the recorded revisions, not completion of every product goal.
-
 ## Breaking changes and upgrade
 
 - Task evidence binds the exact check, declared inputs and acceptance epoch. Existing evidence remains readable history but cannot approve current work. Reaccept, rerun the declared check, reassess consulted knowledge and challenge before hand-back; same-model reacceptance also starts a new epoch.
@@ -16,7 +14,7 @@ Version 0.10 strengthens that loop with revision-bound task evidence and review,
 - Typed `judgment::<pack>::<name>` and `binding::<name>` definitions extend Knowledge and Process. `judgment` and `binding` are reserved contract groups; rename collisions with `as`. Status/check JSON adds expert-definition and shared-state fields.
 - Expert packet/provider/policy/trace APIs use strict bounded schemas. CLI, trace and native surfaces remain experimental. Generator changes can change seeded trajectories between verifier versions.
 
-The [upgrade procedure](https://github.com/Kiborgik/blabla/blob/release/0.10-expert-loop/docs/agent-workflow.md#upgrading-task-records-to-010) explains current evidence and review credit.
+The [upgrade procedure](https://github.com/Kiborgik/blabla/blob/v0.10.0/docs/agent-workflow.md#upgrading-task-records-to-010) explains current evidence and review credit.
 
 ## Added and improved
 
@@ -29,12 +27,12 @@ The [upgrade procedure](https://github.com/Kiborgik/blabla/blob/release/0.10-exp
 
 ## What useful progress looks like
 
-For a content expansion, the outcome is reachable, mechanically distinct choices with legible in-game art. A real first-fight/save/replay witness, an inspected contact sheet from the actual renderer and a route that changes an observable preparation consequence say more about that goal than a rising test count. An anonymized private dogfooding case exposed route and integration failures through such checks. Human direction and review supplied the questions; BlaBla recorded the workflow and enforced current-evidence and scope prerequisites. This does not demonstrate autonomous product judgment or faster development.
+An exact user journey, an inspected rendered artifact or a witness with an observable consequence says more about a product goal than a rising test count. Humans and reviewers choose those questions; BlaBla records the workflow and enforces current-evidence and scope prerequisites. It does not supply autonomous product judgment.
 
 Goal expectations resolve to rule/contract identities. Nonformal acceptance remains an explicit owner/reviewer decision; goals, tasks and experts do not alter `OVERALL`.
 
 ## Expert qualification limits
 
-The expert layer remains experimental and repository bindings remain shadow-only. Zero judgments are promoted. Real Kev calibration selected **no feasible policy**; offline fixtures, replay and dogfooding do not demonstrate useful live steering or reduced development effort. Codex CLI delivery remains blocked, while Luna repository inference and Jev remain unverified. Qualification is required before enabling advisory delivery; the deterministic product can be used with the optional expert layer disabled.
+The expert layer remains experimental and repository bindings remain shadow-only. Zero judgments are promoted. Real Kev calibration selected **no feasible policy**; offline fixtures and replay do not demonstrate useful live steering or reduced development effort. Codex CLI delivery remains blocked, while Luna repository inference and Jev remain unverified. Qualification is required before enabling advisory delivery; the deterministic product can be used with the optional expert layer disabled.
 
-See the [full changelog](https://github.com/Kiborgik/blabla/blob/release/0.10-expert-loop/CHANGELOG.md#0100-unreleased) and [release evidence](https://github.com/Kiborgik/blabla/blob/release/0.10-expert-loop/docs/design/0.10-release-evidence.md) for the checks performed and their limits. These notes do not themselves create a tag or publish an artifact.
+See the [full changelog](https://github.com/Kiborgik/blabla/blob/v0.10.0/CHANGELOG.md#0100-2026-10-06) and [release evidence](https://github.com/Kiborgik/blabla/blob/v0.10.0/docs/design/0.10-release-evidence.md) for the checks performed and their limits.

@@ -199,4 +199,4 @@ Standalone `check` validates/evaluates the selected file; `check --falsify` test
 
 ## 0.10 task-record revalidation
 
-Task records are separate machine state. The [workflow upgrade procedure](agent-workflow.md#upgrading-task-records-to-010) covers legacy evidence, acceptance epochs, lenses, explicit reviews, withdrawal and JSON changes. Preserve old records as history; do not interpret them as current approval. [Breaking notes](../CHANGELOG.md#0100-unreleased)
+Task records are separate machine state. The [workflow upgrade procedure](agent-workflow.md#upgrading-task-records-to-010) covers legacy evidence, acceptance epochs, lenses, explicit reviews, withdrawal and JSON changes. Preserve old records as history; do not interpret them as current approval. [Breaking notes](../CHANGELOG.md#0100-2026-10-06)
