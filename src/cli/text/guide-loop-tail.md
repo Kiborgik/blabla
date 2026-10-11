@@ -5,7 +5,7 @@ or names the evidence it lacked. Silence is not approval: no challenge means non
 from that evidence. It reads no meaning from source code. A selected accepted task records its
 challenge receipt: exit 0 means its assignment check is clear, even if project-wide verification
 still belongs to the orchestrator. Exit 1 means assignment attention is needed. Without a task,
-the exit code describes the project challenge. What each class rests on: docs/agent-workflow.md.
+the exit code describes the project challenge. Every challenge class: docs/agent-workflow.md.
 
 THE REVIEWER reads the task and the whole diff in a context that never saw the work being done,
 holds the hand-back against the lenses the role consults, and records what it finds. A finding

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.0 (2026-10-11)
+
+Shorter, plainer docs around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. No contract syntax, CLI behavior, JSON field or exit code changed.
+
+### Changed
+
+- Descriptive docs are about four times shorter, in plain English, with tables kept where people read them. History (changelog, release notes, research data, release evidence) is unchanged
+- `docs/test-ownership.md` moved into `CONTRIBUTING.md`. `docs/design/0.10-native-host-schema.md` is replaced by the wire-contract section of `adapters/native/README.md`, which points at the Rust types in `src/expert/native/wire.rs`
+- The paragraph printed after every `task` command is shorter; two guide lines point at the new docs
+- Mission memory states the drift and overconfidence problem; system, process and design-knowledge prose is shorter, with every identity, binding and judgment unchanged
+- New active goals: `goal::short-plain-docs` for this release, and four gaps found while dogfooding: evidence in `task show`, expert `--help` descriptions, a docs link check and self-carried task confirmation
+
 ## 0.10.0 (2026-10-06)
 
 Revision-bound handoffs and an experimental bounded expert layer. [Release evidence](docs/design/0.10-release-evidence.md) lists the checks and their limits.

@@ -1,6 +1,6 @@
 # behavior.bla
 
-A behavior contract declares observable state, callable actions and the rules that must hold after actions. The application stays ordinary code behind a small JSON Lines adapter; BlaBla generates action sequences, observes state and reports GREEN, YELLOW or RED with a minimized counterexample.
+A behavior contract names what the running app shows (state), what can be done to it (actions) and the rules that must hold. BlaBla drives the app through a small JSON Lines adapter, generates action sequences, and reports GREEN, YELLOW or RED with the shortest failing example.
 
 ```text
 type Todo {
@@ -39,19 +39,19 @@ never "empty-text" { any(todos, t => t.text == "") }
 | `always "label" { predicate }` | an invariant checked initially and after every action |
 | `never "label" { predicate }` | a forbidden state; normalized to a negated invariant with its own label |
 
-`action restart()` is reserved: it is the BlaBla-controlled runtime primitive `runtime::restart` (trusted process restart with the persistent directory preserved). `blabla explain runtime::restart` prints its semantics.
+`action restart()` is reserved for `runtime::restart`: BlaBla restarts the process and keeps its data directory. `blabla explain runtime::restart` says more.
 
 ## Types and expressions
 
-Types: `bool`, exact JSON-safe `int`, finite `float`, `string`, records, lists `[T]` and `optional<T>` (explicit JSON null; access needs a null guard). Expressions: comparisons, checked `+` and `-`, `and`, `or`, `not`, `count`, and the bounded queries `any(list, x => ...)`, `all(list, x => ...)`, `unique(list, x => key)`. Binders exist only inside queries; there are no user functions, loops or temporal operators. List equality is ordered; observations must carry every declared field with the declared type and extra fields are projected away.
+Types: `bool`, JSON-safe `int`, finite `float`, `string`, records, lists `[T]` and `optional<T>` (JSON null; guard before use). Expressions: comparisons, checked `+` and `-`, `and`, `or`, `not`, `count`, `any(list, x => ...)`, `all(list, x => ...)`, `unique(list, x => key)`. No user functions, loops or temporal operators. List equality is ordered. An observation must carry every declared field; extra fields are ignored.
 
 ## Verification results
 
-- GREEN: every derived obligation was meaningfully exercised and passed in the recorded campaign.
-- YELLOW: no violation, but an obligation was never exercised; the report names the required witness.
-- RED: a confirmed violation with a shrunk counterexample.
+- **GREEN**: every obligation was exercised and passed
+- **YELLOW**: nothing broke, but an obligation was never exercised; the report names the witness to reach
+- **RED**: a confirmed violation, shrunk to the shortest failing steps
 
-Obligations are derived from the typed contract (guards, effects, frames, quantifier members, persistence partitions), not from source lines. A campaign is finite and heuristic: GREEN is exercised and satisfied behavior under the configured verifier, not a proof.
+Obligations come from the contract (guards, effects, frames, quantifiers, persistence), not from source lines. A campaign is finite: GREEN is not a proof.
 
 ## Adapter protocol
 
@@ -63,8 +63,4 @@ One UTF-8 JSON object per line on stdin and stdout, correlated by an opaque `id`
 | `{"id":"r2","op":"call","name":"add","args":["milk"]}` | `{"id":"r2","result":{"ok":true}}` |
 | `{"id":"r3","op":"observe"}` | `{"id":"r3","result":{"todos":[...]}}` |
 
-Return `{"ok":false,"error":"message"}` inside `result` for adapter failures. Crashes, timeouts and protocol errors are application failures, separate from contract violations.
-
-Flush every response, log to stderr, keep data in the current directory (each case runs in a fresh temporary directory), persist each completed operation, and exit cleanly when stdin closes. `blabla run --help` prints the same protocol.
-
-Use absolute script paths when launching an interpreter. Reuse the [language adapters](../adapters/README.md); the application supplies storage, domain logic and an action table. The verifier trusts these observations to describe the real application.
+Return `{"ok":false,"error":"message"}` inside `result` for an adapter failure. Crashes, timeouts and protocol errors are app failures, not rule violations. Flush every response, log to stderr, keep data in the current directory (each case gets a fresh one), persist each completed operation and exit when stdin closes. Give an interpreter an absolute script path. `blabla run --help` prints the protocol. Reuse the [adapters](../adapters/README.md); the app supplies storage, logic and an action table. BlaBla trusts the adapter to report the real app.

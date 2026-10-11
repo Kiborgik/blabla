@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: If you use BlaBla or its benchmark artifacts, please cite this repository.
 title: "BlaBla: executable project memory for coding agents"
 type: software
-version: 0.10.0
-date-released: 2026-10-06
+version: 0.11.0
+date-released: 2026-10-11
 license: MIT
 repository-code: "https://github.com/Kiborgik/blabla"
 identifiers:
@@ -14,8 +14,9 @@ authors:
   - family-names: Yakovyshyn
     given-names: Petro
 abstract: >-
-  BlaBla moves project intent out of chat context and into the repository, where
-  coding agents can query and verify it. Behavior and Structure contracts are
+  BlaBla catches small coding models drifting and claiming done too early: a
+  human or a strong model writes project intent once, as contracts in the
+  repository, and cheaper agents query and verify it. Behavior and Structure contracts are
   executable and decide completion through a GREEN/YELLOW/RED gate; Mission,
   System, Process and Knowledge memory is queryable and advisory. A coverage-guided
   behavior verifier produces minimized counterexamples, a static structure verifier

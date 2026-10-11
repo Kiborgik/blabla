@@ -40,6 +40,41 @@ goal "bounded-expert-release-ready-for-review" {
     state "active"
 }
 
+goal "short-plain-docs" {
+    serves ["disclosure-over-dumping", "steering-cost-over-token-cost"]
+    statement "0.11 says one idea in plain English, far shorter than 0.10 (a target of up to ten times, never at the cost of facts or tables people need): small models drift and claim done too early, so a human or a strong model writes contracts once and cheap models do bounded work against them. The CLI, status and explain stay the detailed reference; history files are not shortened."
+    expect ["contract::onboarding"]
+    state "active"
+}
+
+goal "task-show-prints-evidence" {
+    serves ["truthful-over-convenient", "disclosure-over-dumping"]
+    statement "Backlog: the text view of blabla task show prints the latest declared-check result (exit code, log path, epoch) and the recorded lens assessments. Today a reviewer must read --json or run challenge to learn whether the check passed."
+    expect ["assignment::task-show-prints-the-latest-evidence"]
+    state "active"
+}
+
+goal "expert-commands-describe-themselves" {
+    serves ["disclosure-over-dumping"]
+    statement "Backlog: every blabla expert subcommand has a one-line description in --help. Today all twelve print an empty description."
+    expect ["onboarding::expert-commands-describe-themselves"]
+    state "active"
+}
+
+goal "docs-links-are-checked" {
+    serves ["truthful-over-convenient"]
+    statement "Backlog: the product gate fails when a relative link or anchor in a tracked markdown file does not resolve. 0.11 shortened and merged many docs and checked links by hand once; nothing keeps them true."
+    expect ["gate::docs-links-resolve"]
+    state "active"
+}
+
+goal "self-carried-tasks-skip-self-confirmation" {
+    serves ["steering-cost-over-token-cost"]
+    statement "Backlog, owner decision first: when role::orchestrator carries its own task, its own scope or check amendments still raise orchestrator-record-during-carry and need task confirm before close. Decide whether a self-carried task should skip that step."
+    expect ["attestation::a-self-carried-amendment-needs-no-confirmation"]
+    state "active"
+}
+
 goal "expert-loop-demonstrated-in-real-work" {
     serves ["truthful-over-convenient", "steering-cost-over-token-cost", "bounded-workers-free-planners"]
     statement "Complete the original 0.10 workflow: a shipped named host adapter observes real work boundaries, evaluates bounded expert judgments, delivers authorized advice to the same worker and records acknowledgment separately from observed correction. Exercise actual feature work and matched off/shadow/advisory runs. Publish concise human/agent documentation and accurate diagrams. Contract expectations are necessary checks, not proof of live delivery, benefit or user acceptance."

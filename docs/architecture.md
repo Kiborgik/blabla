@@ -1,47 +1,33 @@
 # Architecture
 
-Two independent verification pipelines meet in the project/report layer. Authored memory, task state and optional expert advice sit alongside them; only Behavior and Structure decide completion.
+Two independent pipelines, Behavior and Structure, meet in the project and report layer. Memory, task records and optional expert advice sit beside them and never decide done.
 
-![Project composition feeds typed behavior verification and live static structure evaluation. Memory is queried; task records feed the skeptic; explicit host checkpoints feed bounded expert policy. Only the two verification pipelines reach finish and OVERALL.](assets/architecture.svg)
+![Project composition feeds behavior verification and live structure evaluation. Memory is queried, task records feed the skeptic, host checkpoints feed expert policy. Only the two pipelines reach finish and OVERALL.](assets/architecture.svg)
 
-[Diagram text alternatives](diagrams/README.md#architecture) · queryable map: `blabla explain system::<name>`
+[Diagram text](diagrams/README.md#architecture) · the queryable map: `blabla explain system::<name>`
 
-## Components
-
-| Path | Responsibility |
+| Path | Owns |
 | --- | --- |
-| `src/cli/` | argument parsing, status/explain/check/run/finish, task and expert commands, managed onboarding and progress; human/JSON output from shared views |
-| `src/project/` | manifest discovery/composition, profile resolution, identities, fingerprints, status and run markers |
-| `src/syntax/` → `src/semantics/` → `src/ir/` | parse and type-check behavior into normalized IR; single-file compilation is one-unit composition |
-| `src/verify/` | seeded generation, typed-literal guidance, prefix corpus, semantic coverage, predicate evaluation and counterexample shrinking |
-| `src/application.rs`, `src/runtime/` | observation boundary, UTF-8 JSON Lines, per-case temporary directory, trusted restart, response/startup timeouts and process-tree containment |
-| `src/structure/` | structure parser/IR, inspection, one fact evaluator, provider registry and in-memory falsification |
-| `src/structure/python.rs`, `python_facts.py` | isolated Python interpreter with embedded `ast` extractor |
-| `src/structure/rust.rs` | in-process `syn` parsing |
-| `src/structure/treesitter.rs` | shared parse/error/line/fact harness for TypeScript/JavaScript, Go, Java, C and C++ walks |
-| `src/memory/` | `.bla` parsing, each memory kind, internal validation and routing into knowledge packs |
-| `src/project/task.rs`, `task/revision.rs`, `task/store.rs` | bounded assignments, shared relevant-revision identity, exact evidence/review bindings and atomic ownership transactions |
-| `src/skeptic.rs` | one grounded challenge from records, tree, completion and falsification; no semantic code review |
-| `src/project/expert.rs`, `src/expert/packet.rs` | registered judgment/binding resolution and selected packets with bounded context/provenance |
-| `src/expert/provider.rs`, `adapters/systemone/provider.py` | strict typed response validation, subprocess exchange and local SystemOne HTTP transport |
-| `src/expert/policy.rs`, `trace.rs` | pure policy/templates, replay, bounded payload retention, final freshness checks, reservation and suppression ledger |
-| `src/expert/calibration.rs` | pure development preflight and fitting over saved validated responses |
-| `src/expert/native/`, `pilot/`, `adapters/native/` | scoped experimental authority and cooperative completed-idle-turn host protocol; Python validates projections, the host skill calls native tools |
-| `experiments/expert_calibrate_live.py`, `expert_native_live.py` | bounded real-response collection and resumable native-run orchestration; no independent policy implementation |
-| `src/report.rs`, `diagnostic.rs`, `voice.rs` | shared report/diagnostic shapes and presentation-only voice |
+| `src/cli/` | commands, onboarding text, progress; human and JSON output from one view |
+| `src/project/` | manifest, profile, identities, fingerprints, status and run markers |
+| `src/syntax/` → `src/semantics/` → `src/ir/` | parse and type-check behavior into normalized IR |
+| `src/verify/` | seeded generation, coverage, evaluation and shrinking |
+| `src/application.rs`, `src/runtime/` | JSON Lines boundary, per-case directory, trusted restart, timeouts, process-tree cleanup |
+| `src/structure/` | structure contracts, providers (`python.rs` + `python_facts.py`, `rust.rs` with `syn`, `treesitter.rs` for TS/JS, Go, Java, C, C++), one fact evaluator, falsification |
+| `src/memory/` | memory parsing, validation and knowledge routing |
+| `src/project/task*` | tasks, relevant revisions, evidence and review bindings, ownership |
+| `src/skeptic.rs` | one grounded challenge from records and tree; no code review |
+| `src/expert/` | packets, provider transport, policy, trace and replay, calibration, native and pilot protocol |
+| `src/report.rs`, `diagnostic.rs`, `voice.rs` | shared report shapes and presentation-only voice |
 
 ## Stable seams
 
-- **`Application`**: `reset`, `call`, `observe`, `restart`, `finish`. The verifier consumes observations, not process details. Unsupported trusted restart defaults to `APP_LIFECYCLE`
-- **`Provider`**: `id`, `extensions`, `symbol_depth`, `handles`, `inspect`, `external_target_error`. First matching extension selects it. A successful inspection must return a record for every requested module; silence is ERROR, not absence
-- **`ModuleFacts`**: existence/error, symbols/imports, literal collections, key/payload entries and unsupported values. Python serializes it; in-process providers construct it. All share one evaluator and fact grammar
-- **Typed IR / `RunReport`**: coverage, failures, shrinking and IDs are defined over IR; human and JSON render the same report value
-- **`Task` / relevant revision**: assignment declarations and observed tree/evidence enter the skeptic and freshness checks here. New challenge classes need grounded data, not agent narrative
-- **Expert request/response/result**: selected `EvaluationRequest` plus validated `EvaluationResponse` enters pure policy. `ExpertResult` is advice, never a verifier verdict. Reservation/consume recheck the current selected revision and execution authority
-- **Native wire / permit**: closed operation, observation, Wake and receipt types preserve experimental identity and uncertain delivery. General host capabilities cannot be inferred from this narrower cooperative protocol
-- **`runtime/primitives.rs`**: the single table every agent-facing surface uses for runtime primitive semantics; dependencies are derived from typed IR
-
-Public definitions and exact host admission: [expert reference](expert.md) · [native schema](design/0.10-native-host-schema.md).
+- **`Application`**: `reset`, `call`, `observe`, `restart`, `finish`. The verifier sees observations, not processes
+- **`Provider`** returns **`ModuleFacts`** for every requested module; silence is ERROR, not absence. All providers share one evaluator
+- **Typed IR and `RunReport`**: coverage, failures and IDs are defined over IR; human and JSON render the same value
+- **`Task` and relevant revision**: declarations, tree and evidence enter the skeptic and freshness checks here
+- **Expert request, response and result**: `ExpertResult` is advice, never a verdict
+- **`runtime/primitives.rs`**: the one table of runtime primitive meaning
 
 ## State and trust
 
@@ -53,14 +39,8 @@ project.bla + registered *.bla    authored intent and contract definitions
 .blabla/expert/                  runtime settings, bounded traces, reservations and receipts
 ```
 
-Behavior records receive freshness/canonical checks; structure is always evaluated live. Memory validity, task lifecycle and expert policy have separate authorities described in [Project](project.md), [Agent workflow](agent-workflow.md) and [BLA_BLA.md](../BLA_BLA.md#trust-boundaries).
-
-Inspection is separate from decision: providers build facts once; the evaluator decides rules. Falsification changes only that in-memory fact map and reruns the same evaluator, without source edits or a second inspection. It tests rule sensitivity, not semantic intent.
-
-Expert calls are explicit at supported host boundaries. They are absent from deterministic verification. Ordinary advisory promotion and scoped native experiments share policy/freshness logic but have distinct admission. Neither route supplies universal hooks, authenticated worker identity or autonomous remediation.
+Behavior records are checked for freshness; structure is always checked live. Providers build facts once and the evaluator decides; falsification flips facts in memory and reruns the same evaluator. Expert calls happen only at explicit host boundaries, never inside verification.
 
 ## Self-hosting
 
-`project.bla` registers the current inventory; use `status` rather than a copied count. The current-source `structure-adapter` bridge translates contracts into calls to real evaluator, task, goal and expert functions. Expert fixtures exercise pure decision/revision seams without a model or network. They are not host-delivery or quality evidence.
-
-Structural dependency rules keep verification pipelines, skeptic and expert concerns separated. The orchestrator's product gate rebuilds the bridge, runs composed canonical `finish` and reads current `status`. [Verification ownership](test-ownership.md) · [contribution checks](../CONTRIBUTING.md#verification)
+BlaBla checks itself. `project.bla` registers its contracts and memory; the `structure-adapter` example bridges behavior contracts to the real evaluator, task, goal and expert functions. Structure rules keep the pipelines, the skeptic and the expert layer apart. The product gate rebuilds the bridge and runs `finish`. [Checks](../CONTRIBUTING.md#checks)

@@ -67,4 +67,4 @@ What this is not:
   is expected to say so instead of complying.
   A ruling is expertise, never permission to widen the task you were given.
 
-Every field and every diagnostic: docs/project.md.
+Fields of every declaration: docs/project.md.

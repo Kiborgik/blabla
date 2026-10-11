@@ -74,46 +74,46 @@ system "expert" {
 
 responsibility "expert-context-selection" {
     owner "project"
-    statement "Resolve registered judgments and Process bindings into bounded selected packets using actual task evidence and the shared relevant revision. No unrestricted transcript or unselected file enters the packet."
+    statement "Resolve registered judgments and bindings into bounded packets from real task evidence and the shared relevant revision. No transcript or unselected file enters a packet."
 }
 
 responsibility "expert-advisory-runtime" {
     owner "expert"
-    statement "Validate typed answers and provider identity, map pure policy, replay saved responses and recheck current revisions before any reservation. Own bounded runtime settings, selected traces and delivery/suppression records under .blabla/expert/. Unknown delivery remains unresolved across restart; acknowledgment is not observed correction. Provider failure leaves deterministic verification available."
+    statement "Validate typed answers and provider identity, apply pure policy, replay saved responses and recheck current revisions before any reservation. Own settings, traces and delivery records under .blabla/expert/. Unknown delivery stays unresolved across restart; acknowledgment is not correction. A provider failure never blocks deterministic verification."
 }
 
 responsibility "expert-command-surfaces" {
     owner "cli"
-    statement "Expose opt-in expert inspection, checkpoint evaluation, saved-response replay and trace operations without adding an expert call to ordinary project verification. Repository bindings remain shadow-only; no live host is certified."
+    statement "Expose opt-in expert inspection, checkpoint evaluation, replay and trace commands without adding an expert call to project verification. Repository bindings stay shadow-only; no live host is certified."
 }
 
 seam "selected-expert-packet" {
     between ["project", "expert"]
     value "ExpertPacket"
-    statement "Only resolved identities, bounded selected observations and the shared task revision cross into a fixed judgment. Missing, unknown, unavailable or truncated required context cannot yield actionable advice. The same selected-revision comparison is used by current-result and actual reservation guards."
+    statement "Only resolved identities, bounded selected observations and the shared task revision cross into a judgment. Missing, unknown or truncated required context never yields actionable advice. Current-result and reservation guards use the same revision comparison."
     moves_with ["src/project/expert.rs", "src/project/task/revision.rs", "src/expert/packet.rs", "src/expert/policy.rs", "src/expert/trace.rs", "bridge/expert.rs", "contracts/expert.bla", "contracts/expert-seams.bla", "docs/project.md"]
 }
 
 seam "expert-proposal" {
     between ["expert", "cli"]
     value "ExpertResult"
-    statement "A validated answer becomes silence, abstention, a proposed nudge or escalation through deterministic policy. Rendering resolves only packet references. The proposal never changes verifier outcomes, exit codes or OVERALL. Local SystemOne transport exists; live checkpoint observation, same-task advisory insertion and tied receipts remain unverified."
+    statement "Deterministic policy turns a validated answer into silence, abstention, a proposed nudge or escalation. Rendering resolves only packet references. A proposal never changes verdicts, exit codes or OVERALL. Live checkpoint observation, same-task advice and tied receipts remain unverified."
     moves_with ["src/expert/provider.rs", "src/expert/policy.rs", "src/expert/trace.rs", "src/cli/expert.rs", "adapters/systemone/provider.py", "docs/expert.md", "docs/design/0.10-host-capabilities.md"]
 }
 
 responsibility "inspect-source" {
     owner "structure-providers"
-    statement "Read a declared source file and produce ModuleFacts from it. No other system reads project source for structural facts, and no system executes it."
+    statement "Read a declared source file and produce its ModuleFacts. No other system reads project source for structural facts, and none executes it."
 }
 
 responsibility "hold-project-memory" {
     owner "memory"
-    statement "Parse, validate and answer queries about authored project memory: Mission, Knowledge, System, Process and Goals. Validation covers project memory against itself, including the knowledge packs System and Process route to, never against the repository, and no result of it reaches completion."
+    statement "Parse, validate and answer queries about Mission, Knowledge, System, Process and Goal memory. Validation checks memory against itself, never against the repository, and never reaches completion."
 }
 
 responsibility "decide-structure-rule" {
     owner "structure-eval"
-    statement "Decide GREEN, RED or ERROR for one structure rule. The decision reads the inspected fact map and nothing else, which is also what lets the same decision be taken a second time against a counterfactual fact map when an author asks whether a rule can fail."
+    statement "Decide GREEN, RED or ERROR for one structure rule from the inspected fact map alone, so the same decision can be rerun against a counterfactual map when an author asks whether a rule can fail."
 }
 
 responsibility "execute-the-application" {
@@ -143,12 +143,12 @@ responsibility "decide-staleness" {
 
 responsibility "hold-persistent-state" {
     owner "project"
-    statement "Write and read project status, in-flight run markers and bounded task records under .blabla/. The expert subsystem separately owns .blabla/expert/. These records are machine state rather than authored memory: written by BlaBla, never registered by the manifest and never validated for truth. Task and expert state do not determine OVERALL."
+    statement "Write and read status, in-flight run markers and task records under .blabla/; the expert system owns .blabla/expert/. This is machine state written by BlaBla, never authored memory and never validated for truth. Task and expert state never decide OVERALL."
 }
 
 responsibility "form-a-challenge" {
     owner "skeptic"
-    statement "Choose at most one challenge to the current account of the work, from the bounded task record, the working tree measured against the snapshot that record holds, the completion state and a falsification verdict. A class with no evidence behind it produces no challenge and states why instead, because a challenge that is not grounded is the overstatement this project treats as worse than silence. It reaches no verdict about correctness and takes no part in completion."
+    statement "Choose at most one challenge to the account of the work, from the task record, the tree measured against its snapshot, the completion state and a falsification verdict. A class with no evidence behind it raises nothing and says why, because an ungrounded challenge is an overstatement. It never judges correctness or completion."
 }
 
 responsibility "hold-the-result-value" {
@@ -164,35 +164,35 @@ responsibility "render" {
 seam "provider" {
     between ["structure-eval", "structure-providers"]
     value "ModuleFacts"
-    statement "Every language fact enters rule evaluation as ModuleFacts and nothing else crosses. Inspection runs once per provider per verification, before any rule is decided; deciding a rule is then a function of that materialised map. This is why a provider adds a language and never a fact, and why rule semantics cannot drift between languages."
+    statement "Every language fact enters rule evaluation as ModuleFacts, and nothing else crosses. Inspection runs once per provider before any rule is decided. So a provider adds a language, never a fact, and rule meaning cannot drift between languages."
     moves_with ["src/structure/mod.rs", "src/structure/falsify.rs", "src/structure/python.rs", "src/structure/python_facts.py", "src/structure/rust.rs", "src/structure/typescript.rs", "src/structure/go.rs", "src/structure/java.rs", "src/structure/cfamily.rs", "contracts/rust.bla", "contracts/providers.bla", "docs/structure.md", "docs/architecture.md"]
 }
 
 seam "parse-harness" {
     between ["structure-harness", "structure-providers"]
     value "Facts"
-    statement "Every tree-sitter language enters through one read-parse-classify preamble and fills one accumulator. A missing file leaves exists false with no error, an unreadable file sets error, and a file that does not parse sets error with its line: those three answers are decided once, for every grammar, because they are the difference between absent and unreadable and a language walk must not be able to reinvent it. A language module supplies its extensions, its grammar and its own node kinds, and nothing else."
+    statement "Every tree-sitter language goes through one read-parse-classify step and fills one accumulator. Missing, unreadable and unparseable files are told apart once, for every grammar, so no language walk can blur absent and unreadable. A language module supplies only its extensions, grammar and node kinds."
     moves_with ["src/structure/treesitter.rs", "src/structure/typescript.rs", "src/structure/go.rs", "src/structure/java.rs", "src/structure/cfamily.rs", "contracts/providers.bla", "docs/structure.md"]
 }
 
 seam "bounded-unknown" {
     between ["structure-providers", "structure-eval"]
     value "UnreadableImport.covers"
-    statement "A provider that cannot decide a dependency says so, and says how far the doubt reaches: the one declared module the unknown could be hiding, or nothing when it is genuinely unbounded. The evaluator turns that into ERROR for exactly the targets the unknown could cover and leaves every other dependency on the module decidable. Silence in place of an unknown is a false GREEN on a forbid; an unbounded unknown in place of a bounded one poisons unrelated facts. Both are defects and the contract holds the evaluator to both."
+    statement "A provider that cannot decide a dependency says so, and names the one declared module the unknown could hide, or none when it is unbounded. The evaluator makes exactly those targets ERROR and keeps the rest decidable. Silence instead of an unknown is a false GREEN on a forbid; an unbounded unknown instead of a bounded one poisons unrelated facts. The contract holds the evaluator to both."
     moves_with ["src/structure/mod.rs", "src/structure/treesitter.rs", "src/structure/go.rs", "src/structure/java.rs", "src/structure/cfamily.rs", "contracts/evaluator.bla", "bridge/structure_adapter.rs", "docs/structure.md"]
 }
 
 seam "rendered-contradiction" {
     between ["voice", "cli"]
     value "Voice"
-    statement "The voice is resolved once, from the manifest, and reaches rendering only. Adjudication never sees it: the standing set, the exit code and the machine-readable report are identical under every voice, and a blunt rendering is appended to the neutral statement rather than replacing it, so no wording choice can drop evidence or a hedge. Only a contradiction has a blunt rendering; an honest failure or a reported blocker has none."
+    statement "The voice is read once from the manifest and reaches rendering only. Standing challenges, exit codes and JSON are identical under every voice. A blunt line is added after the neutral statement, never instead of it, so wording cannot drop evidence. Only a contradiction gets a blunt line; an honest failure or a reported blocker never does."
     moves_with ["src/voice.rs", "src/cli/task.rs", "src/cli/project.rs", "src/project/mod.rs", "contracts/voice.bla", "bridge/voice.rs", "docs/project.md"]
 }
 
 seam "application" {
     between ["behavior-verify", "adapter"]
     value "Application"
-    statement "Everything above this boundary works in observations, so the verifier never knows whether a real process is behind them. An adapter that cannot provide trusted process restart reports that rather than faking it. The application's observations are trusted and BlaBla cannot prove they describe the real application."
+    statement "Everything above this boundary works in observations; the verifier never knows whether a real process is behind them. An adapter that cannot restart trustworthily says so instead of faking it. Observations are trusted, and BlaBla cannot prove they describe the real app."
     moves_with ["src/application.rs", "src/runtime/mod.rs", "src/runtime/primitives.rs", "docs/language.md", "docs/architecture.md"]
 }
 
@@ -206,20 +206,20 @@ seam "typed-ir" {
 seam "bounded-task" {
     between ["project", "skeptic"]
     value "Task"
-    statement "Everything the skeptic knows about a bounded change crosses as the recorded Task: its write scope, its deliverables, the findings raised against it and the tree snapshot taken when it opened. The skeptic reads no chat, no agent report and no diff of its own, so a challenge can only ever rest on what an orchestrator wrote down at assignment and what the tree says now. A class of challenge that would need anything else cannot be added here without first adding it to the record."
+    statement "Everything the skeptic knows about a change crosses as the recorded Task: scope, deliverables, findings and the snapshot taken at opening. It reads no chat, agent report or diff, so a challenge rests only on what the orchestrator recorded and what the tree says now. A challenge class that needs anything else must first be added to the record."
     moves_with ["src/project/task.rs", "src/skeptic.rs", "src/cli/task.rs", "process.bla", "docs/agent-workflow.md"]
 }
 
 seam "run-report" {
     between ["report", "cli"]
     value "RunReport"
-    statement "The human rendering and the --json rendering are two views of one value. Neither computes anything the other does not see, so a field added for one surface is added to the value, never to a renderer."
+    statement "Human and --json output are two views of one value. A field needed by one surface is added to the value, never to a renderer."
     moves_with ["src/report.rs", "src/cli/project.rs", "src/cli/mod.rs"]
 }
 
 seam "runtime-primitives" {
     between ["adapter", "cli"]
     value "primitives table"
-    statement "Every agent-facing surface renders runtime primitive semantics from one table. No surface carries its own prose copy, and a rule's dependency on a primitive is derived from the typed IR rather than annotated in a contract."
+    statement "Every agent-facing surface renders runtime primitive meaning from one table, never its own copy. A rule's dependency on a primitive is derived from the typed IR, not annotated in a contract."
     moves_with ["src/runtime/primitives.rs", "src/project/status.rs", "src/cli/project.rs", "src/cli/guide.rs", "src/cli/init.rs", "docs/architecture.md"]
 }

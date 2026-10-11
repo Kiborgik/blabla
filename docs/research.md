@@ -39,67 +39,19 @@ The interesting part is where the saving came from: not the first prompt. The in
 
 So the table is an observation to reproduce, not evidence that BlaBla will save 71% of context in general.
 
-## How a memory-utility comparison is set up
+## Other observations
 
-Two rules govern every comparison that asks whether a memory kind helps. Both were learned from
-runs in this repository, and neither changes any result already recorded above.
+- **Small-model diagnostic.** Qwen3 4B reached 47/50 behavior with zero regressions once onboarding named the CLI. A diagnostic, not a benchmark: a profile flag changed the frozen hash. Its lasting lesson: a 4096-action campaign made 518 `seal` calls and never reached a state where sealing was allowed, yet passed. That is why YELLOW exists: "nothing broke" and "the behavior was exercised" are different claims
+- **Benchmark failures that became features.** One chain passed every behavior check but kept the record id among durable fields; another left a dead restart method. So v0.5 added structure contracts. An agent could also background a long `finish` and move on, so v0.5 added VERIFYING, progress and INTERRUPTED
+- **Real-project use (0.10).** On two game projects, reviewers working through BlaBla tasks found defects that passing tests had missed; findings, failing reproductions and stale evidence stayed in the record until fixed. One review found a BlaBla freshness bug, which was fixed. No speed-up or less rework was measured, and the expert layer was not used
 
-**Explicit CLI onboarding is held constant, never treated as the thing under test.** An agent that
-is merely near BlaBla may ignore it; that was established early and does not need re-establishing.
-So a memory comparison is
+**Method rule for memory comparisons**: give both arms the same explicit CLI onboarding, and change one variable at a time; only the memory under test may differ.
 
-```text
-A = explicit working BlaBla CLI + baseline memory
-B = explicit working BlaBla CLI + the memory under test
-```
-
-and onboarding is identical in both arms. Whether an agent discovers the CLI unprompted is a
-separate question, studied on its own, and mixing it into a memory comparison makes the result
-unattributable.
-
-**One meaningful variable changes at a time.** Model, tools, code-intel availability, task, CLI,
-onboarding, repository baseline and environment are fixed; only the memory under investigation
-differs. An arm that also changes the model family, the prompt or the tooling produces a number
-that no longer belongs to the memory.
-
-## An earlier small-model diagnostic
-
-A Qwen3 4B run on the sealing reference finished at 47/50 behavior with zero regressions once the
-onboarding named the CLI explicitly. It is a diagnostic rather than a benchmark, because a
-UI-only profile flag changed the frozen hash.
-
-Its lasting result was a verifier weakness, not a score: a 4096-action campaign made 518 `seal`
-calls and never once reached a state where sealing was eligible. The verifier of the day could
-therefore report PASS without ever exercising the feature under test. That observation is the
-origin of the GREEN/YELLOW distinction and of coverage-guided verification — YELLOW exists because
-"no violation found" and "the behavior was exercised" turned out to be different claims.
-
-## What the benchmark changed in BlaBla
-
-Two failures in the benchmark became product features.
-
-First, runtime behavior can be correct while the requested codebase shape is wrong. One chain passed every behavior check but kept the record id inside the durable-field set after a persistence refactor. Another left an obsolete application-level restart method behind after repairing the runtime behavior. This is why v0.5 adds `structure.bla`: `BEHAVIOR GREEN` can now coexist with `STRUCTURE RED`, and `OVERALL` remains blocked.
-
-Second, long verification runs need an observable completion gate. In the benchmark, an agent could background a long `finish` command and continue without seeing the result. v0.5 prints `VERIFYING` immediately, emits progress, records the active run, and reports `INTERRUPTED` rather than leaving a stale GREEN if the run dies.
-
-## Reproducing
-
-The curated package is under [`research/haiku-handoff/`](../research/haiku-handoff/). It includes the methodology frozen before the subjects ran, manifests, prompts, contracts, scorers, references and result tables.
-
-Raw model transcripts are not included in the repository.
-
-Useful replications:
-
-- another model
-- another project/domain
-- several chains per condition
-- a fourth baseline using conventional tests plus prose
-- another application language once a structure provider exists
+**Reproducing.** The curated package is under [`research/haiku-handoff/`](../research/haiku-handoff/): frozen method, prompts, contracts, scorers and results, without raw transcripts. Useful replications: another model, another project, several chains per condition, a tests-plus-prose baseline.
 
 ## Model-size hypotheses
 
-**Hypotheses, none of them measured.** They are recorded so that a later experiment can aim at a
-stated claim rather than a vague expectation.
+**Not measured.** Recorded so a later experiment can aim at a stated claim.
 
 | Agent | Hypothesised value of BlaBla |
 | --- | --- |
@@ -108,17 +60,4 @@ stated claim rather than a vague expectation.
 | Large model | project-memory compression, handoff continuity, less rereading |
 | Orchestrator | continuity of goals, role boundaries and handoffs across fresh contexts |
 
-The handoff benchmark above tested one model at one size. Nothing in this repository separates these
-four cases.
-
-## Broader hypothesis
-
-BlaBla's long-term hypothesis is not simply "tests for agents." It is that selected project intent can live outside transient chat context as executable, queryable memory.
-
-Behavior and Structure are the shipped completion layers. Mission, System, Process, Knowledge
-and Goals are shipped queryable, non-gating memory; bounded task records carry development state.
-Their general utility across fresh contexts and model sizes remains a research question.
-
-The 0.10 expert layer implements typed selected-context evaluation, deterministic policy/replay, calibration tooling and a cooperative native host protocol. Real Kev calibration selected no feasible policy; no judgment is promoted and runtime expert benefit remains unestablished. Fixtures and transport success cannot substitute for matched live quality evidence. [Expert limits](expert.md) · [release evidence](design/0.10-release-evidence.md)
-
-Historical methods/results above are unchanged; additional languages and memory mechanisms do not themselves perform the listed replications.
+The benchmark tested one model at one size; nothing here separates these cases. Whether memory kinds help across fresh contexts and model sizes is still open. The 0.10 expert layer's real calibration found no feasible policy, so its benefit is unshown. [Expert](expert.md)
