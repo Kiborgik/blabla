@@ -412,7 +412,9 @@ pub fn carrier(task: &Task) -> Option<&str> {
 }
 
 pub fn attest(task: &mut Task, verb: &str, model: Option<&str>, unix: u64) {
-    let carried_by = carrier(task).map(str::to_owned);
+    let carried_by = carrier(task)
+        .filter(|_| task.role != ORCHESTRATOR_ROLE)
+        .map(str::to_owned);
     task.orchestrator_records.push(OrchestratorRecord {
         verb: verb.to_owned(),
         model: model.map(str::to_owned),
@@ -660,6 +662,8 @@ pub struct Note {
 }
 
 pub const ATTRIBUTIONS: [&str; 3] = ["task", "concurrent", "unknown"];
+
+pub const ORCHESTRATOR_ROLE: &str = "orchestrator";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Attribution {
@@ -1460,6 +1464,8 @@ pub struct Task {
     pub orchestrator_records: Vec<OrchestratorRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lenses: Vec<String>,
 }
 
 fn open_state() -> String {
@@ -1500,6 +1506,7 @@ impl Default for Task {
             decisions: Vec::new(),
             orchestrator_records: Vec::new(),
             goal: None,
+            lenses: Vec::new(),
         }
     }
 }
@@ -1597,6 +1604,7 @@ pub struct Opening {
     pub check_argv: Option<Vec<String>>,
     pub inputs: Vec<String>,
     pub goal: Option<String>,
+    pub lenses: Vec<String>,
 }
 
 pub fn record(root: &Path, ignore: &Ignore, opening: Opening, now_unix: u64) -> Task {
@@ -1644,6 +1652,7 @@ pub fn record_from(
         check_argv: opening.check_argv,
         check_inputs: opening.inputs,
         goal: opening.goal,
+        lenses: opening.lenses,
         ..Task::default()
     }
 }
@@ -1927,6 +1936,33 @@ mod tests {
     }
 
     #[test]
+    fn an_orchestrator_role_task_keeps_its_carried_record_out_of_the_carry() {
+        let carried = |role: &str| -> Task {
+            serde_json::from_value(serde_json::json!({
+                "name": "self-carried",
+                "role": role,
+                "statement": "an orchestrator carries its own task",
+                "scope": ["src"],
+                "deliverables": [],
+                "opened_unix": 1,
+                "state": "accepted",
+                "accepted": { "model": "opus-5", "unix": 2 }
+            }))
+            .expect("a carried task parses")
+        };
+        let mut own = carried(ORCHESTRATOR_ROLE);
+        assert!(carrier(&own).is_some());
+        attest(&mut own, "resolve", Some("opus-5"), 3);
+        assert_eq!(own.orchestrator_records.len(), 1);
+        assert_eq!(own.recorded_during_carry().count(), 0);
+        assert_eq!(own.unconfirmed_during_carry().count(), 0);
+        let mut worker = carried("worker");
+        attest(&mut worker, "resolve", Some("opus-5"), 3);
+        assert_eq!(worker.recorded_during_carry().count(), 1);
+        assert_eq!(worker.unconfirmed_during_carry().count(), 1);
+    }
+
+    #[test]
     fn a_default_task_is_open_and_holds_nothing() {
         assert_eq!(
             serde_json::to_value(Task::default()).expect("task serializes"),
@@ -1966,6 +2002,7 @@ mod tests {
                 inputs: vec!["shared".to_owned()],
                 goal: Some("ship".to_owned()),
                 review_of: None,
+                lenses: vec!["review-lens".to_owned()],
             },
             7,
             BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),
@@ -1993,7 +2030,8 @@ mod tests {
                 "attributions": [],
                 "notes": [],
                 "removed_deliverables": [],
-                "goal": "ship"
+                "goal": "ship",
+                "lenses": ["review-lens"]
             })
         );
         let opening = Opening::default();

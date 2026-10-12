@@ -1,6 +1,7 @@
 module init    "src/cli/init.rs"
 module clitask "src/cli/task.rs"
 module guide   "src/cli/guide.rs"
+module experttests "src/cli/expert/tests.rs"
 
 require "a-portable-skill-is-shipped":        symbol init::skill
 require "the-skill-has-a-declared-location":  symbol init::SKILL_PATH
@@ -35,6 +36,8 @@ require "the-loop-guide-is-generated":            symbol guide::loop_text
 require "the-loop-guide-reuses-the-routes":       dependency guide -> clitask
 require "the-entry-reuses-the-routes":            dependency init -> clitask
 forbid  "the-loop-guide-is-not-a-second-copy":    symbol guide::LOOP
+
+require "expert-commands-describe-themselves": symbol experttests::every_expert_subcommand_describes_itself
 
 forbid "the-entry-names-no-model":            value init::SKILL_TOPICS contains "model-list"
 forbid "the-entry-names-no-host-command":     value init::SKILL_TOPICS contains "cargo"

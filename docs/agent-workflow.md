@@ -48,6 +48,8 @@ Use the packs your role consults, not the ones in this example. `task show` prin
 - Evidence covers the scope and deliverables, or the `--input` list you declare. It binds the exact check, its arguments, the acceptance epoch and the input digests. A new acceptance starts a new epoch, even for the same model
 - `task evidence --run` runs an argv check from the project root with no shell and no timeout, so pick a bounded check. For a text check, run it yourself and record `--exit CODE --tool TOOL`
 - READY needs current passing evidence, current lens assessments and a fresh challenge receipt. Relevant edits or findings void the receipt; unrelated work does not
+- Lenses: every pack the role consults, or only the packs named with `task open --lens PACK`. A pack the role does not consult is refused
+- `task show` prints the latest evidence (tool, epoch, exit, log) and every lens assessment; `task evidence --run` prints the same receipt
 - CLOSE checks it all again. Task acceptance and project verification answer different questions
 
 | Need | Command (add `--model M` where `--help` asks) |
@@ -59,7 +61,9 @@ Use the packs your role consults, not the ones in this example. `task show` prin
 | change deliverables or scope | `task deliverable NAME --add\|--remove PATH`; `task scope NAME --add PATH` |
 | withdraw | `task withdraw NAME --reason "…"`; changed paths stay challenged until restored or `task reconcile-withdrawal`, which can go stale |
 
-Scope, check, attribution and withdrawal changes are the orchestrator's. BlaBla options go before `--argv`; `--input` replaces the whole input list. After hand-back, the orchestrator checks records it made during the carry and runs `task confirm` once before `task close`.
+Scope, check, attribution and withdrawal changes are the orchestrator's. BlaBla options go before `--argv`; `--input` replaces the whole input list. After hand-back, the orchestrator checks records it made during the carry and runs `task confirm` once before `task close`. A task assigned to role `orchestrator` needs no confirmation: its own records never count as made during a carry.
+
+Running several tasks at once: author the rules for work not started yet in a `draft` contract and promote it to `use` when its task opens. An active RED rule keeps `finish` from passing, and closing any task needs a current passing `finish`.
 
 ## Ask, don't guess
 

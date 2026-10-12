@@ -2,7 +2,19 @@
 
 ## 0.11.0 (2026-10-11)
 
-Shorter, plainer docs around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. No contract syntax, CLI behavior, JSON field or exit code changed.
+Shorter, plainer docs around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. Then a dogfooding round, run with small worker models and independent reviewers through BlaBla's own task workflow, fixed the frictions it hit. No contract syntax or exit code changed; task JSON gains one optional field.
+
+### Breaking and upgrade
+
+- A task assigned to role `orchestrator` no longer records its own amendments as made during a carry, so it raises no `orchestrator-record-during-carry` challenge and needs no `task confirm`. Tasks of every other role behave as before. Records written by older versions keep their stored carry state
+- Task records gain an optional `lenses` list; records without it require every consulted pack, as before
+
+### Added
+
+- `task show` prints the latest evidence (tool, acceptance epoch, exit, log) and every lens assessment; `task evidence --run` prints the same receipt
+- `task open --lens PACK` names the subset of the role's consulted packs a task must assess; `task lens --model` must match the accepted model
+- Every `blabla expert` subcommand, at every depth, describes itself in `--help`
+- Product gate steps `docs-links` (relative links and anchors in tracked markdown, exact case) and `versions` (every declared version matches `Cargo.toml`)
 
 ### Changed
 
@@ -10,7 +22,10 @@ Shorter, plainer docs around one idea: contracts keep small coding models from d
 - `docs/test-ownership.md` moved into `CONTRIBUTING.md`. `docs/design/0.10-native-host-schema.md` is replaced by the wire-contract section of `adapters/native/README.md`, which points at the Rust types in `src/expert/native/wire.rs`
 - The paragraph printed after every `task` command is shorter; two guide lines point at the new docs
 - Mission memory states the drift and overconfidence problem; system, process and design-knowledge prose is shorter, with every identity, binding and judgment unchanged
-- New active goals: `goal::short-plain-docs` for this release, and four gaps found while dogfooding: evidence in `task show`, expert `--help` descriptions, a docs link check and self-carried task confirmation
+- Systems in project memory own whole directories where they own all of them, so new files are owned without editing a file list; 15 files that no system owned are now covered
+- Role `worker` permits Haiku 5.5 and role `reviewer` Sonnet 5.5, with their host model ids as aliases
+- `guide change` and the agent workflow say to author rules for work not started yet as draft contracts, because an active RED rule blocks every task close
+- New active goals: `goal::short-plain-docs` and one goal per fix above, each expecting the rule that checks it
 
 ## 0.10.0 (2026-10-06)
 

@@ -245,6 +245,12 @@ enum TaskAction {
             help = "The distinct existing task this review inspects"
         )]
         review_of: Option<String>,
+        #[arg(
+            long,
+            value_name = "PACK",
+            help = "A consulted pack this task must assess; repeat for several. When none is named, every pack the role consults is required"
+        )]
+        lens: Vec<String>,
     },
     #[command(about = "Record something discovered during the task that is not yet settled")]
     Finding { name: String, statement: String },
@@ -436,6 +442,12 @@ enum TaskAction {
         name: String,
         lens: String,
         statement: String,
+        #[arg(
+            long,
+            value_name = "MODEL",
+            help = "The accepted model recording this assessment; refused when it is not the accepted model"
+        )]
+        model: Option<String>,
     },
     #[command(about = "Propose an alternative model with a reason")]
     ProposeModel {
@@ -1045,6 +1057,7 @@ fn execute(cli: Cli) -> i32 {
                         input,
                         goal,
                         review_of,
+                        lens,
                     } => task::open(
                         &loaded,
                         blabla::project::task::Opening {
@@ -1062,6 +1075,7 @@ fn execute(cli: Cli) -> i32 {
                             inputs: input,
                             goal,
                             review_of,
+                            lenses: lens,
                         },
                         json,
                     ),
@@ -1170,7 +1184,8 @@ fn execute(cli: Cli) -> i32 {
                         name,
                         lens,
                         statement,
-                    } => task::lens(&loaded, &name, &lens, &statement, json),
+                        model,
+                    } => task::lens(&loaded, &name, &lens, &statement, model.as_deref(), json),
                     TaskAction::ProposeModel {
                         name,
                         model,

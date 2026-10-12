@@ -1,11 +1,11 @@
 system "cli" {
     purpose "Parse arguments, choose a command, and render every human and JSON surface."
-    paths ["src/main.rs", "src/cli/mod.rs", "src/cli/project.rs", "src/cli/guide.rs", "src/cli/init.rs", "src/cli/heartbeat.rs", "src/cli/task.rs", "src/cli/recovery.rs", "src/cli/expert.rs"]
+    paths ["src/main.rs", "src/lib.rs", "src/cli/"]
 }
 
 system "project" {
     purpose "Compose a manifest's contracts into one project, fingerprint the implementation, and decide staleness and completion."
-    paths ["src/project/mod.rs", "src/project/status.rs", "src/project/runstate.rs", "src/project/task.rs", "src/project/task/revision.rs", "src/project/task/store.rs", "src/project/ignore.rs", "src/project/expert.rs"]
+    paths ["src/project/"]
     knowledge ["testing"]
 }
 
@@ -17,29 +17,29 @@ system "skeptic" {
 
 system "behavior-contract" {
     purpose "Turn behavior contract text into a typed, normalized IR, and reject what cannot be typed."
-    paths ["src/syntax/mod.rs", "src/semantics/mod.rs", "src/ir/mod.rs"]
+    paths ["src/syntax/", "src/semantics/", "src/ir/"]
 }
 
 system "behavior-verify" {
     purpose "Search for a counterexample to the typed IR under a finite campaign, and shrink what it finds."
-    paths ["src/verify/mod.rs", "src/verify/campaign.rs", "src/verify/coverage.rs", "src/verify/corpus.rs", "src/verify/evaluator.rs", "src/verify/generator.rs"]
+    paths ["src/verify/"]
     knowledge ["testing"]
 }
 
 system "adapter" {
     purpose "Drive the application under test across the trust boundary: process, protocol, isolation and containment."
-    paths ["src/application.rs", "src/runtime/mod.rs", "src/runtime/primitives.rs", "src/runtime/process_tree.rs", "src/runtime/strict_json.rs"]
+    paths ["src/application.rs", "src/runtime/"]
 }
 
 system "memory" {
     purpose "Parse authored Mission, Knowledge, System, Process and Goal memory, validate it within project memory, and answer identity queries about it."
-    paths ["src/memory/mod.rs", "src/memory/syntax.rs", "src/memory/system.rs", "src/memory/process.rs", "src/memory/mission.rs", "src/memory/knowledge.rs", "src/memory/routing.rs", "src/memory/goal.rs"]
+    paths ["src/memory/"]
     knowledge ["engineering"]
 }
 
 system "structure-eval" {
     purpose "Parse structure contracts and decide each rule against an already-inspected fact map."
-    paths ["src/structure/mod.rs", "src/structure/syntax.rs", "src/structure/falsify.rs"]
+    paths ["src/structure/mod.rs", "src/structure/syntax.rs", "src/structure/falsify.rs", "src/structure/falsify/", "src/structure/tests.rs"]
     knowledge ["testing"]
 }
 
@@ -68,7 +68,7 @@ system "report" {
 
 system "expert" {
     purpose "Validate fixed provider answers, apply deterministic advisory policy, and retain bounded current-revision replay and delivery state without deciding project completion."
-    paths ["src/expert/mod.rs", "src/expert/packet.rs", "src/expert/provider.rs", "src/expert/policy.rs", "src/expert/trace.rs", "adapters/systemone/provider.py"]
+    paths ["src/expert/", "adapters/systemone/", "adapters/native/"]
     knowledge ["engineering", "testing", "expert-review"]
 }
 

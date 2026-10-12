@@ -65,6 +65,7 @@ impl Attestation {
     pub fn call(&mut self, name: &str) -> bool {
         match name {
             "take_the_task" => self.take(),
+            "assign_the_task_to_the_orchestrator" => self.assign_to_orchestrator(),
             "record_an_orchestrator_verb_while_carried" => {
                 if task::carrier(&self.task).is_some() {
                     self.record();
@@ -95,6 +96,12 @@ impl Attestation {
         if self.task.open() && task::apply(&mut self.task, "accepted") {
             let unix = self.tick();
             task::record_acceptance(&mut self.task, &self.tree, WORKER, unix);
+        }
+    }
+
+    fn assign_to_orchestrator(&mut self) {
+        if task::carrier(&self.task).is_none() {
+            self.task.role = task::ORCHESTRATOR_ROLE.to_owned();
         }
     }
 
@@ -180,6 +187,7 @@ impl Attestation {
             .collect();
         json!({
             "carried": task::carrier(&self.task).is_some(),
+            "orchestrator_role": self.task.role == task::ORCHESTRATOR_ROLE,
             "records_during_carry": self.task.recorded_during_carry().count(),
             "unconfirmed_during_carry": self.task.unconfirmed_during_carry().count(),
             "carry_closed": !self.task.open(),
@@ -264,5 +272,20 @@ mod tests {
         assert!(standing(&attestation).is_empty());
         attestation.call("try_to_close_the_carried_task");
         assert_eq!(attestation.observe()["carry_closed"], true);
+    }
+
+    #[test]
+    fn the_orchestrator_carrying_its_own_task_records_no_carry_counts() {
+        let mut attestation = Attestation::new();
+        attestation.call("assign_the_task_to_the_orchestrator");
+        attestation.call("take_the_task");
+        attestation.call("record_an_orchestrator_verb_while_carried");
+        let observed = attestation.observe();
+        assert_eq!(observed["orchestrator_role"], true, "{observed}");
+        assert_eq!(observed["carried"], true, "{observed}");
+        assert_eq!(observed["records_during_carry"], 0, "{observed}");
+        assert_eq!(observed["unconfirmed_during_carry"], 0, "{observed}");
+        assert_eq!(attestation.task.orchestrator_records.len(), 1);
+        assert!(!standing(&attestation).contains(&"orchestrator-record-during-carry".to_owned()));
     }
 }

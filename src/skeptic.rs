@@ -965,7 +965,12 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
     let Some(role) = role else {
         return Err("no role memory is registered, so no lens is expected");
     };
-    let Some(missing) = role.lenses.iter().find(|lens| {
+    let required = if task.lenses.is_empty() {
+        &role.lenses
+    } else {
+        &task.lenses
+    };
+    let Some(missing) = required.iter().find(|lens| {
         !role
             .knowledge_fingerprints
             .get(*lens)
@@ -975,7 +980,7 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
                 })
             })
     }) else {
-        return Err("every lens the role consults carries an assessment");
+        return Err("every lens the task requires carries an assessment");
     };
     Ok(Challenge {
         class: Class::LensUnassessed,

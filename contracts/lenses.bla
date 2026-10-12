@@ -1,0 +1,3 @@
+module task "src/project/task.rs"
+
+require "a-task-can-name-its-lenses": symbol task::Task.lenses

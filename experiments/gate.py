@@ -33,6 +33,8 @@ STEPS = (
     ("example-cpp", ("@blabla", "--project", "examples/todo-cpp", "finish")),
     ("example-java", ("@blabla", "--project", "examples/todo-java", "finish")),
     ("audit", ("@python", "experiments/audit_public_tree.py", "--out", "@out")),
+    ("docs-links", ("@python", "experiments/check_text.py", "links")),
+    ("versions", ("@python", "experiments/check_text.py", "versions")),
     ("diagrams", ("@python", "experiments/render_diagrams.py", "--check")),
 )
 

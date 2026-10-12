@@ -23,6 +23,8 @@ require "java-support-is-exercised":       value gate::STEPS maps "example-java"
 
 require "the-public-tree-is-audited":  value gate::STEPS maps "audit" to "experiments/audit_public_tree.py"
 require "the-diagrams-are-checked":    value gate::STEPS maps "diagrams" to "--check"
+require "docs-links-resolve":          value gate::STEPS maps "docs-links" to "links"
+require "versions-agree":              value gate::STEPS maps "versions" to "versions"
 
 require "the-bridge-precedes-completion":    value gate::REQUIRED_ORDER maps "bridge" to "self-hosting-finish"
 require "completion-precedes-the-read-back": value gate::REQUIRED_ORDER maps "self-hosting-finish" to "self-hosting-status"

@@ -8,6 +8,7 @@ __pycache__/
 .blabla/
 .serena/
 .playwright-cli/
+.dup-detector/
 /artifacts/
 /ci-artifacts/
 /experiments/repair_pilot/

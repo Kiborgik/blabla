@@ -11,7 +11,7 @@ role "worker" {
     owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
     verification "focused"
     block_below "70"
-    model ["haiku-4.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
+    model ["haiku-4.5", "haiku-5.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["engineering", "testing"]
 }
 
@@ -19,7 +19,7 @@ role "reviewer" {
     purpose "Independently review one bounded worker patch and report the defects that block its integration."
     owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
     verification "focused"
-    model ["qwen3.5:4b", "opus-5", "gpt-5.6-sol", "haiku-4.5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
+    model ["qwen3.5:4b", "opus-5", "sonnet-5.5", "gpt-5.6-sol", "haiku-4.5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["reviewing", "engineering", "testing", "design"]
 }
 
@@ -34,6 +34,14 @@ alias "claude-haiku-4-5-20251001" {
 
 alias "claude-opus-5-5" {
     model "opus-5"
+}
+
+alias "claude-haiku-5-5" {
+    model "haiku-5.5"
+}
+
+alias "claude-sonnet-5-5" {
+    model "sonnet-5.5"
 }
 
 policy "code-speaks-for-itself" {

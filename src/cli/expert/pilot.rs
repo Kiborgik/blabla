@@ -3,14 +3,17 @@ use blabla::expert::pilot::{self, PermitRequest, PermitResult};
 use clap::Subcommand;
 #[derive(Subcommand)]
 pub(in crate::cli) enum Action {
+    #[command(about = "Issue a pilot permit from the request file")]
     Issue {
         #[arg(long)]
         request: PathBuf,
     },
+    #[command(about = "Show the pilot state of one run")]
     Show {
         #[arg(long)]
         run: String,
     },
+    #[command(about = "Revoke a pilot permit from the request file")]
     Revoke {
         #[arg(long)]
         request: PathBuf,

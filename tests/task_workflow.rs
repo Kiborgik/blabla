@@ -1630,9 +1630,10 @@ fn failing_evidence_displays_log_path_and_last_lines() {
     let output = run_in(Some(temp.path()), &args(&["task", "show", "failing-run"]));
     let stdout = String::from_utf8(output.stdout).unwrap();
 
+    let failed = task::read(temp.path(), "failing-run").unwrap().unwrap();
     assert!(
-        stdout.contains("Exit code:"),
-        "Output should contain exit code heading: {}",
+        stdout.contains(&receipt_line(failed.evidence.last().unwrap())),
+        "Output should carry the recorded evidence receipt: {}",
         stdout
     );
 
@@ -1652,11 +1653,442 @@ fn failing_evidence_displays_log_path_and_last_lines() {
         stdout
     );
 
+    let log_text = std::fs::read_to_string(
+        temp.path()
+            .join(failed.evidence.last().unwrap().log.as_ref().unwrap()),
+    )
+    .unwrap();
+    let last_line = log_text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap();
     assert!(
-        stdout.contains("non-empty lines")
-            || stdout.contains("could not read")
-            || stdout.contains("empty"),
-        "Output should mention log lines: {}",
+        stdout.contains(last_line),
+        "Output should carry the last non-empty log line: {}",
+        stdout
+    );
+}
+
+fn lensed_evidence_fixture() -> TempDir {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let process = std::fs::read_to_string(temp.path().join("process.bla")).unwrap();
+    std::fs::write(
+        temp.path().join("process.bla"),
+        format!("{process}\nrole \"lensed\" {{\n purpose \"carry one lensed task\"\n consult [\"review-lens\"]\n model \"qwen3.5:4b\"\n}}\n"),
+    )
+    .unwrap();
+    let manifest = std::fs::read_to_string(temp.path().join("project.bla")).unwrap();
+    std::fs::write(
+        temp.path().join("project.bla"),
+        format!("{manifest}\nknowledge \"knowledge.bla\"\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        temp.path().join("knowledge.bla"),
+        "knowledge \"review-lens\" { purpose \"review fixture evidence\" }\nruling \"current\" { pack \"review-lens\" statement \"inspect current evidence\" }\n",
+    )
+    .unwrap();
+    temp
+}
+
+fn receipt_line(evidence: &task::Evidence) -> String {
+    format!(
+        "tool {}   acceptance epoch {}   exit {}",
+        evidence.tool,
+        evidence.acceptance_epoch.unwrap(),
+        evidence.exit
+    )
+}
+
+fn assessment_line(assessment: &task::Assessment) -> String {
+    format!(
+        "{} by {} at acceptance epoch {}: {}",
+        assessment.ruling,
+        assessment.model.as_deref().unwrap(),
+        assessment.acceptance_epoch.unwrap(),
+        assessment.statement
+    )
+}
+
+#[test]
+fn task_show_prints_passing_run_evidence_and_lens_assessment() {
+    let temp = lensed_evidence_fixture();
+    let blabla_path = env!("CARGO");
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "passing-run",
+                "--role",
+                "lensed",
+                "--statement",
+                "record passing evidence and a lens",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--check-argv",
+                blabla_path,
+                "--version",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "passing-run", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    let run = run_in(
+        Some(temp.path()),
+        &args(&["task", "evidence", "passing-run", "--run"]),
+    );
+    assert_eq!(run.status.code(), Some(0));
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "passing-run",
+                "review-lens",
+                "inspect the fixture evidence",
+            ]
+        ),
+        0
+    );
+
+    let record = task::read(temp.path(), "passing-run").unwrap().unwrap();
+    let evidence = record.evidence.last().unwrap();
+    let assessment = record.assessments.last().unwrap();
+    let show = run_in(Some(temp.path()), &args(&["task", "show", "passing-run"]));
+    let stdout = String::from_utf8(show.stdout).unwrap();
+
+    assert!(
+        stdout.contains(&receipt_line(evidence)),
+        "task show should print the receipt of the passing run: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains(evidence.log.as_ref().unwrap().as_str()),
+        "task show should print the log of the passing run: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains(&assessment_line(assessment)),
+        "task show should print the lens assessment: {}",
+        stdout
+    );
+}
+
+fn two_lens_fixture() -> TempDir {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let process = std::fs::read_to_string(temp.path().join("process.bla")).unwrap();
+    std::fs::write(
+        temp.path().join("process.bla"),
+        format!(
+            "{process}\nrole \"lensed\" {{\n purpose \"carry one lensed task\"\n consult [\"review-lens\", \"second-lens\"]\n model \"qwen3.5:4b\"\n}}\n"
+        ),
+    )
+    .unwrap();
+    let manifest = std::fs::read_to_string(temp.path().join("project.bla")).unwrap();
+    std::fs::write(
+        temp.path().join("project.bla"),
+        format!("{manifest}\nknowledge \"knowledge.bla\"\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        temp.path().join("knowledge.bla"),
+        "knowledge \"review-lens\" { purpose \"review fixture evidence\" }\nruling \"current\" { pack \"review-lens\" statement \"inspect current evidence\" }\nknowledge \"second-lens\" { purpose \"second fixture evidence\" }\nruling \"second-current\" { pack \"second-lens\" statement \"inspect second evidence\" }\n",
+    )
+    .unwrap();
+    temp
+}
+
+#[test]
+fn a_task_naming_one_lens_hands_back_after_assessing_only_that_pack() {
+    let temp = two_lens_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "named",
+                "--role",
+                "lensed",
+                "--statement",
+                "assess one named pack",
+                "--scope",
+                "src",
+                "--lens",
+                "review-lens",
+                "--check-argv",
+                env!("CARGO"),
+                "--version",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "accept", "named", "--model", "qwen3.5:4b"]),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "evidence", "named", "--run"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "named",
+                "review-lens",
+                "inspect the named pack"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "named"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "named"]), 0);
+
+    let record = task::read(temp.path(), "named").unwrap().unwrap();
+    assert_eq!(record.state, "ready");
+    assert_eq!(record.lenses, vec!["review-lens".to_owned()]);
+    assert_eq!(
+        record
+            .assessments
+            .iter()
+            .map(|entry| entry.ruling.clone())
+            .collect::<Vec<_>>(),
+        vec!["review-lens".to_owned()]
+    );
+}
+
+#[test]
+fn without_a_named_lens_every_consulted_pack_is_still_required() {
+    let temp = two_lens_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "unnamed",
+                "--role",
+                "lensed",
+                "--statement",
+                "assess every consulted pack",
+                "--scope",
+                "src",
+                "--check-argv",
+                env!("CARGO"),
+                "--version",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "unnamed", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "evidence", "unnamed", "--run"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "unnamed",
+                "review-lens",
+                "inspect the first pack"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "unnamed"]), 1);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "unnamed",
+                "second-lens",
+                "inspect the second pack"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "unnamed"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "unnamed"]), 0);
+
+    let record = task::read(temp.path(), "unnamed").unwrap().unwrap();
+    assert!(record.lenses.is_empty());
+    assert_eq!(record.state, "ready");
+}
+
+#[test]
+fn a_lens_the_role_does_not_consult_is_refused_at_open() {
+    let temp = two_lens_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "stray",
+                "--role",
+                "lensed",
+                "--statement",
+                "name a pack nobody consults",
+                "--scope",
+                "src",
+                "--lens",
+                "unconsulted-lens",
+            ]
+        ),
+        2
+    );
+    assert!(task::read(temp.path(), "stray").unwrap().is_none());
+}
+
+#[test]
+fn a_lens_recorded_with_another_model_than_the_accepted_one_is_refused() {
+    let temp = two_lens_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "pinned",
+                "--role",
+                "lensed",
+                "--statement",
+                "pin the lens to the accepted model",
+                "--scope",
+                "src",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "pinned", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "pinned",
+                "review-lens",
+                "inspect the pinned pack",
+                "--model",
+                "qwen3.5:9b",
+            ]
+        ),
+        2
+    );
+    assert!(
+        task::read(temp.path(), "pinned")
+            .unwrap()
+            .unwrap()
+            .assessments
+            .is_empty()
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "pinned",
+                "review-lens",
+                "inspect the pinned pack",
+                "--model",
+                "qwen3.5:4b",
+            ]
+        ),
+        0
+    );
+}
+
+#[test]
+fn task_show_prints_manual_evidence_without_a_log() {
+    let temp = lensed_evidence_fixture();
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "manual-evidence",
+                "--role",
+                "lensed",
+                "--statement",
+                "record manual evidence",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--check",
+                "check",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "manual-evidence", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "manual-evidence",
+                "--exit",
+                "3",
+                "--tool",
+                "check",
+            ]
+        ),
+        0
+    );
+
+    let record = task::read(temp.path(), "manual-evidence").unwrap().unwrap();
+    let evidence = record.evidence.last().unwrap();
+    assert!(evidence.log.is_none());
+    let show = run_in(
+        Some(temp.path()),
+        &args(&["task", "show", "manual-evidence"]),
+    );
+    let stdout = String::from_utf8(show.stdout).unwrap();
+
+    assert!(
+        stdout.contains(&receipt_line(evidence)),
+        "task show should print the receipt of manual evidence: {}",
         stdout
     );
 }
@@ -1755,9 +2187,11 @@ fn failing_evidence_log_readable_from_subdirectory() {
     let output = run_in(Some(&subdir), &args(&["task", "show", "subdir-test"]));
     let stdout = String::from_utf8(output.stdout).unwrap();
 
+    let recorded = task::read(temp.path(), "subdir-test").unwrap().unwrap();
+    let evidence = recorded.evidence.last().unwrap();
     assert!(
-        stdout.contains("Exit code:"),
-        "Output should contain exit code heading when run from subdirectory: {}",
+        stdout.contains(&receipt_line(evidence)),
+        "Output should carry the recorded receipt when run from subdirectory: {}",
         stdout
     );
 
@@ -1777,11 +2211,16 @@ fn failing_evidence_log_readable_from_subdirectory() {
         stdout
     );
 
+    let log_text =
+        std::fs::read_to_string(temp.path().join(evidence.log.as_ref().unwrap())).unwrap();
+    let last_line = log_text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap();
     assert!(
-        stdout.contains("non-empty lines")
-            || stdout.contains("could not read")
-            || stdout.contains("empty"),
-        "Output should mention log lines when run from subdirectory: {}",
+        stdout.contains(last_line),
+        "Output should carry the last non-empty log line when run from subdirectory: {}",
         stdout
     );
 }

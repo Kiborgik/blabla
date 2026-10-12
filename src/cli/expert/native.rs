@@ -12,20 +12,34 @@ pub(in crate::cli) struct RequestPath {
 }
 #[derive(Subcommand)]
 pub(in crate::cli) enum Action {
+    #[command(about = "Enroll a native run from the request file")]
     Enroll(RequestPath),
+    #[command(about = "Capture a work boundary for a native run from the request file")]
     CaptureBoundary(RequestPath),
+    #[command(
+        about = "Rebuild a checkpoint from a captured boundary when both operation ids match and store it as the observed checkpoint"
+    )]
     Observe(RequestPath),
+    #[command(about = "Prepare a wake for a native checkpoint and request")]
     PrepareWake(RequestPath),
+    #[command(about = "Consume a prepared wake for a task and record its attestations")]
     Consume(RequestPath),
+    #[command(about = "Record the response evidence for a native checkpoint request")]
     RecordResponse(RequestPath),
+    #[command(about = "Record an invalidation of a native run key and stop the whole run")]
     Invalidate(RequestPath),
+    #[command(about = "Start a native run from its plan and protocol")]
     StartRun(RequestPath),
+    #[command(about = "Advance a native run after checking its plan hash and coordinator")]
     Advance(RequestPath),
+    #[command(about = "Print the next host step of a native run")]
     HostNext {
         #[arg(long)]
         run: String,
     },
+    #[command(about = "Claim a host step of a native run from the request file")]
     HostClaim(RequestPath),
+    #[command(about = "Record the result of a host step of a native run from the request file")]
     HostResult(RequestPath),
 }
 pub(super) fn read_request<T: DeserializeOwned + Serialize>(path: &Path) -> Result<T, Error> {

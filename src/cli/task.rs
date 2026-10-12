@@ -356,6 +356,21 @@ fn declared_role(project: &Project, role_name: &str) -> Option<blabla::memory::p
         })
 }
 
+fn unconsulted_lens(project: &Project, role_name: &str, lenses: &[String]) -> Option<String> {
+    let consulted = declared_role(project, role_name)
+        .map(|role| role.consult)
+        .unwrap_or_default();
+    lenses
+        .iter()
+        .find(|lens| !consulted.contains(*lens))
+        .map(|lens| {
+            format!(
+                "{lens:?} is not a pack role::{role_name} consults; it consults: {}",
+                join_or(&consulted, "none")
+            )
+        })
+}
+
 fn declared_permitted_models(project: &Project, role_name: &str) -> Vec<String> {
     project
         .manifest
@@ -378,10 +393,10 @@ fn declared_permitted_models(project: &Project, role_name: &str) -> Vec<String> 
 }
 
 fn validate_orchestrator_model(project: &Project, model: &str, json: bool) -> Result<(), i32> {
-    let role = declared_role(project, "orchestrator");
+    let role = declared_role(project, task::ORCHESTRATOR_ROLE);
     match role {
         Some(_) => {
-            let permitted = declared_permitted_models(project, "orchestrator");
+            let permitted = declared_permitted_models(project, task::ORCHESTRATOR_ROLE);
             if permitted.is_empty() || permitted.contains(&model.to_owned()) {
                 Ok(())
             } else {
@@ -400,7 +415,7 @@ fn validate_orchestrator_model(project: &Project, model: &str, json: bool) -> Re
             }
         }
         None => Err(emit_error(
-            error("task", undeclared_role("orchestrator"), None),
+            error("task", undeclared_role(task::ORCHESTRATOR_ROLE), None),
             json,
             2,
         )),
@@ -496,6 +511,9 @@ pub(super) fn open(project: &Project, mut opening: Opening, json: bool) -> i32 {
     if let Some(goal) = &opening.goal
         && let Some(message) = super::project::undeclared_goal(project, goal)
     {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    if let Some(message) = unconsulted_lens(project, &opening.role, &opening.lenses) {
         return emit_error(error("task", message, None), json, 2);
     }
     let root = &project.manifest.root;
@@ -918,9 +936,9 @@ struct QuestionView<'a> {
 }
 
 pub(super) fn ask(project: &Project, name: &str, asked: task::Ask, json: bool) -> i32 {
-    if declared_role(project, "orchestrator").is_none() {
+    if declared_role(project, task::ORCHESTRATOR_ROLE).is_none() {
         return emit_error(
-            error("task", undeclared_role("orchestrator"), None),
+            error("task", undeclared_role(task::ORCHESTRATOR_ROLE), None),
             json,
             2,
         );
@@ -932,7 +950,7 @@ pub(super) fn ask(project: &Project, name: &str, asked: task::Ask, json: bool) -
     let Some(role) = declared_role(project, &task.role) else {
         return emit_error(error("task", undeclared_role(&task.role), None), json, 2);
     };
-    let permitted = declared_permitted_models(project, "orchestrator");
+    let permitted = declared_permitted_models(project, task::ORCHESTRATOR_ROLE);
     let model = asked.model.clone();
     let asked = task::Ask {
         options: split_options(&asked.options),
@@ -1617,11 +1635,37 @@ fn handback_guidance(task: &Task, next: &str) -> String {
     }
 }
 
-pub(super) fn lens(project: &Project, name: &str, lens: &str, statement: &str, json: bool) -> i32 {
+pub(super) fn lens(
+    project: &Project,
+    name: &str,
+    lens: &str,
+    statement: &str,
+    model: Option<&str>,
+    json: bool,
+) -> i32 {
     let mut task = match mutate(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    if let Some(model) = model
+        && task
+            .accepted
+            .as_ref()
+            .map(|accepted| accepted.model.as_str())
+            != Some(model)
+    {
+        return emit_error(
+            error(
+                "task",
+                format!(
+                    "model {model:?} did not accept this task; the lens is recorded by the accepted model"
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     let fingerprint = knowledge_fingerprints(project).get(lens).cloned();
     let consulted = declared_role(project, &task.role)
         .is_some_and(|role| role.consult.iter().any(|pack| pack == lens));
@@ -1996,7 +2040,15 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         log: Some(log),
     };
     task::apply_evidence(&mut reloaded, evidence);
-    store(project, &mut reloaded, json)
+    let code = store(project, &mut reloaded, json);
+    if code == 0 && !json {
+        if let Some(latest) = reloaded.evidence.last() {
+            if write_evidence_receipt(&mut io::stdout().lock(), latest).is_err() {
+                return 4;
+            }
+        }
+    }
+    code
 }
 
 pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i32 {
@@ -2248,9 +2300,6 @@ fn write_failing_evidence(
     }
 
     if let Some(log_path_str) = &evidence.log {
-        writeln!(output, "\nExit code: {}", evidence.exit)?;
-        writeln!(output, "  Log: {}", log_path_str)?;
-
         let log_path = root.join(log_path_str);
         match read_last_lines(&log_path, 20) {
             Ok(lines) if !lines.is_empty() => {
@@ -2265,6 +2314,45 @@ fn write_failing_evidence(
             Err(_) => {
                 writeln!(output, "  (could not read log file)")?;
             }
+        }
+    }
+    Ok(())
+}
+
+fn write_evidence_receipt(output: &mut impl Write, evidence: &task::Evidence) -> io::Result<()> {
+    writeln!(
+        output,
+        "\nLatest evidence:\n  tool {}   acceptance epoch {}   exit {}",
+        evidence.tool,
+        epoch_label(evidence.acceptance_epoch),
+        evidence.exit
+    )?;
+    if let Some(log) = &evidence.log {
+        writeln!(output, "  log {log}")?;
+    }
+    Ok(())
+}
+
+fn epoch_label(epoch: Option<u64>) -> String {
+    epoch.map_or_else(|| "none".to_owned(), |epoch| epoch.to_string())
+}
+
+fn write_evidence(output: &mut impl Write, root: &std::path::Path, task: &Task) -> io::Result<()> {
+    if let Some(latest) = task.evidence.last() {
+        write_evidence_receipt(output, latest)?;
+        write_failing_evidence(output, root, latest)?;
+    }
+    if !task.assessments.is_empty() {
+        writeln!(output, "\nLens assessments:")?;
+        for assessment in &task.assessments {
+            writeln!(
+                output,
+                "  {} by {} at acceptance epoch {}: {}",
+                assessment.ruling,
+                assessment.model.as_deref().unwrap_or("none"),
+                epoch_label(assessment.acceptance_epoch),
+                assessment.statement
+            )?;
         }
     }
     Ok(())
@@ -2404,9 +2492,7 @@ fn write_task(
             "  Withdrawal releases ownership and grants no completion credit; restore captured paths or reconcile them against a current CLOSED successor"
         )?;
     }
-    if let Some(latest_evidence) = task.evidence.last() {
-        write_failing_evidence(&mut output, root, latest_evidence)?;
-    }
+    write_evidence(&mut output, root, task)?;
     write_routes(&mut output, task)?;
     writeln!(output, "\n{}", task::AUTHORITY)
 }

@@ -28,7 +28,7 @@ python experiments/render_diagrams.py --check
 
 | Gate | Runs |
 | --- | --- |
-| `python experiments/gate.py --tag local` | the product gate: lint, tests, adapters, current-source bridge, composed `finish`, examples, public-tree audit, diagram hashes |
+| `python experiments/gate.py --tag local` | the product gate: lint, tests, adapters, current-source bridge, composed `finish`, examples, public-tree audit, markdown links, version agreement, diagram hashes |
 | `python experiments/run_historical_tests.py` | the experiment tests the product gate does not run |
 | `python experiments/research_gate.py` | opt-in stress tests and frozen research reproductions |
 | `experiments/gate_v04.py`, `gate_v05.py` | frozen old releases; never retarget them |
