@@ -42,6 +42,8 @@
 - `challenge NAME` leads with a class that blocks the hand-back; project-level classes follow it
 - `attribution-unknown` groups changed paths by top-level directory instead of listing every one
 - `task reconcile-withdrawal` accepts a successor whose write scope covers the path when it declares no inputs, as evidence already did
+- A withdrawal reconciliation is checked in full when it is recorded and then stands while that successor stays closed; later edits to the path or to the successor's inputs no longer bring the residue back. Reconciliations recorded by older versions keep the live check
+- An optional `--model` on `task check`, `task scope` or `task statement` is recorded unchecked when process memory declares no `role::orchestrator`, instead of being refused; resolving, answering, confirming, attributing, removing a deliverable, withdrawing and reconciling still need the role, and `task open` reports up front whether it is declared (`orchestrator_declared` in `--json`)
 - A BLOCKED task's route names its unresolved findings instead of telling the worker to resume at once; a review not yet accepted is no longer shown as STALE
 - `task close` and `task withdraw` keep the exit of the recorded change when only removing falsify leftovers fails, and print what was left
 

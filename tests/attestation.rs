@@ -24,13 +24,26 @@ role "worker" {
 "#;
 
 fn project() -> TempDir {
+    project_with_process(Some(PROCESS))
+}
+
+fn project_without_process_memory() -> TempDir {
+    project_with_process(None)
+}
+
+fn project_with_process(process: Option<&str>) -> TempDir {
     let temp = TempDir::new().unwrap();
     let root = temp.path();
     std::fs::create_dir_all(root.join("contracts")).unwrap();
     std::fs::create_dir_all(root.join("src")).unwrap();
+    let declaration = if process.is_some() {
+        "process \"process.bla\"\n\n"
+    } else {
+        ""
+    };
     std::fs::write(
         root.join("project.bla"),
-        "project Test\n\nprocess \"process.bla\"\n\nuse structure \"contracts/arch.bla\"\n",
+        format!("project Test\n\n{declaration}use structure \"contracts/arch.bla\"\n"),
     )
     .unwrap();
     std::fs::write(
@@ -38,9 +51,147 @@ fn project() -> TempDir {
         "module thing \"src/thing.rs\"\n\nrequire \"entry\": symbol thing::run\n",
     )
     .unwrap();
-    std::fs::write(root.join("process.bla"), PROCESS).unwrap();
+    if let Some(process) = process {
+        std::fs::write(root.join("process.bla"), process).unwrap();
+    }
     std::fs::write(root.join("src/thing.rs"), "pub fn run() {}\n").unwrap();
     temp
+}
+
+#[test]
+fn check_amendment_is_recorded_without_process_memory() {
+    let temp = project_without_process_memory();
+    opened(&temp);
+    assert_eq!(
+        code(
+            &temp,
+            &[
+                "task",
+                "check",
+                "work",
+                "--model",
+                "claude-opus-5-5",
+                "--argv",
+                "true"
+            ]
+        ),
+        0
+    );
+    let view = json(&temp, &["task", "show", "work"]);
+    assert_eq!(view["task"]["check_argv"][0], "true");
+    let recorded = records(&temp);
+    assert_eq!(recorded.last().unwrap()["verb"], "check");
+    assert_eq!(recorded.last().unwrap()["model"], "claude-opus-5-5");
+}
+
+#[test]
+fn resolve_stays_refused_without_process_memory() {
+    let temp = project_without_process_memory();
+    opened(&temp);
+    ok(
+        &temp,
+        &["task", "finding", "work", "the entry point panics"],
+    );
+    assert_eq!(
+        code(
+            &temp,
+            &[
+                "task",
+                "resolve",
+                "work",
+                "1",
+                "--evidence",
+                "src/thing.rs no longer panics",
+                "--model",
+                "opus",
+            ]
+        ),
+        2
+    );
+    assert_eq!(json(&temp, &["task", "show", "work"])["unresolved"], 1);
+}
+
+#[test]
+fn resolve_is_accepted_when_process_memory_declares_the_orchestrator() {
+    let temp = project();
+    opened(&temp);
+    record_a_finding(&temp);
+    resolve(&temp, "1");
+}
+
+#[test]
+fn open_reports_whether_process_memory_declares_the_orchestrator() {
+    let open = [
+        "task",
+        "open",
+        "work",
+        "--role",
+        "worker",
+        "--statement",
+        "repair the entry point",
+        "--scope",
+        "src",
+        "--deliverable",
+        "src/thing.rs",
+        "--check",
+        "true",
+    ];
+    let bare = project_without_process_memory();
+    assert_eq!(json(&bare, &open)["orchestrator_declared"], false);
+    let declared = project();
+    assert_eq!(json(&declared, &open)["orchestrator_declared"], true);
+}
+
+#[test]
+fn a_declared_orchestrator_still_limits_the_models_a_check_may_record() {
+    let temp = project();
+    opened(&temp);
+    assert_eq!(
+        code(
+            &temp,
+            &[
+                "task", "check", "work", "--model", "small", "--argv", "true"
+            ]
+        ),
+        2
+    );
+}
+
+fn amendment<'a>(verb: &str, model: &'a str) -> Vec<&'a str> {
+    match verb {
+        "check" => vec!["task", "check", "work", "--model", model, "--argv", "true"],
+        "scope" => vec![
+            "task",
+            "scope",
+            "work",
+            "--add",
+            "contracts",
+            "--model",
+            model,
+        ],
+        _ => vec![
+            "task",
+            "statement",
+            "work",
+            "repair the entry point",
+            "--model",
+            model,
+        ],
+    }
+}
+
+#[test]
+fn optional_orchestrator_model_is_recorded_without_a_role_and_limited_with_one() {
+    let bare = project_without_process_memory();
+    opened(&bare);
+    let declared = project();
+    opened(&declared);
+    for verb in ["check", "scope", "statement"] {
+        assert_eq!(code(&bare, &amendment(verb, "claude-opus-5-5")), 0);
+        assert_eq!(records(&bare).last().unwrap()["verb"], verb);
+        assert_eq!(code(&declared, &amendment(verb, "small")), 2);
+        assert_eq!(code(&declared, &amendment(verb, "opus")), 0);
+    }
 }
 
 fn run(temp: &TempDir, list: &[&str]) -> Output {

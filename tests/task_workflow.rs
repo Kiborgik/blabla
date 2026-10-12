@@ -3324,9 +3324,7 @@ fn withdrawal_reconciliation_requires_current_closed_successor() {
     task::write(temp.path(), &successor).unwrap();
     let (report, _) = cli_json(&temp, &["challenge", "--json"]);
     assert!(
-        report["grounded"]
-            .as_array()
-            .unwrap()
+        !grounded_classes(&report)
             .iter()
             .any(|class| class == "withdrawal-residue")
     );
@@ -3415,9 +3413,7 @@ fn withdrawal_successor_can_close_and_reconcile_through_cli() {
     .unwrap();
     let (report, _) = cli_json(&temp, &["challenge", "--json"]);
     assert!(
-        report["grounded"]
-            .as_array()
-            .unwrap()
+        !grounded_classes(&report)
             .iter()
             .any(|class| class == "withdrawal-residue")
     );
@@ -3580,9 +3576,7 @@ fn changed_work_withdrawal_successor_can_close_and_reconcile_through_cli() {
     task::write(temp.path(), &replaced).unwrap();
     let (report, _) = cli_json(&temp, &["challenge", "--json"]);
     assert!(
-        report["grounded"]
-            .as_array()
-            .unwrap()
+        !grounded_classes(&report)
             .iter()
             .any(|class| class == "withdrawal-residue")
     );
@@ -3596,13 +3590,176 @@ fn changed_work_withdrawal_successor_can_close_and_reconcile_through_cli() {
     assert!(!task::challenge_current(&successor, &task_tree(&temp)));
     let (report, _) = cli_json(&temp, &["challenge", "--json"]);
     assert!(
-        report["grounded"]
-            .as_array()
-            .unwrap()
+        !grounded_classes(&report)
             .iter()
             .any(|class| class == "withdrawal-residue")
     );
     assert_eq!(cli_run(&temp, &reconcile), 2);
+}
+
+fn close_successor(temp: &TempDir, inputs: &[&str]) {
+    let mut open = vec![
+        "task",
+        "open",
+        "successor",
+        "--role",
+        "worker",
+        "--statement",
+        "retain repair",
+        "--scope",
+        "src",
+        "--check",
+        "check",
+    ];
+    for input in inputs {
+        open.extend(["--input", *input]);
+    }
+    assert_eq!(cli_run(temp, &open), 0);
+    assert_eq!(
+        cli_run(
+            temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(temp, &["challenge", "successor", "--json"]), 0);
+    assert_eq!(cli_run(temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+}
+
+fn reconcile_thing(temp: &TempDir) -> i32 {
+    cli_run(
+        temp,
+        &[
+            "task",
+            "reconcile-withdrawal",
+            "withdraw-work",
+            "src/thing.rs",
+            "--successor",
+            "successor",
+            "--model",
+            "claude-opus-4-1",
+        ],
+    )
+}
+
+fn residue_grounded(temp: &TempDir) -> bool {
+    let (report, _) = cli_json(temp, &["challenge", "--json"]);
+    grounded_classes(&report)
+        .iter()
+        .any(|class| class == "withdrawal-residue")
+}
+
+#[test]
+fn durable_reconciliation_survives_a_later_change_to_the_path() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    assert!(residue_grounded(&temp));
+    close_successor(&temp, &["src"]);
+    assert_eq!(reconcile_thing(&temp), 0);
+    assert!(!residue_grounded(&temp));
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 8 }\n",
+    )
+    .unwrap();
+    assert_eq!(reconcile_thing(&temp), 2);
+    assert!(!residue_grounded(&temp));
+}
+
+#[test]
+fn durable_reconciliation_survives_a_later_change_to_the_successors_inputs() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    std::fs::write(
+        temp.path().join("src/helper.rs"),
+        "pub fn helper() -> u8 { 1 }\n",
+    )
+    .unwrap();
+    close_successor(&temp, &["src/thing.rs", "src/helper.rs"]);
+    assert_eq!(reconcile_thing(&temp), 0);
+    std::fs::write(
+        temp.path().join("src/helper.rs"),
+        "pub fn helper() -> u8 { 2 }\n",
+    )
+    .unwrap();
+    assert_eq!(reconcile_thing(&temp), 2);
+    assert!(!residue_grounded(&temp));
+}
+
+#[test]
+fn reconciliation_against_a_successor_without_current_evidence_is_refused() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    close_successor(&temp, &["src"]);
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 8 }\n",
+    )
+    .unwrap();
+    assert_eq!(reconcile_thing(&temp), 2);
+    let (view, _) = cli_json(&temp, &["task", "show", "withdraw-work", "--json"]);
+    assert!(
+        view["task"]["withdrawal"]["reconciliations"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+fn durably_reconciled() -> TempDir {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    close_successor(&temp, &["src"]);
+    assert_eq!(reconcile_thing(&temp), 0);
+    assert!(!residue_grounded(&temp));
+    temp
+}
+
+#[test]
+fn durable_reconciliation_lapses_when_the_successor_closes_again() {
+    let temp = durably_reconciled();
+    let mut successor = task::read(temp.path(), "successor").unwrap().unwrap();
+    successor.closed_unix = successor.closed_unix.map(|unix| unix + 1);
+    task::write(temp.path(), &successor).unwrap();
+    assert!(residue_grounded(&temp));
+}
+
+#[test]
+fn durable_reconciliation_lapses_when_the_successor_is_no_longer_closed() {
+    let temp = durably_reconciled();
+    let mut successor = task::read(temp.path(), "successor").unwrap().unwrap();
+    successor.state = "ready".into();
+    task::write(temp.path(), &successor).unwrap();
+    assert!(residue_grounded(&temp));
+}
+
+#[test]
+fn durable_reconciliation_lapses_when_its_successor_record_is_removed() {
+    let temp = durably_reconciled();
+    std::fs::remove_file(task::path_of(temp.path(), "successor")).unwrap();
+    assert!(residue_grounded(&temp));
 }
 
 #[test]

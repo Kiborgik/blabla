@@ -21,6 +21,7 @@ struct TaskView<'a> {
     decisions: Vec<DecisionStateView<'a>>,
     assessment_current: Vec<bool>,
     open: bool,
+    orchestrator_declared: bool,
     unresolved: usize,
     unresolved_findings: Vec<usize>,
     possibly_incomplete: bool,
@@ -104,6 +105,7 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
             })
             .collect(),
         open: task.open(),
+        orchestrator_declared: orchestrator_declared(project),
         unresolved: task.unresolved().count(),
         unresolved_findings: task.unresolved().map(|finding| finding.id).collect(),
         possibly_incomplete: recovery::foreign(recovery::running(), task.build.as_deref()),
@@ -498,6 +500,22 @@ fn validate_orchestrator_model(project: &Project, model: &str, json: bool) -> Re
     }
 }
 
+fn orchestrator_declared(project: &Project) -> bool {
+    declared_role(project, task::ORCHESTRATOR_ROLE).is_some()
+}
+
+fn validate_optional_orchestrator_model(
+    project: &Project,
+    model: &str,
+    json: bool,
+) -> Result<(), i32> {
+    if orchestrator_declared(project) {
+        validate_orchestrator_model(project, model, json)
+    } else {
+        Ok(())
+    }
+}
+
 fn undeclared_role(role: &str) -> String {
     include_str!("text/role-undeclared.md").replace("{{role}}", role)
 }
@@ -705,6 +723,12 @@ pub(super) fn open(
         );
     }
     let code = create(project, &mut recorded, json, swallowed);
+    if code == 0 && !orchestrator_declared(project) {
+        eprintln!(
+            "task {:?} is opened, but process memory declares no role::orchestrator: task resolve, answer, confirm, withdraw, reconcile-withdrawal, unowe and attribute are refused until it does",
+            recorded.name
+        );
+    }
     if code != 0 {
         let _ = task::store::discard_falsification(&project.manifest.root, &recorded.name);
     }
@@ -1244,7 +1268,7 @@ pub(super) fn widen(
     json: bool,
 ) -> i32 {
     if let Some(model) = model
-        && let Err(exit) = validate_orchestrator_model(project, model, json)
+        && let Err(exit) = validate_optional_orchestrator_model(project, model, json)
     {
         return exit;
     }
@@ -1267,7 +1291,7 @@ pub(super) fn restate(
     json: bool,
 ) -> i32 {
     if let Some(model) = model
-        && let Err(exit) = validate_orchestrator_model(project, model, json)
+        && let Err(exit) = validate_optional_orchestrator_model(project, model, json)
     {
         return exit;
     }
@@ -1365,6 +1389,7 @@ pub(super) fn reconcile_withdrawal(
             successor: successor.name.clone(),
             model: model.to_owned(),
             unix: now_unix(),
+            successor_closed_unix: successor.closed_unix,
         });
     task::attest(&mut task, "reconcile-withdrawal", Some(model), now_unix());
     store(project, &mut task, json)
@@ -1472,7 +1497,7 @@ pub(super) fn declare_check(
         model,
     } = amendment;
     if let Some(model) = model.as_deref()
-        && let Err(exit) = validate_orchestrator_model(project, model, json)
+        && let Err(exit) = validate_optional_orchestrator_model(project, model, json)
     {
         return exit;
     }

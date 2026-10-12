@@ -1074,6 +1074,8 @@ pub struct WithdrawalReconciliation {
     pub revision: revision::RelevantRevision,
     pub model: String,
     pub unix: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successor_closed_unix: Option<u64>,
 }
 
 pub fn withdraw(
@@ -1200,15 +1202,30 @@ fn withdrawal_residue_by(
                     && tasks.iter().any(|successor| {
                         successor.name == record.successor
                             && observable(successor)
-                            && successful_successor(successor, tree, path)
-                            && successor_revision(successor, tree, path) == record.revision
-                            && record.revision.paths.get(*path)
-                                == Some(&observed_digest(tree, path))
+                            && reconciliation_stands(record, successor, tree, path)
                     })
             })
         })
         .cloned()
         .collect()
+}
+
+fn reconciliation_stands(
+    record: &WithdrawalReconciliation,
+    successor: &Task,
+    tree: &BTreeMap<String, String>,
+    path: &str,
+) -> bool {
+    match record.successor_closed_unix {
+        Some(closed_unix) => {
+            successor.state == "closed" && successor.closed_unix == Some(closed_unix)
+        }
+        None => {
+            successful_successor(successor, tree, path)
+                && successor_revision(successor, tree, path) == record.revision
+                && record.revision.paths.get(path) == Some(&observed_digest(tree, path))
+        }
+    }
 }
 
 pub fn normalize_scope(root: &Path, path: &str) -> Result<String, String> {

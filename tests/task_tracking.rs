@@ -648,17 +648,16 @@ fn legacy_invalid_closed_successors_cannot_clear_withdrawal_residue() {
         "owner",
         6
     ));
-    old.withdrawal
-        .as_mut()
-        .unwrap()
-        .reconciliations
-        .push(task::WithdrawalReconciliation {
-            path: "src/app.rs".into(),
-            successor: successor.name.clone(),
-            model: "owner".into(),
-            unix: 7,
-            revision: task::successor_revision(&successor, &tree, "src/app.rs"),
-        });
+    old.withdrawal.as_mut().unwrap().reconciliations.push(
+        serde_json::from_value::<task::WithdrawalReconciliation>(serde_json::json!({
+            "path": "src/app.rs",
+            "successor": successor.name,
+            "model": "owner",
+            "unix": 7,
+            "revision": task::successor_revision(&successor, &tree, "src/app.rs"),
+        }))
+        .unwrap(),
+    );
     assert!(task::withdrawal_residue(&old, &[successor.clone()], &tree).is_empty());
     assert_eq!(
         task::tracked_withdrawal_residue(&old, &[successor], &tree, temp.path(), &project.ignore),

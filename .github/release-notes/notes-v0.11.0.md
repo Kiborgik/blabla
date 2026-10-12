@@ -29,7 +29,8 @@ Small coding models drift from the goal and say "done" too early. BlaBla catches
 - Recording or resolving findings no longer makes a review stale, and resolving a finding no longer voids the challenge receipt
 - A path that becomes ignored while a task is open no longer counts as its change
 - `challenge NAME` leads with what blocks the hand-back, and a BLOCKED task's route names its unresolved findings
-- `task reconcile-withdrawal` accepts a successor whose write scope covers the path, as evidence already did
+- `task reconcile-withdrawal` accepts a successor whose write scope covers the path, and a reconciliation stands once recorded instead of coming back after later edits
+- Without a declared `role::orchestrator`, an optional `--model` on an amendment is recorded instead of refused, and `task open` says which verbs will need the role
 
 A review made before 0.11 on a target with findings goes stale once; accept, check and challenge it again. Windows CI failed the self-hosting `finish` once and passed it on the next run; the cause is not known yet.
 
