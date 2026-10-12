@@ -8,6 +8,9 @@ Small coding models drift from the goal and say "done" too early. BlaBla catches
 - `task open --lens PACK` names the lenses a task must assess
 - Every `blabla expert` subcommand describes itself in `--help`
 - Gate steps that fail on a broken markdown link or anchor and on a version mismatch
+- `task open --falsify PATH` and `task falsify NAME`: the check runs in a copy of the tree on the current files and on the files as they were at open, and hand-back waits until it passed on the first and failed on the second
+- `task show` lists what a task changed, its falsify state and a review target's changes; `task finding` prints the new id; `status` splits a goal's unheld expectations into not held, unverified and unresolved
+- `task statement NAME TEXT` amends a live task's statement; an option written after `--check-argv` or `--argv` is reported instead of silently joining the check
 
 ## Changed
 
@@ -21,6 +24,15 @@ Small coding models drift from the goal and say "done" too early. BlaBla catches
 - Systems own whole directories in project memory, so new files are never unowned
 - New goals: `goal::short-plain-docs` and one per fix, each expecting the rule that checks it
 
-No contract syntax or exit code changed; task JSON gains an optional `lenses` field. History files are unchanged.
+## Fixed
+
+- Recording or resolving findings no longer makes a review stale, and resolving a finding no longer voids the challenge receipt
+- A path that becomes ignored while a task is open no longer counts as its change
+- `challenge NAME` leads with what blocks the hand-back, and a BLOCKED task's route names its unresolved findings
+- `task reconcile-withdrawal` accepts a successor whose write scope covers the path, as evidence already did
+
+A review made before 0.11 on a target with findings goes stale once; accept, check and challenge it again. Windows CI failed the self-hosting `finish` once and passed it on the next run; the cause is not known yet.
+
+No contract syntax or exit code changed; task JSON gains optional `lenses`, `falsify` and `falsifications` fields. History files are unchanged.
 
 See the [full changelog](https://github.com/Kiborgik/blabla/blob/v0.11.0/CHANGELOG.md#0110-2026-10-11).

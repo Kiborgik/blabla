@@ -82,6 +82,13 @@ goal "tasks-name-their-lenses" {
     state "active"
 }
 
+goal "tests-prove-their-change" {
+    serves ["truthful-over-convenient", "bounded-workers-free-planners"]
+    statement "A task can name the production paths its change touches with task open --falsify; BlaBla then runs the declared check against the opened contents of those paths and refuses hand-back unless the check failed there and passes now. Small-model workers wrote three tests this round that passed without the code they claimed to prove; this makes that visible without a reviewer reading the old code."
+    expect ["falsify::a-task-can-name-the-paths-its-check-must-falsify", "falsify::the-check-is-run-against-the-opened-contents", "falsify::an-unfalsified-check-is-challenged"]
+    state "active"
+}
+
 goal "versions-agree" {
     serves ["truthful-over-convenient"]
     statement "The product gate fails when the version in Cargo.toml differs from the one in .claude-plugin/plugin.json, CITATION.cff or the issue template placeholders. The version is one decision stored in several files."

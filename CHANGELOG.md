@@ -2,12 +2,13 @@
 
 ## 0.11.0 (2026-10-11)
 
-Shorter, plainer docs around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. Then a dogfooding round, run with small worker models and independent reviewers through BlaBla's own task workflow, fixed the frictions it hit. No contract syntax or exit code changed; task JSON gains one optional field.
+Shorter, plainer docs around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. Then a dogfooding round, run with small worker models and independent reviewers through BlaBla's own task workflow, fixed the frictions it hit. No contract syntax or exit code changed; task JSON gains optional fields.
 
 ### Breaking and upgrade
 
 - A task assigned to role `orchestrator` no longer records its own amendments as made during a carry, so it raises no `orchestrator-record-during-carry` challenge and needs no `task confirm`. Tasks of every other role behave as before. Records written by older versions keep their stored carry state
-- Task records gain an optional `lenses` list; records without it require every consulted pack, as before
+- Task records gain optional `lenses`, `falsify` and `falsifications` lists; records without `lenses` require every consulted pack, as before
+- A review recorded before 0.11 on a target that had findings goes stale once; accept it again, rerun its check and challenge it. [Upgrade note](docs/agent-workflow.md#upgrading-task-records-to-011)
 
 ### Added
 
@@ -15,6 +16,12 @@ Shorter, plainer docs around one idea: contracts keep small coding models from d
 - `task open --lens PACK` names the subset of the role's consulted packs a task must assess; `task lens --model` must match the accepted model
 - Every `blabla expert` subcommand, at every depth, describes itself in `--help`
 - Product gate steps `docs-links` (relative links and anchors in tracked markdown, exact case) and `versions` (every declared version matches `Cargo.toml`)
+- `task open --falsify PATH` and `task falsify NAME`: the declared check runs in a copy of the tree, on the current files and then on those paths as they were at open. Hand-back is challenged with `check-not-falsified` until the check passed on the first and failed on the second, so a check that passes without the change it claims to prove is caught without a reviewer reading old code. It judges the whole check, not each test in it
+- `task finding` prints the new finding's id. `task show` lists the falsify paths, the latest falsification, the paths changed since the task opened, a review target's changed paths, the task's own lens subset and paths in their on-disk spelling
+- `blabla status` prints the not held, unverified and unresolved counts of a goal that is not fully held, and points `explain` at the first such goal
+- `task statement NAME TEXT` replaces the statement of a task that is not closed or withdrawn, recorded as an orchestrator amendment
+- `task open --check-argv` and `task check --argv` report an argument after them that matches one of their own options (stderr and a `swallowed_check_argv` JSON field); the check keeps it, because a check program may take the same names
+- Ruling `ruling::testing::a-falsifying-run-reaches-the-assertions`: a run on the old code proves something only when it builds and every test runs
 
 ### Changed
 
@@ -26,6 +33,21 @@ Shorter, plainer docs around one idea: contracts keep small coding models from d
 - Role `worker` permits Haiku 5.5 and role `reviewer` Sonnet 5.5, with their host model ids as aliases
 - `guide change` and the agent workflow say to author rules for work not started yet as draft contracts, because an active RED rule blocks every task close
 - New active goals: `goal::short-plain-docs` and one goal per fix above, each expecting the rule that checks it
+
+### Fixed
+
+- Recording or resolving findings on a reviewed task no longer makes its review stale; edits and a worker's `task addressed` still do
+- Resolving a finding no longer voids the task's challenge receipt
+- A path that becomes ignored while a task is open no longer counts as a change of that task
+- `challenge NAME` leads with a class that blocks the hand-back; project-level classes follow it
+- `attribution-unknown` groups changed paths by top-level directory instead of listing every one
+- `task reconcile-withdrawal` accepts a successor whose write scope covers the path when it declares no inputs, as evidence already did
+- A BLOCKED task's route names its unresolved findings instead of telling the worker to resume at once; a review not yet accepted is no longer shown as STALE
+- `task close` and `task withdraw` keep the exit of the recorded change when only removing falsify leftovers fails, and print what was left
+
+### Known issues
+
+- Windows CI failed the self-hosting `finish` step once (exit 3) and passed it on the next run; the cause is not known yet
 
 ## 0.10.0 (2026-10-06)
 

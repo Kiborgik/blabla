@@ -233,7 +233,13 @@ impl Questions {
         task::attest(&mut self.task, "answer", Some(ORCHESTRATOR), unix);
         if task::apply(&mut self.task, "accepted") {
             let unix = self.tick();
-            task::record_acceptance(&mut self.task, &self.tree, WORKER, unix);
+            task::record_acceptance(
+                &mut self.task,
+                &self.tree,
+                &blabla::project::ignore::Ignore::default(),
+                WORKER,
+                unix,
+            );
         }
     }
 

@@ -24,6 +24,7 @@ use structure "contracts/onboarding.bla"
 use structure "contracts/seams.bla"
 use structure "contracts/expert-seams.bla"
 use structure "contracts/lenses.bla"
+use structure "contracts/falsify.bla"
 
 use behavior "contracts/evaluator.bla"
 use behavior "contracts/assignment.bla"

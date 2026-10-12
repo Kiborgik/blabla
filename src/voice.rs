@@ -27,7 +27,7 @@ impl Voice {
     }
 }
 
-pub const BLUNT: [(&str, &str); 20] = [
+pub const BLUNT: [(&str, &str); 21] = [
     (
         "declared-check-failed",
         "This is not fucking ready. Fix the check or record the actual blocker.",
@@ -107,6 +107,10 @@ pub const BLUNT: [(&str, &str); 20] = [
     (
         "goal-outcome-unmet",
         "That goal is marked done, but the expectations it carries are not all held. Set it back to active or make every one GREEN.",
+    ),
+    (
+        "check-not-falsified",
+        "That check was never shown to fail on the opened contents. Run blabla task falsify and record a failing run.",
     ),
 ];
 

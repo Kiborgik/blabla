@@ -95,7 +95,13 @@ impl Attestation {
     fn take(&mut self) {
         if self.task.open() && task::apply(&mut self.task, "accepted") {
             let unix = self.tick();
-            task::record_acceptance(&mut self.task, &self.tree, WORKER, unix);
+            task::record_acceptance(
+                &mut self.task,
+                &self.tree,
+                &blabla::project::ignore::Ignore::default(),
+                WORKER,
+                unix,
+            );
         }
     }
 
@@ -155,8 +161,14 @@ impl Attestation {
         }
         let standing = self.report().grounded.len();
         let unix = self.tick();
-        self.close_refused =
-            !task::accept_result(&mut self.task, &self.tree, standing, ORCHESTRATOR, unix);
+        self.close_refused = !task::accept_result(
+            &mut self.task,
+            &self.tree,
+            &blabla::project::ignore::Ignore::default(),
+            standing,
+            ORCHESTRATOR,
+            unix,
+        );
     }
 
     fn report(&self) -> skeptic::ChallengeReport {

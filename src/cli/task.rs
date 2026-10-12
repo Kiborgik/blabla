@@ -2,7 +2,7 @@ use super::{emit_error, error, recovery, write_json};
 use blabla::memory::goal::Outcome;
 use blabla::memory::{self, goal, knowledge, mission, process, system};
 use blabla::project::Project;
-use blabla::project::status::{RECORD_DIRECTORY, StatusView, now_unix, status_view};
+use blabla::project::status::{StatusView, now_unix, status_view};
 use blabla::project::task::{self, Finding, Opening, Task};
 use blabla::skeptic::{self, ChallengeReport, Evidence};
 use blabla::structure::default_providers;
@@ -15,13 +15,22 @@ use std::io::{self, Write};
 #[derive(Serialize)]
 struct TaskView<'a> {
     task: &'a Task,
+    review_accepted: Option<bool>,
     review_current: Option<bool>,
     approval_current: Option<bool>,
     decisions: Vec<DecisionStateView<'a>>,
     assessment_current: Vec<bool>,
     open: bool,
     unresolved: usize,
+    unresolved_findings: Vec<usize>,
     possibly_incomplete: bool,
+    changed_since_open: Vec<String>,
+    changed_elsewhere: usize,
+    reviewed_target_readable: Option<bool>,
+    reviewed_changed_since_open: Vec<String>,
+    reviewed_changed_elsewhere: usize,
+    swallowed_check_argv: Vec<String>,
+    on_disk: BTreeMap<String, String>,
     authority: &'static str,
 }
 
@@ -36,7 +45,34 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
     let review_current = review_freshness(project, task);
     let fingerprints = knowledge_fingerprints(project);
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    let on_disk = task
+        .scope
+        .iter()
+        .chain(
+            task.deliverables
+                .iter()
+                .map(|deliverable| &deliverable.path),
+        )
+        .chain(task.check_inputs.iter())
+        .chain(task.falsify.iter())
+        .map(|path| (path.clone(), task::on_disk_spelling(path, &tree)))
+        .collect();
+    let (changed_since_open, changed_elsewhere) =
+        covered_changes(task, task::changed(task, &tree, &project.ignore));
+    let reviewed = task
+        .review_of
+        .as_ref()
+        .map(|target| task::read(&project.manifest.root, &target.task));
+    let reviewed_target_readable = reviewed.as_ref().map(|read| matches!(read, Ok(Some(_))));
+    let (reviewed_changed_since_open, reviewed_changed_elsewhere) = match reviewed {
+        Some(Ok(Some(reviewed))) => {
+            let changed = task::changed(&reviewed, &tree, &project.ignore);
+            covered_changes(&reviewed, changed)
+        }
+        _ => (Vec::new(), 0),
+    };
     TaskView {
+        review_accepted: task.review_of.as_ref().map(|_| task.accepted.is_some()),
         review_current,
         approval_current: review_current.map(|current| {
             current
@@ -68,10 +104,48 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
             .collect(),
         open: task.open(),
         unresolved: task.unresolved().count(),
+        unresolved_findings: task.unresolved().map(|finding| finding.id).collect(),
         possibly_incomplete: recovery::foreign(recovery::running(), task.build.as_deref()),
+        changed_since_open,
+        changed_elsewhere,
+        reviewed_target_readable,
+        reviewed_changed_since_open,
+        reviewed_changed_elsewhere,
+        swallowed_check_argv: Vec::new(),
+        on_disk,
         authority: task::AUTHORITY,
         task,
     }
+}
+
+fn covered_changes(task: &Task, changed: Vec<&str>) -> (Vec<String>, usize) {
+    let (covered, elsewhere): (Vec<&str>, Vec<&str>) = changed
+        .into_iter()
+        .partition(|path| task::covered(task, path));
+    (
+        covered.into_iter().map(str::to_owned).collect(),
+        elsewhere.len(),
+    )
+}
+
+fn write_changed(
+    output: &mut impl Write,
+    heading: &str,
+    paths: &[String],
+    elsewhere: usize,
+) -> io::Result<()> {
+    if paths.is_empty() {
+        writeln!(output, "\n{heading}\n  none")?;
+    } else {
+        writeln!(output, "\n{heading}")?;
+        for path in paths {
+            writeln!(output, "  {path}")?;
+        }
+    }
+    if elsewhere > 0 {
+        writeln!(output, "  {elsewhere} more outside this task's paths")?;
+    }
+    Ok(())
 }
 
 pub(super) fn locked(project: &Project, json: bool, f: impl FnOnce() -> i32) -> i32 {
@@ -426,11 +500,11 @@ fn undeclared_role(role: &str) -> String {
     include_str!("text/role-undeclared.md").replace("{{role}}", role)
 }
 
-fn create(project: &Project, task: &mut Task, json: bool) -> i32 {
+fn create(project: &Project, task: &mut Task, json: bool, swallowed: &[String]) -> i32 {
     if let Some(identity) = recovery::running() {
         task.build = Some(identity.stamp());
     }
-    write_record(project, task, json, true)
+    write_record(project, task, json, true, swallowed)
 }
 
 fn stamp(task: &mut Task, json: bool) -> Result<(), i32> {
@@ -447,13 +521,47 @@ fn stamp(task: &mut Task, json: bool) -> Result<(), i32> {
 }
 
 fn store(project: &Project, task: &mut Task, json: bool) -> i32 {
+    store_with(project, task, json, &[])
+}
+
+fn store_with(project: &Project, task: &mut Task, json: bool, swallowed: &[String]) -> i32 {
     if let Err(exit) = stamp(task, json) {
         return exit;
     }
-    write_record(project, task, json, false)
+    write_record(project, task, json, false, swallowed)
 }
 
-fn write_record(project: &Project, task: &mut Task, json: bool, whole_view: bool) -> i32 {
+fn report_leftovers(root: &std::path::Path, name: &str, failure: &io::Error) {
+    let leftovers: Vec<String> = task::falsification_leftovers(root, name)
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    if leftovers.is_empty() {
+        return;
+    }
+    eprintln!(
+        "task {name:?} is recorded, but its falsify cleanup failed ({failure}); still present: {}",
+        leftovers.join(", ")
+    );
+}
+
+fn store_and_discard(project: &Project, task: &mut Task, json: bool) -> i32 {
+    let code = store(project, task, json);
+    if code == 0
+        && let Err(failure) = task::store::discard_falsification(&project.manifest.root, &task.name)
+    {
+        report_leftovers(&project.manifest.root, &task.name, &failure);
+    }
+    code
+}
+
+fn write_record(
+    project: &Project,
+    task: &mut Task,
+    json: bool,
+    whole_view: bool,
+    swallowed: &[String],
+) -> i32 {
     let task = &*task;
     if let Err(failure) = task::write(&project.manifest.root, task) {
         return emit_error(
@@ -462,14 +570,16 @@ fn write_record(project: &Project, task: &mut Task, json: bool, whole_view: bool
             2,
         );
     }
+    let mut shown = view(project, task);
+    shown.swallowed_check_argv = swallowed.to_vec();
     let result = if json {
-        write_json(&view(project, task))
+        write_json(&shown)
     } else if whole_view {
         write_task(
             task,
             &project.manifest.root,
             role_floor(project, &task.role),
-            &view(project, task),
+            &shown,
         )
     } else {
         write_task_line(task)
@@ -488,7 +598,13 @@ fn write_task_line(task: &Task) -> io::Result<()> {
     )
 }
 
-pub(super) fn open(project: &Project, mut opening: Opening, json: bool) -> i32 {
+pub(super) fn open(
+    project: &Project,
+    mut opening: Opening,
+    falsify: Vec<String>,
+    json: bool,
+    swallowed: &[String],
+) -> i32 {
     let name = &opening.name;
     if !blabla::memory::syntax::is_identity_safe(name) {
         return emit_error(
@@ -565,10 +681,32 @@ pub(super) fn open(project: &Project, mut opening: Opening, json: bool) -> i32 {
         },
         now_unix(),
     );
+    let falsify = match falsify_paths(project, &recorded, falsify) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    recorded.falsify = falsify;
     if let Err(exit) = require_tracking(project, &recorded, json) {
         return exit;
     }
-    create(project, &mut recorded, json)
+    if let Err(failure) =
+        task::store::record_opened(&project.manifest.root, &recorded.name, &recorded.falsify)
+    {
+        return emit_error(
+            error(
+                "task",
+                format!("cannot save the opened contents: {failure}"),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    let code = create(project, &mut recorded, json, swallowed);
+    if code != 0 {
+        let _ = task::store::discard_falsification(&project.manifest.root, &recorded.name);
+    }
+    code
 }
 
 fn tracked_declarations(
@@ -632,13 +770,18 @@ pub(super) fn finding(project: &Project, name: &str, statement: &str, json: bool
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    let id = task.next_finding_id();
     task.findings.push(Finding {
-        id: task.next_finding_id(),
+        id,
         statement: statement.to_owned(),
         addressed: None,
         resolution: None,
     });
-    store(project, &mut task, json)
+    let code = store(project, &mut task, json);
+    if code == 0 && !json {
+        println!("finding {id} recorded on task::{name}");
+    }
+    code
 }
 
 pub(super) fn note(project: &Project, name: &str, statement: &str, json: bool) -> i32 {
@@ -1114,6 +1257,27 @@ pub(super) fn widen(
     store(project, &mut task, json)
 }
 
+pub(super) fn restate(
+    project: &Project,
+    name: &str,
+    text: &str,
+    model: Option<&str>,
+    json: bool,
+) -> i32 {
+    if let Some(model) = model
+        && let Err(exit) = validate_orchestrator_model(project, model, json)
+    {
+        return exit;
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    text.clone_into(&mut task.statement);
+    task::attest(&mut task, "statement", model, now_unix());
+    store(project, &mut task, json)
+}
+
 pub(super) fn withdraw(
     project: &Project,
     name: &str,
@@ -1129,11 +1293,13 @@ pub(super) fn withdraw(
         Err(exit) => return exit,
     };
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
-    if let Err(message) = task::withdraw(&mut task, &tree, reason, model, now_unix()) {
+    if let Err(message) =
+        task::withdraw(&mut task, &tree, &project.ignore, reason, model, now_unix())
+    {
         return emit_error(error("task", message, None), json, 2);
     }
     task::attest(&mut task, "withdraw", Some(model), now_unix());
-    store(project, &mut task, json)
+    store_and_discard(project, &mut task, json)
 }
 
 pub(super) fn reconcile_withdrawal(
@@ -1185,7 +1351,7 @@ pub(super) fn reconcile_withdrawal(
     if task::tracking_error(&successor, root, &project.ignore).is_some()
         || !task::successful_successor(&successor, &tree, &path)
     {
-        return emit_error(error("task", "reconciliation requires a CLOSED successor with current successful evidence and explicit input or deliverable coverage".to_owned(), None), json, 2);
+        return emit_error(error("task", "reconciliation requires the successor CLOSED, with current successful evidence and the path covered by its inputs (its check inputs, or its write scope when it declares none) or its deliverables".to_owned(), None), json, 2);
     }
     task.withdrawal
         .as_mut()
@@ -1294,6 +1460,7 @@ pub(super) fn declare_check(
     name: &str,
     amendment: CheckAmendment,
     json: bool,
+    swallowed: &[String],
 ) -> i32 {
     let CheckAmendment {
         command,
@@ -1341,7 +1508,7 @@ pub(super) fn declare_check(
         "check --add-scope"
     };
     task::attest(&mut task, verb, model.as_deref(), now_unix());
-    store(project, &mut task, json)
+    store_with(project, &mut task, json, swallowed)
 }
 
 pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i32 {
@@ -1380,7 +1547,14 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
         .iter()
         .filter(|class| **class != "withdrawal-residue")
         .count();
-    if !task::accept_result(&mut task, &tree, standing, model, now_unix()) {
+    if !task::accept_result(
+        &mut task,
+        &tree,
+        &project.ignore,
+        standing,
+        model,
+        now_unix(),
+    ) {
         return emit_error(
             error(
                 "task",
@@ -1404,7 +1578,7 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
             2,
         );
     }
-    store(project, &mut task, json)
+    store_and_discard(project, &mut task, json)
 }
 
 fn unconfirmed_guidance(task: &Task) -> String {
@@ -1525,7 +1699,7 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
             revision,
         });
     }
-    task::record_acceptance(&mut task, &current_tree, model, now_unix());
+    task::record_acceptance(&mut task, &current_tree, &project.ignore, model, now_unix());
     store(project, &mut task, json)
 }
 
@@ -1596,6 +1770,19 @@ pub(super) fn ready(project: &Project, name: &str, json: bool) -> i32 {
 fn handback_guidance(task: &Task, next: &str) -> String {
     let name = &task.name;
     match next {
+        "accept" if task.state == "blocked" => {
+            let unresolved: Vec<usize> = task.unresolved().map(|finding| finding.id).collect();
+            let resume = format!("then blabla task accept {name} --model <id> resumes the task");
+            if unresolved.is_empty() {
+                format!(
+                    "BLOCKED; the orchestrator settles the block (scope, check or an answer), {resume}"
+                )
+            } else {
+                format!(
+                    "BLOCKED on unresolved findings {unresolved:?}; the orchestrator settles them first (scope, check or an answer), {resume}"
+                )
+            }
+        }
         "accept" => format!("accept or resume it with blabla task accept {name} --model <id>"),
         "await-answer" => match task::unanswered_decision(task) {
             Some(decision) => format!(
@@ -1774,7 +1961,7 @@ pub(super) fn attribute(
         Err(exit) => return exit,
     };
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
-    let changed: Vec<String> = task::changed(&task, &tree)
+    let changed: Vec<String> = task::changed(&task, &tree, &project.ignore)
         .into_iter()
         .map(str::to_owned)
         .collect();
@@ -1941,10 +2128,7 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
     let input_digests = task::evidence_inputs(&task, &tree);
     let identity = task::declared_check(&task);
     let acceptance_epoch = task.acceptance_epoch;
-    let scratch = root
-        .join(RECORD_DIRECTORY)
-        .join(task::SCRATCH_DIRECTORY)
-        .join(name);
+    let scratch = task::scratch_directory(root, name);
     if let Err(failure) = std::fs::create_dir_all(&scratch) {
         return emit_error(
             error(
@@ -2004,10 +2188,7 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
             2,
         );
     }
-    let log = format!(
-        "{RECORD_DIRECTORY}/{}/{name}/{log_name}",
-        task::SCRATCH_DIRECTORY
-    );
+    let log = format!("{}/{log_name}", task::scratch_label(name));
     let _completion_lock = match task::store::lock(root) {
         Ok(lock) => lock,
         Err(message) => return emit_error(error("task", message, None), json, 2),
@@ -2041,14 +2222,288 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
     };
     task::apply_evidence(&mut reloaded, evidence);
     let code = store(project, &mut reloaded, json);
-    if code == 0 && !json {
-        if let Some(latest) = reloaded.evidence.last() {
-            if write_evidence_receipt(&mut io::stdout().lock(), latest).is_err() {
-                return 4;
-            }
-        }
+    if code == 0
+        && !json
+        && let Some(latest) = reloaded.evidence.last()
+        && write_evidence_receipt(&mut io::stdout().lock(), latest).is_err()
+    {
+        return 4;
     }
     code
+}
+
+fn falsify_paths(
+    project: &Project,
+    task: &Task,
+    paths: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let root = &project.manifest.root;
+    paths
+        .iter()
+        .map(|path| {
+            let normalized = task::normalize_scope(root, path)?;
+            if !task.in_scope(&normalized) {
+                return Err(format!(
+                    "falsify path {path:?} is outside the write scope of task {:?}; only files the task may write can be falsified",
+                    task.name
+                ));
+            }
+            if root.join(&normalized).is_dir() {
+                return Err(format!("falsify path {path:?} is a directory; name a file"));
+            }
+            Ok(normalized)
+        })
+        .collect()
+}
+
+pub(super) fn falsify(project: &Project, name: &str, json: bool) -> i32 {
+    let root = &project.manifest.root;
+    let lock = match task::store::lock(root) {
+        Ok(lock) => lock,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    let task = match accepted_for_evidence(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    if task.falsify.is_empty() {
+        return emit_error(
+            error(
+                "task",
+                format!("task {name:?} names no paths to falsify; open it with --falsify PATH"),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
+    if let Err(exit) = require_current_review(project, &task, json) {
+        return exit;
+    }
+    let Some(argv) = task.check_argv.clone().filter(|argv| !argv.is_empty()) else {
+        return emit_error(
+            error(
+                "task",
+                format!(
+                    "task {name:?} declares no argv check, so falsify cannot execute it; the orchestrator declares one with blabla task check {name} --argv <prog> <arg>..."
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    };
+    let scratch = task::scratch_directory(root, name);
+    let copy = task::falsify_copy_directory(root, name);
+    if let Err(failure) = std::fs::create_dir_all(&scratch) {
+        return emit_error(
+            error(
+                "task",
+                format!("cannot create {}: {failure}", scratch.display()),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    drop(lock);
+    let tree = match stage_copy(project, &copy) {
+        Ok(tree) => tree,
+        Err(message) => {
+            let _ = std::fs::remove_dir_all(&copy);
+            return emit_error(error("task", message, None), json, 2);
+        }
+    };
+    let inputs = task::evidence_inputs(&task, &tree);
+    let runs = run_in_copy(project, &task, name, &argv, &copy, &scratch, json);
+    let _ = std::fs::remove_dir_all(&copy);
+    let (current, opened) = match runs {
+        Ok(runs) => runs,
+        Err(exit) => return exit,
+    };
+    let _completion = match task::store::lock(root) {
+        Ok(lock) => lock,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    let mut reloaded = match accepted_for_evidence(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    if reloaded.opened_unix != task.opened_unix || reloaded.opened_tree != task.opened_tree {
+        return emit_error(
+            error(
+                "task",
+                format!(
+                    "task {name:?} was replaced while its falsify run ran; nothing is recorded"
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    reloaded.falsifications.push(task::Falsification {
+        acceptance_epoch: task.acceptance_epoch,
+        check: argv.join(" "),
+        current_exit: current.exit,
+        current_log: current.log,
+        opened_exit: opened.as_ref().map(|run| run.exit),
+        opened_log: opened.map(|run| run.log),
+        unix: now_unix(),
+        inputs,
+    });
+    let code = store(project, &mut reloaded, json);
+    if code == 0
+        && !json
+        && let Some(latest) = reloaded.falsifications.last()
+        && write_falsification_receipt(&mut io::stdout().lock(), latest).is_err()
+    {
+        return 4;
+    }
+    code
+}
+
+struct FalsifyRun {
+    exit: i32,
+    log: String,
+}
+
+fn stage_copy(
+    project: &Project,
+    copy: &std::path::Path,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    if copy.exists() {
+        std::fs::remove_dir_all(copy)
+            .map_err(|failure| format!("cannot clear {}: {failure}", copy.display()))?;
+    }
+    let root = &project.manifest.root;
+    let files: Vec<String> = blabla::project::snapshot(root, &project.ignore)
+        .into_keys()
+        .collect();
+    task::store::copy_into(root, copy, &files)
+        .map_err(|failure| format!("cannot copy the tree for falsify: {failure}"))?;
+    Ok(blabla::project::snapshot(copy, &project.ignore))
+}
+
+fn run_in_copy(
+    project: &Project,
+    task: &Task,
+    name: &str,
+    argv: &[String],
+    copy: &std::path::Path,
+    scratch: &std::path::Path,
+    json: bool,
+) -> Result<(FalsifyRun, Option<FalsifyRun>), i32> {
+    let label = task::scratch_label(name);
+    let number = task.falsifications.len() + 1;
+    let stamp = now_unix();
+    let current = run_check(
+        argv,
+        copy,
+        scratch,
+        &label,
+        &format!("falsify-{number}-current-{stamp}.log"),
+        json,
+    )?;
+    if current.exit != 0 {
+        return Ok((current, None));
+    }
+    let opened_directory = task::store::opened_directory(&project.manifest.root, name);
+    if let Err(failure) = task::store::apply_opened(copy, &opened_directory, &task.falsify) {
+        return Err(emit_error(
+            error(
+                "task",
+                format!("cannot place the opened contents in the copy: {failure}"),
+                None,
+            ),
+            json,
+            2,
+        ));
+    }
+    let opened = run_check(
+        argv,
+        copy,
+        scratch,
+        &label,
+        &format!("falsify-{number}-opened-{stamp}.log"),
+        json,
+    )?;
+    Ok((current, Some(opened)))
+}
+
+fn run_check(
+    argv: &[String],
+    dir: &std::path::Path,
+    scratch: &std::path::Path,
+    label: &str,
+    log_name: &str,
+    json: bool,
+) -> Result<FalsifyRun, i32> {
+    let output = match std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .current_dir(dir)
+        .output()
+    {
+        Ok(output) => output,
+        Err(failure) => {
+            return Err(emit_error(
+                error("task", format!("cannot spawn {}: {failure}", argv[0]), None),
+                json,
+                2,
+            ));
+        }
+    };
+    let Some(exit) = output.status.code() else {
+        return Err(emit_error(
+            error(
+                "task",
+                format!(
+                    "{} ended without an exit code; nothing is recorded",
+                    argv[0]
+                ),
+                None,
+            ),
+            json,
+            2,
+        ));
+    };
+    if let Err(failure) = std::fs::write(
+        scratch.join(log_name),
+        [output.stdout, output.stderr].concat(),
+    ) {
+        return Err(emit_error(
+            error("task", format!("cannot write {log_name}: {failure}"), None),
+            json,
+            2,
+        ));
+    }
+    Ok(FalsifyRun {
+        exit,
+        log: format!("{label}/{log_name}"),
+    })
+}
+
+fn write_falsification_receipt(
+    output: &mut impl Write,
+    falsification: &task::Falsification,
+) -> io::Result<()> {
+    let opened = falsification
+        .opened_exit
+        .map_or_else(|| "not run".to_owned(), |exit| exit.to_string());
+    writeln!(
+        output,
+        "\nFalsification:\n  acceptance epoch {}   current exit {}   opened exit {opened}",
+        epoch_label(Some(falsification.acceptance_epoch)),
+        falsification.current_exit
+    )?;
+    writeln!(output, "  current log {}", falsification.current_log)?;
+    if let Some(log) = &falsification.opened_log {
+        writeln!(output, "  opened log {log}")?;
+    }
+    Ok(())
 }
 
 pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i32 {
@@ -2243,8 +2698,9 @@ pub(super) fn write_challenge_into(
             writeln!(output, "\nReconcile:\n  {}", challenge.reconcile)?;
             writeln!(output, "\nClass: {}", challenge.class.word())?;
             let waiting: Vec<&str> = report
-                .grounded
+                .assignment_blockers
                 .iter()
+                .chain(report.project_challenges.iter())
                 .copied()
                 .filter(|class| *class != challenge.class.word())
                 .collect();
@@ -2365,6 +2821,11 @@ fn write_task(
     view: &TaskView<'_>,
 ) -> io::Result<()> {
     let mut output = io::stdout().lock();
+    let shown = |path: &String| {
+        view.on_disk
+            .get(path)
+            .map_or_else(|| path.clone(), Clone::clone)
+    };
     writeln!(output, "task::{}   {}", task.name, state_label(task))?;
     writeln!(output, "\nStatement:\n  {}", task.statement)?;
     writeln!(output, "\nCarried by:\n  role::{}", task.role)?;
@@ -2377,7 +2838,11 @@ fn write_task(
         if task.scope.is_empty() {
             "none declared".to_owned()
         } else {
-            task.scope.join("  ")
+            task.scope
+                .iter()
+                .map(&shown)
+                .collect::<Vec<String>>()
+                .join("  ")
         }
     )?;
     writeln!(
@@ -2388,7 +2853,7 @@ fn write_task(
         } else {
             task.deliverables
                 .iter()
-                .map(|deliverable| deliverable.path.clone())
+                .map(|deliverable| shown(&deliverable.path))
                 .collect::<Vec<String>>()
                 .join("  ")
         }
@@ -2397,11 +2862,56 @@ fn write_task(
         output,
         "\nCheck inputs (plus deliverables):\n  {}",
         if task.check_inputs.is_empty() {
-            format!("write scope: {}", task.scope.join("  "))
+            format!(
+                "write scope: {}",
+                task.scope
+                    .iter()
+                    .map(&shown)
+                    .collect::<Vec<String>>()
+                    .join("  ")
+            )
         } else {
-            task.check_inputs.join("  ")
+            task.check_inputs
+                .iter()
+                .map(&shown)
+                .collect::<Vec<String>>()
+                .join("  ")
         }
     )?;
+    writeln!(
+        output,
+        "\nFalsify paths:\n  {}",
+        if task.falsify.is_empty() {
+            "none declared".to_owned()
+        } else {
+            task.falsify
+                .iter()
+                .map(&shown)
+                .collect::<Vec<String>>()
+                .join("  ")
+        }
+    )?;
+    if let Some(latest) = task.falsifications.last() {
+        write_falsification_receipt(&mut output, latest)?;
+    }
+    write_changed(
+        &mut output,
+        "Changed since open:",
+        &view.changed_since_open,
+        view.changed_elsewhere,
+    )?;
+    if task.review_of.is_some() {
+        if view.reviewed_target_readable == Some(false) {
+            writeln!(output, "\nReviewed target: unreadable or missing")?;
+        } else {
+            write_changed(
+                &mut output,
+                "Reviewed target changed since open:",
+                &view.reviewed_changed_since_open,
+                view.reviewed_changed_elsewhere,
+            )?;
+        }
+    }
     if task.findings.is_empty() {
         writeln!(output, "\nFindings:\n  none recorded")?;
     } else {
@@ -2429,7 +2939,14 @@ fn write_task(
             }
         }
     }
-    if let Some(current) = view.review_current {
+    if view.review_accepted == Some(false) {
+        let target = task.review_of.as_ref().expect("review target");
+        writeln!(
+            output,
+            "\nReview of task::{}: NOT ACCEPTED YET; current approval: NO",
+            target.task
+        )?;
+    } else if let Some(current) = view.review_current {
         let target = task.review_of.as_ref().expect("review target");
         writeln!(
             output,
@@ -2533,6 +3050,10 @@ fn write_questions(output: &mut impl Write, task: &Task) -> io::Result<()> {
 
 fn write_decisions(output: &mut impl Write, task: &Task, floor: Option<u8>) -> io::Result<()> {
     let floor = match floor {
+        Some(0) => format!(
+            "role::{} sets a 0% decision floor, so no decision blocks the task",
+            task.role
+        ),
         Some(floor) => format!(
             "role::{} blocks the task on a decision below {floor}% confidence",
             task.role
@@ -2875,6 +3396,9 @@ pub(super) fn resolved(project: &Project, task: &Task) -> task::Resolution {
         }
         None => task::resolve(task, &[], &[], "unstated", &contracts),
     };
+    if !task.lenses.is_empty() {
+        resolution.lenses.clone_from(&task.lenses);
+    }
     resolution.knowledge_fingerprints = knowledge_fingerprints(project);
     resolution.review_current = review_freshness(project, task);
     resolution

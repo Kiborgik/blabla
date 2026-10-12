@@ -43,13 +43,14 @@ Use the packs your role consults, not the ones in this example. `task show` prin
 
 ## Evidence that stays current
 
-- Opening a task snapshots the tree. Each deliverable must change from that snapshot
+- Opening a task snapshots the tree. Each deliverable must change from that snapshot. A path that becomes ignored later no longer counts as a change
 - Live write scopes never overlap; reads may. A scope is project-relative: absolute, `..` and symlink paths are refused. Inputs and deliverables also refuse skipped and ignored paths
 - Evidence covers the scope and deliverables, or the `--input` list you declare. It binds the exact check, its arguments, the acceptance epoch and the input digests. A new acceptance starts a new epoch, even for the same model
 - `task evidence --run` runs an argv check from the project root with no shell and no timeout, so pick a bounded check. For a text check, run it yourself and record `--exit CODE --tool TOOL`
-- READY needs current passing evidence, current lens assessments and a fresh challenge receipt. Relevant edits or findings void the receipt; unrelated work does not
+- READY needs current passing evidence, current lens assessments and a fresh challenge receipt. Relevant edits or new findings void the receipt; resolving a finding and unrelated work do not
 - Lenses: every pack the role consults, or only the packs named with `task open --lens PACK`. A pack the role does not consult is refused
-- `task show` prints the latest evidence (tool, epoch, exit, log) and every lens assessment; `task evidence --run` prints the same receipt
+- `task show` prints the latest evidence (tool, epoch, exit, log) and every lens assessment; `task evidence --run` prints the same receipt. It also lists the falsify paths and the latest falsification, the paths changed since the task opened and, for a review, the paths its target changed
+- `task open --falsify PATH` names production files the check must catch. `task falsify NAME` copies the tree into the task's scratch and runs the check there twice: on the current files, then with those paths as they were at open. Hand-back needs a pass, then a failure, with the inputs unchanged since. Any non-zero exit counts as a failure, a compile error included, so read the opened log: a build error there proves nothing about a test. Tests reach the change through a surface that existed before it, and the check keeps running after a failure (`cargo test --no-fail-fast`). The working tree is never touched. Falsify judges the whole check: a new test that passes on old code hides behind one that fails, so declare a narrow check for the test that matters. A check that names the project by absolute path reads the real tree in both runs and never counts
 - CLOSE checks it all again. Task acceptance and project verification answer different questions
 
 | Need | Command (add `--model M` where `--help` asks) |
@@ -59,9 +60,10 @@ Use the packs your role consults, not the ones in this example. `task show` prin
 | fix the check or its inputs | `task check NAME --input PATH… --argv PROG ARG…` |
 | widen scope and fix the check at once | `task check NAME --add-scope PATH… --argv PROG ARG…` |
 | change deliverables or scope | `task deliverable NAME --add\|--remove PATH`; `task scope NAME --add PATH` |
-| withdraw | `task withdraw NAME --reason "…"`; changed paths stay challenged until restored or `task reconcile-withdrawal`, which can go stale |
+| change the statement | `task statement NAME "…"`; the hand-back must be challenged again |
+| withdraw | `task withdraw NAME --reason "…"`; changed paths stay challenged until restored or `task reconcile-withdrawal` names a CLOSED successor with current evidence whose inputs or deliverables cover them; a reconciliation goes stale when the path changes again |
 
-Scope, check, attribution and withdrawal changes are the orchestrator's. BlaBla options go before `--argv`; `--input` replaces the whole input list. After hand-back, the orchestrator checks records it made during the carry and runs `task confirm` once before `task close`. A task assigned to role `orchestrator` needs no confirmation: its own records never count as made during a carry.
+Scope, check, attribution and withdrawal changes are the orchestrator's. BlaBla options go before `--argv` and `--check-argv`: everything after them is the check, and an argument there that matches a BlaBla option is kept and reported. `--input` replaces the whole input list. After hand-back, the orchestrator checks records it made during the carry and runs `task confirm` once before `task close`. A task assigned to role `orchestrator` needs no confirmation: its own records never count as made during a carry.
 
 Running several tasks at once: author the rules for work not started yet in a `draft` contract and promote it to `use` when its task opens. An active RED rule keeps `finish` from passing, and closing any task needs a current passing `finish`.
 
@@ -82,18 +84,22 @@ blabla task open review-cache --role reviewer --statement "Review cache repair" 
   --review-of fix-cache --check-argv cargo test --release --test cache
 ```
 
-A review binds the target's current state. If the target changes, the review is accepted, checked and challenged again. An old CLOSED review gives no current approval; open a new one. Each `task lens NAME PACK "…"` binds the model, the epoch and the pack.
+A review binds the target's current state. Findings recorded on the target and their resolutions do not change that state; edits and a worker's `task addressed` do. If the target changes, the review is accepted, checked and challenged again. An old CLOSED review gives no current approval; open a new one. Each `task lens NAME PACK "…"` binds the model, the epoch and the pack.
 
 `--model` and task records are claims, not authentication. Records the orchestrator makes while a worker carries a task stay unconfirmed: READY is allowed, CLOSE is refused until `task confirm`.
 
 ## Challenge
 
-`blabla challenge NAME` reports the one strongest contradiction it can ground. With a task that is not CLOSED or WITHDRAWN it exits 0 when the hand-back is clear and 1 when it is blocked; otherwise exit 1 means a project challenge stands. It reads no code meaning; silence means no contradiction was found, not approval. Classes:
+`blabla challenge NAME` reports the one strongest contradiction it can ground; a class that blocks the hand-back comes before a project-level one. With a task that is not CLOSED or WITHDRAWN it exits 0 when the hand-back is clear and 1 when it is blocked; otherwise exit 1 means a project challenge stands. It reads no code meaning; silence means no contradiction was found, not approval. Classes:
 
 - **Task record**: `unresolved-finding`, `deliverable-unchanged`, `scope-breach`, `work-without-acceptance`, `attribution-unknown`
 - **Roles and decisions**: `model-outside-role-policy`, `exception-unresolved`, `decision-unanswered`, `question-unpicked`, `orchestrator-record-during-carry`
-- **Evidence**: `declared-check-failed`, `readiness-without-evidence`, `evidence-superseded`, `review-target-stale`, `lens-unassessed`, `unobservable-task-input`
+- **Evidence**: `declared-check-failed`, `readiness-without-evidence`, `evidence-superseded`, `review-target-stale`, `lens-unassessed`, `unobservable-task-input`, `check-not-falsified`
 - **Project**: `vacuous-rule`, `verification-not-current`, `withdrawal-residue`, `goal-outcome-unmet`
+
+## Upgrading task records to 0.11
+
+A review recorded before 0.11 on a target that had findings goes stale once, because unaddressed findings and resolutions no longer count as part of the target. Accept it again, rerun its check and challenge it.
 
 ## Upgrading task records to 0.10
 
