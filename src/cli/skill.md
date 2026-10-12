@@ -10,7 +10,7 @@ BlaBla turns behavioral and structural intent into executable contracts and repo
 
 ## Working under an assignment
 
-A project may hand you a bounded task instead of the whole repository. `blabla task show <name>` prints the assignment -- statement, role, write scope, deliverables, findings, declared check, scratch -- then the routes below, in the order they are taken. That view is the authority, never this file.
+A project may hand you a bounded task instead of the whole repository. `blabla task show <name>` prints the assignment -- statement, role, write scope, deliverables, findings, declared check, scratch -- then the routes below, in the order they are taken. That view is the authority, never this file. `task falsify` is offered only when the task names falsify paths.
 {{routes}}
 Run the declared check from the project root. `--tool` is an evidence label, not the command to execute; `--exit` records the command's real exit code.
 Acceptance records that a role took the work through BlaBla, not that it read what it retrieved. Hand-back requires current successful evidence and an explicit assignment challenge receipt. Changes to the task or its inputs require another challenge; resume a READY task with `task accept` before further work. A path outside the write scope is a finding, never a widening; read the whole run before recording it.
@@ -27,8 +27,7 @@ When multiple tasks are open, choose a name explicitly; status never assigns one
 4. `blabla finish`: verifies structure, runs the project's canonical behavior verification and decides completion (exit 0 only for OVERALL GREEN).
 5. RED: repair using the minimized counterexample or the observed fact. YELLOW: supply the missing witness; NOT COMPLETE. OVERALL GREEN: done.
 
-Read a contract file only when `explain` is not enough. Never edit a `.bla` file to reach GREEN.
-`blabla run -- <application>` is a quick manual check; only `blabla finish` decides completion.
+Read a contract file only when `explain` is not enough. Never edit a `.bla` file to reach GREEN. `blabla run -- <application>` is a quick manual check; only `blabla finish` decides completion.
 
 ## Contract authoring and bootstrap
 
@@ -57,7 +56,7 @@ implementation phase reaches GREEN.
 | `blabla explain system::<name>` | one system: purpose, paths, the responsibilities it owns and its seams |
 | `blabla explain knowledge::<pack>` | one reusable knowledge pack and the id of every ruling in it |
 | `blabla explain flow::<name>` | the order the roles are meant to work in, one line per step |
-| `blabla task <action>` | record one bounded change; `show <name>` prints the routes your role takes next; `open`, `ask`, `resolve`, `attribute`, `deliverable --remove`, `confirm` and `close` are the orchestrator's; a question it asks is picked with `task decide <name> --on <id>` before hand-back; every `--model` is an attestation, not proof |
+| `blabla task <action>` | record one bounded change; `show <name>` prints the routes your role takes next; `open`, `ask`, `resolve`, `attribute`, `deliverable --remove`, `confirm`, `statement` and `close` are the orchestrator's; a question it asks is picked with `task decide <name> --on <id>` before hand-back; every `--model` is an attestation, not proof |
 | `blabla challenge` | one grounded challenge to the current account of the work; without a task, exit 1 when one stands; with a task that is not closed, exit 0 when its assignment check is clear and 1 otherwise |
 | `blabla finish` | structure check plus canonical behavior verification from project.bla; exit 0 only for OVERALL GREEN |
 | `blabla run -- <app>` | manual verification with explicit settings; records the result |

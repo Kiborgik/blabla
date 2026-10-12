@@ -27,6 +27,8 @@ never BlaBla's verdict on it, and every --model is an attestation, not proof.
   blabla task resolve <name> <id> --evidence "..." --model <id>
   blabla task check <name> "..."                     declare the check a record opened without, or
                                                      correct the one it declares
+  blabla task statement <name> "..." --model <id>    replace the statement of a live task; its
+                                                     hand-back must be challenged again
   blabla task confirm <name> --model <id>            after hand-back, confirm the records made
                                                      under an orchestrator model while a worker
                                                      carried the task; refused while it is carried

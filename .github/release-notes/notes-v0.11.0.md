@@ -1,14 +1,14 @@
 # BlaBla 0.11.0
 
-Small coding models drift from the goal and say "done" too early. BlaBla catches that: a human or a strong model writes the intent once, as contracts, and cheap models do bounded work that BlaBla checks. Version 0.11 says this plainly, makes the docs about four times shorter, and fixes the frictions a dogfooding round with small worker models and independent reviewers ran into.
+Small coding models drift from the goal and say "done" too early. BlaBla catches that: a human or a strong model writes the intent once, as contracts, and cheap models do bounded work that BlaBla checks. Version 0.11 adds the check that catches the most common false "done": `task falsify` runs a task's tests against the code as it was before the task, and the hand-back waits until they fail there and pass now. In BlaBla's own dogfooding it caught small-model tests that passed without the change they claimed to prove. The docs are about four times shorter and say the idea plainly, and the frictions two dogfooding rounds with small worker models and independent reviewers ran into are fixed. Falsify's benefit with local models is not measured yet.
 
 ## Added
 
+- `task open --falsify PATH` and `task falsify NAME`: the check runs in a copy of the tree on the current files and on the files as they were at open, and hand-back waits until it passed on the first and failed on the second. It judges the whole check; the copy holds only the tree snapshot, so a check that needs an ignored directory or a file outside the project root reports that it cannot judge
 - `task show` and `task evidence --run` print the latest evidence and the lens assessments
 - `task open --lens PACK` names the lenses a task must assess
 - Every `blabla expert` subcommand describes itself in `--help`
 - Gate steps that fail on a broken markdown link or anchor and on a version mismatch
-- `task open --falsify PATH` and `task falsify NAME`: the check runs in a copy of the tree on the current files and on the files as they were at open, and hand-back waits until it passed on the first and failed on the second
 - `task show` lists what a task changed, its falsify state and a review target's changes; `task finding` prints the new id; `status` splits a goal's unheld expectations into not held, unverified and unresolved
 - `task statement NAME TEXT` amends a live task's statement; an option written after `--check-argv` or `--argv` is reported instead of silently joining the check
 

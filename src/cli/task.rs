@@ -31,6 +31,7 @@ struct TaskView<'a> {
     reviewed_changed_elsewhere: usize,
     swallowed_check_argv: Vec<String>,
     on_disk: BTreeMap<String, String>,
+    routes: Vec<&'static str>,
     authority: &'static str,
 }
 
@@ -113,6 +114,7 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
         reviewed_changed_elsewhere,
         swallowed_check_argv: Vec::new(),
         on_disk,
+        routes: offered_routes(task),
         authority: task::AUTHORITY,
         task,
     }
@@ -3157,7 +3159,7 @@ fn write_orchestrator_records(output: &mut impl Write, task: &Task) -> io::Resul
     Ok(())
 }
 
-pub(super) const ROUTES: [&str; 10] = [
+pub(super) const ROUTES: [&str; 11] = [
     "accept",
     "check",
     "blocker",
@@ -3167,6 +3169,7 @@ pub(super) const ROUTES: [&str; 10] = [
     "decide",
     "lens",
     "challenge",
+    "falsify",
     "hand-back",
 ];
 
@@ -3185,7 +3188,7 @@ fn route_states(route: &str) -> &'static [&'static str] {
             &["open", "accepted", "blocked"]
         }
         "finding" | "challenge" => &["open", "accepted", "blocked", "ready"],
-        "lens" => &["accepted"],
+        "lens" | "falsify" => &["accepted"],
         _ => &[],
     }
 }
@@ -3257,6 +3260,9 @@ fn render_route(
                 "  blabla challenge {name}   ask BlaBla for one contradiction grounded in the record and tree; no challenge is recorded until the command runs"
             )
         }],
+        "falsify" => vec![format!(
+            "  blabla task falsify {name}   runs the declared check in a copy of the tree on the current files, then on the falsify paths as they were at open; hand-back waits until it passed, then failed"
+        )],
         "hand-back" => vec![format!(
             "  blabla task ready {name}   hand back for review; closing it is the orchestrator's, never yours"
         )],
@@ -3291,6 +3297,9 @@ pub(super) fn routes_text(name: &str, check: Option<&str>) -> String {
 }
 
 fn route_lines(route: &str, task: &Task) -> Vec<String> {
+    if route == "falsify" && task.falsify.is_empty() {
+        return Vec::new();
+    }
     route_text(
         route,
         &task.name,
@@ -3298,6 +3307,13 @@ fn route_lines(route: &str, task: &Task) -> Vec<String> {
         task.check_argv.as_deref(),
         Some(&task.state),
     )
+}
+
+fn offered_routes(task: &Task) -> Vec<&'static str> {
+    ROUTES
+        .into_iter()
+        .filter(|route| !route_lines(route, task).is_empty())
+        .collect()
 }
 
 fn write_routes(output: &mut impl Write, task: &Task) -> io::Result<()> {
@@ -3427,6 +3443,7 @@ mod tests {
     #[test]
     fn every_declared_route_puts_a_line_in_the_assignment_view() {
         let mut task = probe_task(Some("cargo test --lib structure"));
+        task.falsify = vec![String::from("src/cli/task.rs")];
         for route in ROUTES {
             let states = route_states(route);
             assert!(!states.is_empty(), "route {route} belongs to no state");

@@ -2,7 +2,7 @@
 
 ## 0.11.0 (2026-10-11)
 
-Shorter, plainer docs around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. Then a dogfooding round, run with small worker models and independent reviewers through BlaBla's own task workflow, fixed the frictions it hit. No contract syntax or exit code changed; task JSON gains optional fields.
+`task falsify` catches a task whose tests pass without the change they claim to prove, by running the check against the code as it was before the task. The docs are shorter and plainer around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. Two dogfooding rounds, run with small worker models and independent reviewers through BlaBla's own task workflow, fixed the frictions they hit. No contract syntax or exit code changed; task JSON gains optional fields.
 
 ### Breaking and upgrade
 
@@ -12,11 +12,11 @@ Shorter, plainer docs around one idea: contracts keep small coding models from d
 
 ### Added
 
+- `task open --falsify PATH` and `task falsify NAME`: the declared check runs in a copy of the tree, on the current files and then on those paths as they were at open. Hand-back is challenged with `check-not-falsified` until the check passed on the first and failed on the second, so a check that passes without the change it claims to prove is caught without a reviewer reading old code. It judges the whole check, not each test in it, and a check that needs an ignored directory or a file outside the project root reports that the copy cannot judge it
 - `task show` prints the latest evidence (tool, acceptance epoch, exit, log) and every lens assessment; `task evidence --run` prints the same receipt
 - `task open --lens PACK` names the subset of the role's consulted packs a task must assess; `task lens --model` must match the accepted model
 - Every `blabla expert` subcommand, at every depth, describes itself in `--help`
 - Product gate steps `docs-links` (relative links and anchors in tracked markdown, exact case) and `versions` (every declared version matches `Cargo.toml`)
-- `task open --falsify PATH` and `task falsify NAME`: the declared check runs in a copy of the tree, on the current files and then on those paths as they were at open. Hand-back is challenged with `check-not-falsified` until the check passed on the first and failed on the second, so a check that passes without the change it claims to prove is caught without a reviewer reading old code. It judges the whole check, not each test in it
 - `task finding` prints the new finding's id. `task show` lists the falsify paths, the latest falsification, the paths changed since the task opened, a review target's changed paths, the task's own lens subset and paths in their on-disk spelling
 - `blabla status` prints the not held, unverified and unresolved counts of a goal that is not fully held, and points `explain` at the first such goal
 - `task statement NAME TEXT` replaces the statement of a task that is not closed or withdrawn, recorded as an orchestrator amendment

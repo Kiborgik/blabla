@@ -319,6 +319,149 @@ step "assign" {
     std::fs::write(root.join("src/thing.rs"), source).unwrap();
 }
 
+fn offered_routes(view: &serde_json::Value) -> Vec<&str> {
+    view["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|route| route.as_str().unwrap())
+        .collect()
+}
+
+#[test]
+fn falsify_route_is_offered_to_an_accepted_task_that_names_falsify_paths() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "falsify-offered",
+                "--role",
+                "worker",
+                "--statement",
+                "offer the falsify route",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--falsify",
+                "src/thing.rs"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "falsify-offered", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    let (view, code) = cli_json(&temp, &["task", "show", "falsify-offered", "--json"]);
+    assert_eq!(code, 0);
+    assert!(offered_routes(&view).contains(&"falsify"), "{view}");
+}
+
+#[test]
+fn falsify_route_is_absent_from_an_accepted_task_without_falsify_paths() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "falsify-unnamed",
+                "--role",
+                "worker",
+                "--statement",
+                "no falsify paths",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "falsify-unnamed", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    let (view, code) = cli_json(&temp, &["task", "show", "falsify-unnamed", "--json"]);
+    assert_eq!(code, 0);
+    assert!(!offered_routes(&view).contains(&"falsify"), "{view}");
+}
+
+#[test]
+fn falsify_route_is_not_offered_once_the_task_is_handed_back() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    std::fs::write(temp.path().join("src/thing.rs"), "fn broken( {\n").unwrap();
+    let scratch = TempDir::new().unwrap();
+    let out_dir = scratch.path().display().to_string();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "falsify-ready",
+                "--role",
+                "worker",
+                "--statement",
+                "hand back after falsify",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--falsify",
+                "src/thing.rs",
+                "--check-argv",
+                "rustc",
+                "--crate-type",
+                "lib",
+                "--emit=metadata",
+                "--out-dir",
+                out_dir.as_str(),
+                "src/thing.rs"
+            ]
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 42 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "falsify-ready", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "falsify-ready", "--run"]),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-ready"]), 0);
+    let (challenge, code) = cli_json(&temp, &["challenge", "falsify-ready", "--json"]);
+    assert_eq!(code, 0, "{challenge}");
+    assert_eq!(cli_run(&temp, &["task", "ready", "falsify-ready"]), 0);
+    let (view, code) = cli_json(&temp, &["task", "show", "falsify-ready", "--json"]);
+    assert_eq!(code, 0);
+    assert_eq!(view["task"]["state"], "ready");
+    assert!(!offered_routes(&view).contains(&"falsify"), "{view}");
+}
+
 #[test]
 fn cli_accept_records_changed_files_in_json_view() {
     let temp = TempDir::new().unwrap();

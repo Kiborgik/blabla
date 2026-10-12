@@ -37,7 +37,7 @@ New project: `blabla init --agents --command python ./main.py`, then `blabla gui
 
 Done means `finish` reports OVERALL GREEN. GREEN is a bounded check, not a proof.
 
-**Several agents.** An orchestrator opens a task with a write scope and a check. A worker accepts, edits inside the scope, runs the check and hands back. A reviewer looks for defects; the orchestrator closes and runs `finish`. BlaBla refuses a hand-back whose evidence is missing or older than the code. It records work; it does not launch agents.
+**Several agents.** An orchestrator opens a task with a write scope and a check. A worker accepts, edits inside the scope, runs the check and hands back. A reviewer looks for defects; the orchestrator closes and runs `finish`. BlaBla refuses a hand-back whose evidence is missing or older than the code. With `task open --falsify`, it also runs the check against the code as it was before the task and refuses a hand-back whose tests pass without the change. It records work; it does not launch agents.
 
 **Evidence so far.** In one benchmark, Claude Haiku with BlaBla kept behavior and architecture intact on about 29% of the input tokens of a full-prose setup (one model, one project). On real projects, missing acceptance, open findings and stale evidence stayed visible until fixed. The expert layer is experimental and has shown no benefit. [Research](docs/research.md)
 

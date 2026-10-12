@@ -16,7 +16,7 @@ goal "the-orchestrator-asks-what-it-doubts" {
     serves ["steering-cost-over-token-cost", "bounded-workers-free-planners"]
     statement "A question the orchestrator asks gets the worker's pick with a stated confidence before the task can be handed back."
     expect ["contract::questions"]
-    state "active"
+    state "done"
 }
 
 goal "no-process-outlives-its-run" {
@@ -37,63 +37,63 @@ goal "bounded-expert-release-ready-for-review" {
     serves ["truthful-over-convenient", "steering-cost-over-token-cost", "bounded-workers-free-planners"]
     statement "Prepare the bounded 0.10 expert foundation for independent user review while preserving deterministic completion and stating unverified live delivery and benefit honestly. Contract expectations do not replace release checks or user acceptance."
     expect ["contract::expert", "contract::expert-seams", "contract::assignment", "contract::gate", "contract::schedule"]
-    state "active"
+    state "done"
 }
 
 goal "short-plain-docs" {
     serves ["disclosure-over-dumping", "steering-cost-over-token-cost"]
     statement "0.11 says one idea in plain English, far shorter than 0.10 (a target of up to ten times, never at the cost of facts or tables people need): small models drift and claim done too early, so a human or a strong model writes contracts once and cheap models do bounded work against them. The CLI, status and explain stay the detailed reference; history files are not shortened."
     expect ["contract::onboarding"]
-    state "active"
+    state "done"
 }
 
 goal "task-show-prints-evidence" {
     serves ["truthful-over-convenient", "disclosure-over-dumping"]
-    statement "Backlog: the text view of blabla task show prints the latest declared-check result (exit code, log path, epoch) and the recorded lens assessments. Today a reviewer must read --json or run challenge to learn whether the check passed."
+    statement "The text view of blabla task show prints the latest declared-check result (exit code, log path, epoch) and the recorded lens assessments, so a reviewer learns whether the check passed without reading --json or running challenge."
     expect ["workflow::task-show-prints-the-latest-evidence"]
-    state "active"
+    state "done"
 }
 
 goal "expert-commands-describe-themselves" {
     serves ["disclosure-over-dumping"]
-    statement "Backlog: every blabla expert subcommand has a one-line description in --help. Today all twelve print an empty description."
+    statement "Every blabla expert subcommand has a one-line description in --help."
     expect ["onboarding::expert-commands-describe-themselves"]
-    state "active"
+    state "done"
 }
 
 goal "docs-links-are-checked" {
     serves ["truthful-over-convenient"]
-    statement "Backlog: the product gate fails when a relative link or anchor in a tracked markdown file does not resolve. 0.11 shortened and merged many docs and checked links by hand once; nothing keeps them true."
+    statement "The product gate fails when a relative link or anchor in a tracked markdown file does not resolve, so docs that were shortened and merged stay linked."
     expect ["schedule::docs-links-resolve"]
-    state "active"
+    state "done"
 }
 
 goal "self-carried-tasks-skip-self-confirmation" {
     serves ["steering-cost-over-token-cost"]
     statement "A task assigned to role::orchestrator records its own scope or check amendments without an orchestrator-record-during-carry challenge, so the orchestrator never confirms its own records. Tasks carried by any other role keep the challenge and the confirmation. The owner approved this in the 0.11 dogfooding round."
     expect ["attestation::the-orchestrator-carrying-its-own-task-needs-no-confirmation", "attestation::an-orchestrator-record-made-while-a-worker-carries-the-task-is-listed"]
-    state "active"
+    state "done"
 }
 
 goal "tasks-name-their-lenses" {
     serves ["steering-cost-over-token-cost", "bounded-workers-free-planners"]
-    statement "task open --lens PACK names the subset of the role's consulted packs a task must assess, as ruling::design::lens-applicability-follows-responsibility already expects; without it every consulted pack is required, as today. A pack the role does not consult is refused."
+    statement "task open --lens PACK names the subset of the role's consulted packs a task must assess, as ruling::design::lens-applicability-follows-responsibility expects; without it every consulted pack is required. A pack the role does not consult is refused."
     expect ["lenses::a-task-can-name-its-lenses"]
-    state "active"
+    state "done"
 }
 
 goal "tests-prove-their-change" {
     serves ["truthful-over-convenient", "bounded-workers-free-planners"]
-    statement "A task can name the production paths its change touches with task open --falsify; BlaBla then runs the declared check against the opened contents of those paths and refuses hand-back unless the check failed there and passes now. Small-model workers wrote three tests this round that passed without the code they claimed to prove; this makes that visible without a reviewer reading the old code."
+    statement "A task can name the production paths its change touches with task open --falsify; task falsify runs the declared check in a copy of the tree on the current files and on those paths as they were at open, and hand-back is refused until it passed on the first and failed on the second. Small-model workers wrote tests that passed without the code they claimed to prove; this makes that visible without a reviewer reading the old code."
     expect ["falsify::a-task-can-name-the-paths-its-check-must-falsify", "falsify::the-check-is-run-against-the-opened-contents", "falsify::an-unfalsified-check-is-challenged"]
-    state "active"
+    state "done"
 }
 
 goal "versions-agree" {
     serves ["truthful-over-convenient"]
     statement "The product gate fails when the version in Cargo.toml differs from the one in .claude-plugin/plugin.json, CITATION.cff or the issue template placeholders. The version is one decision stored in several files."
     expect ["schedule::versions-agree"]
-    state "active"
+    state "done"
 }
 
 goal "expert-loop-demonstrated-in-real-work" {
