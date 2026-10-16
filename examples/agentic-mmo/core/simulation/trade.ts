@@ -17,6 +17,8 @@ import { hasFeatures } from './history.ts';
 import { createLandTransportPlanner, describeLandTransport, landTransportBlock, landTransportCadence } from './transport.ts';
 import { canAfford, citiesOf, civilizationById, transferCost } from './world.ts';
 
+export type TradePresentation = 'full' | 'compact-trade-v1';
+
 type TradeAction = Extract<
   GameAction,
   { type: 'propose-trade' | 'respond-trade' | 'withdraw-trade' | 'stop-trade' }
@@ -62,7 +64,21 @@ function describeTradeEndpoints(state: WorldState, from: City, to: City): string
   return `${from.name} (${from.id}): ${describeSettlementSite(state, origin)}. ${to.name} (${to.id}): ${describeSettlementSite(state, destination)}. Straight-line hex distance ${hexDistance(origin, destination)}; not a traversed path or travel time. Supplies remain shared across each civilization.`;
 }
 
-export function availableTradeActions(state: WorldState, seat: number): ActionOption[] {
+function compactDistance(state: WorldState, from: City | undefined, to: City | undefined): string {
+  const origin = from ? state.tiles.find(tile => tile.id === from.tileId) : undefined;
+  const destination = to ? state.tiles.find(tile => tile.id === to.tileId) : undefined;
+  return origin && destination ? `Straight-line hex distance ${hexDistance(origin, destination)}` : 'Exact endpoint site is missing';
+}
+
+function compactLandReason(quote: NonNullable<ActionOption['tradeQuote']>, authority: string): string {
+  return `Land path in tradeQuote: ${quote.transport.edges} edges; exchange every ${quote.cadenceRounds} rounds, first due ${quote.cadenceRounds} rounds after acceptance. Town facts in tradeFacts; ${authority}`;
+}
+
+function compactProposalReason(state: WorldState, from: City | undefined, to: City | undefined, exact: boolean): string {
+  return `${exact ? '' : `First-city endpoints ${from?.id ?? 'missing'} to ${to?.id ?? 'missing'}; `}${compactDistance(state, from, to)}; town and current recipe facts in tradeFacts`;
+}
+
+export function availableTradeActions(state: WorldState, seat: number, presentation: TradePresentation = 'full'): ActionOption[] {
   const choices: ActionOption[] = [];
   const civilization = civilizationById(state, seat);
   const land = hasFeatures(state, ['land-transport']);
@@ -90,18 +106,22 @@ export function availableTradeActions(state: WorldState, seat: number): ActionOp
           for (const from of citiesOf(state, seat)) for (const to of citiesOf(state, partner.id)) {
             const transport = planner?.quote(from.tileId, to.tileId);
             if (land && !transport) continue;
+            const tradeQuote = transport ? { transport, cadenceRounds: landTransportCadence(recipe.terms.cadenceRounds, transport) } : undefined;
             choices.push({
               action: { type: 'propose-trade', partner: partner.id, recipeId: recipe.id, sourceCityId: from.id, recipientCityId: to.id },
-              ...(transport ? { tradeQuote: { transport, cadenceRounds: landTransportCadence(recipe.terms.cadenceRounds, transport) } } : {}),
+              ...(tradeQuote ? { tradeQuote } : {}),
               label: `Offer ${recipe.id}: ${from.name} to ${to.name}`,
-              reason: `Request consent to these exact towns and recurring terms; no recipient stock is spent by a proposal. ${transport ? `${describeLandTransport(transport, landTransportCadence(recipe.terms.cadenceRounds, transport))}. ` : ''}${describeTradeEndpoints(state, from, to)}`,
+              reason: presentation === 'compact-trade-v1'
+                ? tradeQuote ? compactLandReason(tradeQuote, 'current recipe facts in tradeFacts') : compactProposalReason(state, from, to, true)
+                : `Request consent to these exact towns and recurring terms; no recipient stock is spent by a proposal. ${transport ? `${describeLandTransport(transport, landTransportCadence(recipe.terms.cadenceRounds, transport))}. ` : ''}${describeTradeEndpoints(state, from, to)}`,
             });
           }
         } else choices.push({
           action: { type: 'propose-trade', partner: partner.id, recipeId: recipe.id },
           label: `Offer ${recipe.id} to ${partner.name}`,
-          reason:
-            'Request consent to exact recurring terms; no recipient stock is spent by a proposal',
+          reason: presentation === 'compact-trade-v1' && !land
+            ? compactProposalReason(state, citiesOf(state, seat)[0], citiesOf(state, partner.id)[0], false)
+            : 'Request consent to exact recurring terms; no recipient stock is spent by a proposal',
         });
       }
     }
@@ -122,11 +142,14 @@ export function availableTradeActions(state: WorldState, seat: number): ActionOp
       ) {
         const from = state.cities.find((city) => city.id === offer.from && city.civId === offer.proposer);
         const to = state.cities.find((city) => city.id === offer.to && city.civId === offer.recipient);
+        const tradeQuote = offer.terms.transport ? { transport: structuredClone(offer.terms.transport), cadenceRounds: offer.terms.cadenceRounds } : undefined;
         choices.push({
           action: { type: 'respond-trade', offerId: offer.id, accept: true },
-          ...(offer.terms.transport ? { tradeQuote: { transport: structuredClone(offer.terms.transport), cadenceRounds: offer.terms.cadenceRounds } } : {}),
+          ...(tradeQuote ? { tradeQuote } : {}),
           label: `Accept ${offer.id}`,
-          reason: `Consent to deliveries every ${offer.terms.cadenceRounds} rounds; ${offer.terms.transport ? describeLandTransport(offer.terms.transport, offer.terms.cadenceRounds) : 'first shipment is on a later strategic beat'}${hasFeatures(state, ['exact-trade-endpoints']) && from && to ? `. ${describeTradeEndpoints(state, from, to)}` : ''}`,
+          reason: presentation === 'compact-trade-v1'
+            ? tradeQuote ? compactLandReason(tradeQuote, `snapshotted ${offer.id} terms in tradeOffers`) : `Consent to ${offer.id} and its snapshotted tradeOffers terms every ${offer.terms.cadenceRounds} rounds; first shipment is on a later strategic beat. ${compactDistance(state, from, to)}; town facts in tradeFacts`
+            : `Consent to deliveries every ${offer.terms.cadenceRounds} rounds; ${offer.terms.transport ? describeLandTransport(offer.terms.transport, offer.terms.cadenceRounds) : 'first shipment is on a later strategic beat'}${hasFeatures(state, ['exact-trade-endpoints']) && from && to ? `. ${describeTradeEndpoints(state, from, to)}` : ''}`,
         });
       }
     }

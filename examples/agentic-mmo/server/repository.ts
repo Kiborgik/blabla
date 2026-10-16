@@ -16,7 +16,7 @@ export type HostedTransition = PublicTransition;
 export interface HostedProvenance extends PublicProvenance { actorUserId: string }
 export interface HostedChronicleEntry extends PublicChronicleEntry { provenance: HostedProvenance }
 export interface HostedEntry extends HostedChronicleEntry { state: WorldState }
-export interface HostedReply { ok: true; revision: number; acceptedRevision: number; duplicate?: boolean; remainingTicks?: number; actionOutcome?: ActionOutcome }
+export interface HostedReply { ok: true; revision: number; acceptedRevision: number; duplicate?: boolean; remainingTicks?: number; actionOutcome?: ActionOutcome; operation?: 'strategy-action' | 'strategy-catchup'; strategyTicks?: number; strategyTimestamp?: string; strategyStartRevision?: number; strategyEndRevision?: number }
 export interface HostedWorld { initial: WorldState; state: WorldState }
 
 function assertReply(value: unknown): asserts value is HostedReply {
@@ -36,6 +36,27 @@ function chronicleEntry(value: unknown): HostedChronicleEntry {
   const entry: unknown = { startRevision: row.start_revision, endRevision: row.end_revision, transition: parseJson(row.transition_json), provenance: parseJson(row.provenance_json), events: parseJson(row.events_json) };
   assertChronicleEntry(entry);
   return entry;
+}
+
+type StrategyIntent = { kind: 'action'; action: GameAction } | { kind: 'upkeep'; timestamp: string };
+
+function strategyIntent(input: Record<string, unknown>, timestamp: string): StrategyIntent | null {
+  const action = input.action;
+  if (!isRecord(action) || action.type !== 'strategy-action' && action.type !== 'strategy-catchup') return null;
+  const combined = action.type === 'strategy-action';
+  const fields = ['seat', 'expectedRevision', 'model', 'commandId', 'action', ...(combined ? ['plan'] : [])];
+  if (Object.keys(input).some(key => !fields.includes(key)) || Object.keys(action).length !== 2) throw new RequestFailure(400, 'invalid_strategy_action');
+  boundedInteger(input.seat, 0, 5, 'seat');
+  boundedInteger(input.expectedRevision, 0, Number.MAX_SAFE_INTEGER, 'revision');
+  text(input.model, 'model');
+  text(input.commandId, 'command_id');
+  if (combined) {
+    if (!isGameAction(action.action)) throw new RequestFailure(400, 'invalid_strategy_action');
+    return { kind: 'action', action: action.action };
+  }
+  const at = utc(action.timestamp);
+  if (Date.parse(at) > Date.parse(timestamp)) throw new RequestFailure(400, 'future_timestamp');
+  return { kind: 'upkeep', timestamp: at };
 }
 
 export class WorldRepository {
@@ -107,6 +128,11 @@ export class WorldRepository {
   }
 
   async mutate(operation: HostedTransition['kind'], input: Record<string, unknown>, actorUserId: string, timestamp: string): Promise<HostedReply> {
+    const intent = operation === 'action' ? strategyIntent(input, timestamp) : null;
+    if (intent?.kind === 'upkeep') {
+      const reply = await this.mutate('strategy-catchup', { ...input, timestamp: intent.timestamp }, actorUserId, timestamp);
+      return { ...reply, operation: 'strategy-catchup' };
+    }
     const submittedRevision = boundedInteger(input.expectedRevision, 0, Number.MAX_SAFE_INTEGER, 'revision');
     const commandId = operation === 'director-tick' ? `${text(input.kind, 'tick_kind')}:${text(input.intervalId, 'interval_id')}` : text(input.commandId, 'command_id');
     const key = `${operation}:${commandId}`;
@@ -119,7 +145,7 @@ export class WorldRepository {
         const current = await this.read();
         if (!current) throw new RequestFailure(503, 'world_not_initialized');
         actionLifecycle ||= operation === 'action' && current.state.unlockedFeatures.includes('bounded-plans');
-        const canRebase = operation === 'action' && current.state.independentTurns !== undefined && input.action !== undefined && input.choice === undefined;
+        const canRebase = operation === 'action' && intent === null && current.state.independentTurns !== undefined && input.action !== undefined && input.choice === undefined;
         if (submittedRevision > current.state.revision || (current.state.revision !== submittedRevision && !canRebase)) throw new RequestFailure(409, 'stale_revision');
         const expectedRevision = current.state.revision;
         let transition: HostedTransition;
@@ -127,25 +153,35 @@ export class WorldRepository {
         let remainingTicks: number | undefined;
         let seat = 5;
         let model: string | null = null;
+        let actionState = current.state;
+        let upkeep: { transition: HostedTransition; result: TransitionResult } | null = null;
+        if (intent?.kind === 'action') {
+          const caught = catchUpStrategy(current.state, timestamp);
+          if (!caught.ok) throw new RequestFailure(400, 'engine_refused_transition', { reason: caught.error ?? 'Strategic catchup refused' });
+          if (caught.remainingTicks > 0) throw new RequestFailure(400, 'strategy_backlog_remaining', { remainingTicks: caught.state.revision - expectedRevision + caught.remainingTicks, processedTicks: 0, reason: 'Use explicit upkeep-only to drain the bounded backlog, then observe and choose again' });
+          assertWorld(caught.state);
+          actionState = caught.state;
+          if (caught.state.revision !== expectedRevision) upkeep = { transition: { kind: 'strategy-catchup', expectedRevision, timestamp }, result: caught };
+        }
         if (operation === 'action') {
           model = text(input.model, 'model');
           seat = boundedInteger(input.seat, 0, 5, 'seat');
-          if (!current.state.independentTurns && seat !== current.state.phase) throw new RequestFailure(409, 'wrong_active_seat');
-          const options = legalActions(current.state, seat);
+          if (!actionState.independentTurns && seat !== actionState.phase) throw new RequestFailure(409, 'wrong_active_seat');
+          const options = legalActions(actionState, seat);
           let action: GameAction | undefined;
           if (input.choice !== undefined && input.action !== undefined) throw new RequestFailure(400, 'one_action_selector_required');
           if (input.choice !== undefined) action = options[boundedInteger(input.choice, 0, options.length - 1, 'choice')]?.action;
-          else action = options.find((option) => canonical(option.action) === canonical(input.action))?.action;
+          else action = options.find((option) => canonical(option.action) === canonical(intent?.kind === 'action' ? intent.action : input.action))?.action;
           if (!action) throw new RequestFailure(400, 'illegal_action');
-          const command: Command = { seat, expectedRevision, action, ...(current.state.independentTurns ? { timestamp } : {}) };
+          const command: Command = { seat, expectedRevision: actionState.revision, action, ...(actionState.independentTurns ? { timestamp } : {}) };
           if (input.plan !== undefined) {
             command.observedRevision = submittedRevision;
-            const checked = validateAttachedPlan(current.state, command, input.plan);
+            const checked = validateAttachedPlan(actionState, command, input.plan);
             if (!checked.ok) throw new RequestFailure(400, checked.code, { actionOutcome: { status: 'failed', code: checked.code, reason: checked.error } });
             command.plan = checked.plan;
           }
           transition = { kind: 'action', command };
-          result = applyCommand(current.state, command);
+          result = applyCommand(actionState, command);
         } else if (operation === 'release-apply') {
           model = text(input.model, 'model');
           const command: ReleaseApplyCommand = { expectedRevision, expectedFromReleaseId: text(input.expectedFromReleaseId, 'source_release'), targetReleaseId: text(input.targetReleaseId, 'target_release'), timestamp };
@@ -181,14 +217,19 @@ export class WorldRepository {
         }
         if (!result.ok) throw new RequestFailure(400, result.actionOutcome?.code ?? (result.error?.startsWith('strategy_catchup_required:') ? 'strategy_catchup_required' : 'engine_refused_transition'), { reason: result.error ?? 'Transition refused', ...(result.actionOutcome ? { actionOutcome: result.actionOutcome } : {}), ...(operation === 'action' ? { admission: observe(current.state, seat).admission } : {}) });
         assertWorld(result.state);
-        const reply: HostedReply = { ok: true, revision: result.state.revision, acceptedRevision: result.state.revision, ...(remainingTicks === undefined ? {} : { remainingTicks }), ...(result.actionOutcome ? { actionOutcome: result.actionOutcome } : {}) };
+        const reply: HostedReply = { ok: true, revision: result.state.revision, acceptedRevision: result.state.revision, ...(remainingTicks === undefined ? {} : { remainingTicks }), ...(result.actionOutcome ? { actionOutcome: result.actionOutcome } : {}), ...(intent?.kind === 'action' ? { operation: 'strategy-action' as const, strategyTicks: actionState.revision - expectedRevision, strategyTimestamp: timestamp, strategyStartRevision: expectedRevision, strategyEndRevision: actionState.revision, remainingTicks: 0 } : {}) };
         const provenance: HostedProvenance = { actorUserId, kind: model === null ? 'clock-service' : 'development-agent', model, seat, commandId, recordedAt: timestamp };
         const unchanged = result.state.revision === expectedRevision;
+        const preflightKey = `strategy-before-action:${commandId}`;
+        const preflightStatements = upkeep === null ? [] : [
+          this.database.prepare('INSERT INTO world_transitions (world_id, start_revision, end_revision, receipt_key, transition_json, provenance_json, state_json, events_json) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_state WHERE world_id = ? AND revision = ?)').bind(this.worldId, expectedRevision, upkeep.result.state.revision, preflightKey, JSON.stringify(upkeep.transition), JSON.stringify({ ...provenance, kind: 'clock-service', model: null, seat: 5, commandId: preflightKey }), JSON.stringify(upkeep.result.state), JSON.stringify(upkeep.result.events), this.worldId, expectedRevision),
+        ];
         const statements = unchanged ? [
           this.database.prepare('INSERT OR IGNORE INTO world_receipts (world_id, receipt_key, request_json, response_json) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_state WHERE world_id = ? AND revision = ?)').bind(this.worldId, key, fingerprint, JSON.stringify(reply), this.worldId, expectedRevision),
         ] : [
-          this.database.prepare('INSERT INTO world_transitions (world_id, start_revision, end_revision, receipt_key, transition_json, provenance_json, state_json, events_json) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_state WHERE world_id = ? AND revision = ?)').bind(this.worldId, expectedRevision, result.state.revision, key, JSON.stringify(transition), JSON.stringify(provenance), JSON.stringify(result.state), JSON.stringify(result.events), this.worldId, expectedRevision),
-          this.database.prepare('UPDATE world_state SET revision = ?, state_json = ?, updated_at = ? WHERE world_id = ? AND revision = ? AND EXISTS (SELECT 1 FROM world_transitions WHERE world_id = ? AND receipt_key = ? AND start_revision = ?)').bind(result.state.revision, JSON.stringify(result.state), timestamp, this.worldId, expectedRevision, this.worldId, key, expectedRevision),
+          ...preflightStatements,
+          this.database.prepare('INSERT INTO world_transitions (world_id, start_revision, end_revision, receipt_key, transition_json, provenance_json, state_json, events_json) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_state WHERE world_id = ? AND revision = ?)').bind(this.worldId, actionState.revision, result.state.revision, key, JSON.stringify(transition), JSON.stringify(provenance), JSON.stringify(result.state), JSON.stringify(result.events), this.worldId, expectedRevision),
+          this.database.prepare('UPDATE world_state SET revision = ?, state_json = ?, updated_at = ? WHERE world_id = ? AND revision = ? AND EXISTS (SELECT 1 FROM world_transitions WHERE world_id = ? AND receipt_key = ? AND start_revision = ?)').bind(result.state.revision, JSON.stringify(result.state), timestamp, this.worldId, expectedRevision, this.worldId, key, actionState.revision),
           this.database.prepare('INSERT OR IGNORE INTO world_receipts (world_id, receipt_key, request_json, response_json) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_transitions WHERE world_id = ? AND receipt_key = ?)').bind(this.worldId, key, fingerprint, JSON.stringify(reply), this.worldId, key),
         ];
         const committed = await this.database.batch(statements);

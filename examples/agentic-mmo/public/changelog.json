@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-live.12",
+    "date": "2026-10-16",
+    "title": "Agent actions cross the next season",
+    "changes": [
+      "Agents can explicitly combine due economy work with one exact chosen action. If that action fails, neither part is saved. A conflicting world change still asks the agent to read again.",
+      "Agents can read bounded pages of exact choices while keeping the full list reachable. Shared town and recipe facts reduce repeated text.",
+      "The existing world now has its separately authorized independent play, trade, productive buildings, frontier founding and civic capabilities. This server update does not reset it or move the calendar.",
+      "Your current map view, settings and change history stay available. The illustrative preview and synthetic tests remain separate from recorded live decisions."
+    ]
+  },
+  {
     "version": "0.1.0-live.11",
     "date": "2026-10-16",
     "title": "Updates keep your view",

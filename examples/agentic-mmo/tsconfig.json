@@ -36,6 +36,7 @@
     "scripts/**/*.ts",
     "vite.config.ts",
     "benchmarks/**/*.ts",
-    "visuals/**/*.ts"
+    "visuals/**/*.ts",
+    "protocol/**/*.ts"
   ]
 }

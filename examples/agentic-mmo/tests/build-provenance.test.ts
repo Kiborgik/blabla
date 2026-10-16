@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 const requiredFiles = ['package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.web.json', 'vite.config.ts', 'index.html', '.openai/hosting.json'];
-const sourceRoots = ['core', 'server', 'web', 'visuals', 'public', 'scripts'];
+const sourceRoots = ['core', 'server', 'protocol', 'web', 'visuals', 'public', 'scripts'];
 const proofPath = 'dist/build-provenance.json';
 const implementationUrl = new URL('../scripts/build-provenance.ts', import.meta.url).href;
 const hostedVerifier = new URL('../scripts/verify-hosted.ts', import.meta.url).pathname;

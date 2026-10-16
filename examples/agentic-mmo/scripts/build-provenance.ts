@@ -6,7 +6,7 @@ interface FileDigest { path: string; bytes: number; sha256: string }
 interface InputDigest { inputDigest: string; files: FileDigest[] }
 
 const INPUT_FILES = ['package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.web.json', 'vite.config.ts', 'index.html', '.openai/hosting.json'];
-const INPUT_DIRECTORIES = ['core', 'server', 'web', 'visuals', 'public', 'scripts'];
+const INPUT_DIRECTORIES = ['core', 'server', 'protocol', 'web', 'visuals', 'public', 'scripts'];
 const OUTPUT_DIRECTORIES = ['dist/server', 'dist/.openai'];
 
 function digest(bytes: string | Buffer): string {

@@ -35,6 +35,18 @@ Request `observationFormat: "compact-trade-v1"` in MCP `observe_world`, or `GET 
 
 Omitting the selector preserves the existing response exactly. Unknown, malformed or repeated HTTP format selectors fail with `invalid_observation_format` before SQL; there is no fallback. Both views keep the existing public-read access and MCP origin guard, perform no writes and do not realize overdue time. Numeric choices still require the observed revision. This presentation option neither activates a release nor changes action eligibility. Actual native discovery depends on deploying and refreshing the supported connection; source support alone does not establish that availability.
 
+### Optional complete choice pages
+
+Hosted `observe_world` and `/api/observe` also accept `observationFormat: "compact-trade-pages-v1"`. The first request may select a seat. It returns at most20 full `legalActions` entries, their original global `choice` indexes, stable `actionId` hashes, and `context` containing all compact facts, plans and stored consent. Keep that first context. Continue with the same format and the returned opaque `page.nextCursor` as `choiceCursor`; null means the menu is complete. No page-size override is supported, and subsequent pages omit `context` rather than repeating it. Full action objects and exact quotes are never shortened.
+
+The cursor binds run scope, revision, seat, the first observation timestamp and the complete projected view. Continuations remain eligible **at that original time**, even if the tactical or strategy boundary has since passed. This is not a reservation: submission still uses the existing exact action or global numeric choice and authoritative current admission. On `strategy_catchup_required`, use the supported protected strategy preflight, then observe afresh and choose an action explicitly.
+
+Malformed, oversized, future or conflicting cursors fail with400 before SQL. Changed run/revision/projected facts fail with409 `stale_choice_cursor` and a bounded reason; no fresh page or replacement choices are silently returned. Restart the observation explicitly. A changed catalogue projection can invalidate the cursor even at an unchanged world revision. Keep cursors within the current read session and do not edit or persist them as authority.
+
+Each page still generates the full canonical menu and reads current state once. Paging lowers the initial response but can cost more for complete traversal, and concurrent revision changes can invalidate unfinished traversal. Use `compact-trade-v1` when the entire menu is needed at once. Twenty entries are a count limit, not a universal byte or CPU limit. No read changes world, clock, receipts or access permissions. Existing unpaged formats retain their output. CLI paging is not yet implemented; its existing compact format remains supported unchanged.
+
+Local finite two-recipe fixture,237 choices: actual HTTP first page26,016 bytes versus full compact136,848, and all twelve pages162,982. Complete MCP bodies including both structured and text copies are54,608,285,732 and340,564 bytes respectively. These are serialization/query witnesses from local Worker tests, not managed-host quotas or deployed-tool verification.
+
 ## MCP and explicit enrollment
 
 `POST /mcp` provides stateless Streamable HTTP initialization, ping, tool discovery and calls using protocol version2025-06-18. `GET /mcp` returns405 because there is no SSE stream. It exposes `whoami`, `observe_world`, `initialize_world`, `play_action`, `director_tick` and `catchup_clock`.
@@ -93,6 +105,18 @@ A tactical action at or beyond an unrealized economy boundary returns `strategy_
 There is no verified exact one-minute unattended trigger in the current Site configuration. Supported external wakes or agent preflights can realize beats late; an idle world remains unrealized until one occurs. Read-only Site inspection exposed no linked schedules and no managed database quota or tier, so generic D1 Free-tier limits are not asserted. Transition frames and receipts remain append-only; no pruning or SQL schema migration was added.
 
 Implementation research used the official [D1 transaction documentation](https://developers.cloudflare.com/d1/worker-api/d1-database/) and [retry guidance](https://developers.cloudflare.com/d1/best-practices/retry-queries/). The existing binding uses primary queries without the Sessions API; atomic batches preserve state, transition and receipt together.
+
+## Explicit atomic strategy and action
+
+An enrolled caller may use the existing `play_action` or `POST /api/action` transport with `action: { type: "strategy-action", action: <exact GameAction> }`, its observed `expectedRevision`, `seat`, `model` and stable `commandId`. This explicitly requests due upkeep and the chosen action together. The host captures its UTC timestamp once, requires the original revision, computes at most sixty strategy beats in memory, and then validates the exact inner action against that candidate state. Numeric `choice`, caller timestamps, extra wrapper fields and nested wrappers are refused before database access. An optional bounded plan compares its head to the inner action and retains the original observed revision.
+
+Success commits one transaction containing an upkeep frame when needed, the action frame, final state and one `action:<commandId>` receipt. The reply identifies `operation: "strategy-action"`, `strategyTicks`, `strategyTimestamp`, `strategyStartRevision`, `strategyEndRevision`, `remainingTicks: 0` and the existing accepted revision/outcome. The upkeep frame uses the existing `strategy-catchup` replay kind with system provenance; the action frame preserves the actual model and exact command. No new timeline interpreter or SQL migration is required. If no beat is due, only the action frame is written. Calendar time remains separate.
+
+Any illegal action, unavailable allowance, invalid plan, terminal candidate, stale/CAS conflict or database failure leaves both upkeep and action uncommitted. Strict conflict returns `stale_revision`; observe again and reconsider rather than retarget a choice. A backlog exceeding sixty beats returns `strategy_backlog_remaining`, `processedTicks: 0` and the full number of still-uncommitted `remainingTicks`. No partial catch-up is hidden in this refusal.
+
+For an explicit upkeep-only request through a cached tool catalogue, use `action: { type: "strategy-catchup", timestamp: <explicit observed UTC> }` with the same outer required fields and no `choice` or `plan`. It reuses the protected strategy catch-up operation, its typed receipt namespace and maximum-sixty-beat result. The caller timestamp may not be in the future. Its reply identifies `operation: "strategy-catchup"`; no tactical allowance is spent. A no-op still has an exact receipt. If a backlog remains, make a fresh observation and a separately identified upkeep request, then explicitly choose the next action. Do not reuse an ID with a changed envelope. `action_receipt` reconciles combined action receipts; upkeep-only receipts remain in the existing strategy namespace.
+
+Ordinary unwrapped actions keep their existing zero-effect `strategy_catchup_required` behavior. Neither form runs a model policy or a queued successor. These wrappers require the same enrolled identity and origin policy as the original method; they introduce no credentials or authority. A deployment must be verified before using them on a live run.
 
 ## Attached action plans
 

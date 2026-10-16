@@ -103,7 +103,7 @@ function expected(state: WorldState, seat: number, compact: boolean, time = time
   return compact ? { ...view, ...metadata, legalActions: indexed } : { ...view, ...metadata, choices: indexed };
 }
 
-await test('observation discovery advertises only the optional compact version and retains its read-only hint', async () => {
+await test('observation discovery advertises the optional compact formats and retains its read-only hint', async () => {
   const item = fixture();
   try {
     const response = await item.worker.fetch(new Request('https://world.test/mcp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) }), item.env);
@@ -115,7 +115,7 @@ await test('observation discovery advertises only the optional compact version a
     const schema = object(tool.inputSchema);
     assert.equal(object(tool.annotations).readOnlyHint, true);
     assert.equal(schema.additionalProperties, false);
-    assert.deepEqual(object(object(schema.properties).observationFormat).enum, [format]);
+    assert.deepEqual(object(object(schema.properties).observationFormat).enum, [format, 'compact-trade-pages-v1']);
     assert.equal(Array.isArray(schema.required) && schema.required.includes('observationFormat'), false);
     assert.equal(item.database.reads.length, 0);
   } finally { item.close(); }

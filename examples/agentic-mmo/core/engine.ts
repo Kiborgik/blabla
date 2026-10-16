@@ -1,3 +1,4 @@
+import type { TradePresentation } from './simulation/trade.ts';
 import { observedRecipes } from './simulation/operations.ts';
 import { CIVILIZATIONS, ECONOMY_RULES, validateContent } from './content.ts';
 import { CURRENT_RELEASE } from './release.ts';
@@ -149,7 +150,7 @@ export function legalActions(state: WorldState, seat: number, timestamp?: string
   return availableActions(state, seat, timestamp);
 }
 
-export function observe(state: WorldState, seat: number, timestamp?: string): Observation {
+export function observe(state: WorldState, seat: number, timestamp?: string, tradePresentation: TradePresentation = 'full'): Observation {
   const civilization = state.civilizations.find((candidate) => candidate.id === seat) ?? null;
   const director = seat === DIRECTOR_SEAT;
   const plan = state.actionPlans?.[seat] ?? null;
@@ -190,7 +191,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string): Ob
     ),
     ...(hasFeatures(state, ['public-projects']) ? { publicProjects: (state.publicProjects ?? []).filter((project) => director || project.proposer === seat || project.recipient === seat) } : {}),
     recentEvents: state.events.slice(-12),
-    legalActions: legalActions(state, seat, timestamp),
+    legalActions: availableActions(state, seat, timestamp, tradePresentation),
     outcome: state.outcome,
   });
 }

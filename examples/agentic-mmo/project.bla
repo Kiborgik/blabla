@@ -25,6 +25,7 @@ draft behavior "contracts/action-receipts.bla"
 draft behavior "contracts/land-transport.bla"
 draft behavior "contracts/operating-resource-exchange.bla"
 draft behavior "contracts/choice-pages.bla"
+draft behavior "contracts/strategy-actions.bla"
 verify behavior {
   command ["node", "cli/adapter.ts"]
   seed 1701

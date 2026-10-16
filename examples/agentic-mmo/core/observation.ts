@@ -1,6 +1,5 @@
 import { ECONOMY_RULES, RESOURCE_IDS, SETTLEMENT_SITE_OUTPUTS, TRADE_RECIPES } from './content.ts';
 import { observe } from './engine.ts';
-import { hexDistance } from './simulation/geography.ts';
 import { hasFeatures } from './simulation/history.ts';
 import { siteProduction } from './simulation/sites.ts';
 import type { City, GameAction, Observation, Resource, Resources, Terrain, TradeTerms, WorldState } from './types.ts';
@@ -37,7 +36,7 @@ function resourceVector(value: Partial<Resources>): Partial<Resources> {
 }
 
 export function observeCompactTrade(state: WorldState, seat: number, timestamp?: string): CompactTradeObservation {
-  const observation = observe(state, seat, timestamp);
+  const observation = observe(state, seat, timestamp, 'compact-trade-v1');
   const cities = new Map(state.cities.map(city => [city.id, city]));
   const tiles = new Map(state.tiles.map(tile => [tile.id, tile]));
   const referencedCities = new Set<string>();
@@ -66,26 +65,7 @@ export function observeCompactTrade(state: WorldState, seat: number, timestamp?:
   for (const offer of offers.values()) referencePair(offer.from, offer.to);
   for (const route of routes.values()) referencePair(route.from, route.to);
   for (const item of observation.actionPlan?.items ?? []) referenceAction(item.action);
-  const distance = (from: City | undefined, to: City | undefined): string => {
-    const origin = from ? tiles.get(from.tileId) : undefined;
-    const destination = to ? tiles.get(to.tileId) : undefined;
-    return origin && destination ? `Straight-line hex distance ${hexDistance(origin, destination)}` : 'Exact endpoint site is missing';
-  };
-  for (const option of observation.legalActions) {
-    const action = option.action;
-    referenceAction(action);
-    if (option.tradeQuote && (action.type === 'propose-trade' || action.type === 'respond-trade' && action.accept)) {
-      const quote = option.tradeQuote;
-      const authority = action.type === 'propose-trade' ? 'current recipe facts in tradeFacts' : `snapshotted ${action.offerId} terms in tradeOffers`;
-      option.reason = `Land path in tradeQuote: ${quote.transport.edges} edges; exchange every ${quote.cadenceRounds} rounds, first due ${quote.cadenceRounds} rounds after acceptance. Town facts in tradeFacts; ${authority}`;
-    } else if (action.type === 'propose-trade' && !hasFeatures(state, ['land-transport'])) {
-      const [from, to] = endpoints(action);
-      option.reason = `${exact ? '' : `First-city endpoints ${from?.id ?? 'missing'} to ${to?.id ?? 'missing'}; `}${distance(from, to)}; town and current recipe facts in tradeFacts`;
-    } else if (action.type === 'respond-trade' && action.accept) {
-      const offer = offers.get(action.offerId);
-      if (offer && !offer.terms.transport) option.reason = `Consent to ${offer.id} and its snapshotted tradeOffers terms every ${offer.terms.cadenceRounds} rounds; first shipment is on a later strategic beat. ${distance(cities.get(offer.from), cities.get(offer.to))}; town facts in tradeFacts`;
-    }
-  }
+  for (const option of observation.legalActions) referenceAction(option.action);
   const townFacts: TradeTownFact[] = [];
   for (const id of [...referencedCities].toSorted()) {
     const city = cities.get(id);

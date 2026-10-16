@@ -13,7 +13,7 @@ import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
 import { canAfford, citiesOf } from './world.ts';
 import { availablePublicProjectActions } from './public-projects.ts';
-import { availableTradeActions } from './trade.ts';
+import { availableTradeActions, type TradePresentation } from './trade.ts';
 import { orderedBuildings, paidRecipe } from './operations.ts';
 import { canAct } from './turns.ts';
 
@@ -35,6 +35,7 @@ export function availableActions(
   state: WorldState,
   seat: number,
   timestamp?: string,
+  tradePresentation: TradePresentation = 'full',
 ): ActionOption[] {
   if (!canAct(state, seat, timestamp)) return [];
   const choices: ActionOption[] = [];
@@ -182,7 +183,7 @@ export function availableActions(
       }
     }
   }
-  choices.push(...availableTradeActions(state, seat), ...availablePublicProjectActions(state, seat));
+  choices.push(...availableTradeActions(state, seat, tradePresentation), ...availablePublicProjectActions(state, seat));
   if (actionFeatureAvailable(state, 'repair-city') && canAfford(civilization.resources, ECONOMY_RULES.repair.cost)) {
     for (const city of cities.filter((candidate) => candidate.damage > 0)) {
       choices.push({

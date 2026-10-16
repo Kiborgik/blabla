@@ -1,6 +1,7 @@
 import { DIRECTOR_EVENTS, TURN_RULES } from '../core/content.ts';
 import { observe } from '../core/engine.ts';
 import { observeCompactTrade } from '../core/observation.ts';
+import { CHOICE_PAGE_FORMAT, ChoicePageError, createChoicePage, parseChoicePageRequest } from '../protocol/choice-pages.ts';
 import { type D1Database, WorldRepository } from './repository.ts';
 import type { PublicProvenance, PublicWorldRead } from './public-protocol.ts';
 import { boundedInteger, record, RequestFailure } from './validation.ts';
@@ -16,9 +17,9 @@ const planField = { type: 'array', maxItems: TURN_RULES.maximumPlanItems, items:
 const tools = [
   { name: 'whoami', description: 'Return this authenticated caller’s Site-scoped identity for explicit operator enrollment.', inputSchema: { ...objectSchema, properties: {} }, annotations: { readOnlyHint: true } },
   { name: 'action_receipt', description: 'Read this enrolled caller’s accepted action command ID and its original committed revision without changing the world. not_found means no matching receipt in the reported revision snapshot; it does not diagnose denial or authorize a retry. Preserve the original request and permission boundary.', inputSchema: { ...objectSchema, properties: { commandId: stringField }, required: ['commandId'] }, annotations: { readOnlyHint: true } },
-  { name: 'observe_world', description: 'Read the persistent world, action-plan readiness and admission times for one seat. Optional observationFormat compact-trade-v1 factors trade facts and returns every indexed legalActions entry without a duplicate choices list. If strategy is due, this enrolled caller can invoke catchup_strategy, then observe again before choosing an action.', inputSchema: { ...objectSchema, properties: { seat: { type: 'integer', minimum: 0, maximum: 5 }, observationFormat: { enum: ['compact-trade-v1'] } } }, annotations: { readOnlyHint: true } },
+  { name: 'observe_world', description: 'Read the persistent world, action-plan readiness and admission times for one seat. Optional observationFormat compact-trade-v1 returns every indexed choice at once. compact-trade-pages-v1 returns20 complete choices and context only on the first page; pass choiceCursor to continue the same revision and observation time. Stale cursors require a fresh first page. Paging does not reserve or execute actions. If strategy is due, this enrolled caller can invoke catchup_strategy, then observe again before choosing an action.', inputSchema: { ...objectSchema, properties: { seat: { type: 'integer', minimum: 0, maximum: 5 }, observationFormat: { enum: ['compact-trade-v1', CHOICE_PAGE_FORMAT] }, choiceCursor: { type: 'string', minLength: 1, maxLength: 2048 } } }, annotations: { readOnlyHint: true } },
   { name: 'initialize_world', description: 'Initialize a clearly named new online world once; never replace an existing world.', inputSchema: { ...objectSchema, properties: { seed: { type: 'integer' }, clockEpoch: stringField, commandId: stringField }, required: ['seed', 'clockEpoch', 'commandId'] } },
-  { name: 'play_action', description: 'Submit one model-chosen action with an optional plan of at most two reasoned items after bounded-plans is released. The head must equal this action; the successor is never autoexecuted. Exact actions are revalidated after unrelated commits; indexed choices remain revision-strict. Preserve the observed cityId or sourceCityId exactly; released city specialization requires a named owned city for focus and build. Released repair-city also requires the exact owned damaged city and current resources. On strategy_catchup_required, call catchup_strategy until remainingTicks is zero, observe afresh and explicitly choose the next submission. Server time enforces the actor budget.', inputSchema: { ...objectSchema, properties: { seat: { type: 'integer', minimum: 0, maximum: 5 }, expectedRevision: revisionField, choice: { type: 'integer', minimum: 0 }, action: { type: 'object' }, plan: planField, model: stringField, commandId: stringField }, required: ['seat', 'expectedRevision', 'model', 'commandId'] } },
+  { name: 'play_action', description: 'Submit one model-chosen action. Explicit action {type: strategy-action, action: <exact typed game action>} atomically realizes up to60 due strategy beats and that action at one server timestamp; any refusal leaves both unchanged. It requires the observed revision, forbids choice indexes, and compares an optional plan head to the inner action. For larger backlogs use action {type: strategy-catchup, timestamp: <explicit observed UTC>} as upkeep-only, inspect remainingTicks, then observe and choose. These explicit envelopes use the same enrolled authority and stable commandId receipts. Ordinary actions retain zero-effect strategy_catchup_required refusal. An ordinary action accepts an optional plan of at most two reasoned items after bounded-plans is released. The head must equal this action; the successor is never autoexecuted. Exact actions are revalidated after unrelated commits; indexed choices remain revision-strict. Preserve the observed cityId or sourceCityId exactly; released city specialization requires a named owned city for focus and build. Released repair-city also requires the exact owned damaged city and current resources. On strategy_catchup_required, call catchup_strategy until remainingTicks is zero, observe afresh and explicitly choose the next submission. Server time enforces the actor budget.', inputSchema: { ...objectSchema, properties: { seat: { type: 'integer', minimum: 0, maximum: 5 }, expectedRevision: revisionField, choice: { type: 'integer', minimum: 0 }, action: { type: 'object' }, plan: planField, model: stringField, commandId: stringField }, required: ['seat', 'expectedRevision', 'model', 'commandId'] } },
   { name: 'director_tick', description: 'Submit an idempotent Director event, review or exact clock interval.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, kind: { enum: ['event', 'review', 'clock'] }, intervalId: stringField, timestamp: stringField, event: { enum: DIRECTOR_EVENTS.map((event) => event.id) }, target: { type: 'integer', minimum: 0, maximum: 4 }, model: stringField }, required: ['expectedRevision', 'kind', 'intervalId', 'timestamp'] } },
   { name: 'catchup_clock', description: 'Realize due six-minute clock intervals through an explicit timestamp. Process at most240 due ticks and inspect remainingTicks. A late scheduler realizes due ticks late.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, timestamp: stringField, commandId: stringField, model: stringField }, required: ['expectedRevision', 'timestamp', 'commandId'] } },
   { name: 'catchup_strategy', description: 'Any enrolled agent can preflight its own action by realizing up to 60 due economy beats through an explicit UTC timestamp. Read remainingTicks, continue bounded batches with fresh revision and unique command IDs until zero, then observe and choose a real action. No other actor or scheduler wake is required; idle worlds may realize beats late.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, timestamp: stringField, commandId: stringField, model: stringField }, required: ['expectedRevision', 'timestamp', 'commandId'] } },
@@ -99,20 +100,29 @@ function repository(environment: WorkerEnvironment): WorldRepository {
   return new WorldRepository(environment.DB, environment.WORLD_ID ?? 'main');
 }
 
-async function observation(store: WorldRepository, timestamp: string, seat?: unknown, observationFormat?: unknown): Promise<unknown> {
-  if (observationFormat !== undefined && observationFormat !== 'compact-trade-v1') throw new RequestFailure(400, 'invalid_observation_format');
-  const current = await store.read();
-  if (!current) throw new RequestFailure(503, 'world_not_initialized');
-  const selected = seat === undefined ? current.state.phase : boundedInteger(seat, 0, 5, 'seat');
-  const view = observationFormat === undefined ? observe(current.state, selected, timestamp) : observeCompactTrade(current.state, selected, timestamp);
-  const hosted = { ...view, serverTimestamp: timestamp, releaseId: current.state.releaseId, unlockedFeatures: current.state.unlockedFeatures, calendarMilestones: current.state.calendarMilestones, clockEpoch: current.state.clockEpoch, clockTicks: current.state.clockTicks };
-  const indexed = view.legalActions.map((option, choice) => ({ choice, ...option }));
-  return observationFormat === undefined ? { ...hosted, choices: indexed } : { ...hosted, legalActions: indexed };
+async function observation(store: WorldRepository, timestamp: string, input: Record<string, unknown>, scope: string): Promise<unknown> {
+  const { observationFormat, ...controls } = input;
+  if (observationFormat !== undefined && observationFormat !== 'compact-trade-v1' && observationFormat !== CHOICE_PAGE_FORMAT) throw new RequestFailure(400, 'invalid_observation_format');
+  if (observationFormat !== CHOICE_PAGE_FORMAT && input.choiceCursor !== undefined) throw new RequestFailure(400, 'invalid_choice_cursor');
+  try {
+    const pageRequest = observationFormat === CHOICE_PAGE_FORMAT ? parseChoicePageRequest(controls, 'host', timestamp) : null;
+    const current = await store.read();
+    if (!current) throw new RequestFailure(503, 'world_not_initialized');
+    if (pageRequest) return await createChoicePage({ ...current, scope }, pageRequest);
+    const selected = input.seat === undefined ? current.state.phase : boundedInteger(input.seat, 0, 5, 'seat');
+    const view = observationFormat === undefined ? observe(current.state, selected, timestamp) : observeCompactTrade(current.state, selected, timestamp);
+    const hosted = { ...view, serverTimestamp: timestamp, releaseId: current.state.releaseId, unlockedFeatures: current.state.unlockedFeatures, calendarMilestones: current.state.calendarMilestones, clockEpoch: current.state.clockEpoch, clockTicks: current.state.clockTicks };
+    const indexed = view.legalActions.map((option, choice) => ({ choice, ...option }));
+    return observationFormat === undefined ? { ...hosted, choices: indexed } : { ...hosted, legalActions: indexed };
+  } catch (failure) {
+    if (failure instanceof ChoicePageError) throw new RequestFailure(failure.status, failure.code, failure.details);
+    throw failure;
+  }
 }
 
 async function callTool(name: string, args: Record<string, unknown>, request: Request, environment: WorkerEnvironment, timestamp: string): Promise<unknown> {
   if (name === 'whoami') return { userId: identity(request), identityScope: 'site', writerEnrolled: (environment.AGENT_WRITER_USER_IDS ?? '').split(',').map((value) => value.trim()).includes(identity(request)) };
-  if (name === 'observe_world') return observation(repository(environment), timestamp, args.seat, args.observationFormat);
+  if (name === 'observe_world') return observation(repository(environment), timestamp, args, environment.WORLD_ID ?? 'main');
   const actor = authorize(request, environment);
   const store = repository(environment);
   switch (name) {
@@ -187,7 +197,14 @@ export function createWorker(assetResponder?: AssetResponder, options: WorkerOpt
               }
               case '/api/observe': {
                 const formats = url.searchParams.getAll('observationFormat');
-                return response(await observation(store, timestamp, url.searchParams.has('seat') ? Number(url.searchParams.get('seat')) : undefined, formats.length > 1 ? formats : formats[0]));
+                const input: Record<string, unknown> = { ...Object.fromEntries(url.searchParams), seat: url.searchParams.has('seat') ? Number(url.searchParams.get('seat')) : undefined, observationFormat: formats.length > 1 ? formats : formats[0] };
+                if (input.observationFormat === CHOICE_PAGE_FORMAT) {
+                  for (const key of new Set(url.searchParams.keys())) {
+                    const values = url.searchParams.getAll(key);
+                    if (values.length > 1) input[key] = values;
+                  }
+                }
+                return response(await observation(store, timestamp, input, environment.WORLD_ID ?? 'main'));
               }
               case '/api/history': {
                 const history = await store.history(Number(url.searchParams.get('after') ?? '0'), Number(url.searchParams.get('limit') ?? '50'));
