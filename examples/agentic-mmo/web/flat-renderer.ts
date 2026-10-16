@@ -17,7 +17,7 @@ import { flatSceneFaces, mapOverlayBounds } from './settlement-parts.ts';
 import { createWorldCues } from './world-cues.ts';
 import { mapLabelVisibility } from './map-labels.ts';
 import { improvementLabel, improvementParts } from '../visuals/improvement-visuals.ts';
-import { districtCaptionPlacement, districtLabel, districtParts } from '../visuals/district-visuals.ts';
+import { districtCaptionPlacement, districtAdjacencySummary, districtLabel, districtParts } from '../visuals/district-visuals.ts';
 
 export function cityScreenMetrics(pixelsPerUnit: number): { targetRadius: number; markerRadius: number; markerFont: number; labelFont: number; labelY: number } {
   const scale = Math.max(0.01, pixelsPerUnit);
@@ -60,7 +60,7 @@ export function createFlatAtlasRenderer(
   const deposits = node('g', { class: 'flat-deposits', 'pointer-events': 'none' });
   const depositNodes: Array<{ parts: SVGGElement; mark: SVGGElement; index: number }> = [];
   const sites = [
-    ...(world.districts ?? []).map(site => ({ ...site, kind: 'district', mark: site.buildingId === 'commercial-hub' ? 'commerce' as const : 'campus' as const, caption: site.name ?? 'Campus', label: districtLabel(site), parts: (level: DetailLevel) => districtParts(site, level) })),
+    ...(world.districts ?? []).map(site => ({ ...site, kind: 'district', mark: site.buildingId === 'industrial-zone' ? 'industry' as const : site.buildingId === 'commercial-hub' ? 'commerce' as const : 'campus' as const, caption: site.name ?? 'Campus', label: districtLabel(site), parts: (level: DetailLevel) => districtParts(site, level) })),
     ...(world.improvements ?? []).map(site => ({ ...site, kind: 'improvement', mark: 'mine' as const, caption: site.name, label: improvementLabel(site), parts: (level: DetailLevel) => improvementParts(site, level) })),
   ];
   const districtNodes: Array<{ element: SVGGElement; parts: SVGGElement; hit: SVGCircleElement; label: SVGTextElement; leader: SVGLineElement; mark: SVGGElement; markLeader: SVGLineElement; index: number; placed: boolean }> = [];
@@ -128,7 +128,7 @@ export function createFlatAtlasRenderer(
   for (const [index, district] of sites.entries()) {
     const point = hexPosition(district.q, district.r);
     const group = node('g', { class: `flat-district flat-${district.kind}`, 'data-district-id': district.id, 'data-tile-id': String(district.tileId), 'data-status': district.status,
-      transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${district.label} of ${district.townName}, tile ${district.tileId}` });
+      transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${district.label} of ${district.townName}, tile ${district.tileId}${'adjacency' in district && district.adjacency ? `. ${districtAdjacencySummary(district.adjacency)}` : ''}` });
     const parts = node('g', { 'pointer-events': 'none' });
     const hit = node('circle', { class: 'district-hit', fill: 'transparent', r: '1' });
     const label = node('text', { 'text-anchor': 'middle', fill: '#fff5d8', 'font-family': 'Arial, sans-serif', stroke: '#173a3c', 'stroke-width': '.09', 'paint-order': 'stroke', 'pointer-events': 'none' });
@@ -136,6 +136,11 @@ export function createFlatAtlasRenderer(
     label.textContent = district.caption;
     const mark = node('g', { 'pointer-events': 'none', 'aria-hidden': 'true' });
     mark.append(node('circle', { r: '12', fill: '#173a3c', stroke: district.color, 'stroke-width': '2', 'stroke-dasharray': district.status === 'building' ? '3 2' : 'none' }), node('path', { d: SITE_MARK_PATHS[district.mark], transform: 'translate(-9 -9) scale(.75)', fill: 'none', stroke: '#fff3c6', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+    if ('adjacency' in district && district.adjacency?.source === 'improvement') {
+      const bonus = node('text', { x: '0', y: '25', 'text-anchor': 'middle', 'font-size': '11', 'font-family': 'Arial, sans-serif', fill: '#fff3c6', stroke: '#173a3c', 'stroke-width': '3', 'paint-order': 'stroke' });
+      bonus.textContent = `+${district.adjacency.bonus} base`;
+      mark.append(bonus);
+    }
     const markLeader = node('line', { stroke: district.color, 'stroke-width': '1.5', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
     group.append(leader, parts, markLeader, hit, mark, label);
     group.addEventListener('click', () => onSelect(district.cityId));
@@ -224,7 +229,7 @@ export function createFlatAtlasRenderer(
     const targetTop = Math.max(metrics.targetRadius * pixelsPerUnit, Math.max(1.2 * pixelsPerUnit, 17) + metrics.markerRadius * pixelsPerUnit);
     const targetBottom = Math.max(metrics.targetRadius * pixelsPerUnit, metrics.labelY * pixelsPerUnit + 6);
     const townTargets = labelPositions.map((label) => ({ x: label.x, y: label.y - metrics.labelY * pixelsPerUnit - targetTop, width: Math.max(label.width, metrics.targetRadius * pixelsPerUnit * 2), height: targetTop + targetBottom }));
-    const marks = placeSiteMarks(sites.map(site => { const point = hexPosition(site.q, site.r); return { id: site.id, cityId: site.cityId, x: (point.x - box.x) * pixelsPerUnit, y: (point.z - box.y) * pixelsPerUnit }; }), [...townTargets, ...mapOverlayBounds(container)], container.clientWidth, container.clientHeight, selected);
+    const marks = placeSiteMarks(sites.map(site => { const point = hexPosition(site.q, site.r); return { id: site.id, cityId: site.cityId, family: site.mark, x: (point.x - box.x) * pixelsPerUnit, y: (point.z - box.y) * pixelsPerUnit }; }), [...townTargets, ...mapOverlayBounds(container)], container.clientWidth, container.clientHeight, selected);
     for (const entry of districtNodes) {
       const district = sites[entry.index];
       if (!district) continue;

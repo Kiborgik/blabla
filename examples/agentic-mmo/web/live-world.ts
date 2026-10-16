@@ -1,7 +1,7 @@
 import { projectRevealedDeposits } from '../visuals/strategic-resource-visuals.ts';
 import { projectRoutePath, mapTileHeight } from '../visuals/route-paths.ts';
 import { BUILDINGS, ERAS, IMPROVEMENTS } from '../core/content.ts';
-import { buildingBaseProduction } from '../core/simulation/districts.ts';
+import { buildingBaseProduction, districtAdjacencyFacts } from '../core/simulation/districts.ts';
 import type { ImprovementView } from '../visuals/improvement-visuals.ts';
 import type { DistrictView } from '../visuals/district-visuals.ts';
 import type { GameEvent, WorldState } from '../core/types.ts';
@@ -87,7 +87,8 @@ export function projectWorld(state: WorldState): AtlasWorld {
         q: tile.q - centerQ, r: tile.r - centerR, height: mapTileHeight(tile.elevation), color: town.color,
         status: built ? 'built' : 'building', library: attachments.find(item => item.buildingId === 'library')?.status ?? 'absent',
         construction: active && (active.buildingId === definition.id || attachments.some(item => item.buildingId === active.buildingId)) ? structuredClone(active) : null,
-        baseProduction: buildingBaseProduction(state, city, definition, tile.id) }];
+        baseProduction: buildingBaseProduction(state, city, definition, tile.id),
+        ...(definition.district?.adjacency?.improvement ? { adjacency: districtAdjacencyFacts(state, definition, tile.id) } : {}) }];
     });
   }).toSorted((a, b) => a.tileId - b.tileId || a.id.localeCompare(b.id));
   const improvements = state.cities.flatMap((city): ImprovementView[] => {

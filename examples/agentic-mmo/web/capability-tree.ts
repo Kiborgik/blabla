@@ -129,7 +129,7 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
         { label: 'Build once', value: amounts(definition.cost) },
         ...(definition.capabilities?.includes('coastal-departure') ? [{ label: 'Enables', value: 'Coastal departure with Navigation; no operating output' }, { label: 'Site', value: 'A coastal town' }] : [
           { label: 'Uses each operating season', value: amounts(definition.operatingInputs ?? {}) },
-          { label: definition.district ? 'Building base before nearby terrain' : 'Base production before productivity', value: amounts(definition.production) },
+          { label: definition.district?.adjacency?.improvement ? 'Building base before nearby Mines' : definition.district ? 'Building base before nearby terrain' : 'Base production before productivity', value: amounts(definition.production) },
         ]),
       ];
     const worked = input.projection.improvements?.find(entry => entry.nodeId === id);
@@ -157,8 +157,13 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
       const district = row.district;
       facts.push({ label: 'District slots', value: `${district.used} used / ${district.capacity} capacity` });
       if (district.siteId !== null) facts.push({ label: row.construction ? 'Reserved site' : 'Built site', value: `Tile ${district.siteId}` });
-      if (district.siteBaseProduction) facts.push({ label: 'Site base with nearby terrain', value: amounts(district.siteBaseProduction) });
-      for (const site of district.availableSites) facts.push({ label: `Available site ${site.tileId}`, value: `${amounts(site.baseProduction)} base before town productivity` });
+      if (district.siteBaseProduction) facts.push({ label: district.siteAdjacency?.source === 'improvement' ? 'Site base with nearby Mines' : 'Site base with nearby terrain', value: amounts(district.siteBaseProduction) });
+      if (district.siteAdjacency?.source === 'improvement') {
+        const adjacency = district.siteAdjacency;
+        facts.push({ label: 'Completed nearby Mines', value: adjacency.tileIds.length ? adjacency.tileIds.map(tile => `Tile ${tile}`).join(' · ') : 'None' },
+          { label: 'Mine bonus before productivity', value: `${amounts({ [adjacency.resource]: adjacency.bonus })} · Maximum ${adjacency.maximum}. Paused Mines count; unfinished Mines do not.` });
+      }
+      for (const site of district.availableSites) facts.push({ label: `Available site ${site.tileId}`, value: `${amounts(site.baseProduction)} base before town productivity${site.adjacency?.source === 'improvement' ? ` · Completed nearby Mine sites: ${site.adjacency.tileIds.join(', ') || 'None'} · Bonus ${amounts({ [site.adjacency.resource]: site.adjacency.bonus })}` : ''}` });
     }
     if (row?.operation) facts.push({ label: 'Operating now', value: row.operation.enabled ? 'On' : 'Paused' });
     if (row?.construction) facts.push(
@@ -296,6 +301,7 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
     }
     details.append(facts);
     if (node.researchExplanation) details.append(text('p', node.researchExplanation, 'capability-note'));
+    else if (node.facts.some(fact => fact.label === 'Building base before nearby Mines')) details.append(text('p', 'Completed nearby Mines change this site’s base production, including paused Mines. Actual output is recorded on later seasons after completion and depends on town productivity.', 'capability-note'));
     else if (node.facts.some(fact => fact.label === 'Building base before nearby terrain')) details.append(text('p', 'Nearby terrain changes a site’s base production. Actual output also depends on town productivity and is recorded after completion on later seasons.', 'capability-note'));
     else if (node.facts.some(fact => fact.label === 'Base production before productivity')) details.append(text('p', 'Production here is catalogue capacity. Actual paid inputs and output are recorded in the town details.', 'capability-note'));
     details.append(relations(node, nodes, 'leadsTo'));

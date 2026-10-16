@@ -1,3 +1,5 @@
+import type { DistrictAdjacencyFacts } from '../core/simulation/districts.ts';
+import { METRIC_LABELS } from './visual-language.ts';
 import type { ConstructionOrder, Resources } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
@@ -18,6 +20,7 @@ export interface DistrictView {
   library: 'absent' | 'building' | 'built';
   construction: ConstructionOrder | null;
   baseProduction: Partial<Resources>;
+  adjacency?: DistrictAdjacencyFacts | null;
 }
 
 export const DISTRICT_PART_BUDGETS = { far: 12, mid: 18, close: 24 } as const;
@@ -42,6 +45,10 @@ export function districtLabel(district: DistrictView): string {
   return name + attachments.map(item => item.status === 'built' ? ` + ${item.name}` : ` · ${item.name} building`).join('');
 }
 
+export function districtAdjacencySummary(facts: DistrictAdjacencyFacts): string {
+  return `Completed nearby Mines: ${facts.tileIds.length ? facts.tileIds.map(id => `Tile ${id}`).join(', ') : 'None'} · Mine bonus: ${facts.bonus} ${METRIC_LABELS[facts.resource]} base (maximum ${facts.maximum}). Paused Mines still count; unfinished Mines do not.`;
+}
+
 export function districtParts(district: DistrictView, detail: DetailLevel): VisualPart[] {
   const parts: VisualPart[] = [];
   const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale']): void => {
@@ -54,6 +61,22 @@ export function districtParts(district: DistrictView, detail: DetailLevel): Visu
     add('foundation-back', 'box', 'timber', [0, .16, -.55], [1.1, .2, .12]);
     if (detail !== 'far') for (const x of [-.55, .55]) add(`frame-${x}`, 'box', 'timber', [x, .42, -.48], [.09, .72, .09]);
     if (detail === 'close') add('supplies', 'box', 'stone', [0, .2, .25], [.48, .22, .35]);
+  } else if (district.buildingId === 'industrial-zone') {
+    add('industrial-yard', 'box', 'stone', [0, .12, 0], [1.35, .06, 1.12]);
+    add('industrial-wall', 'box', 'stone', [-.16, .32, -.25], [.98, .42, .59]);
+    for (const x of [-.4, .08]) add(`industrial-roof-${x}`, 'gable', 'metal', [x, .66, -.25], [.53, .28, .7]);
+    add('industrial-chimney', 'box', 'stone', [.53, .6, -.36], [.2, 1.02, .22]);
+    const guild = district.attachments?.find(item => item.buildingId === 'guild-workshop');
+    if (guild?.status === 'building') add('guild-foundation', 'box', 'timber', [-.08, .14, .38], [1.08, .12, .41]);
+    else if (guild) {
+      add('guild-wall', 'box', 'timber', [-.08, .31, .38], [1.06, .4, .42]);
+      add('guild-roof', 'gable', 'roof', [-.08, .64, .38], [1.2, .25, .53]);
+    }
+    if (detail !== 'far') {
+      add('industrial-door', 'box', 'timber', [-.16, .27, .06], [.23, .3, .04]);
+      add('industrial-stock', 'box', 'metal', [.54, .22, .36], [.25, .22, .36]);
+    }
+    if (detail === 'close' && guild?.status === 'built') add('guild-sign', 'box', 'grain', [-.08, .4, .62], [.22, .15, .04]);
   } else if (district.buildingId === 'commercial-hub') {
     add('commerce-court', 'box', 'grain', [0, .12, 0], [1.3, .06, 1.1]);
     for (const x of [-.48, .48]) {

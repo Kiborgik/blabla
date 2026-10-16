@@ -1,5 +1,5 @@
 import { DISTRICT_RULES, IMPROVEMENT_RULES, RESOURCE_IDS } from '../content.ts';
-import type { BuildingDefinition, City, Resources, WorldState } from '../types.ts';
+import type { BuildingDefinition, City, Resource, Resources, WorldState } from '../types.ts';
 import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
 
@@ -33,15 +33,31 @@ export function availableDistrictSites(state: WorldState, city: City, building: 
   return state.tiles.filter(tile => districtSiteBlock(state, city, building, tile.id) === null).map(tile => tile.id).toSorted((a, b) => a - b);
 }
 
+export interface DistrictAdjacencyFacts {
+  source: 'terrain' | 'improvement';
+  tileIds: number[];
+  resource: Resource;
+  amount: number;
+  maximum: number;
+  bonus: number;
+}
+
+export function districtAdjacencyFacts(state: WorldState, building: BuildingDefinition, tileId: number): DistrictAdjacencyFacts | null {
+  const rule = building.district?.adjacency;
+  const site = state.tiles.find(tile => tile.id === tileId);
+  if (!rule || !site || !hasFeatures(state, [DISTRICT_RULES.featureId])) return null;
+  const installations = rule.improvement === undefined ? null : new Set(state.cities.flatMap(city => Object.values(city.improvements ?? {}).filter(improvement => improvement.improvementId === rule.improvement).map(improvement => improvement.tileId)));
+  const tileIds = state.tiles.filter(tile => hexDistance(site, tile) === 1 && (installations ? installations.has(tile.id) : tile.terrain === rule.terrain)).map(tile => tile.id).toSorted((left, right) => left - right);
+  return { source: installations ? 'improvement' : 'terrain', tileIds, resource: rule.resource, amount: rule.amount, maximum: rule.maximum, bonus: Math.min(rule.maximum, tileIds.length * rule.amount) };
+}
+
 export function buildingBaseProduction(state: WorldState, city: City, building: BuildingDefinition, tileId = city.districtSites?.[building.id]): Partial<Resources> {
   const result = { ...building.production };
   if (!building.district || !hasFeatures(state, [DISTRICT_RULES.featureId])) return result;
   const site = state.tiles.find(tile => tile.id === tileId);
   if (!site) return {};
-  const rule = building.district.adjacency;
-  if (!rule) return result;
-  const count = state.tiles.filter(tile => tile.terrain === rule.terrain && hexDistance(site, tile) === 1).length;
-  result[rule.resource] = (result[rule.resource] ?? 0) + Math.min(rule.maximum, count * rule.amount);
+  const adjacency = districtAdjacencyFacts(state, building, site.id);
+  if (adjacency) result[adjacency.resource] = (result[adjacency.resource] ?? 0) + adjacency.bonus;
   return result;
 }
 

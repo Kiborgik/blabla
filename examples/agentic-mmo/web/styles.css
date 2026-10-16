@@ -1269,3 +1269,5 @@ dialog h2 {
 .deposit-map-mark { position: absolute; width: 14px; height: 14px; transform: translate(-50%, -100%); pointer-events: none; border-radius: 50%; background: #edf1e6; color: #293c43; border: 1px solid currentColor; }
 .deposit-map-mark svg { fill: none; stroke: currentColor; stroke-width: 2; }
 .district-label { pointer-events: none; }
+
+.site-base-bonus { position: absolute; top: 33px; left: 50%; transform: translateX(-50%); white-space: nowrap; color: #fff3c6; background: #173a3c; padding: 0 2px; font: 11px Arial, sans-serif; }

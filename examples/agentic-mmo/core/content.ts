@@ -19,7 +19,7 @@ export const CIVILIZATIONS: CivilizationDefinition[] = [
 
 export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, perPaidRecipe: 3 } as const;
 
-export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14 } } as const;
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
 
 export const BUILDING_CAPABILITY_ACTIONS: Record<BuildingCapability, readonly GameAction['type'][]> = { 'coastal-departure': ['settle-coast'] };
 export const RESEARCH_INVESTMENT_RULES = { ruleVersion: 1, featureId: 'productive-research', budget: 'current-city-science-output' } as const;
@@ -29,11 +29,14 @@ export const IMPROVEMENT_RULES = { ruleVersion: 1, featureId: 'worked-land', hil
 
 export const CONNECTED_RESEARCH_PACING = { ruleVersion: 1, featureId: 'learning-commerce', multiplier: 3, baseCosts: { 'bronze-working': 36, currency: 42, mathematics: 44, education: 72, banking: 120 } } as const;
 
+export const MANUFACTURING_RESEARCH_PACING = { ruleVersion: 1, featureId: 'manufacturing', multiplier: 3, baseCosts: { 'iron-working': 48, apprenticeship: 68 } } as const;
+
 export const METAL_RULES = { ruleVersion: 1, featureId: 'finite-metals', resource: 'iron', revealTechnology: 'bronze-working', capacityPerCity: 40, extractionPerBeat: 2, initialReserve: 240, placement: { id: 'iron-placement-1', maximumDeposits: 8, frontierMinimumDistance: 2, ownedSiteRange: 3, seedMultiplier: 0x9e3779b1, mixMultipliers: [0x7feb352d, 0x846ca68b], hillOnly: true } } as const;
 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'manufacturing', name: 'Connected local manufacturing', description: 'Iron working and Apprenticeship connect real worked Mine sites to Industrial zones and resident-supported Guild workshops.' },
   { id: 'finite-metals', name: 'Finite useful deposits', description: 'Bronze working reveals finite iron on existing hills; staffed Mines extract it for consensual exchange.' },
   { id: 'learning-commerce', name: 'Connected learning and commerce', description: 'Currency, Mathematics, Education and Banking connect useful local institutions and paid operations.' },
   { id: 'worked-land', name: 'People work the land', description: 'Commit an exact owned site to a timed improvement, then assign local residents to its actual output.' },
@@ -92,6 +95,8 @@ export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
+  { id: 'iron-working', name: 'Iron working', requiredFeatures: ['manufacturing'], era: 1, cost: 144, requires: ['bronze-working'], capability: 'Prepare Apprenticeship and local manufacturing supported by worked land. Military units remain planned.' },
+  { id: 'apprenticeship', name: 'Apprenticeship', requiredFeatures: ['manufacturing'], era: 1, cost: 204, requires: ['currency', 'iron-working'], capability: 'Build an exact Industrial zone near completed Mines and operate its own Guild workshop.' },
   { id: 'bronze-working', name: 'Bronze working', requiredFeatures: ['finite-metals'], era: 1, cost: 108, requires: ['mining'], capability: 'Reveal finite iron at existing hills and extract it with a staffed Mine for useful exchange.' },
   { id: 'currency', name: 'Currency', requiredFeatures: ['learning-commerce'], era: 1, cost: 126, requires: ['writing'], capability: 'Build a Commercial hub and Market, and propose iron for food when finite metal exchange is released.' },
   { id: 'mathematics', name: 'Mathematics', requiredFeatures: ['learning-commerce'], era: 1, cost: 132, requires: ['writing', 'currency'], capability: 'Prepare Education and its useful local University.' },
@@ -130,6 +135,8 @@ export const IMPROVEMENTS: ImprovementDefinition[] = [
 ];
 
 export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'industrial-zone', name: 'Industrial zone', requiredFeatures: ['district-planning', 'manufacturing'], minEra: 1, cost: { materials: 24, credits: 12 }, requires: ['apprenticeship'], effects: [], production: { materials: 2 }, district: { range: 3, adjacency: { improvement: 'mine', resource: 'materials', amount: 1, maximum: 3 } }, description: 'Commit an exact owned site to local manufacturing. Completed adjacent Mines add up to 3 base materials, even while paused; unfinished orders do not count. Quarry and great-person systems remain planned.' },
+  { id: 'guild-workshop', name: 'Guild workshop', requiredFeatures: ['manufacturing', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 26, credits: 12 }, requires: ['apprenticeship'], requiresBuildings: ['industrial-zone'], effects: [], operatingInputs: { energy: 2 }, production: { materials: 6 }, description: 'Use two energy and three local residents to operate a workshop in this town’s completed Industrial zone. First output follows completion on a later season.' },
   { id: 'commercial-hub', name: 'Commercial hub', requiredFeatures: ['district-planning', 'learning-commerce'], minEra: 1, cost: { materials: 20, credits: 10 }, requires: ['currency'], effects: [], production: { credits: 2 }, district: { range: 3 }, description: 'Reserve an exact owned site for local commerce. River and Harbor adjacency await those actual systems.' },
   { id: 'market', name: 'Market', requiredFeatures: ['learning-commerce', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 18, credits: 10 }, requires: ['currency'], requiresBuildings: ['commercial-hub'], effects: [], operatingInputs: { credits: 1 }, production: { credits: 4 }, description: 'Use credits and three local residents to operate this town’s Market. Extra trade capacity and great-person effects remain planned.' },
   { id: 'university', name: 'University', requiredFeatures: ['learning-commerce', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 28, credits: 14 }, requires: ['education'], requiresBuildings: ['campus'], effects: [], operatingInputs: { credits: 2 }, production: { science: 5 }, description: 'Use credits and three local residents to support advanced local learning. Specialists and knowledge-point effects remain planned.' },
@@ -389,7 +396,9 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
       const { range, adjacency } = building.district;
       if (!building.requiredFeatures.includes('district-planning')) errors.push(`building ${building.id}: district requires district-planning feature`);
       if (!Number.isSafeInteger(range) || range < 1) errors.push(`building ${building.id}: invalid district range`);
-      if (adjacency && !['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].includes(adjacency.terrain)) errors.push(`building ${building.id}: invalid district terrain`);
+      if (adjacency && ((adjacency.terrain !== undefined) === (adjacency.improvement !== undefined))) errors.push(`building ${building.id}: district adjacency requires exactly one selector`);
+      if (adjacency?.terrain !== undefined && !['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].includes(adjacency.terrain)) errors.push(`building ${building.id}: invalid district terrain`);
+      if (adjacency?.improvement !== undefined && !catalog.improvements.some(improvement => improvement.id === adjacency.improvement)) errors.push(`building ${building.id}: invalid district improvement`);
       if (adjacency && !RESOURCE_IDS.includes(adjacency.resource)) errors.push(`building ${building.id}: invalid district resource`);
       if (adjacency && (!positive(adjacency.amount) || !Number.isFinite(adjacency.maximum) || adjacency.maximum < 0)) errors.push(`building ${building.id}: invalid district adjacency`);
     }

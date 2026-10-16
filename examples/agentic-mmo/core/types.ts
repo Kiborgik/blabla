@@ -100,7 +100,8 @@ export type EffectDefinition =
   | { kind: 'route'; field: 'damage'; amount: number };
 export interface TechnologyDefinition { id: string; name: string; requiredFeatures: readonly string[]; era: number; cost: number; requires: string[]; capability: string }
 export type BuildingCapability = 'coastal-departure';
-export interface DistrictDefinition { range: number; adjacency?: { terrain: Terrain; resource: Resource; amount: number; maximum: number } }
+export type DistrictAdjacency = ({ terrain: Terrain; improvement?: never } | { improvement: string; terrain?: never }) & { resource: Resource; amount: number; maximum: number };
+export interface DistrictDefinition { range: number; adjacency?: DistrictAdjacency }
 export interface ImprovementDefinition { id: string; name: string; description: string; requiredFeatures: readonly string[]; requires: string[]; minEra: number; cost: Partial<Resources>; requiredWork: number; siteRange: number; siteRequirement: 'hill'; residentsRequired: number; production: Partial<Resources> }
 export interface BuildingDefinition { district?: DistrictDefinition; requiresBuildings?: readonly string[]; capabilities?: readonly BuildingCapability[]; siteRequirement?: 'coastal'; id: string; name: string; requiredFeatures: readonly string[]; minEra: number; cost: Partial<Resources>; requires: string[]; effects: EffectDefinition[]; production: Partial<Resources>; operatingInputs?: Partial<Resources>; description: string }
 

@@ -19,7 +19,7 @@ import { cameraShiftForAnchor } from './inspection-camera.ts';
 import type { CameraView, ScreenPoint } from './inspection-camera.ts';
 import { createSettlementMeshes, createDistrictMeshes, createImprovementMeshes, createDepositMeshes } from './settlement-three.ts';
 import { improvementLabel } from '../visuals/improvement-visuals.ts';
-import { districtCaptionPlacement, districtLabel } from '../visuals/district-visuals.ts';
+import { districtCaptionPlacement, districtAdjacencySummary, districtLabel } from '../visuals/district-visuals.ts';
 import { mapOverlayBounds } from './settlement-parts.ts';
 import { createWorldCues, visualIcon } from './world-cues.ts';
 import { mapLabelVisibility } from './map-labels.ts';
@@ -249,7 +249,7 @@ export function createAtlasRenderer(
   const improvementMeshes = createImprovementMeshes(world, material);
   const depositMeshes = createDepositMeshes(world, material);
   const sites = [
-    ...(world.districts ?? []).map(site => ({ ...site, mark: site.buildingId === 'commercial-hub' ? 'commerce' as const : 'campus' as const, label: districtLabel(site) })),
+    ...(world.districts ?? []).map(site => ({ ...site, mark: site.buildingId === 'industrial-zone' ? 'industry' as const : site.buildingId === 'commercial-hub' ? 'commerce' as const : 'campus' as const, label: districtLabel(site) })),
     ...(world.improvements ?? []).map(site => ({ ...site, mark: 'mine' as const, label: improvementLabel(site) })),
   ];
   const districtLabels = sites.map(district => {
@@ -260,7 +260,7 @@ export function createAtlasRenderer(
     element.dataset['districtId'] = district.id; element.dataset['tileId'] = String(district.tileId);
     element.style.setProperty('--civ-color', district.color);
     element.textContent = district.label;
-    element.setAttribute('aria-label', `Inspect ${district.label} of ${district.townName}, tile ${district.tileId}`);
+    element.setAttribute('aria-label', `Inspect ${district.label} of ${district.townName}, tile ${district.tileId}${'adjacency' in district && district.adjacency ? `. ${districtAdjacencySummary(district.adjacency)}` : ''}`);
     labels.append(element);
     return { element, point: new THREE.Vector3(point.x, district.height + .8, point.z), id: district.id };
   });
@@ -268,11 +268,14 @@ export function createAtlasRenderer(
     const point = hexPosition(site.q, site.r); const element = document.createElement('button');
     element.type = 'button'; element.className = 'site-map-mark';
     element.dataset['status'] = site.status; element.style.setProperty('--civ-color', site.color);
-    element.setAttribute('aria-label', `Inspect ${site.label} of ${site.townName}, tile ${site.tileId}`);
+    element.setAttribute('aria-label', `Inspect ${site.label} of ${site.townName}, tile ${site.tileId}${'adjacency' in site && site.adjacency ? `. ${districtAdjacencySummary(site.adjacency)}` : ''}`);
     element.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${SITE_MARK_PATHS[site.mark]}"/></svg>`;
+    if ('adjacency' in site && site.adjacency?.source === 'improvement') {
+      const bonus = document.createElement('span'); bonus.className = 'site-base-bonus'; bonus.textContent = `+${site.adjacency.bonus} base`; element.append(bonus);
+    }
     element.addEventListener('click', () => onSelect(site.cityId)); labels.append(element);
     const leader = document.createElement('span'); leader.className = 'site-map-leader'; leader.setAttribute('aria-hidden', 'true'); leader.style.background = site.color; labels.append(leader);
-    return { element, leader, id: site.id, cityId: site.cityId, point: new THREE.Vector3(point.x, site.height + .4, point.z) };
+    return { element, leader, id: site.id, cityId: site.cityId, family: site.mark, point: new THREE.Vector3(point.x, site.height + .4, point.z) };
   });
   const depositMarks = (world.deposits ?? []).map(site => {
     const point = hexPosition(site.q, site.r); const element = document.createElement('span');
@@ -404,7 +407,7 @@ export function createAtlasRenderer(
     const projectedRoute = routePoint?.clone().project(camera);
     const townTargets = positions.slice(0, cityLabels.length).map((position) => ({ ...position, y: position.y - position.height * 1.1, height: position.height * 1.1 + 8 }));
     const overlayBounds = mapOverlayBounds(container);
-    const anchors = siteMarks.map(mark => { const point = mark.point.clone().project(camera); return { id: mark.id, cityId: mark.cityId, x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight }; });
+    const anchors = siteMarks.map(mark => { const point = mark.point.clone().project(camera); return { id: mark.id, cityId: mark.cityId, family: mark.family, x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight }; });
     const markPlacements = placeSiteMarks(anchors, [...townTargets, ...overlayBounds], container.clientWidth, container.clientHeight, selected);
     for (const mark of siteMarks) {
       const placed = markPlacements.find(candidate => candidate.id === mark.id); const anchor = anchors.find(candidate => candidate.id === mark.id);

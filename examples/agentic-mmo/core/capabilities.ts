@@ -1,5 +1,5 @@
 import { availableImprovementSites, isImprovementOrder, orderedImprovements } from './simulation/improvements.ts';
-import { availableDistrictSites, buildingBaseProduction, districtCapacity, districtCount } from './simulation/districts.ts';
+import { availableDistrictSites, buildingBaseProduction, districtCapacity, districtCount, districtAdjacencyFacts, type DistrictAdjacencyFacts } from './simulation/districts.ts';
 import { BUILDINGS, IMPROVEMENTS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
 import { RELEASES } from './release.ts';
 import type { ActionPlan } from './planning.ts';
@@ -23,7 +23,7 @@ export interface CapabilityRow {
   research?: { progress: number; cost: number };
   operation?: BuildingOperation;
   construction?: ConstructionOrder;
-  district?: { capacity: number; used: number; siteId: number | null; siteBaseProduction: Partial<Resources> | null; availableSites: Array<{ tileId: number; baseProduction: Partial<Resources> }> };
+  district?: { capacity: number; used: number; siteId: number | null; siteBaseProduction: Partial<Resources> | null; siteAdjacency?: DistrictAdjacencyFacts | null; availableSites: Array<{ tileId: number; baseProduction: Partial<Resources>; adjacency?: DistrictAdjacencyFacts | null }> };
 }
 
 export interface ImprovementCapabilityRow extends CapabilityRow {
@@ -108,7 +108,8 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     const active = city?.construction?.active;
     const construction = active && !isImprovementOrder(active) && active.buildingId === building.id ? active : null;
     const districtSiteId = city?.districtSites?.[building.id] ?? construction?.tileId;
-    return { ...row(`building:${building.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), ...(operation ? { operation } : {}), ...(city && building.district ? { district: { capacity: districtCapacity(city), used: districtCount(city), siteId: districtSiteId ?? null, siteBaseProduction: districtSiteId === undefined ? null : buildingBaseProduction(state, city, building, districtSiteId), availableSites: eligibility.completed || eligibility.blockers.length ? [] : availableDistrictSites(state, city, building).map(tileId => ({ tileId, baseProduction: buildingBaseProduction(state, city, building, tileId) })) } } : {}) };
+    const improvementAdjacency = building.district?.adjacency?.improvement !== undefined && hasFeatures(state, building.requiredFeatures);
+    return { ...row(`building:${building.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), ...(operation ? { operation } : {}), ...(city && building.district ? { district: { capacity: districtCapacity(city), used: districtCount(city), siteId: districtSiteId ?? null, ...(improvementAdjacency ? { siteAdjacency: districtSiteId === undefined ? null : districtAdjacencyFacts(state, building, districtSiteId) } : {}), siteBaseProduction: districtSiteId === undefined ? null : buildingBaseProduction(state, city, building, districtSiteId), availableSites: eligibility.completed || eligibility.blockers.length ? [] : availableDistrictSites(state, city, building).map(tileId => ({ tileId, baseProduction: buildingBaseProduction(state, city, building, tileId), ...(improvementAdjacency ? { adjacency: districtAdjacencyFacts(state, building, tileId) } : {}) })) } } : {}) };
   });
   const improvements: ImprovementCapabilityRow[] = IMPROVEMENTS.map(definition => {
     const eligibility = improvementEligibility(state, civilizationId, definition, cityId);
