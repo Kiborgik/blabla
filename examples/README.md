@@ -2,6 +2,7 @@
 
 | Example | Level | What it shows |
 | --- | --- | --- |
+| [`agentic-mmo/`](agentic-mmo/README.md) | growing live-service example | a public spectator scaffold and developing six-agent civilization world, built through prospective BlaBla tasks |
 | [`hello/`](hello/README.md) | minimal | the smallest possible contract: one state, one action, one postcondition |
 | [`todo/`](todo/README.md) | introductory | a two-layer project: `project.bla`, a behavior contract and a structure contract, verified by `blabla finish` |
 | [`todo-go/`](todo-go/README.md) | introductory | the same behavior contract as `todo`, satisfied by a Go application instead of a Python one |

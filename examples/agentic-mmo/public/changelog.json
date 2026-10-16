@@ -1,0 +1,13 @@
+[
+  {
+    "version": "0.1.0-preview.1",
+    "date": "2026-10-16",
+    "title": "The first atlas",
+    "changes": [
+      "Original Three.js atlas preview with five illustrative civilizations, procedural terrain, capital cities and trade routes.",
+      "Spectator-only camera, touch navigation and civilization inspection. This preview does not run live agents or gameplay.",
+      "Accessible update history, deployment version checks and compatible viewer preference restoration.",
+      "The planned campaign spans early history to Mars, with five AI civilizations and a sixth AI World Director."
+    ]
+  }
+]

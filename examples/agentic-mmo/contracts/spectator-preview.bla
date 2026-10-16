@@ -1,0 +1,18 @@
+module atlas "web/atlas.ts"
+module renderer "web/renderer.ts"
+module viewer "web/main.ts"
+module state "web/viewer-state.ts"
+
+require "preview-content-is-data": symbol atlas::CIVILIZATIONS
+require "one-preview-world-constructor": symbol atlas::createPreviewWorld
+require "renderer-uses-content": dependency renderer -> atlas
+require "inspection-uses-the-same-content": dependency viewer -> atlas
+require "viewer-delegates-rendering": dependency viewer -> renderer
+require "viewer-delegates-preference-and-update-policy": dependency viewer -> state
+require "version-update-has-one-predicate": symbol state::shouldReload
+require "preferences-have-one-parser": symbol state::parsePreferences
+forbid "content-does-not-import-rendering": dependency atlas -> "three"
+forbid "content-does-not-depend-on-viewer": dependency atlas -> viewer
+forbid "preference-policy-does-not-depend-on-rendering": dependency state -> renderer
+forbid "viewer-does-not-write-files": dependency viewer -> "node:fs"
+forbid "viewer-does-not-launch-processes": dependency viewer -> "node:child_process"

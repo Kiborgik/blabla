@@ -1,0 +1,13 @@
+project AgenticCivilizations
+mission "mission.bla"
+system "system.bla"
+process "process.bla"
+goal "goals.bla"
+knowledge "../../knowledge/engineering.bla"
+knowledge "../../knowledge/testing.bla"
+knowledge "../../knowledge/reviewing.bla"
+knowledge "../../knowledge/design.bla"
+use structure "contracts/bootstrap.bla"
+use structure "contracts/spectator-preview.bla"
+draft behavior "contracts/campaign.bla"
+ignore from ".gitignore"
