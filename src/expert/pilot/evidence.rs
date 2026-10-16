@@ -110,7 +110,7 @@ pub fn approval(project: &Project, approval: &Approval) -> Result<(), Error> {
         .ok_or(Refusal::IdentityMismatch)?;
     require(
         issuer.state == "accepted"
-            && issuer.role.trim_start_matches("role::") == "orchestrator"
+            && issuer.role.trim_start_matches("role::") == task::ORCHESTRATOR_ROLE
             && task::carrier(&issuer) == Some(approval.issuer_model.as_str()),
         Refusal::PermitMismatch,
     )?;
@@ -129,7 +129,7 @@ pub fn approval(project: &Project, approval: &Approval) -> Result<(), Error> {
     let role = process
         .roles
         .iter()
-        .find(|r| r.name == "orchestrator")
+        .find(|r| r.name == task::ORCHESTRATOR_ROLE)
         .ok_or(Error::InvalidInput)?;
     require(
         role.model.contains(&approval.issuer_model)

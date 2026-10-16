@@ -22,6 +22,11 @@ ruling "assert-structure-not-text" {
     statement "Assert identifiers, structural attributes, counts, roles and values the code exposes, never user-facing or translatable wording. A text assertion turns every wording change into a failing suite and teaches the team that a red run is normal. Where a formatted message must be checked, build the expectation through the same function the code uses instead of writing the literal a second time."
 }
 
+ruling "a-falsifying-run-reaches-the-assertions" {
+    pack "testing"
+    statement "Running the check against the old code is evidence only when the old code builds and every test runs on it. A test that calls a function, field or type the change adds fails to compile there, which says nothing about what it asserts; reach the change through a surface that existed before it, such as the command line, a public entry point or a serialized record. A check that stops at its first failing binary hides the rest, so the falsifying check runs every test even after one fails. A test that lives inside a falsified file reverts with it and never runs on the old code, so the tests that prove a change live outside the files it falsifies. Read the old run for test failures, not build errors."
+}
+
 ruling "verification-is-not-progress" {
     pack "testing"
     statement "Adding checks is not implementing. When work stalls, writing more verification is the most common displacement activity: it feels productive, it is easy to justify, and it leaves the actual obligation untouched. Verification earns its place by the failure it would catch, not by its presence."

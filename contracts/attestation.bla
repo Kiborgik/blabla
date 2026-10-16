@@ -1,6 +1,7 @@
 type Standing { class: string }
 
 state carried: bool
+state orchestrator_role: bool
 state records_during_carry: int
 state unconfirmed_during_carry: int
 state carry_closed: bool
@@ -8,6 +9,7 @@ state carry_close_refused: bool
 state confirm_refused: bool
 state attestation_standing: [Standing]
 
+action assign_the_task_to_the_orchestrator()
 action take_the_task()
 action record_an_orchestrator_verb_while_carried()
 action record_an_orchestrator_verb_while_not_carried()
@@ -18,11 +20,14 @@ action try_to_close_the_carried_task()
 
 when record_an_orchestrator_verb_while_carried {
     expect "an-orchestrator-record-made-while-a-worker-carries-the-task-is-listed":
-        before.carry_closed or not before.carried or
+        before.carry_closed or not before.carried or before.orchestrator_role or
         (after.records_during_carry == before.records_during_carry + 1 and
          after.unconfirmed_during_carry == before.unconfirmed_during_carry + 1)
+    expect "the-orchestrator-carrying-its-own-task-needs-no-confirmation":
+        not before.orchestrator_role or
+        (after.records_during_carry == before.records_during_carry and
+         after.unconfirmed_during_carry == before.unconfirmed_during_carry)
 }
-
 when record_an_orchestrator_verb_while_not_carried {
     expect "an-orchestrator-record-made-while-nobody-carries-the-task-is-not-listed":
         after.records_during_carry == before.records_during_carry

@@ -1913,13 +1913,26 @@ fn write_goal_memory(output: &mut impl Write, memory: Option<&GoalStatus>) -> io
         .max()
         .unwrap_or(0);
     for outcome in &memory.active {
-        writeln!(
+        write!(
             output,
             "  {:<width$}  {}/{} held",
             outcome.goal, outcome.held, outcome.expected
         )?;
+        if outcome.held < outcome.expected {
+            write!(
+                output,
+                "; not held {}, unverified {}, unresolved {}",
+                outcome.not_held, outcome.unverified, outcome.unresolved
+            )?;
+        }
+        writeln!(output)?;
     }
-    if let Some(first) = memory.active.first() {
+    if let Some(first) = memory
+        .active
+        .iter()
+        .find(|outcome| outcome.held < outcome.expected)
+        .or_else(|| memory.active.first())
+    {
         writeln!(
             output,
             "  blabla explain {}   its statement, the priorities it serves and the verdict on each expectation",

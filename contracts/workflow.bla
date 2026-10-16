@@ -10,6 +10,7 @@ require "resolution-names-the-consulted-lenses": symbol task::Resolution.lenses
 require "resolution-names-the-binding-requirements": symbol task::Resolution.requirements
 require "resolution-names-the-verification-tier": symbol task::Resolution.verification
 require "every-role-resolves-the-same-way": symbol task::resolve
+require "task-show-prints-the-latest-evidence": symbol clitask::write_evidence
 
 require "assignment-acceptance-is-recorded": symbol task::Task.accepted
 require "result-acceptance-is-separate":     symbol task::Task.result

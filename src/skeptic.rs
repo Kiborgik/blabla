@@ -6,6 +6,8 @@ use crate::structure::falsify::FalsifyReport;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
+use crate::project::ignore::Ignore;
+
 pub const AUTHORITY: &str = include_str!("cli/text/skeptic-authority.md");
 
 pub const LIMITS: [&str; 3] = [
@@ -14,7 +16,7 @@ pub const LIMITS: [&str; 3] = [
     include_str!("cli/text/skeptic-limit-source.md"),
 ];
 
-pub const CLASSES: [&str; 19] = [
+pub const CLASSES: [&str; 20] = [
     "unresolved-finding",
     "deliverable-unchanged",
     "scope-breach",
@@ -34,6 +36,7 @@ pub const CLASSES: [&str; 19] = [
     "withdrawal-residue",
     "review-target-stale",
     "unobservable-task-input",
+    "check-not-falsified",
 ];
 
 pub const OUTSIDE_THE_ASSIGNMENT: [&str; 4] = [
@@ -68,6 +71,7 @@ pub enum Class {
     WithdrawalResidue,
     ReviewTargetStale,
     UnobservableTaskInput,
+    CheckNotFalsified,
 }
 
 impl Class {
@@ -93,6 +97,7 @@ impl Class {
             Class::WithdrawalResidue => CLASSES[16],
             Class::ReviewTargetStale => CLASSES[17],
             Class::UnobservableTaskInput => CLASSES[18],
+            Class::CheckNotFalsified => CLASSES[19],
         }
     }
 }
@@ -215,7 +220,7 @@ pub fn challenge_tracked_against(
     evidence: &Evidence<'_>,
     goals: Result<&[Outcome], &'static str>,
     root: &std::path::Path,
-    ignore: &crate::project::ignore::Ignore,
+    ignore: &Ignore,
 ) -> ChallengeReport {
     challenge_against_tracking(evidence, goals, Some((root, ignore)))
 }
@@ -223,11 +228,13 @@ pub fn challenge_tracked_against(
 fn challenge_against_tracking(
     evidence: &Evidence<'_>,
     goals: Result<&[Outcome], &'static str>,
-    tracking: Option<(&std::path::Path, &crate::project::ignore::Ignore)>,
+    tracking: Option<(&std::path::Path, &Ignore)>,
 ) -> ChallengeReport {
     let tracking_error = evidence.task.and_then(|task| {
         tracking.and_then(|(root, ignore)| task::tracking_error(task, root, ignore))
     });
+    let default_rules = Ignore::default();
+    let ignore = tracking.map_or(&default_rules, |(_, rules)| rules);
     let mut outcomes: Vec<(&'static str, Result<Challenge, &'static str>)> = Vec::new();
     outcomes.push((
         CLASSES[18],
@@ -246,37 +253,40 @@ fn challenge_against_tracking(
         },
     ));
     outcomes.push((CLASSES[16], withdrawal_residue(evidence, tracking)));
-    type Grounding = fn(&Task, &Evidence<'_>) -> Result<Challenge, &'static str>;
-    let against_the_task: [(&'static str, Grounding); 11] = [
-        (CLASSES[12], |task, evidence| {
+    type Grounding = fn(&Task, &Evidence<'_>, &Ignore) -> Result<Challenge, &'static str>;
+    let against_the_task: [(&'static str, Grounding); 12] = [
+        (CLASSES[12], |task, evidence, _| {
             declared_check_failed(task, evidence.tree)
         }),
-        (CLASSES[13], |task, _| decision_unanswered(task)),
-        (CLASSES[15], |task, _| question_unpicked(task)),
-        (CLASSES[0], |task, _| unresolved_finding(task)),
-        (CLASSES[1], |task, evidence| {
+        (CLASSES[13], |task, _, _| decision_unanswered(task)),
+        (CLASSES[15], |task, _, _| question_unpicked(task)),
+        (CLASSES[0], |task, _, _| unresolved_finding(task)),
+        (CLASSES[1], |task, evidence, _| {
             deliverable_unchanged(task, evidence.tree)
         }),
-        (CLASSES[2], |task, evidence| {
-            scope_breach(task, evidence.tree)
+        (CLASSES[2], |task, evidence, ignore| {
+            scope_breach(task, evidence.tree, ignore)
         }),
-        (CLASSES[5], |task, evidence| {
-            work_without_acceptance(task, evidence.tree)
+        (CLASSES[5], |task, evidence, ignore| {
+            work_without_acceptance(task, evidence.tree, ignore)
         }),
-        (CLASSES[7], |task, _| exception_unresolved(task)),
-        (CLASSES[9], |task, _| readiness_without_evidence(task)),
-        (CLASSES[10], |task, evidence| {
+        (CLASSES[7], |task, _, _| exception_unresolved(task)),
+        (CLASSES[9], |task, _, _| readiness_without_evidence(task)),
+        (CLASSES[10], |task, evidence, _| {
             evidence_superseded(task, evidence.tree)
         }),
-        (CLASSES[11], |task, evidence| {
-            attribution_unknown(task, evidence.tree, evidence.other_tasks)
+        (CLASSES[11], |task, evidence, ignore| {
+            attribution_unknown(task, evidence.tree, evidence.other_tasks, ignore)
+        }),
+        (CLASSES[19], |task, evidence, _| {
+            check_not_falsified(task, evidence.tree)
         }),
     ];
     for (class, grounding) in against_the_task {
         outcomes.push((
             class,
             match evidence.task {
-                Some(task) => grounding(task, evidence),
+                Some(task) => grounding(task, evidence, ignore),
                 None => Err(NO_TASK),
             },
         ));
@@ -326,18 +336,21 @@ fn challenge_against_tracking(
 
     let mut grounded = Vec::new();
     let mut ungrounded = Vec::new();
-    let mut found: Option<Challenge> = None;
+    let mut challenges: Vec<(&'static str, Challenge)> = Vec::new();
     for (class, outcome) in outcomes {
         match outcome {
             Ok(challenge) => {
                 grounded.push(class);
-                if found.is_none() {
-                    found = Some(challenge);
-                }
+                challenges.push((class, challenge));
             }
             Err(reason) => ungrounded.push((class, reason)),
         }
     }
+    let headline = challenges
+        .iter()
+        .position(|(class, _)| !OUTSIDE_THE_ASSIGNMENT.contains(class))
+        .or_else(|| (!challenges.is_empty()).then_some(0));
+    let found = headline.map(|index| challenges.swap_remove(index).1);
 
     ChallengeReport {
         task: evidence.task.map(|task| task.name.clone()),
@@ -361,7 +374,7 @@ fn challenge_against_tracking(
 
 fn withdrawal_residue(
     evidence: &Evidence<'_>,
-    tracking: Option<(&std::path::Path, &crate::project::ignore::Ignore)>,
+    tracking: Option<(&std::path::Path, &Ignore)>,
 ) -> Result<Challenge, &'static str> {
     for task in evidence.other_tasks {
         let paths = match tracking {
@@ -631,11 +644,15 @@ fn deliverable_unchanged(
     })
 }
 
-fn scope_breach(task: &Task, tree: &BTreeMap<String, String>) -> Result<Challenge, &'static str> {
+fn scope_breach(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    ignore: &Ignore,
+) -> Result<Challenge, &'static str> {
     if task.scope.is_empty() {
         return Err("the task declares no write scope");
     }
-    let moved = task::changed(task, tree);
+    let moved = task::changed(task, tree, ignore);
     let outside: Vec<&str> = moved
         .into_iter()
         .filter(|path| {
@@ -739,13 +756,14 @@ fn verification_not_current(
 fn work_without_acceptance(
     task: &Task,
     tree: &BTreeMap<String, String>,
+    ignore: &Ignore,
 ) -> Result<Challenge, &'static str> {
     if task.accepted.is_some() {
         return Err(
             "an acceptance is recorded for this assignment; whether it preceded the work is not something BlaBla observes",
         );
     }
-    let moved = task::changed(task, tree);
+    let moved = task::changed(task, tree, ignore);
     let Some(first) = moved.first() else {
         return Err("nothing has changed since the task opened");
     };
@@ -814,6 +832,48 @@ fn declared_check_failed(
             format!("tool: {}", latest.tool),
         ],
         reconcile: include_str!("cli/text/skeptic-declared-check-failed.md").to_owned(),
+    })
+}
+
+fn check_not_falsified(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Result<Challenge, &'static str> {
+    if task.falsify.is_empty() {
+        return Err("the task names no paths to falsify");
+    }
+    let inputs = task::evidence_inputs(task, tree);
+    let standing = task
+        .falsifications
+        .iter()
+        .rev()
+        .find(|run| run.acceptance_epoch == task.acceptance_epoch);
+    let reason = match standing {
+        None => "no falsification is recorded at the current acceptance epoch",
+        Some(run) if run.inputs != inputs => {
+            "the check inputs changed after the latest falsification"
+        }
+        Some(run) if run.current_exit != 0 => {
+            "the check fails on the current contents in its copy, so it cannot prove anything"
+        }
+        Some(run) if run.opened_exit.is_none_or(|exit| exit == 0) => {
+            "the check passed on the opened contents, so it does not depend on the change"
+        }
+        Some(_) => {
+            return Err(
+                "the latest falsification at this epoch passed on the current contents, failed on the opened contents and its inputs still match",
+            );
+        }
+    };
+    Ok(Challenge {
+        class: Class::CheckNotFalsified,
+        statement: format!("I don't believe this hand-back proves its change. {reason}."),
+        evidence: vec![
+            format!("task: {}", task.name),
+            format!("falsify: {}", task.falsify.join(", ")),
+            format!("acceptance epoch: {}", task.acceptance_epoch),
+        ],
+        reconcile: include_str!("cli/text/skeptic-check-not-falsified.md").to_owned(),
     })
 }
 
@@ -887,8 +947,9 @@ fn attribution_unknown(
     task: &Task,
     tree: &BTreeMap<String, String>,
     other_tasks: &[Task],
+    ignore: &Ignore,
 ) -> Result<Challenge, &'static str> {
-    let moved = task::changed(task, tree);
+    let moved = task::changed(task, tree, ignore);
     let undeclared: Vec<&str> = moved
         .iter()
         .copied()
@@ -905,13 +966,16 @@ fn attribution_unknown(
         format!("write scope: {}", task.scope.join(", ")),
         "no declaration covers it".to_owned(),
     ];
-    if undeclared.len() > 1 {
-        evidence.push(format!(
-            "{} changed paths carry no declaration: {}",
-            undeclared.len(),
-            undeclared.join(", ")
-        ));
+    let mut by_top: BTreeMap<&str, usize> = BTreeMap::new();
+    for path in undeclared.iter().skip(1) {
+        let top = path.split('/').next().unwrap_or(path);
+        *by_top.entry(top).or_default() += 1;
     }
+    evidence.extend(
+        by_top
+            .iter()
+            .map(|(top, count)| format!("{count} more undeclared under {top}")),
+    );
     Ok(Challenge {
         class: Class::AttributionUnknown,
         statement: format!(
@@ -965,7 +1029,12 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
     let Some(role) = role else {
         return Err("no role memory is registered, so no lens is expected");
     };
-    let Some(missing) = role.lenses.iter().find(|lens| {
+    let required = if task.lenses.is_empty() {
+        &role.lenses
+    } else {
+        &task.lenses
+    };
+    let Some(missing) = required.iter().find(|lens| {
         !role
             .knowledge_fingerprints
             .get(*lens)
@@ -975,7 +1044,7 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
                 })
             })
     }) else {
-        return Err("every lens the role consults carries an assessment");
+        return Err("every lens the task requires carries an assessment");
     };
     Ok(Challenge {
         class: Class::LensUnassessed,
@@ -984,7 +1053,11 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
         ),
         evidence: vec![
             format!("state: {}", task.state),
-            format!("role::{} consults: {}", task.role, role.lenses.join(", ")),
+            if task.lenses.is_empty() {
+                format!("role::{} consults: {}", task.role, role.lenses.join(", "))
+            } else {
+                format!("task requires lenses: {}", task.lenses.join(", "))
+            },
             format!("assessments recorded: {}", task.assessments.len()),
         ],
         reconcile: include_str!("cli/text/skeptic-lens-unassessed.md").to_owned(),

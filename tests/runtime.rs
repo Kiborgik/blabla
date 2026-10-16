@@ -18,12 +18,14 @@ fn field(name: &str, ty: Type) -> Field {
     }
 }
 
+const PYTHON_STARTUP: Duration = Duration::from_secs(10);
+
 fn python_config(script: &Path, mode: &str, timeout: Duration) -> AppConfig {
     AppConfig {
         executable: PathBuf::from("python"),
         args: vec![OsString::from(script.as_os_str()), OsString::from(mode)],
         timeout,
-        startup: timeout,
+        startup: PYTHON_STARTUP,
     }
 }
 
@@ -305,11 +307,10 @@ fn rejects_wrong_observation_types_through_the_session_boundary() {
 
 #[test]
 fn bounds_read_and_blocking_write_deadlines() {
-    let mut read_session = AppSession::spawn(&python_config(
-        &fixture(),
-        "timeout_read",
-        Duration::from_millis(100),
-    ))
+    let mut read_session = AppSession::spawn(&AppConfig {
+        startup: Duration::from_millis(100),
+        ..python_config(&fixture(), "timeout_read", Duration::from_millis(100))
+    })
     .unwrap();
     let read_start = Instant::now();
     let read_error = read_session.reset().unwrap_err();

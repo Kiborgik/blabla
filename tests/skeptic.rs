@@ -1518,23 +1518,24 @@ fn a_path_outside_all_open_tasks_scopes_is_grounded_as_attribution_unknown() {
 }
 
 #[test]
-fn attribution_unknown_counts_every_undeclared_path_in_its_evidence() {
+fn attribution_unknown_groups_undeclared_paths_by_top_level_directory() {
     let temp = project();
     assign_within(&temp, "src/thing.rs", "src/thing.rs");
     write(temp.path(), "src/thing.rs", "pub fn run() -> u8 { 1 }\n");
     record_success(&temp);
+    write(temp.path(), "docs/a.md", "# a\n");
     write(temp.path(), "src/owed.rs", "pub fn owed() -> u8 { 3 }\n");
     write(temp.path(), "src/owed2.rs", "pub fn owed2() -> u8 { 4 }\n");
+    write(temp.path(), "tests/x.rs", "#[test]\nfn x() {}\n");
     let (report, code) = json_of(&temp, &["challenge", "one", "--json"]);
     assert_eq!(code, 1);
     assert_eq!(report["challenge"]["class"], "attribution-unknown");
     let evidence = report["challenge"]["evidence"].as_array().unwrap();
-    let counted = evidence
-        .iter()
-        .filter_map(|line| line.as_str())
-        .find(|line| line.starts_with("2 changed paths carry no declaration"))
-        .expect("the evidence names how many paths are undeclared");
-    assert!(counted.contains("src/owed.rs") && counted.contains("src/owed2.rs"));
+    assert_eq!(
+        evidence.len(),
+        5,
+        "three base lines, then one line per top-level directory of the paths after the first (src and tests), not one per path: {evidence:?}"
+    );
     assert_eq!(
         run(
             &temp,
@@ -1542,8 +1543,10 @@ fn attribution_unknown_counts_every_undeclared_path_in_its_evidence() {
                 "task",
                 "attribute",
                 "one",
+                "docs/a.md",
                 "src/owed.rs",
                 "src/owed2.rs",
+                "tests/x.rs",
                 "--kind",
                 "concurrent",
                 "--model",

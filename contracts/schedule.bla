@@ -8,7 +8,7 @@ require "no-step-runs-before-the-order-is-checked":          symbol gate::steps_
 
 require "formatting-is-checked":       value gate::STEPS maps "fmt" to "--check"
 require "lint-denies-warnings":        value gate::STEPS maps "clippy" to "warnings"
-require "the-rust-tests-run":          value gate::STEPS maps "rust-tests" to "test"
+require "the-rust-tests-run":          value gate::STEPS maps "rust-tests" to "nextest"
 require "the-schedule-tests-itself":   value gate::STEPS maps "gate-schedule" to "test_gate*.py"
 require "the-bridge-is-built":         value gate::STEPS maps "bridge" to "structure-adapter"
 require "the-bridge-tests-run":        value gate::STEPS maps "bridge-tests" to "structure-adapter"
@@ -23,6 +23,8 @@ require "java-support-is-exercised":       value gate::STEPS maps "example-java"
 
 require "the-public-tree-is-audited":  value gate::STEPS maps "audit" to "experiments/audit_public_tree.py"
 require "the-diagrams-are-checked":    value gate::STEPS maps "diagrams" to "--check"
+require "docs-links-resolve":          value gate::STEPS maps "docs-links" to "links"
+require "versions-agree":              value gate::STEPS maps "versions" to "versions"
 
 require "the-bridge-precedes-completion":    value gate::REQUIRED_ORDER maps "bridge" to "self-hosting-finish"
 require "completion-precedes-the-read-back": value gate::REQUIRED_ORDER maps "self-hosting-finish" to "self-hosting-status"

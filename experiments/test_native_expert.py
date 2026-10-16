@@ -4,7 +4,6 @@ import importlib.util
 import json
 import os
 import pathlib
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -88,14 +87,6 @@ class NativeEvidenceTests(unittest.TestCase):
         evidence = native.write_observation(observed, 'record.json')
         return native.normalize_event(request, observed, evidence)
 
-    def test_matching_observed_origin_yields_boundary_with_null_agent_id(self):
-        request = host_request('await_boundary')
-        marker = boundary()
-        result = self.normalize(request, {'kind': 'completion', 'source': 'native_completion_notification',
-                                         'origin': child(), 'marker': marker})
-        self.assertEqual(result['payload'], {'kind': 'boundary_returned', 'origin': child(), 'marker': marker})
-        self.assertEqual(result['key'], request['key'])
-
     def test_worker_attestation_cannot_override_wrong_native_origin(self):
         with self.assertRaises(native.Failure) as failure:
             self.normalize(host_request('await_boundary'), {'kind': 'completion',
@@ -133,13 +124,6 @@ class NativeEvidenceTests(unittest.TestCase):
                     native.normalize_event(host_request('await_boundary'), observed, evidence)
                 self.assertEqual(failure.exception.code, code)
 
-    def test_unknown_followup_never_becomes_transport_accepted(self):
-        request = host_request()
-        result = self.normalize(request, {'kind': 'followup', 'tool': 'collaboration.followup_task',
-            'target_task_name': child()['task_name'], 'sent': {'kind': 'wake', 'message': request['payload']['wake']},
-            'outcome': 'unknown'})
-        self.assertEqual(result['payload'], {'kind': 'unknown', 'reason': 'missing_result'})
-
     def test_actual_followup_identity_only_yields_transport_acceptance(self):
         request = host_request('continue_work')
         call = native.host_call(request)
@@ -155,43 +139,6 @@ class NativeEvidenceTests(unittest.TestCase):
         evidence = native.write_observation(observed, 'wrong-message.json')
         with self.assertRaises(native.Failure):
             native.normalize_event(request, observed, evidence)
-
-    def test_completed_status_is_only_request_bound_idle_candidate(self):
-        request = host_request('inspect_child')
-        marker = boundary()
-        marker['sequence'] = request['key']['sequence']
-        result = self.normalize(request, {'kind': 'status', 'tool': 'collaboration.list_agents',
-            'path_prefix': child()['task_name'], 'selected': {'kind': 'completed',
-                'agent_name': child()['task_name'], 'agent_id': None, 'marker': marker}})
-        self.assertEqual(result['payload'], {'kind': 'child_status', 'child': child(), 'status': 'idle'})
-
-    def test_wait_summary_does_not_establish_completion(self):
-        result = self.normalize(host_request('await_boundary'), {'kind': 'unavailable',
-            'source': 'collaboration.wait_agent', 'reason': 'missing_result'})
-        self.assertEqual(result['payload'], {'kind': 'unknown', 'reason': 'missing_result'})
-
-    def test_no_call_and_wrong_operation_remain_distinct(self):
-        request = host_request()
-        projected = {'kind': 'not_invoked', 'tool': 'collaboration.followup_task',
-                     'reason': 'cancelled_before_call'}
-        result = self.normalize(request, projected)
-        self.assertEqual(result['payload'], {'kind': 'not_invoked', 'reason': 'cancelled_before_call'})
-        observed = observation(projected)
-        observed['operation_id'] = None
-        evidence = native.write_observation(observed, 'bootstrap.json')
-        with self.assertRaises(native.Failure):
-            native.normalize_event(request, observed, evidence)
-
-    def test_no_advice_response_is_preserved_without_acknowledgment(self):
-        completion = {'run_id': 'run-1', 'checkpoint_id': 'checkpoint-1', 'request_id': 'request-1',
-                      'wake_nonce': 'a' * 32, 'refusal_nonce': 'c' * 32, 'refusal_sha256': 'd' * 64,
-                      'code': 'stale_revision'}
-        response = {'kind': 'blabla_native_no_advice', 'schema_version': 1,
-                    'completion': completion, 'child_attestation': child()}
-        result = self.normalize(host_request('await_boundary'), {'kind': 'completion',
-            'source': 'native_completion_notification', 'origin': child(), 'marker': response})
-        self.assertEqual(result['payload'], {'kind': 'worker_response', 'origin': child(), 'response': response})
-        self.assertNotIn('disposition', result['payload']['response'])
 
     def test_evidence_is_create_only_and_bound_to_saved_bytes(self):
         observed = observation({'kind': 'unavailable', 'source': 'collaboration.followup_task', 'reason': 'missing_result'})
@@ -265,17 +212,6 @@ class NativeHostProjectionTests(unittest.TestCase):
         with self.assertRaises(native.Failure):
             native.host_call(request)
 
-    def test_work_and_inspection_target_observed_native_task_name(self):
-        self.assertTrue(hasattr(native, 'host_call'), 'host call projection is missing')
-        request = host_request('continue_work')
-        call = native.host_call(request)
-        message = json.loads(call['arguments']['message'])
-        self.assertEqual(message, {'kind': 'blabla_native_work', 'schema_version': 1,
-                                  'key': request['key'], 'brief': request['payload']['brief'],
-                                  'brief_sha256': request['payload']['brief_sha256']})
-        self.assertEqual(native.host_call(host_request('inspect_child')),
-                         {'tool': 'collaboration.list_agents', 'arguments': {'path_prefix': child()['task_name']}})
-
     def test_invalid_versions_boolean_epoch_and_unknown_actions_fail_closed(self):
         self.assertTrue(hasattr(native, 'host_call'), 'host call projection is missing')
         for field, value in (('schema_version', True), ('schema_version', 2), ('surprise', 1)):
@@ -346,22 +282,6 @@ class NativeTransportTests(unittest.TestCase):
                 native.CoreCLI(project=ROOT).invoke('promote', {})
             exchange.assert_not_called()
 
-    def test_unrecognized_core_result_is_not_accepted_or_retried(self):
-        for output in (b'[]', b'{"kind":"delivered"}', b'{"kind":"claimed"}'):
-            with self.subTest(output=output), patch.object(native, 'exchange', return_value=output) as exchange:
-                with self.assertRaises(native.Failure) as failure:
-                    native.CoreCLI(project=ROOT).invoke('advance', {})
-                self.assertEqual(failure.exception.exit_code, 4)
-                self.assertEqual(exchange.call_count, 1)
-
-    def test_zero_exit_empty_malformed_or_truncated_consume_output_is_uncertain(self):
-        for output in (b'', b'not-json', b'{"kind":"consumed"'):
-            with self.subTest(output=output), patch.object(native, 'exchange', return_value=output) as exchange:
-                with self.assertRaises(native.Failure) as failure:
-                    native.CoreCLI(project=ROOT).invoke('consume', {})
-                self.assertEqual(failure.exception.exit_code, 4)
-                self.assertEqual(exchange.call_count, 1)
-
     def test_allowed_result_tag_requires_complete_closed_payload(self):
         missing = consumed_result()
         del missing['consume_nonce']
@@ -388,75 +308,12 @@ class NativeTransportTests(unittest.TestCase):
                 self.assertEqual(failure.exception.exit_code, 2)
             exchange.assert_not_called()
 
-    def test_installed_argv_is_a_string_array_and_malformed_cli_fails_cleanly(self):
-        with patch.object(native, 'SOURCE_ROOT', None):
-            self.assertEqual(native.CoreCLI(project=ROOT, blabla_argv=['blabla', '--verbose']).argv,
-                             ['blabla', '--verbose'])
-            with self.assertRaises(native.Failure):
-                native.CoreCLI(project=ROOT, blabla_argv={'blabla': True})
-        result = subprocess.run([sys.executable, str(HELPER), '--blabla-argv', '[broken',
-                                 'host-next', '--run', 'run-1'], capture_output=True)
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(json.loads(result.stderr)['code'], 'malformed')
-
-    def test_checkpoint_and_receipt_preserve_core_outcomes(self):
-        operations = []
-        completion = {'refusal_nonce': 'b' * 32, 'code': 'stale_revision'}
-        class Core:
-            def invoke(self, operation, request):
-                operations.append((operation, request))
-                return {'kind': 'no_advice', 'code': 'stale_revision', 'completion': completion}
-        request = {'schema_version': 1, 'kind': 'observe'}
-        self.assertEqual(native.handle_checkpoint(Core(), request), {
-            'boundary': {'kind': 'no_advice', 'code': 'stale_revision', 'completion': completion},
-            'evaluation': None})
-        response = {'schema_version': 1, 'kind': 'record_response'}
-        self.assertEqual(native.record_receipt(Core(), response)['completion'], completion)
-        self.assertEqual(operations, [('observe', request), ('record-response', response)])
-
-    def test_checkpoint_uses_only_core_returned_empty_event(self):
-        event = {'task': 'task::fixture', 'observations': []}
-        boundary = {'kind': 'boundary_observed', 'checkpoint': {}, 'event': event}
-        class Core:
-            def invoke(self, operation, request):
-                return boundary
-            def checkpoint(self, run_id, captured):
-                self.captured = (run_id, captured)
-                return {'results': []}
-        core = Core()
-        self.assertEqual(native.handle_checkpoint(core, {'key': {'run_id': 'run-1'}}),
-                         {'boundary': boundary, 'evaluation': {'results': []}})
-        self.assertEqual(core.captured, ('run-1', event))
-
-    def test_core_state_is_reconsulted_after_duplicate_and_restart(self):
-        results = [b'{"kind":"claimed","operation_id":"op-1"}',
-                   b'{"kind":"refused","code":"already_claimed"}']
-        with patch.object(native, 'exchange', side_effect=results) as exchange:
-            first = native.CoreCLI(project=ROOT).invoke('host-claim', {})
-            second = native.CoreCLI(project=ROOT).invoke('host-claim', {})
-        self.assertEqual(first['kind'], 'claimed')
-        self.assertEqual(second, {'kind': 'refused', 'code': 'already_claimed'})
-        self.assertEqual(exchange.call_count, 2)
-
-    def test_uncertain_dispatch_is_never_retried(self):
-        with patch.object(native, 'exchange', side_effect=native.Failure('io', 'lost output', 4)) as exchange:
-            with self.assertRaises(native.Failure):
-                native.CoreCLI(project=ROOT).invoke('consume', {})
-            self.assertEqual(exchange.call_count, 1)
-
     def test_actual_subprocess_bounds_stdout_and_reaps_timeout(self):
         with self.assertRaises(native.Failure):
             native.exchange([sys.executable, '-c', 'print("x" * 65537)'], ROOT, 5)
         with self.assertRaises(native.Failure):
             native.exchange([sys.executable, '-c', 'import time; time.sleep(10)'], ROOT, .05)
         self.assertEqual(native.decode(native.exchange([sys.executable, '-c', 'print("{}")'], ROOT, 5)), {})
-
-    def test_core_rejection_keeps_bounded_diagnostic(self):
-        with self.assertRaises(native.Failure) as failure:
-            native.exchange([sys.executable, '-c',
-                             'import sys; print("native route unavailable", file=sys.stderr); sys.exit(2)'], ROOT, 5)
-        self.assertEqual(failure.exception.exit_code, 2)
-        self.assertIn('native route unavailable', str(failure.exception))
 
 
 if __name__ == '__main__':

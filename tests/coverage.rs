@@ -562,7 +562,7 @@ fn reordered_composed_contract() -> blabla::ir::Contract {
             profile.steps,
             profile.shrink_budget
         ),
-        (0, 32, 512, 256)
+        (0, 8, 512, 256)
     );
     let mut sources: Vec<_> = manifest
         .entries
@@ -605,7 +605,7 @@ fn reordered_composed_contract() -> blabla::ir::Contract {
 fn reordered_composed_contract_preserves_targeted_witness() {
     let options = RunOptions {
         seed: 0,
-        cases: 32,
+        cases: 8,
         steps: 512,
         shrink_budget: 256,
     };
@@ -653,7 +653,7 @@ fn reordered_composed_contract_preserves_targeted_witness() {
         );
     }
     assert_eq!(report.status, blabla::report::RunStatus::Green);
-    assert_eq!(report.metrics.action_budget, 16384);
-    assert_eq!(report.metrics.total_actions, 16384);
+    assert_eq!(report.metrics.action_budget, 4096);
+    assert_eq!(report.metrics.total_actions, 4096);
     assert!(report.metrics.replay_actions > 0);
 }

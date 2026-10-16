@@ -94,7 +94,7 @@ fn legacy(temp: &TempDir, path: &str, deliverable: bool) -> task::Task {
         1,
     );
     assert!(task::apply(&mut work, "accepted"));
-    task::record_acceptance(&mut work, &tree, "worker", 2);
+    task::record_acceptance(&mut work, &tree, &project.ignore, "worker", 2);
     work.evidence.push(task::Evidence {
         identity: task::declared_check(&work),
         acceptance_epoch: Some(work.acceptance_epoch),
@@ -633,25 +633,31 @@ fn legacy_invalid_closed_successors_cannot_clear_withdrawal_residue() {
     );
     write(temp.path(), "src/app.rs", "pub fn run() { let _ = 1; }\n");
     let tree = project::snapshot(temp.path(), &project.ignore);
-    task::withdraw(&mut old, &tree, "superseded", "owner", 2).unwrap();
+    task::withdraw(&mut old, &tree, &project.ignore, "superseded", "owner", 2).unwrap();
     let mut successor = legacy(&temp, ".blabla/scratch/value.txt", false);
     successor.check_inputs.push("src/app.rs".into());
     let inputs = task::evidence_inputs(&successor, &tree);
     successor.evidence.last_mut().unwrap().inputs = inputs;
     assert!(task::record_challenge(&mut successor, &tree, 0, 5));
     successor.state = "ready".into();
-    assert!(task::accept_result(&mut successor, &tree, 0, "owner", 6));
-    old.withdrawal
-        .as_mut()
-        .unwrap()
-        .reconciliations
-        .push(task::WithdrawalReconciliation {
-            path: "src/app.rs".into(),
-            successor: successor.name.clone(),
-            model: "owner".into(),
-            unix: 7,
-            revision: task::successor_revision(&successor, &tree, "src/app.rs"),
-        });
+    assert!(task::accept_result(
+        &mut successor,
+        &tree,
+        &project.ignore,
+        0,
+        "owner",
+        6
+    ));
+    old.withdrawal.as_mut().unwrap().reconciliations.push(
+        serde_json::from_value::<task::WithdrawalReconciliation>(serde_json::json!({
+            "path": "src/app.rs",
+            "successor": successor.name,
+            "model": "owner",
+            "unix": 7,
+            "revision": task::successor_revision(&successor, &tree, "src/app.rs"),
+        }))
+        .unwrap(),
+    );
     assert!(task::withdrawal_residue(&old, &[successor.clone()], &tree).is_empty());
     assert_eq!(
         task::tracked_withdrawal_residue(&old, &[successor], &tree, temp.path(), &project.ignore),

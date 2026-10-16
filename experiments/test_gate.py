@@ -2,7 +2,7 @@ import unittest
 import sys
 from pathlib import Path
 
-from gate import REQUIRED_ORDER, STEPS, checks, ordered, steps_of
+from gate import REQUIRED_ORDER, STEPS, checks, ordered, rust_tests_are_clean, steps_of
 
 PLACEHOLDERS = {"@cargo", "@python", "@out", "@blabla"}
 
@@ -56,13 +56,8 @@ class RunnerUsesTheSchedule(unittest.TestCase):
     def test_credential_free_expert_checks_are_exact_product_gate_stages(self):
         schedule = dict(checks(Path("."), True))
         expected = {
-            "expert-host-probe": "test_expert_host_probe.py",
             "systemone-provider": "test_systemone_provider.py",
-            "expert-evaluation": "test_expert_eval.py",
             "native-expert": "test_native_expert.py",
-            "expert-calibrate-live": "test_expert_calibrate_live.py",
-            "expert-native-live": "test_expert_native_live.py",
-            "todo-c": "test_todo_c.py",
         }
         for name, pattern in expected.items():
             self.assertIn(name, schedule)
@@ -76,13 +71,12 @@ class RunnerUsesTheSchedule(unittest.TestCase):
 
     def test_expert_check_stages_precede_completion_without_reordering_existing_steps(self):
         names = [name for name, _ in STEPS]
-        for name in ("expert-host-probe", "systemone-provider", "expert-evaluation", "native-expert", "expert-calibrate-live", "expert-native-live"):
+        for name in ("systemone-provider", "native-expert"):
             self.assertIn(name, names)
             self.assertLess(names.index("gate-schedule"), names.index(name))
             self.assertLess(names.index(name), names.index("todo-python"))
             self.assertLess(names.index(name), names.index("self-hosting-finish"))
-        self.assertLess(names.index("todo-python"), names.index("todo-c"))
-        self.assertLess(names.index("todo-c"), names.index("self-hosting-finish"))
+        self.assertLess(names.index("todo-python"), names.index("self-hosting-finish"))
 
     def test_canonical_finish_owns_composed_behavior_without_standalone_campaigns(self):
         schedule = dict(checks(Path("."), True))
@@ -100,6 +94,38 @@ class RunnerUsesTheSchedule(unittest.TestCase):
         online = dict(checks(Path("."), False))
         self.assertIn("--offline", offline["rust-tests"])
         self.assertNotIn("--offline", online["rust-tests"])
+
+    def test_the_rust_test_log_is_uncolored_so_its_summary_parses_under_a_forced_color_terminal(self):
+        command = dict(checks(Path("."), False))["rust-tests"]
+        self.assertEqual(command[command.index("--color") + 1], "never")
+
+
+FAILED_LINE = "FAIL [   0.142s] (2/3) blabla::cli a_check_fails"
+TIMED_OUT_LINE = "TIMEOUT [   2.001s] (3/3) blabla::cli a_check_hangs"
+
+
+class RustTestLog(unittest.TestCase):
+    def test_every_failed_or_timed_out_test_is_listed_once_and_the_run_is_not_clean(self):
+        log = "\n".join([
+            "        PASS [   0.011s] (1/3) blabla::cli a_check_passes",
+            "        " + FAILED_LINE,
+            "     " + TIMED_OUT_LINE,
+            "────────────",
+            "     Summary [   2.002s] 3 tests run: 1 passed, 2 failed, 0 skipped",
+            "        " + FAILED_LINE,
+            "     " + TIMED_OUT_LINE,
+        ])
+        summaries, failed_titles, clean = rust_tests_are_clean(log)
+        self.assertEqual(failed_titles, [FAILED_LINE, TIMED_OUT_LINE])
+        self.assertEqual(len(summaries), 1)
+        self.assertFalse(clean)
+
+    def test_a_run_with_a_passing_summary_and_no_failure_is_clean(self):
+        log = "        PASS [   0.011s] (1/1) blabla::cli a_check_passes\n     Summary [   0.012s] 1 test run: 1 passed, 2 skipped"
+        self.assertEqual(rust_tests_are_clean(log)[1:], ([], True))
+
+    def test_a_run_without_a_summary_is_not_clean(self):
+        self.assertFalse(rust_tests_are_clean("error: could not compile `blabla`")[2])
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ role "worker" {
     owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
     verification "focused"
     block_below "70"
-    model ["haiku-4.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
+    model ["haiku-4.5", "haiku-5.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["engineering", "testing"]
 }
 
@@ -19,12 +19,12 @@ role "reviewer" {
     purpose "Independently review one bounded worker patch and report the defects that block its integration."
     owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
     verification "focused"
-    model ["qwen3.5:4b", "opus-5", "gpt-5.6-sol", "haiku-4.5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
+    model ["qwen3.5:4b", "opus-5", "sonnet-5.5", "gpt-5.6-sol", "haiku-4.5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["reviewing", "engineering", "testing", "design"]
 }
 
 policy "explicit-write-scope" {
-    statement "A worker is given an explicit set of paths it may write, and writes nothing outside it. Two workers running at the same time never share a path. Reading is unrestricted: a worker reads whatever it needs to make its edit correct."
+    statement "A worker gets an explicit set of paths it may write and writes nothing else. Two workers running at once never share a path. Reading is free: a worker reads whatever it needs to get its edit right."
     applies_to ["orchestrator", "worker"]
 }
 
@@ -36,158 +36,166 @@ alias "claude-opus-5-5" {
     model "opus-5"
 }
 
+alias "claude-haiku-5-5" {
+    model "haiku-5.5"
+}
+
+alias "claude-sonnet-5-5" {
+    model "sonnet-5.5"
+}
+
 policy "code-speaks-for-itself" {
-    statement "Code carries no comments and no docstrings. A name, a smaller function or a test says what a comment would have said. Text a person reads, such as a finding, a note, a commit message or a document, is plain and specific: it names the file, the behavior and the evidence, and leaves out filler, praise and summaries of what was just said."
+    statement "Code carries no comments or docstrings; a name, a smaller function or a test says it instead. Text people read (findings, notes, commits, docs) is plain and specific: it names the file, the behavior and the evidence, with no filler, praise or recap."
     applies_to ["orchestrator", "worker", "reviewer"]
 }
 
 policy "orchestrator-owns-integration" {
-    statement "Decomposition, worker assignment, files several tasks touch, and the integration of finished work belong to the orchestrator. A worker that finds it needs a shared file reports that instead of editing it."
+    statement "Decomposition, assignment, files several tasks touch and integration belong to the orchestrator. A worker that needs a shared file reports it instead of editing it."
     applies_to ["orchestrator", "worker"]
 }
 
 policy "contracts-are-orchestrator-owned" {
-    statement "Contracts, the manifest and project memory change by an orchestrator decision or an explicit assignment naming them. A worker never edits them to make its own task pass; changing declared intent is a separate authoring act."
+    statement "Contracts, the manifest and project memory change only by an orchestrator decision or an assignment that names them. A worker never edits them to pass its own task; changing intent is a separate authoring act."
     applies_to ["orchestrator", "worker"]
 }
 
 policy "verification-ownership" {
-    statement "A worker runs only the checks that cover what it changed, and reports rather than runs anything wider. The product gate and blabla finish belong to the orchestrator. Research and stress validation are not part of ordinary development and run only when the orchestrator asks for them."
+    statement "A worker runs only the checks that cover its change and reports, rather than runs, anything wider. The product gate and blabla finish are the orchestrator's. Research and stress runs happen only when the orchestrator asks."
     applies_to ["orchestrator", "worker"]
     consult ["testing"]
 }
 
 policy "planner-challenges-the-plan" {
-    statement "An orchestrator that finds the evidence points elsewhere says so before implementing, naming the assumption it is challenging, the evidence against it and what it proposes instead. Accepting a plan it believes is worse is a failure of the role rather than deference. A worker does not carry this authority: it reports the contradiction and the orchestrator decides."
+    statement "An orchestrator whose evidence points elsewhere says so before implementing: the assumption it challenges, the evidence against it and what it proposes instead. Accepting a plan it believes is worse is a failure of the role, not deference. A worker only reports the contradiction; the orchestrator decides."
     applies_to ["orchestrator"]
     consult ["engineering"]
 }
 
 policy "no-version-control-in-workers" {
-    statement "A worker runs no git command that changes state, and creates no branch or worktree. The default topology is one shared tree with disjoint write scopes. The orchestrator commits, one commit per batch of work."
+    statement "A worker runs no git command that changes state and creates no branch or worktree. Work happens in one shared tree with disjoint write scopes. The orchestrator commits, once per batch."
     applies_to ["orchestrator", "worker"]
 }
 
 policy "workers-do-not-spawn" {
-    statement "A worker does not start further agents. If its task turns out to need division, it reports that to the orchestrator, whose decision it is."
+    statement "A worker starts no agents. A task that needs dividing is reported to the orchestrator, who decides."
     applies_to ["worker"]
 }
 
 policy "reports-are-advisory" {
-    statement "What an agent says it did is advisory evidence. The repository, the working tree and deterministic tool output outrank it, and a claim that matters is confirmed against them before it is acted on."
+    statement "What an agent says it did is advisory. The repository, the tree and deterministic tool output outrank it; a claim that matters is confirmed against them before anyone acts on it."
     applies_to ["orchestrator", "worker"]
 }
 
 policy "review-follows-an-evidence-procedure" {
-    statement "A review reaches a verdict by working through the change, in this order. Read the original bounded task. Read the complete diff, every hunk of it. Account for each thing the task asked for and mark it implemented, intentionally unchanged with the evidence for that, or missing. Then, before writing any semantic or blocking finding, read the existing code that decides whether it is true: the definition of every function the change newly calls, the set of values that function can return, the guard or branch at issue, and the parser, classifier or helper standing behind it; a finding about behaviour whose controlling code was not read is not ready to be written. Where the change touches one semantic case, inspect the sibling cases for assumptions that are now stale or contradictory. Use focused execution only where it can falsify a concrete concern already formed. Then classify every finding as BLOCKING, meaning the change is wrong, incomplete or states something untrue, or NON-BLOCKING, meaning it is a suggestion, and ground every blocking finding in a file, a line or a command and what that evidence showed. Consult the knowledge packs the role names and open the rulings inside them rather than their identities alone, because retrieving a ruling is not applying it: a ruling counts only where the change has actually been held against it and the outcome stated. Nothing about the volume of the review is evidence of its quality: not the number of tool calls, not the number of checks run, not a stylistic preference, not cleanup nobody asked for, and no count of any of these is required or rewarded."
+    statement "A review works in this order. Read the original task. Read the whole diff, every hunk. Mark each thing the task asked for as implemented, intentionally unchanged (with evidence) or missing. Before writing a semantic or blocking finding, read the code that decides it: every newly called function, the values it can return, the guard at issue and the helper behind it; a finding whose controlling code was not read is not ready. Where the change touches one case, check its sibling cases for stale assumptions. Run a focused check only to falsify a concern already formed. Mark each finding BLOCKING (wrong, incomplete or untrue) or NON-BLOCKING (a suggestion), and ground every blocking one in a file, line or command and what it showed. Open the rulings of the packs the role consults, not just their names: a ruling counts only where the change was held against it and the outcome stated. Volume is not quality: tool calls, check counts, style preferences and unasked cleanup prove nothing."
     applies_to ["orchestrator", "reviewer"]
     consult ["reviewing"]
 }
 
 policy "worker-output-is-independently-reviewed" {
-    statement "A bounded worker's patch is reviewed by an independent reviewer, in a context that never saw the work being done, before the orchestrator integrates it. The reviewer is given the original task, the write scope, the relevant identities and the actual diff, and retrieves whatever else it needs by progressive disclosure rather than being handed a summary of the project. Its job is to falsify the patch rather than confirm it: changes unrelated to the task, deletion or restructuring of what sat around the requested edit, capability reinvented where it already exists, an edit wider than the task required, a test pinned to wording where a structural assertion was available, a test that passes for the wrong reason, malformed generated output, a claim resting on partial check output, and anything that contradicts project memory. It reports blocking defects with file and line evidence and never edits the patch, never redesigns the architecture and never runs a product or research gate; a focused check is run only where the question actually needs one. The implementation worker's own account of what it did is not evidence for any of this, and a review that finds nothing says so rather than approving."
+    statement "Before integration, a reviewer that never saw the work being done reviews a worker's patch. It gets the task, the write scope, the relevant identities and the diff, and looks up anything else itself instead of reading a project summary. Its job is to falsify the patch: unrelated changes, deleted or restructured surroundings, reinvented capability, an edit wider than asked, a test pinned to wording where a structural assertion existed, a test passing for the wrong reason, malformed generated output, a claim resting on partial check output, and anything contradicting project memory. It reports blocking defects with file and line evidence; it never edits the patch, redesigns the architecture or runs a product or research gate, and runs a focused check only when a question needs one. The worker's own account is not evidence, and a review that finds nothing says so instead of approving."
     applies_to ["orchestrator", "reviewer"]
     consult ["engineering", "testing"]
 }
 
 flow "development" {
-    purpose "One bounded change, from recovering what the project already decided through to the completion gate. The steps below are the order the roles and policies above are meant to be used in; each names the command that carries it, where a command exists. A step with no command is carried by judgment."
+    purpose "One bounded change, from recovering what the project already decided to the completion gate. The steps are the order the roles and policies are used in; each names its command where one exists, and a step without one is carried by judgment."
 }
 
 step "recover-context" {
     flow "development"
     role ["orchestrator"]
-    statement "Read the project's own state before deciding anything about it: the layers and their verdicts, and the Mission, System, Process and Knowledge identities status lists. Open only the identities the change actually touches."
+    statement "Read the project's state before deciding anything: the layers, their verdicts and the memory identities status lists. Open only the identities the change touches."
     command "blabla status"
 }
 
 step "locate-the-change" {
     flow "development"
     role ["orchestrator"]
-    statement "Name the system the change belongs to, the responsibilities it owns, the seams it would cross, and the knowledge packs that system routes to. A change that crosses a seam is a different size of change from one inside a system."
+    statement "Name the system the change belongs to, its responsibilities, the seams the change would cross and the packs the system routes to. Crossing a seam makes a bigger change than staying inside a system."
     command "blabla explain system::<name>"
 }
 
 step "decompose" {
     flow "development"
     role ["orchestrator"]
-    statement "Divide the work into bounded tasks whose write scopes do not overlap, keeping shared and hot files for the orchestrator itself. Choose the worker model from the choices role::worker declares; those are owner-approved permissions rather than a ranking, and a task that does not fit one is not a bounded task."
+    statement "Divide the work into tasks with non-overlapping write scopes, keeping shared and hot files for the orchestrator. Pick the worker model from those role::worker declares: owner-approved permissions, not a ranking. A task no listed model fits is not a bounded task."
 }
 
 step "assign" {
     flow "development"
     role ["orchestrator"]
-    statement "Record the bounded task before the work starts: the role carrying it, the paths it may write and the deliverables it owes. Recording it snapshots the tree the task starts from, which is the only reason a later challenge can tell a produced deliverable from an untouched one."
+    statement "Record the task before work starts: the role, the paths it may write and the deliverables it owes. Opening it snapshots the tree, which is how a later challenge tells a produced deliverable from an untouched one."
     command "blabla task open <name> --role worker --statement \"...\" --scope <path> --deliverable <path> --check \"...\""
 }
 
 step "accept" {
     flow "development"
     role ["worker"]
-    statement "Take the assignment through BlaBla before changing anything, then challenge immediately rather than waiting for the hand-back. Acceptance records which role and model took the work and nothing about what was read; a deliverable changed on an unaccepted task is challenged as work done outside BlaBla, and a model the role does not list is challenged unless the owner has ruled on it. The model comparison is exact and needs no hand-back to fire, so a mis-typed model is visible one command after acceptance and costs the whole task only when nobody asks."
+    statement "Accept through BlaBla before changing anything, then challenge at once instead of waiting for hand-back. Acceptance records the role and model, not what was read. A deliverable changed before acceptance is challenged as work outside BlaBla, and a model the role does not list is challenged unless the owner ruled on it; an early challenge shows a mistyped model one command later."
     command "blabla task accept <name> --model <id>"
 }
 
 step "implement" {
     flow "development"
     role ["worker"]
-    statement "Make the smallest correct edit inside the assigned write scope, reading whatever is needed to make it correct. A task that turns out to need a shared file, a contract, a wider scope or a second worker is reported back rather than taken."
+    statement "Make the smallest correct edit inside the write scope, reading whatever is needed. A task that turns out to need a shared file, a contract, a wider scope or a second worker is reported back, not taken."
     command "blabla task show <name>"
 }
 
 step "verify-focused" {
     flow "development"
     role ["worker"]
-    statement "Run only the declared check, read the whole run, exit code first, and record what it reported. The product gate and the research gate belong to the orchestrator, and a worker that believes a wider run is needed says so instead of starting one. A hand-back with no result for the declared check, with a failing one, or with one whose inputs have since changed is challenged."
+    statement "Run only the declared check, read the whole run, exit code first, and record what it reported. The product and research gates are the orchestrator's; a worker that thinks a wider run is needed says so. A hand-back with no result, a failing result or a result whose inputs changed since is challenged."
     command "blabla task evidence <name> --exit <code> --tool <tool>"
 }
 
 step "challenge" {
     flow "development"
     role ["orchestrator", "worker", "reviewer"]
-    statement "Before reporting a task done, before writing a review verdict, and before the gate, ask BlaBla to contradict the current account of the work from evidence it already holds. It states one grounded challenge to reconcile, or says nothing can be grounded; it decides no correctness and grants no completion."
+    statement "Before reporting a task done, writing a review verdict or running the gate, ask BlaBla to contradict the account of the work from evidence it holds. It states one grounded challenge, or says none can be grounded; it decides no correctness and grants no completion."
     command "blabla challenge"
 }
 
 step "hand-back" {
     flow "development"
     role ["worker"]
-    statement "Mark the task ready for review once current successful evidence for the declared check is recorded, every lens the role consults carries an assessment, and blabla challenge <name> reports the assignment clear. A hand-back is not acceptance of the result: closing the task is the orchestrator's decision, never the worker's."
+    statement "Mark the task ready once the declared check has current passing evidence, every consulted lens has an assessment and blabla challenge <name> reports the assignment clear. A hand-back is not acceptance: closing is the orchestrator's decision."
     command "blabla task ready <name>"
 }
 
 step "review" {
     flow "development"
     role ["reviewer"]
-    statement "Read the original task and the whole diff in a context that never saw the work being done, account for every deliverable the task named, and read the code that decides whether a finding is true before writing it. Falsify the patch rather than confirm it, and record one assessment against each lens the role consults; a hand-back with a lens unassessed is challenged."
+    statement "In a context that never saw the work, read the task and the whole diff, account for every deliverable, and read the code that decides a finding before writing it. Falsify the patch rather than confirm it, and record one assessment per consulted lens; a missing one is challenged."
     command "blabla task lens <name> <lens> \"...\""
 }
 
 step "report-findings" {
     flow "development"
     role ["reviewer", "worker"]
-    statement "Record what the review found against the task it belongs to, one finding at a time. A finding recorded here survives the context that found it, which is what lets a later challenge notice it being dropped instead of settled."
+    statement "Record each finding on the task it belongs to, one at a time. A recorded finding outlives the context that found it, so a later challenge notices if it is dropped instead of settled."
     command "blabla task finding <name> \"...\""
 }
 
 step "integrate" {
     flow "development"
     role ["orchestrator"]
-    statement "Take the finished work, settle every finding against the repository rather than against the worker's account of it, and record what settled each one. The evidence recorded is the agent's claim and never BlaBla's verdict."
+    statement "Settle every finding against the repository, not the worker's account, and record what settled it. That evidence is the agent's claim, never BlaBla's verdict."
     command "blabla task resolve <name> <id> --evidence \"...\" --model <id>"
 }
 
 step "accept-result" {
     flow "development"
     role ["orchestrator"]
-    statement "Accept the result and close the task; BlaBla refuses while a grounded challenge stands. Accepting a result says one handoff is in order and nothing more: project completion is the gate's question, and neither a clean task record nor OVERALL GREEN alone establishes everything."
+    statement "Close the task; BlaBla refuses while a grounded challenge stands. Closing says one handoff is in order, nothing more: completion is the gate's question, and neither a clean record nor OVERALL GREEN proves everything."
     command "blabla task close <name> --model <id>"
 }
 
 step "gate" {
     flow "development"
     role ["orchestrator"]
-    statement "Decide completion. Structure is checked live and the canonical behavior profile is run; only OVERALL GREEN is completion, and a contract or profile is never weakened to obtain it. Any challenge still standing is printed beside the verdict and changes none of it."
+    statement "Decide completion: structure is checked live and the canonical behavior profile runs. Only OVERALL GREEN is completion, and no contract or profile is weakened to get it. A standing challenge is printed beside the verdict and changes none of it."
     command "blabla finish"
 }
 

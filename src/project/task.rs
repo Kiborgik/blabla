@@ -412,7 +412,9 @@ pub fn carrier(task: &Task) -> Option<&str> {
 }
 
 pub fn attest(task: &mut Task, verb: &str, model: Option<&str>, unix: u64) {
-    let carried_by = carrier(task).map(str::to_owned);
+    let carried_by = carrier(task)
+        .filter(|_| task.role != ORCHESTRATOR_ROLE)
+        .map(str::to_owned);
     task.orchestrator_records.push(OrchestratorRecord {
         verb: verb.to_owned(),
         model: model.map(str::to_owned),
@@ -552,13 +554,27 @@ pub struct ReviewTarget {
     pub revision: RelevantRevision,
 }
 
+fn work_under_review(reviewed: &Task) -> Task {
+    let mut work = reviewed.clone();
+    work.findings = work
+        .findings
+        .into_iter()
+        .filter(|finding| finding.addressed.is_some())
+        .map(|finding| Finding {
+            resolution: None,
+            ..finding
+        })
+        .collect();
+    work
+}
+
 pub fn review_revision(
     review: &Task,
     reviewed: &Task,
     tree: &BTreeMap<String, String>,
     identities: BTreeMap<String, String>,
 ) -> RelevantRevision {
-    let mut revision = relevant_revision(reviewed, tree, identities);
+    let mut revision = relevant_revision(&work_under_review(reviewed), tree, identities);
     for input in &review.check_inputs {
         revision
             .paths
@@ -648,6 +664,18 @@ pub struct Evidence {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Falsification {
+    pub acceptance_epoch: u64,
+    pub check: String,
+    pub current_exit: i32,
+    pub current_log: String,
+    pub opened_exit: Option<i32>,
+    pub opened_log: Option<String>,
+    pub unix: u64,
+    pub inputs: BTreeMap<String, Option<String>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChallengeReceipt {
     pub fingerprint: String,
     pub unix: u64,
@@ -660,6 +688,8 @@ pub struct Note {
 }
 
 pub const ATTRIBUTIONS: [&str; 3] = ["task", "concurrent", "unknown"];
+
+pub const ORCHESTRATOR_ROLE: &str = "orchestrator";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Attribution {
@@ -733,16 +763,19 @@ pub fn stale(evidence: &Evidence, tree: &BTreeMap<String, String>) -> bool {
         .any(|(path, digest)| observed_digest(tree, path) != *digest)
 }
 
+pub fn declared_inputs(task: &Task) -> &[String] {
+    if task.check_inputs.is_empty() {
+        task.scope.as_slice()
+    } else {
+        task.check_inputs.as_slice()
+    }
+}
+
 pub fn evidence_inputs(
     task: &Task,
     tree: &BTreeMap<String, String>,
 ) -> BTreeMap<String, Option<String>> {
-    let declared = if task.check_inputs.is_empty() {
-        &task.scope
-    } else {
-        &task.check_inputs
-    };
-    declared
+    declared_inputs(task)
         .iter()
         .chain(
             task.deliverables
@@ -832,6 +865,9 @@ fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String
     record.closed_paths.clear();
     record.result = None;
     record.build = None;
+    record
+        .findings
+        .retain(|finding| finding.resolution.is_none() || finding.addressed.is_some());
     for finding in &mut record.findings {
         finding.resolution = None;
     }
@@ -942,7 +978,13 @@ pub fn mark_ready(
     Ok(())
 }
 
-pub fn record_acceptance(task: &mut Task, tree: &BTreeMap<String, String>, model: &str, unix: u64) {
+pub fn record_acceptance(
+    task: &mut Task,
+    tree: &BTreeMap<String, String>,
+    ignore: &Ignore,
+    model: &str,
+    unix: u64,
+) {
     let replacement = task
         .accepted
         .as_ref()
@@ -960,7 +1002,7 @@ pub fn record_acceptance(task: &mut Task, tree: &BTreeMap<String, String>, model
         .acceptance_epoch
         .checked_add(1)
         .expect("acceptance epoch exhausted");
-    let changed_paths = changed(task, tree);
+    let changed_paths = changed(task, tree, ignore);
     let changed_at_acceptance = if changed_paths.is_empty() {
         None
     } else {
@@ -976,6 +1018,7 @@ pub fn record_acceptance(task: &mut Task, tree: &BTreeMap<String, String>, model
 pub fn accept_result(
     task: &mut Task,
     tree: &BTreeMap<String, String>,
+    ignore: &Ignore,
     standing: usize,
     model: &str,
     now_unix: u64,
@@ -993,7 +1036,7 @@ pub fn accept_result(
         changed_at_acceptance: None,
     });
     task.closed_unix = Some(now_unix);
-    let paths_changed: Vec<String> = changed(task, tree)
+    let paths_changed: Vec<String> = changed(task, tree, ignore)
         .into_iter()
         .map(|s| s.to_owned())
         .collect();
@@ -1031,11 +1074,14 @@ pub struct WithdrawalReconciliation {
     pub revision: revision::RelevantRevision,
     pub model: String,
     pub unix: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successor_closed_unix: Option<u64>,
 }
 
 pub fn withdraw(
     task: &mut Task,
     tree: &BTreeMap<String, String>,
+    ignore: &Ignore,
     reason: &str,
     model: &str,
     unix: u64,
@@ -1043,7 +1089,7 @@ pub fn withdraw(
     if !task.open() || reason.trim().is_empty() {
         return Err("withdrawal requires a nonterminal task and a nonempty reason".to_owned());
     }
-    let unresolved_paths = changed(task, tree)
+    let unresolved_paths = changed(task, tree, ignore)
         .into_iter()
         .filter(|path| task.in_scope(path) || attribute(task, tree, path) == ATTRIBUTIONS[0])
         .map(|path| (path.to_owned(), observed_digest(tree, path)))
@@ -1089,11 +1135,22 @@ pub fn successor_revision(
 }
 
 pub fn successor_covers(task: &Task, path: &str) -> bool {
-    task.check_inputs.iter().any(|input| covers(input, path))
+    declared_inputs(task)
+        .iter()
+        .any(|input| covers(input, path))
         || task
             .deliverables
             .iter()
             .any(|deliverable| covers(&deliverable.path, path))
+}
+
+pub fn covered(task: &Task, path: &str) -> bool {
+    task.in_scope(path)
+        || successor_covers(task, path)
+        || task
+            .attributions
+            .iter()
+            .any(|attribution| covers(&attribution.path, path))
 }
 
 pub fn successful_successor(task: &Task, tree: &BTreeMap<String, String>, path: &str) -> bool {
@@ -1145,15 +1202,30 @@ fn withdrawal_residue_by(
                     && tasks.iter().any(|successor| {
                         successor.name == record.successor
                             && observable(successor)
-                            && successful_successor(successor, tree, path)
-                            && successor_revision(successor, tree, path) == record.revision
-                            && record.revision.paths.get(*path)
-                                == Some(&observed_digest(tree, path))
+                            && reconciliation_stands(record, successor, tree, path)
                     })
             })
         })
         .cloned()
         .collect()
+}
+
+fn reconciliation_stands(
+    record: &WithdrawalReconciliation,
+    successor: &Task,
+    tree: &BTreeMap<String, String>,
+    path: &str,
+) -> bool {
+    match record.successor_closed_unix {
+        Some(closed_unix) => {
+            successor.state == "closed" && successor.closed_unix == Some(closed_unix)
+        }
+        None => {
+            successful_successor(successor, tree, path)
+                && successor_revision(successor, tree, path) == record.revision
+                && record.revision.paths.get(path) == Some(&observed_digest(tree, path))
+        }
+    }
 }
 
 pub fn normalize_scope(root: &Path, path: &str) -> Result<String, String> {
@@ -1460,6 +1532,12 @@ pub struct Task {
     pub orchestrator_records: Vec<OrchestratorRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lenses: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub falsify: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub falsifications: Vec<Falsification>,
 }
 
 fn open_state() -> String {
@@ -1500,6 +1578,9 @@ impl Default for Task {
             decisions: Vec::new(),
             orchestrator_records: Vec::new(),
             goal: None,
+            lenses: Vec::new(),
+            falsify: Vec::new(),
+            falsifications: Vec::new(),
         }
     }
 }
@@ -1597,6 +1678,7 @@ pub struct Opening {
     pub check_argv: Option<Vec<String>>,
     pub inputs: Vec<String>,
     pub goal: Option<String>,
+    pub lenses: Vec<String>,
 }
 
 pub fn record(root: &Path, ignore: &Ignore, opening: Opening, now_unix: u64) -> Task {
@@ -1644,6 +1726,7 @@ pub fn record_from(
         check_argv: opening.check_argv,
         check_inputs: opening.inputs,
         goal: opening.goal,
+        lenses: opening.lenses,
         ..Task::default()
     }
 }
@@ -1767,21 +1850,66 @@ pub fn status(root: &Path) -> Option<TaskStatus> {
     })
 }
 
-pub fn changed<'a>(task: &'a Task, current: &'a BTreeMap<String, String>) -> Vec<&'a str> {
+pub fn changed<'a>(
+    task: &'a Task,
+    current: &'a BTreeMap<String, String>,
+    ignore: &Ignore,
+) -> Vec<&'a str> {
     let mut moved: Vec<&str> = current
         .iter()
-        .filter(|(path, digest)| task.opened_tree.get(*path) != Some(*digest))
+        .filter(|(path, digest)| {
+            !ignore.skips_file(path) && task.opened_tree.get(*path) != Some(*digest)
+        })
         .map(|(path, _)| path.as_str())
         .collect();
     moved.extend(
         task.opened_tree
             .keys()
-            .filter(|path| !current.contains_key(*path))
+            .filter(|path| !current.contains_key(*path) && !ignore.skips_file(path))
             .map(String::as_str),
     );
     moved.sort_unstable();
     moved.dedup();
     moved
+}
+
+pub fn on_disk_spelling(stored: &str, tree: &BTreeMap<String, String>) -> String {
+    tree.keys()
+        .find_map(|key| {
+            std::iter::once(key.as_str())
+                .chain(key.match_indices('/').map(|(index, _)| &key[..index]))
+                .find(|candidate| super::path_identity(candidate) == stored)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| stored.to_owned())
+}
+
+pub const FALSIFY_TREE_PREFIX: &str = "falsify-tree-";
+
+pub fn scratch_directory(root: &Path, name: &str) -> PathBuf {
+    root.join(RECORD_DIRECTORY)
+        .join(SCRATCH_DIRECTORY)
+        .join(name)
+}
+
+pub fn scratch_label(name: &str) -> String {
+    format!("{RECORD_DIRECTORY}/{SCRATCH_DIRECTORY}/{name}")
+}
+
+pub fn falsify_copy_directory(root: &Path, name: &str) -> PathBuf {
+    scratch_directory(root, name).join(format!("{FALSIFY_TREE_PREFIX}{}", std::process::id()))
+}
+
+pub fn falsification_leftovers(root: &Path, name: &str) -> Vec<PathBuf> {
+    let opened = store::opened_directory(root, name);
+    let mut leftovers: Vec<PathBuf> = opened.is_dir().then_some(opened).into_iter().collect();
+    if let Ok(entries) = std::fs::read_dir(scratch_directory(root, name)) {
+        leftovers.extend(entries.flatten().map(|entry| entry.path()).filter(|path| {
+            path.file_name()
+                .is_some_and(|file| file.to_string_lossy().starts_with(FALSIFY_TREE_PREFIX))
+        }));
+    }
+    leftovers
 }
 
 pub fn owe_path(task: &mut Task, path: String) {
@@ -1927,6 +2055,33 @@ mod tests {
     }
 
     #[test]
+    fn an_orchestrator_role_task_keeps_its_carried_record_out_of_the_carry() {
+        let carried = |role: &str| -> Task {
+            serde_json::from_value(serde_json::json!({
+                "name": "self-carried",
+                "role": role,
+                "statement": "an orchestrator carries its own task",
+                "scope": ["src"],
+                "deliverables": [],
+                "opened_unix": 1,
+                "state": "accepted",
+                "accepted": { "model": "opus-5", "unix": 2 }
+            }))
+            .expect("a carried task parses")
+        };
+        let mut own = carried(ORCHESTRATOR_ROLE);
+        assert!(carrier(&own).is_some());
+        attest(&mut own, "resolve", Some("opus-5"), 3);
+        assert_eq!(own.orchestrator_records.len(), 1);
+        assert_eq!(own.recorded_during_carry().count(), 0);
+        assert_eq!(own.unconfirmed_during_carry().count(), 0);
+        let mut worker = carried("worker");
+        attest(&mut worker, "resolve", Some("opus-5"), 3);
+        assert_eq!(worker.recorded_during_carry().count(), 1);
+        assert_eq!(worker.unconfirmed_during_carry().count(), 1);
+    }
+
+    #[test]
     fn a_default_task_is_open_and_holds_nothing() {
         assert_eq!(
             serde_json::to_value(Task::default()).expect("task serializes"),
@@ -1966,6 +2121,7 @@ mod tests {
                 inputs: vec!["shared".to_owned()],
                 goal: Some("ship".to_owned()),
                 review_of: None,
+                lenses: vec!["review-lens".to_owned()],
             },
             7,
             BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),
@@ -1993,7 +2149,8 @@ mod tests {
                 "attributions": [],
                 "notes": [],
                 "removed_deliverables": [],
-                "goal": "ship"
+                "goal": "ship",
+                "lenses": ["review-lens"]
             })
         );
         let opening = Opening::default();

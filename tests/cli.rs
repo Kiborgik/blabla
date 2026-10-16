@@ -330,7 +330,7 @@ fn run_uses_project_profile_timeout() {
         r#"project TestProject
 
 verify behavior {
-    command ["python3", "simple_adapter.py"]
+    command ["python", "simple_adapter.py"]
     timeout_ms 3000
 }
 "#,
@@ -398,7 +398,7 @@ for line in sys.stdin:
         OsStr::new("1"),
         OsStr::new("--json"),
         OsStr::new("--"),
-        OsStr::new("python3"),
+        OsStr::new("python"),
         adapter_path.as_os_str(),
     ];
     let output = support::run_in(Some(dir.path()), &run_args);

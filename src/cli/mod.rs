@@ -6,7 +6,7 @@ use blabla::report::{
     RunReport, RunStatus, VerifyError,
 };
 use blabla::{runtime, semantics, structure, verify};
-use clap::{Parser, Subcommand, error::ErrorKind};
+use clap::{CommandFactory, Parser, Subcommand, error::ErrorKind};
 use serde::Serialize;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
@@ -245,6 +245,19 @@ enum TaskAction {
             help = "The distinct existing task this review inspects"
         )]
         review_of: Option<String>,
+        #[arg(
+            long,
+            value_name = "PACK",
+            help = "A consulted pack this task must assess; repeat for several. When none is named, every pack the role consults is required"
+        )]
+        lens: Vec<String>,
+        #[arg(
+            long,
+            value_name = "PATH",
+            num_args = 1..,
+            help = "A file in the write scope whose opened contents the check must fail on; repeat or list several"
+        )]
+        falsify: Vec<String>,
     },
     #[command(about = "Record something discovered during the task that is not yet settled")]
     Finding { name: String, statement: String },
@@ -390,6 +403,19 @@ enum TaskAction {
         )]
         model: Option<String>,
     },
+
+    #[command(about = "Replace the statement of a task that is not closed or withdrawn")]
+    Statement {
+        name: String,
+        #[arg(help = "The new statement of the task, in one sentence")]
+        text: String,
+        #[arg(
+            long,
+            value_name = "ID",
+            help = "The orchestrator model recording the amendment; an attestation, not proof"
+        )]
+        model: Option<String>,
+    },
     #[command(
         about = "Accept the result of a bounded task and close it; refused while a grounded challenge stands"
     )]
@@ -436,6 +462,12 @@ enum TaskAction {
         name: String,
         lens: String,
         statement: String,
+        #[arg(
+            long,
+            value_name = "MODEL",
+            help = "The accepted model recording this assessment; refused when it is not the accepted model"
+        )]
+        model: Option<String>,
     },
     #[command(about = "Propose an alternative model with a reason")]
     ProposeModel {
@@ -526,6 +558,10 @@ enum TaskAction {
         )]
         run: bool,
     },
+    #[command(
+        about = "Run the declared check against the opened contents of the task's falsify paths and record whether it fails; the current files are restored"
+    )]
+    Falsify { name: String },
     #[command(
         about = "State where a changed path came from: the task itself, concurrent work, or unknown"
     )]
@@ -1024,6 +1060,16 @@ fn execute(cli: Cli) -> i32 {
         },
         Command::Task { action } => match project::load(explicit, &cwd, json, None) {
             Ok(loaded) => {
+                let swallowed = swallowed_options(&action);
+                if !swallowed.is_empty() {
+                    eprintln!(
+                        "argv elements {} equal long options of this subcommand and are kept in the check argv; put BlaBla options before --check-argv or --argv if they were meant for BlaBla",
+                        swallowed.join(", ")
+                    );
+                }
+                if let TaskAction::Falsify { name } = action {
+                    return task::falsify(&loaded, &name, json);
+                }
                 if let TaskAction::Show { name } = action {
                     return task::show(&loaded, name.as_deref(), json);
                 }
@@ -1045,6 +1091,8 @@ fn execute(cli: Cli) -> i32 {
                         input,
                         goal,
                         review_of,
+                        lens,
+                        falsify,
                     } => task::open(
                         &loaded,
                         blabla::project::task::Opening {
@@ -1062,8 +1110,11 @@ fn execute(cli: Cli) -> i32 {
                             inputs: input,
                             goal,
                             review_of,
+                            lenses: lens,
                         },
+                        falsify,
                         json,
+                        &swallowed,
                     ),
                     TaskAction::Finding { name, statement } => {
                         task::finding(&loaded, &name, &statement, json)
@@ -1144,6 +1195,9 @@ fn execute(cli: Cli) -> i32 {
                     TaskAction::Scope { name, add, model } => {
                         task::widen(&loaded, &name, add, model.as_deref(), json)
                     }
+                    TaskAction::Statement { name, text, model } => {
+                        task::restate(&loaded, &name, &text, model.as_deref(), json)
+                    }
                     TaskAction::Close { name, model } => task::close(&loaded, &name, &model, json),
                     TaskAction::Withdraw {
                         name,
@@ -1170,7 +1224,8 @@ fn execute(cli: Cli) -> i32 {
                         name,
                         lens,
                         statement,
-                    } => task::lens(&loaded, &name, &lens, &statement, json),
+                        model,
+                    } => task::lens(&loaded, &name, &lens, &statement, model.as_deref(), json),
                     TaskAction::ProposeModel {
                         name,
                         model,
@@ -1205,6 +1260,7 @@ fn execute(cli: Cli) -> i32 {
                             model,
                         },
                         json,
+                        &swallowed,
                     ),
                     TaskAction::Deliverable {
                         name,
@@ -1238,6 +1294,7 @@ fn execute(cli: Cli) -> i32 {
                         }
                         _ => 2,
                     },
+                    TaskAction::Falsify { name } => task::falsify(&loaded, &name, json),
                 })
             }
             Err(exit) => exit,
@@ -1974,6 +2031,30 @@ fn emit_init(outcome: &init::Outcome, json: bool) -> i32 {
         })()
     };
     if result.is_ok() { 0 } else { 4 }
+}
+
+fn swallowed_options(action: &TaskAction) -> Vec<String> {
+    let (subcommand, argv) = match action {
+        TaskAction::Open { check_argv, .. } => ("open", check_argv),
+        TaskAction::Check { argv, .. } => ("check", argv),
+        _ => return Vec::new(),
+    };
+    let root = Cli::command();
+    let Some(definition) = root
+        .find_subcommand("task")
+        .and_then(|task| task.find_subcommand(subcommand))
+    else {
+        return Vec::new();
+    };
+    argv.iter()
+        .filter(|element| {
+            definition.get_arguments().any(|arg| {
+                arg.get_long()
+                    .is_some_and(|long| element.as_str() == format!("--{long}"))
+            })
+        })
+        .cloned()
+        .collect()
 }
 
 pub fn main() -> i32 {

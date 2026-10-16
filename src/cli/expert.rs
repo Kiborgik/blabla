@@ -16,6 +16,8 @@ use blabla::project::{Project, task};
 use clap::Subcommand;
 mod native;
 mod pilot;
+#[cfg(test)]
+mod tests;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, BufRead, Read};
@@ -25,28 +27,44 @@ use std::time::{Duration, Instant};
 
 #[derive(Subcommand)]
 pub(super) enum Action {
+    #[command(
+        about = "Check a development calibration request file against the project's evidence and print the preflight result"
+    )]
     PreflightDevelopmentCalibration {
         #[arg(long)]
         input: PathBuf,
     },
+    #[command(
+        about = "Fit a saved calibration request from its evidence and write the fit result bytes to stdout"
+    )]
     FitSaved {
         #[arg(long)]
         input: PathBuf,
     },
+    #[command(
+        about = "Read up to 64 evaluation request lines from stdin and print each typed result under the configured mode"
+    )]
     Evaluate {
         #[arg(long)]
         config: Option<PathBuf>,
         #[arg(long, num_args = 1..)]
         provider_command: Vec<String>,
     },
+    #[command(
+        about = "Drive a native run through its protocol: enroll, capture boundaries, observe, prepare and consume wakes, record responses, invalidate, start, advance and exchange host steps"
+    )]
     Native {
         #[command(subcommand)]
         action: native::Action,
     },
+    #[command(about = "Issue, show and revoke pilot permits that gate expert advice")]
     Pilot {
         #[command(subcommand)]
         action: pilot::Action,
     },
+    #[command(
+        about = "Evaluate one observed event at a checkpoint for an accepted task and write its judgment trace records"
+    )]
     Checkpoint {
         #[arg(long)]
         event: PathBuf,
@@ -55,11 +73,13 @@ pub(super) enum Action {
         #[arg(long)]
         experimental_run: Option<String>,
     },
+    #[command(about = "Reserve delivery of a request's advice at a checkpoint")]
     Delivery {
         request_id: String,
         #[arg(long)]
         checkpoint: String,
     },
+    #[command(about = "Record the delivery state and its evidence for a reserved request")]
     Receipt {
         request_id: String,
         #[arg(long, value_parser = parse_state)]
@@ -67,9 +87,11 @@ pub(super) enum Action {
         #[arg(long)]
         evidence: String,
     },
-    Replay {
-        trace: PathBuf,
-    },
+    #[command(about = "Replay a recorded trace file and print its report")]
+    Replay { trace: PathBuf },
+    #[command(
+        about = "Re-run a recorded trace's request through the configured provider and store a shadow comparison record when the config has a policy for it"
+    )]
     Reevaluate {
         trace: PathBuf,
         #[arg(long)]
@@ -77,10 +99,16 @@ pub(super) enum Action {
         #[arg(long, num_args = 1..)]
         provider_command: Vec<String>,
     },
+    #[command(
+        about = "List recorded traces and captures, or delete one run with the delete subcommand"
+    )]
     Traces {
         #[command(subcommand)]
         action: Option<TraceAction>,
     },
+    #[command(
+        about = "Drop one closed task's ordinary delivery and checkpoint ledger entries; refused while the task is open"
+    )]
     Cleanup {
         #[arg(long)]
         task: String,
@@ -89,6 +117,7 @@ pub(super) enum Action {
 
 #[derive(Subcommand)]
 pub(super) enum TraceAction {
+    #[command(about = "Delete one recorded trace run by its run id")]
     Delete { run_id: String },
 }
 

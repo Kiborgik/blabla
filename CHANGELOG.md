@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.11.0 (2026-10-16)
+
+`task falsify` catches a task whose tests pass without the change they claim to prove, by running the check against the code as it was before the task. The docs are shorter and plainer around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. Two dogfooding rounds, run with small worker models and independent reviewers through BlaBla's own task workflow, fixed the frictions they hit. No contract syntax or exit code changed; task JSON gains optional fields.
+
+### Breaking and upgrade
+
+- A task assigned to role `orchestrator` no longer records its own amendments as made during a carry, so it raises no `orchestrator-record-during-carry` challenge and needs no `task confirm`. Tasks of every other role behave as before. Records written by older versions keep their stored carry state
+- Task records gain optional `lenses`, `falsify` and `falsifications` lists; records without `lenses` require every consulted pack, as before
+- A review recorded before 0.11 on a target that had findings goes stale once; accept it again, rerun its check and challenge it. [Upgrade note](docs/agent-workflow.md#upgrading-task-records-to-011)
+
+### Added
+
+- `task open --falsify PATH` and `task falsify NAME`: the declared check runs in a copy of the tree, on the current files and then on those paths as they were at open. Hand-back is challenged with `check-not-falsified` until the check passed on the first and failed on the second, so a check that passes without the change it claims to prove is caught without a reviewer reading old code. It judges the whole check, not each test in it, and a check that needs an ignored directory or a file outside the project root reports that the copy cannot judge it
+- `task show` prints the latest evidence (tool, acceptance epoch, exit, log) and every lens assessment; `task evidence --run` prints the same receipt
+- `task open --lens PACK` names the subset of the role's consulted packs a task must assess; `task lens --model` must match the accepted model
+- Every `blabla expert` subcommand, at every depth, describes itself in `--help`
+- Product gate steps `docs-links` (relative links and anchors in tracked markdown, exact case) and `versions` (every declared version matches `Cargo.toml`)
+- `task finding` prints the new finding's id. `task show` lists the falsify paths, the latest falsification, the paths changed since the task opened, a review target's changed paths, the task's own lens subset and paths in their on-disk spelling
+- `blabla status` prints the not held, unverified and unresolved counts of a goal that is not fully held, and points `explain` at the first such goal
+- `task statement NAME TEXT` replaces the statement of a task that is not closed or withdrawn, recorded as an orchestrator amendment
+- `task open --check-argv` and `task check --argv` report an argument after them that matches one of their own options (stderr and a `swallowed_check_argv` JSON field); the check keeps it, because a check program may take the same names
+- Ruling `ruling::testing::a-falsifying-run-reaches-the-assertions`: a run on the old code proves something only when it builds and every test runs
+
+### Changed
+
+- Descriptive docs are about four times shorter, in plain English, with tables kept where people read them. History (changelog, release notes, research data, release evidence) is unchanged
+- `docs/test-ownership.md` moved into `CONTRIBUTING.md`. `docs/design/0.10-native-host-schema.md` is replaced by the wire-contract section of `adapters/native/README.md`, which points at the Rust types in `src/expert/native/wire.rs`
+- The paragraph printed after every `task` command is shorter; two guide lines point at the new docs
+- Mission memory states the drift and overconfidence problem; system, process and design-knowledge prose is shorter, with every identity, binding and judgment unchanged
+- Systems in project memory own whole directories where they own all of them, so new files are owned without editing a file list; 15 files that no system owned are now covered
+- Role `worker` permits Haiku 5.5 and role `reviewer` Sonnet 5.5, with their host model ids as aliases
+- `guide change` and the agent workflow say to author rules for work not started yet as draft contracts, because an active RED rule blocks every task close
+- New active goals: `goal::short-plain-docs` and one goal per fix above, each expecting the rule that checks it
+- BlaBla's own canonical profile is 8 cases × 512 actions instead of 32 × 512. Every obligation is covered by about action 2,300, so `finish` runs 4,096 actions instead of 16,384
+- Debug and test builds use `opt-level = 1`, which halves the CPU-bound verifier tests
+- The product gate runs the Rust tests through `cargo-nextest`, every test binary at once; contributors install it with `cargo install cargo-nextest --locked`
+- The product gate drops the expert experiment tests and the C example persistence test, and CI drops the historical experiment tests and runs Windows tests in parallel. The expert adapter tests keep one working-adapter check and every check that forged or hostile input is refused; the language adapters are covered by the example `finish` runs and the acceptance tests
+
+### Fixed
+
+- Recording or resolving findings on a reviewed task no longer makes its review stale; edits and a worker's `task addressed` still do
+- Resolving a finding no longer voids the task's challenge receipt
+- A path that becomes ignored while a task is open no longer counts as a change of that task
+- `challenge NAME` leads with a class that blocks the hand-back; project-level classes follow it
+- `attribution-unknown` groups changed paths by top-level directory instead of listing every one
+- `task reconcile-withdrawal` accepts a successor whose write scope covers the path when it declares no inputs, as evidence already did
+- A withdrawal reconciliation is checked in full when it is recorded and then stands while that successor stays closed; later edits to the path or to the successor's inputs no longer bring the residue back. Reconciliations recorded by older versions keep the live check
+- An optional `--model` on `task check`, `task scope` or `task statement` is recorded unchecked when process memory declares no `role::orchestrator`, instead of being refused; resolving, answering, confirming, attributing, removing a deliverable, withdrawing and reconciling still need the role, and `task open` reports up front whether it is declared (`orchestrator_declared` in `--json`)
+- A BLOCKED task's route names its unresolved findings instead of telling the worker to resume at once; a review not yet accepted is no longer shown as STALE
+- `task close` and `task withdraw` keep the exit of the recorded change when only removing falsify leftovers fails, and print what was left
+
 ## 0.10.0 (2026-10-06)
 
 Revision-bound handoffs and an experimental bounded expert layer. [Release evidence](docs/design/0.10-release-evidence.md) lists the checks and their limits.

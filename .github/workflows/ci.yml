@@ -15,11 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            test_threads: 1
-          - os: ubuntu-latest
-            test_threads: 4
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -34,12 +30,11 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: Swatinem/rust-cache@v2
-      - name: Historical and current experiment tests
-        run: python experiments/run_historical_tests.py
+        with:
+          cache-on-failure: "true"
+      - uses: taiki-e/install-action@nextest
       - name: Product gate
         run: python experiments/gate.py --tag ci --out ci-artifacts/gate
-        env:
-          RUST_TEST_THREADS: ${{ matrix.test_threads }}
       - name: Hello contract check
         run: cargo run --quiet -- check examples/hello.bla
       - name: Collect failure evidence

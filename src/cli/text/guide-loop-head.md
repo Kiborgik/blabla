@@ -14,5 +14,9 @@ file changed inside the write scope from one changed outside it.
 
   blabla task open <name> --role worker --statement "..." --scope <path> --deliverable <path> --check "..."
 
+Add --falsify <path> for each production file the change touches: the worker's task falsify then
+runs the declared check in a copy of the tree on the current files and on those files as they were
+at open, and the hand-back waits until it passed on the first and failed on the second.
+
 THE WORKER takes it up in this order. blabla task show <name> prints these same routes for the
 task it was given, and that view is the authority over this text.

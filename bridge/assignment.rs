@@ -141,6 +141,7 @@ impl Assignment {
         assert!(task::accept_result(
             &mut self.task,
             &self.tree,
+            &blabla::project::ignore::Ignore::default(),
             standing,
             PERMITTED,
             4
@@ -192,7 +193,13 @@ impl Assignment {
 
     fn accept_on(&mut self, model: &str) {
         if task::apply(&mut self.task, "accepted") {
-            task::record_acceptance(&mut self.task, &self.tree, model, 1);
+            task::record_acceptance(
+                &mut self.task,
+                &self.tree,
+                &blabla::project::ignore::Ignore::default(),
+                model,
+                1,
+            );
         }
     }
 
@@ -517,7 +524,14 @@ impl Assignment {
             }
             "accept_the_result" => {
                 let standing = self.standing().len();
-                task::accept_result(&mut self.task, &self.tree, standing, PERMITTED, 4);
+                task::accept_result(
+                    &mut self.task,
+                    &self.tree,
+                    &blabla::project::ignore::Ignore::default(),
+                    standing,
+                    PERMITTED,
+                    4,
+                );
             }
             "record_a_check_result" => self.record_evidence(DECLARED_CHECK),
             "record_a_failing_check_result" => self.record_result(DECLARED_CHECK, 101),
@@ -729,7 +743,13 @@ mod tests {
     fn check_result_bindings_preserve_the_observed_check_and_acceptance() {
         let mut assignment = Assignment::new();
         assignment.call("accept_with_a_permitted_model");
-        task::record_acceptance(&mut assignment.task, &assignment.tree, PERMITTED, 1);
+        task::record_acceptance(
+            &mut assignment.task,
+            &assignment.tree,
+            &blabla::project::ignore::Ignore::default(),
+            PERMITTED,
+            1,
+        );
         assignment.call("record_a_check_result");
         let evidence = assignment.task.evidence.last().unwrap();
         assert_eq!(evidence.identity, task::declared_check(&assignment.task));

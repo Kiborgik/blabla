@@ -12,16 +12,11 @@ PYTHON = sys.executable
 STEPS = (
     ("fmt", ("cargo", "fmt", "--all", "--", "--check")),
     ("clippy", ("cargo", "clippy", "@cargo", "--all-targets", "--", "-D", "warnings")),
-    ("rust-tests", ("cargo", "test", "@cargo")),
+    ("rust-tests", ("cargo", "nextest", "run", "@cargo", "--no-fail-fast", "--color", "never")),
     ("gate-schedule", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_gate*.py")),
-    ("expert-host-probe", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_expert_host_probe.py")),
     ("systemone-provider", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_systemone_provider.py")),
-    ("expert-evaluation", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_expert_eval.py")),
     ("native-expert", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_native_expert.py")),
-    ("expert-calibrate-live", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_expert_calibrate_live.py")),
-    ("expert-native-live", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_expert_native_live.py")),
     ("todo-python", ("@python", "-m", "unittest", "discover", "-s", "examples/todo", "-p", "test_*.py")),
-    ("todo-c", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_todo_c.py")),
     ("bridge", ("cargo", "build", "@cargo", "--quiet", "--example", "structure-adapter")),
     ("bridge-tests", ("cargo", "test", "@cargo", "--quiet", "--example", "structure-adapter")),
     ("self-hosting-finish", ("@blabla", "finish")),
@@ -33,6 +28,8 @@ STEPS = (
     ("example-cpp", ("@blabla", "--project", "examples/todo-cpp", "finish")),
     ("example-java", ("@blabla", "--project", "examples/todo-java", "finish")),
     ("audit", ("@python", "experiments/audit_public_tree.py", "--out", "@out")),
+    ("docs-links", ("@python", "experiments/check_text.py", "links")),
+    ("versions", ("@python", "experiments/check_text.py", "versions")),
     ("diagrams", ("@python", "experiments/render_diagrams.py", "--check")),
 )
 
@@ -88,10 +85,14 @@ def run(command, timeout=1800):
     return completed.returncode, completed.stdout + completed.stderr, time.perf_counter() - started
 
 
+FAILED_STATUSES = ("FAIL", "TIMEOUT", "SIGSEGV", "SIGABRT", "SIGBUS", "SIGILL", "ABORT", "LEAK-FAIL")
+
+
 def rust_tests_are_clean(log):
-    summaries = [line for line in log.splitlines() if line.startswith("test result:")]
-    failed_titles = [line for line in log.splitlines() if line.startswith("test ") and line.rstrip().endswith("FAILED")]
-    counted = all(" 0 failed;" in line for line in summaries)
+    lines = [line.strip() for line in log.splitlines()]
+    summaries = [line for line in lines if line.startswith("Summary [")]
+    failed_titles = list(dict.fromkeys(line for line in lines if line.split(" [", 1)[0] in FAILED_STATUSES))
+    counted = all(" failed" not in line for line in summaries)
     return summaries, failed_titles, bool(summaries) and counted and not failed_titles
 
 

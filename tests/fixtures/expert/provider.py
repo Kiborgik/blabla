@@ -9,8 +9,11 @@ raw = sys.stdin.readline()
 envelope = json.loads(raw)
 requests = [envelope['request']] if envelope['kind'] == 'single' else envelope['batch']['requests']
 if mode == 'descendant':
-    child = subprocess.Popen([sys.executable, '-c', 'import pathlib,sys,time;time.sleep(.5);pathlib.Path(sys.argv[1]).write_text("late")', sys.argv[2]])
-    pathlib.Path(sys.argv[3]).write_text(str(child.pid))
+    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+    pid = pathlib.Path(sys.argv[2])
+    staged = pid.with_suffix('.staged')
+    staged.write_text(str(child.pid))
+    staged.replace(pid)
     time.sleep(10)
 if mode == 'slow':
     time.sleep(1)
