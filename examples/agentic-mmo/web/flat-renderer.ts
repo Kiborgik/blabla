@@ -12,9 +12,10 @@ import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor } from './inspection-camera.ts';
 import { settlementVisual, VISUAL_PALETTE, visualDetail } from '../visuals/world-visuals.ts';
 import type { DetailLevel } from '../visuals/world-visuals.ts';
-import { flatSceneFaces } from './settlement-parts.ts';
+import { flatSceneFaces, mapOverlayBounds } from './settlement-parts.ts';
 import { createWorldCues } from './world-cues.ts';
 import { mapLabelVisibility } from './map-labels.ts';
+import { districtCaptionPlacement, districtLabel, districtParts } from '../visuals/district-visuals.ts';
 
 export function cityScreenMetrics(pixelsPerUnit: number): { targetRadius: number; markerRadius: number; markerFont: number; labelFont: number; labelY: number } {
   const scale = Math.max(0.01, pixelsPerUnit);
@@ -53,6 +54,8 @@ export function createFlatAtlasRenderer(
   let selectedRoute: string | null = null;
   let routeLabel: { element: SVGGElement; x: number; z: number; id: string } | null = null;
   const cities = node('g', {});
+  const districts = node('g', { class: 'flat-districts' });
+  const districtNodes: Array<{ element: SVGGElement; parts: SVGGElement; hit: SVGCircleElement; label: SVGTextElement; leader: SVGLineElement; index: number; placed: boolean }> = [];
   const settlements: Array<{ element: SVGGElement; index: number }> = [];
   let detail: DetailLevel | undefined;
   const cityNodes: Array<{ id: string; element: SVGGElement; hit: SVGCircleElement; ring: SVGCircleElement; marker: SVGTextElement; label: SVGTextElement }> = [];
@@ -114,6 +117,21 @@ export function createFlatAtlasRenderer(
     }
   };
   drawRoutes();
+  for (const [index, district] of (world.districts ?? []).entries()) {
+    const point = hexPosition(district.q, district.r);
+    const group = node('g', { class: 'flat-district', 'data-district-id': district.id, 'data-tile-id': String(district.tileId), 'data-status': district.status,
+      transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${districtLabel(district)} of ${district.townName}, tile ${district.tileId}` });
+    const parts = node('g', { 'pointer-events': 'none' });
+    const hit = node('circle', { class: 'district-hit', fill: 'transparent', r: '1' });
+    const label = node('text', { 'text-anchor': 'middle', fill: '#fff5d8', 'font-family': 'Arial, sans-serif', stroke: '#173a3c', 'stroke-width': '.09', 'paint-order': 'stroke', 'pointer-events': 'none' });
+    const leader = node('line', { x1: '0', y1: '0', stroke: district.color, 'stroke-width': '1', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
+    label.textContent = 'Campus';
+    group.append(leader, parts, hit, label);
+    group.addEventListener('click', () => onSelect(district.cityId));
+    group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(district.cityId); } });
+    districts.append(group);
+    districtNodes.push({ element: group, parts, hit, label, leader, index, placed: false });
+  }
   for (const [index, city] of world.cities.entries()) {
     const point = hexPosition(city.q, city.r);
     const group = node('g', { class: 'flat-city', 'data-city-id': cityKey(city), transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${damageMapLabel(city.capital, city.settlement?.damage ?? 0)}, ${city.name}` });
@@ -136,7 +154,7 @@ export function createFlatAtlasRenderer(
   }
   borders.style.display = preferences.borders ? '' : 'none';
   routes.style.display = preferences.routes ? '' : 'none';
-  svg.append(coast, land, borders, terrain, routes, cities);
+  svg.append(coast, land, borders, terrain, routes, districts, cities);
   container.prepend(svg);
   const cues = createWorldCues(container, world, (px, pz) => {
     const box = svg.viewBox.baseVal;
@@ -153,7 +171,11 @@ export function createFlatAtlasRenderer(
     if (nextDetail !== detail) {
       detail = nextDetail;
       svg.dataset['detail'] = detail;
-      paintParts(terrain, projectLandscape(world.tiles, world.cities, detail).parts, VISUAL_PALETTE.stone);
+      paintParts(terrain, projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? [])], detail).parts, VISUAL_PALETTE.stone);
+      for (const entry of districtNodes) {
+        const district = world.districts?.[entry.index];
+        if (district) paintParts(entry.parts, districtParts(district, detail), district.color);
+      }
       for (const entry of settlements) {
         const city = world.cities[entry.index];
         if (!city?.settlement) continue;
@@ -182,16 +204,38 @@ export function createFlatAtlasRenderer(
     const targetTop = Math.max(metrics.targetRadius * pixelsPerUnit, Math.max(1.2 * pixelsPerUnit, 17) + metrics.markerRadius * pixelsPerUnit);
     const targetBottom = Math.max(metrics.targetRadius * pixelsPerUnit, metrics.labelY * pixelsPerUnit + 6);
     const townTargets = labelPositions.map((label) => ({ x: label.x, y: label.y - metrics.labelY * pixelsPerUnit - targetTop, width: Math.max(label.width, metrics.targetRadius * pixelsPerUnit * 2), height: targetTop + targetBottom }));
+    for (const entry of districtNodes) {
+      const district = world.districts?.[entry.index];
+      if (!district) continue;
+      const point = hexPosition(district.q, district.r);
+      entry.hit.setAttribute('r', String(Math.max(.9, 22 / pixelsPerUnit)));
+      entry.label.setAttribute('font-size', String(12 / pixelsPerUnit));
+      const anchor = { x: (point.x - box.x) * pixelsPerUnit, y: (point.z - box.y) * pixelsPerUnit };
+      const placement = districtCaptionPlacement(anchor, [...townTargets, ...mapOverlayBounds(container)], container.clientWidth, container.clientHeight, 46);
+      entry.placed = placement !== null;
+      if (placement) {
+        entry.label.setAttribute('x', String((placement.x - anchor.x) / pixelsPerUnit));
+        entry.label.setAttribute('y', String((placement.y + 12 - anchor.y) / pixelsPerUnit));
+        entry.leader.setAttribute('x2', String((placement.x - anchor.x) / pixelsPerUnit));
+        entry.leader.setAttribute('y2', String((placement.y + 16 - anchor.y) / pixelsPerUnit));
+      }
+      labelPositions.push({ id: district.id, ...(placement ?? { x: -1000, y: -1000, width: 44, height: 16 }) });
+    }
     const placedRouteLabel = routeLabel && routes.style.display !== 'none'
       ? routeLabelPlacement({ x: (routeLabel.x - box.x) * pixelsPerUnit, y: (routeLabel.z - box.y) * pixelsPerUnit }, townTargets, container.clientWidth, container.clientHeight) : null;
     if (routeLabel && placedRouteLabel) {
       routeLabel.element.setAttribute('transform', `translate(${box.x + placedRouteLabel.x / pixelsPerUnit} ${box.y + (placedRouteLabel.y + 22) / pixelsPerUnit}) scale(${1 / pixelsPerUnit})`);
       labelPositions.unshift({ id: routeLabel.id, ...placedRouteLabel });
     }
-    const visibility = mapLabelVisibility(labelPositions, selected, nextDetail, container.clientWidth, container.clientHeight);
+    const selectedDistricts = new Set((world.districts ?? []).filter(district => district.cityId === selected).map(district => district.id));
+    const prioritized = labelPositions.toSorted((a, b) => Number(selectedDistricts.has(b.id)) - Number(selectedDistricts.has(a.id)));
+    const shown = mapLabelVisibility(prioritized, selected, nextDetail, container.clientWidth, container.clientHeight);
+    const visibilityById = new Map(prioritized.map((label, index) => [label.id, shown[index]]));
+    const visibility = labelPositions.map(label => visibilityById.get(label.id));
     const routeLabelOffset = placedRouteLabel ? 1 : 0;
     if (routeLabel) routeLabel.element.style.visibility = routeLabelOffset && visibility[0] ? 'visible' : 'hidden';
     cityNodes.forEach((city, index) => { city.label.style.visibility = visibility[index + routeLabelOffset] ? 'visible' : 'hidden'; });
+    districtNodes.forEach((district, index) => { const visible = district.placed && visibility[world.cities.length + index + routeLabelOffset]; district.label.style.visibility = visible ? 'visible' : 'hidden'; district.leader.style.visibility = visible ? 'visible' : 'hidden'; });
     cues.update();
   };
   const observer = new ResizeObserver(resize);
@@ -208,7 +252,7 @@ export function createFlatAtlasRenderer(
   select(selected);
   let pointer: { id: number; x: number; y: number; originX: number; originZ: number } | null = null;
   svg.addEventListener('pointerdown', (event) => {
-    if (event.target instanceof Element && event.target.closest('.flat-city, .flat-route')) return;
+    if (event.target instanceof Element && event.target.closest('.flat-city, .flat-route, .flat-district')) return;
     pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, originX: x, originZ: z };
     svg.setPointerCapture(event.pointerId);
   });

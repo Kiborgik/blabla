@@ -1,3 +1,4 @@
+import { districtSiteBlock } from './simulation/districts.ts';
 import { coastalSourceBlock } from './simulation/coastal.ts';
 import { publicProjectActionFailure } from './simulation/public-projects.ts';
 import { paidRecipe } from './simulation/operations.ts';
@@ -61,7 +62,7 @@ export function isGameAction(value: unknown): value is GameAction {
     case 'research':
       return fields(value, ['type', 'technology']) && text(value.technology, 128);
     case 'build':
-      return text(value.project, 128) && (fields(value, ['type', 'project']) || (fields(value, ['type', 'project', 'cityId']) && text(value.cityId, 128)));
+      return text(value.project, 128) && (fields(value, ['type', 'project']) || (fields(value, ['type', 'project', 'cityId']) && text(value.cityId, 128)) || (fields(value, ['type', 'project', 'cityId', 'tileId']) && text(value.cityId, 128) && integer(value.tileId)));
     case 'repair-city':
       return fields(value, ['type', 'cityId']) && text(value.cityId, 128);
     case 'set-building-operation':
@@ -167,6 +168,14 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
       if (civilization?.researchTarget === action.technology) return invalidated(`Research ${action.technology} is already underway`);
       return null;
     case 'build':
+      if (action.tileId !== undefined) {
+        const city = cities.find(candidate => candidate.id === action.cityId);
+        const building = BUILDINGS.find(candidate => candidate.id === action.project);
+        if (city && building) {
+          const block = districtSiteBlock(state, city, building, action.tileId);
+          if (block) return invalidated(block);
+        }
+      }
       if (hasFeatures(state, ['recurring-decisions']) && cities.find(city => city.id === action.cityId)?.construction?.active?.buildingId === action.project) return invalidated(`Construction ${action.project} is already underway in ${action.cityId}`);
       if (!BUILDINGS.some((building) => building.id === action.project)) return invalidated(`Building ${action.project} no longer exists`);
       if (specialized) return cities.find((city) => city.id === action.cityId)?.buildings.includes(action.project) ? invalidated(`City ${action.cityId} already has ${action.project}`) : null;

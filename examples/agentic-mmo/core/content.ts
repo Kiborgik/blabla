@@ -19,14 +19,18 @@ export const CIVILIZATIONS: CivilizationDefinition[] = [
 
 export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, perPaidRecipe: 3 } as const;
 
-export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4 } } as const;
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4, campus: 8, library: 8 } } as const;
 
 export const BUILDING_CAPABILITY_ACTIONS: Record<BuildingCapability, readonly GameAction['type'][]> = { 'coastal-departure': ['settle-coast'] };
 export const RESEARCH_INVESTMENT_RULES = { ruleVersion: 1, featureId: 'productive-research', budget: 'current-city-science-output' } as const;
 
+export const DISTRICT_RULES = { ruleVersion: 1, featureId: 'district-planning', baseCapacity: 1, populationPerDistrict: 4 } as const;
+
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'district-planning', name: 'Choose a district site', description: 'A town commits its existing construction lane to an exact owned site; nearby terrain changes its later output.' },
+  { id: 'writing', name: 'Writing and local learning', description: 'Writing opens a real Campus and its own Library; specialist and great-person systems remain planned.' },
   { id: 'coastal-founding', name: 'New shores', description: 'Navigation and a completed coastal Boat yard let existing residents found a new coastal town along a recorded ocean path.' },
   { id: 'productive-research', name: 'Productive research', description: 'Research advances from actual science made each season; old reserves do not accelerate the current project.' },
   { id: 'resident-capacity', name: 'People support local work', description: 'Each town uses its opening residents and complete supplies together for paid operations, so conserved founding changes later local support.' },
@@ -77,6 +81,7 @@ export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
+  { id: 'writing', name: 'Writing', requiredFeatures: ['writing', 'district-planning'], era: 0, cost: 24, requires: ['agriculture'], capability: 'Choose an exact owned Campus site, then support its Library with credits for more productive research.' },
   { id: 'agriculture', name: 'Cultivation', requiredFeatures: ['settlement-research'], era: 0, cost: 10, requires: [], capability: 'Cultivation supports farms, workshops and more reliable settlements.' },
   { id: 'water-management', name: 'Water management', requiredFeatures: ['settlement-crafts'], era: 0, cost: 16, requires: ['agriculture'], capability: 'Irrigation uses materials to supply more food.' },
   { id: 'kiln-firing', name: 'Kiln firing', requiredFeatures: ['settlement-crafts'], era: 0, cost: 16, requires: ['agriculture'], capability: 'Kilns use energy to supply more building materials.' },
@@ -104,6 +109,8 @@ export const ERAS: EraDefinition[] = ERA_PRESENTATION.map(era => {
 });
 
 export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'campus', name: 'Campus', requiredFeatures: ['district-planning', 'writing'], minEra: 0, cost: { materials: 16, credits: 8 }, requires: ['writing'], effects: [], production: { science: 1 }, district: { range: 3, adjacency: { terrain: 'mountain', resource: 'science', amount: 1, maximum: 3 } }, description: 'Commit an owned site near this town to learning. Nearby mountains add up to 3 base science; output begins after completion.' },
+  { id: 'library', name: 'Library', requiredFeatures: ['district-planning', 'writing', 'building-operations'], minEra: 0, cost: { materials: 16, credits: 8 }, requires: ['writing'], requiresBuildings: ['campus'], effects: [], production: { science: 3 }, operatingInputs: { credits: 1 }, description: 'Support the Library in this town’s completed Campus with credits and residents to produce science. Specialist and great-person effects remain planned.' },
   { id: 'boat-yard', name: 'Boat yard', requiredFeatures: ['coastal-founding'], minEra: 0, cost: { materials: 14, credits: 10 }, requires: ['water-management'], effects: [], production: {}, capabilities: ['coastal-departure'], siteRequirement: 'coastal', description: 'Prepare boats at an ocean-adjacent town. With Navigation, transfer existing residents to a new coastal settlement.' },
   { id: 'farm', name: 'Terraced fields', requiredFeatures: ['settlement-production'], minEra: 0, cost: { materials: 8, credits: 4 }, requires: ['agriculture'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }, { kind: 'city', field: 'wellbeing', amount: 4 }], production: { food: 4 }, description: 'Reliable harvests sustain people and leave a surplus for future growth.' },
   { id: 'workshop', name: 'Artisan quarter', requiredFeatures: ['settlement-production'], minEra: 0, cost: { materials: 12, credits: 8 }, requires: ['agriculture'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }], production: { materials: 3, energy: 1 }, description: 'Specialized work supplies the materials other projects need.' },
@@ -322,6 +329,21 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     for (const capability of capabilities) if (!Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability)) errors.push(`building ${building.id}: unknown capability ${capability}`);
     if (new Set(capabilities).size !== capabilities.length) errors.push(`building ${building.id}: duplicate capabilities`);
     if (building.siteRequirement !== undefined && building.siteRequirement !== 'coastal') errors.push(`building ${building.id}: unknown site requirement`);
+    if (building.district) {
+      const { range, adjacency } = building.district;
+      if (!building.requiredFeatures.includes('district-planning')) errors.push(`building ${building.id}: district requires district-planning feature`);
+      if (!Number.isSafeInteger(range) || range < 1) errors.push(`building ${building.id}: invalid district range`);
+      if (!['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].includes(adjacency.terrain)) errors.push(`building ${building.id}: invalid district terrain`);
+      if (!RESOURCE_IDS.includes(adjacency.resource)) errors.push(`building ${building.id}: invalid district resource`);
+      if (!positive(adjacency.amount) || !Number.isFinite(adjacency.maximum) || adjacency.maximum < 0) errors.push(`building ${building.id}: invalid district adjacency`);
+    }
+    const requiredBuildings = building.requiresBuildings ?? [];
+    if (new Set(requiredBuildings).size !== requiredBuildings.length) errors.push(`building ${building.id}: duplicate building prerequisite`);
+    for (const id of requiredBuildings) {
+      const prerequisite = buildings.get(id);
+      if (!prerequisite) errors.push(`building ${building.id}: missing building prerequisite ${id}`);
+      else if (prerequisite.minEra > building.minEra) errors.push(`building ${building.id}: future building prerequisite ${id}`);
+    }
     if (capabilities.includes('coastal-departure') && (building.siteRequirement !== 'coastal' || !building.requiredFeatures.includes('coastal-founding'))) errors.push(`building ${building.id}: coastal departure requires coastal site and feature`);
     if (building.effects.length === 0 && !Object.values(building.production).some(positive) && !capabilities.some(capability => Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability))) errors.push(`building ${building.id}: no production or world effect`);
     effects(building.id, building.effects);
@@ -331,6 +353,8 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
       else if (technology.era > building.minEra) errors.push(`building ${building.id}: future prerequisite ${required}`);
     }
   }
+  const checkedBuildings = new Set<string>();
+  for (const id of buildings.keys()) visit(id, new Set(), checkedBuildings, key => buildings.get(key)?.requiresBuildings ?? []);
   for (const event of catalog.events) {
     requireFeatures(event.id, event.requiredFeatures);
     if (!eraValid(event.minEra) || !Number.isInteger(event.cooldown) || event.cooldown < 0) errors.push(`event ${event.id}: invalid era or cooldown`);

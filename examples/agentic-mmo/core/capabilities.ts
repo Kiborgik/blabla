@@ -1,7 +1,8 @@
+import { availableDistrictSites, buildingBaseProduction, districtCapacity, districtCount } from './simulation/districts.ts';
 import { BUILDINGS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
 import { RELEASES } from './release.ts';
 import type { ActionPlan } from './planning.ts';
-import type { ActionOption, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, WorldState } from './types.ts';
+import type { ActionOption, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, Resources, WorldState } from './types.ts';
 import { buildingEligibility, researchEligibility, type CapabilityBlocker, type CapabilityEligibility } from './simulation/capabilities.ts';
 import { admissionError, turnAdmission } from './simulation/turns.ts';
 import { hasFeatures, milestoneEligible } from './simulation/history.ts';
@@ -20,6 +21,7 @@ export interface CapabilityRow {
   research?: { progress: number; cost: number };
   operation?: BuildingOperation;
   construction?: ConstructionOrder;
+  district?: { capacity: number; used: number; siteId: number | null; siteBaseProduction: Partial<Resources> | null; availableSites: Array<{ tileId: number; baseProduction: Partial<Resources> }> };
 }
 
 export interface CapabilityChoiceContext {
@@ -54,6 +56,7 @@ export function capabilityCatalogue() {
     buildings: BUILDINGS,
     edges: [
       ...TECHNOLOGIES.flatMap(technology => technology.requires.map(id => ({ from: `technology:${id}`, to: `technology:${technology.id}` }))),
+      ...BUILDINGS.flatMap(building => (building.requiresBuildings ?? []).map(id => ({ from: `building:${id}`, to: `building:${building.id}` }))),
       ...BUILDINGS.flatMap(building => building.requires.map(id => ({ from: `technology:${id}`, to: `building:${building.id}` }))),
     ],
     features: FEATURES.map(feature => ({ ...feature, releaseIds: RELEASES.filter(release => release.featureIds.includes(feature.id)).map(release => release.id) })),
@@ -92,7 +95,8 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     const choiceRefs = eligibility.completed || eligibility.blockers.length ? [] : legalActions.flatMap((option, index) => option.action.type === 'build' && option.action.project === building.id && (option.action.cityId === undefined || option.action.cityId === cityId) ? [index] : []);
     const operation = city?.buildingOperations?.[building.id];
     const construction = city?.construction?.active?.buildingId === building.id ? city.construction.active : null;
-    return { ...row(`building:${building.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), ...(operation ? { operation } : {}) };
+    const districtSiteId = city?.districtSites?.[building.id] ?? construction?.tileId;
+    return { ...row(`building:${building.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), ...(operation ? { operation } : {}), ...(city && building.district ? { district: { capacity: districtCapacity(city), used: districtCount(city), siteId: districtSiteId ?? null, siteBaseProduction: districtSiteId === undefined ? null : buildingBaseProduction(state, city, building, districtSiteId), availableSites: eligibility.completed || eligibility.blockers.length ? [] : availableDistrictSites(state, city, building).map(tileId => ({ tileId, baseProduction: buildingBaseProduction(state, city, building, tileId) })) } } : {}) };
   });
   return structuredClone({
     choiceReferenceState: choices ? 'provided' : 'not-provided',

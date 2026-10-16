@@ -97,6 +97,15 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     damage.append(value, text('p', 'Damage lowers production. A repair changes future seasons; it does not make supplies immediately.'));
     host.append(damage);
   }
+  const activeDistrict = city.construction?.active;
+  if (activeDistrict && (activeDistrict.buildingId === 'campus' || activeDistrict.buildingId === 'library')) {
+    const site = text('section', '', 'building-card');
+    const tileId = activeDistrict.buildingId === 'campus' ? activeDistrict.tileId : city.districtSites?.['campus'];
+    site.append(text('h4', `${activeDistrict.buildingId === 'campus' ? 'Campus' : 'Library'} · Under construction`),
+      text('p', `${activeDistrict.buildingId === 'campus' ? 'Reserved site' : 'At this town’s Campus'}: ${tileId === undefined ? 'Unavailable' : `Tile ${tileId}`}`, 'building-current'),
+      text('p', `${activeDistrict.workDone} / ${activeDistrict.workRequired} work · Not built yet`, 'building-summary'));
+    host.append(site);
+  }
   if (!city.buildings.length) host.append(text('p', 'No buildings yet', 'settlement-facts'));
   for (const id of city.buildings) {
     const definition = BUILDINGS.find((entry) => entry.id === id);
@@ -107,6 +116,10 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     const name = text('h4', definition?.name ?? id);
     name.prepend(visualIcon(appearance?.icon ?? 'infrastructure'));
     card.append(name);
+    if (id === 'campus' || id === 'library') {
+      const siteId = city.districtSites?.['campus'];
+      card.append(text('p', siteId === undefined ? 'Exact Campus site unavailable' : `${id === 'library' ? 'At this town’s Campus' : 'Exact district site'} · Tile ${siteId}`, 'building-summary'));
+    }
     if (!definition?.operatingInputs) {
       card.append(text('p', 'Built', 'building-current'));
       if (definition?.capabilities?.includes('coastal-departure')) card.append(text('p', 'Coastal departure site. With Navigation, existing residents can found a new coastal town. This building has no operating output.', 'building-summary'));

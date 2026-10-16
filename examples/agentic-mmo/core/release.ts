@@ -23,6 +23,7 @@ export const RELEASES: readonly CompatibleReleaseDefinition[] = [
   { id: 'settlement-residents-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-decisions-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints', 'land-transport', 'operating-resource-exchange', 'recurring-decisions', 'resident-capacity'] },
   { id: 'settlement-coastal-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-residents-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints', 'land-transport', 'operating-resource-exchange', 'recurring-decisions', 'resident-capacity', 'navigation', 'coastal-founding'] },
   { id: 'settlement-research-rate-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-coastal-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints', 'land-transport', 'operating-resource-exchange', 'recurring-decisions', 'resident-capacity', 'navigation', 'coastal-founding', 'productive-research'] },
+  { id: 'settlement-writing-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-research-rate-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints', 'land-transport', 'operating-resource-exchange', 'recurring-decisions', 'resident-capacity', 'navigation', 'coastal-founding', 'productive-research', 'district-planning', 'writing'] },
 ];
 function currentRelease(): CompatibleReleaseDefinition {
   const release = RELEASES.find((candidate) => candidate.id === 'settlement-foundations-1');

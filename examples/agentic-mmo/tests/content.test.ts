@@ -44,7 +44,7 @@ await test('the catalogue rejects duplicate identities and missing prerequisite 
 
 await test('research prerequisites cannot form a cycle or require an undiscovered future era', () => {
   const cycle = structuredClone(CONTENT);
-  required(cycle.technologies[0]).requires = [required(cycle.technologies.at(-1)).id];
+  required(cycle.technologies.find(technology => technology.id === 'agriculture')).requires = ['spaceflight'];
   assert.ok(validateContent(cycle).some(error => error.includes('cycle')));
   assert.ok(validateContent(cycle).some(error => error.includes('future')));
 });
@@ -227,7 +227,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -237,7 +237,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -347,4 +347,38 @@ await test('productive research is a prospective release with a canonical output
   assert.ok(!prior.featureIds.includes(RESEARCH_INVESTMENT_RULES.featureId));
   assert.ok(current.featureIds.includes(RESEARCH_INVESTMENT_RULES.featureId));
   assert.deepEqual(current.featureIds.filter(feature => !prior.featureIds.includes(feature)), ['productive-research']);
+});
+
+await test('district metadata and local building dependencies are validated before release', () => {
+  const campus = required(BUILDINGS.find(building => building.id === 'campus'));
+  const library = required(BUILDINGS.find(building => building.id === 'library'));
+  assert.deepEqual(library.requiresBuildings, ['campus']);
+  assert.deepEqual(campus.district, { range: 3, adjacency: { terrain: 'mountain', resource: 'science', amount: 1, maximum: 3 } });
+  for (const [field, value, error] of [
+    ['range', 0, 'district range'],
+    ['range', 1.5, 'district range'],
+    ['terrain', 'unknown', 'district terrain'],
+    ['resource', 'unknown', 'district resource'],
+    ['amount', Number.NaN, 'district adjacency'],
+    ['amount', -1, 'district adjacency'],
+    ['maximum', -1, 'district adjacency'],
+  ] as const) {
+    const invalid = structuredClone(CONTENT);
+    const district = required(required(invalid.buildings.find(building => building.id === 'campus')).district);
+    Reflect.set(field === 'range' ? district : district.adjacency, field, value);
+    assert.ok(validateContent(invalid).some(message => message.includes(error)), error);
+  }
+  const unknown = structuredClone(CONTENT);
+  required(unknown.buildings.find(building => building.id === 'library')).requiresBuildings = ['missing-campus'];
+  assert.ok(validateContent(unknown).some(message => message.includes('missing building prerequisite')));
+  const cycle = structuredClone(CONTENT);
+  required(cycle.buildings.find(building => building.id === 'campus')).requiresBuildings = ['library'];
+  assert.ok(validateContent(cycle).some(message => message.includes('prerequisite cycle')));
+  const future = structuredClone(CONTENT);
+  required(future.buildings.find(building => building.id === 'campus')).minEra = 1;
+  assert.ok(validateContent(future).some(message => message.includes('future building prerequisite')));
+  const ungated = structuredClone(CONTENT);
+  required(ungated.buildings.find(building => building.id === 'campus')).requiredFeatures = ['writing'];
+  assert.ok(validateContent(ungated).some(message => message.includes('district-planning feature')));
+  assert.deepEqual(validateContent(), []);
 });

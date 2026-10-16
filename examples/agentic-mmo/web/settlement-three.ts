@@ -4,6 +4,7 @@ import { hexPosition } from './atlas.ts';
 import { settlementVisual, VISUAL_PALETTE, visualDetail } from '../visuals/world-visuals.ts';
 import type { DetailLevel, VisualPart } from '../visuals/world-visuals.ts';
 import { shapeTriangles } from './settlement-parts.ts';
+import { districtParts } from '../visuals/district-visuals.ts';
 
 export function createPartMeshes(project: (detail: DetailLevel) => Array<{ part: VisualPart; color: string }>, material: (color: string) => THREE.Material): {
   group: THREE.Group; update: (tilePixels: number) => DetailLevel; dispose: () => void;
@@ -63,6 +64,16 @@ export function createSettlementMeshes(world: AtlasWorld, material: (color: stri
     return settlementVisual(city.settlement, detail).parts.map(part => ({
       color: part.material === 'identity' ? city.color : VISUAL_PALETTE[part.material],
       part: { ...part, position: [origin.x + part.position[0], floor + part.position[1], origin.z + part.position[2]] },
+    }));
+  }), material);
+}
+
+export function createDistrictMeshes(world: AtlasWorld, material: (color: string) => THREE.Material): ReturnType<typeof createPartMeshes> {
+  return createPartMeshes(detail => (world.districts ?? []).flatMap(district => {
+    const origin = hexPosition(district.q, district.r);
+    return districtParts(district, detail).map(part => ({
+      color: part.material === 'identity' ? district.color : VISUAL_PALETTE[part.material],
+      part: { ...part, position: [origin.x + part.position[0], district.height + part.position[1], origin.z + part.position[2]] },
     }));
   }), material);
 }

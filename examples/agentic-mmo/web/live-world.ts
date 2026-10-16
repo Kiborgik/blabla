@@ -1,5 +1,7 @@
 import { projectRoutePath, mapTileHeight } from '../visuals/route-paths.ts';
-import { ERAS } from '../core/content.ts';
+import { BUILDINGS, ERAS } from '../core/content.ts';
+import { buildingBaseProduction } from '../core/simulation/districts.ts';
+import type { DistrictView } from '../visuals/district-visuals.ts';
 import type { GameEvent, WorldState } from '../core/types.ts';
 import { eventVisual } from '../visuals/world-visuals.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -64,6 +66,20 @@ export function projectWorld(state: WorldState): AtlasWorld {
     };
   });
   const cityById = new Map(cities.map((city) => [city.cityId, city]));
+  const campus = BUILDINGS.find(building => building.id === 'campus');
+  const districts = state.cities.flatMap((city): DistrictView[] => {
+    const active = city.construction?.active;
+    const built = city.buildings.includes('campus');
+    const tileId = built ? city.districtSites?.['campus'] : active?.buildingId === 'campus' ? active.tileId : undefined;
+    const tile = tileId === undefined ? undefined : tiles.get(tileId);
+    const town = cityById.get(city.id);
+    if (!campus || !town || !tile || tile.terrain === 'ocean') return [];
+    return [{ id: `district:${city.id}:campus`, cityId: city.id, townName: city.name, civId: city.civId,
+      tileId: tile.id, q: tile.q - centerQ, r: tile.r - centerR, height: mapTileHeight(tile.elevation), color: town.color,
+      status: built ? 'built' : 'building', library: built && city.buildings.includes('library') ? 'built' : built && active?.buildingId === 'library' ? 'building' : 'absent',
+      construction: active && (active.buildingId === 'campus' || active.buildingId === 'library') ? structuredClone(active) : null,
+      baseProduction: buildingBaseProduction(state, city, campus, tile.id) }];
+  }).toSorted((a, b) => a.tileId - b.tileId || a.id.localeCompare(b.id));
   const town = (id: string) => {
     const city = cityById.get(id);
     return city ? { id, name: city.capital, civilization: city.name, color: city.color, q: city.q, r: city.r } : null;
@@ -74,6 +90,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
   return {
     illustrative: false,
     cities,
+    districts,
     tiles: state.tiles.flatMap((tile) => tile.terrain === 'ocean' ? [] : [{
       id: tile.id, q: tile.q - centerQ, r: tile.r - centerR, owner: tile.owner,
       terrain: tile.terrain, height: mapTileHeight(tile.elevation),

@@ -1,3 +1,4 @@
+import { buildingBaseProduction } from './districts.ts';
 import { ECONOMY_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
 import type { City, GameEvent, Resources, WorldState } from '../types.ts';
 import { siteProduction } from './sites.ts';
@@ -26,10 +27,11 @@ function produceCity(
   const buildings = productiveBuildings(state, city);
   const free = buildings.filter((building) => !paidRecipe(building));
   const paid = buildings.filter(paidRecipe);
+  const freeOutputs = free.map(building => buildingBaseProduction(state, city, building));
   for (const resource of RESOURCE_IDS) {
     const terrain = siteOutputs[resource] ?? 0;
     let raw = (ECONOMY_RULES.baseProduction[resource] ?? 0) + (focus[resource] ?? 0)
-      + free.reduce((total, building) => total + (building.production[resource] ?? 0), 0) + terrain;
+      + freeOutputs.reduce((total, output) => total + (output[resource] ?? 0), 0) + terrain;
     let amount = quantize(raw * productivity);
     for (const building of paid) {
       raw += building.production[resource] ?? 0;

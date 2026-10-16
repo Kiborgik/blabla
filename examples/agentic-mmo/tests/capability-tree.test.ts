@@ -11,6 +11,29 @@ function fixture(): CapabilityTreeInput {
   return { runId: 'fixture-a', civilizationName: 'Aster', towns: state.cities.filter(city => city.civId === 0).map(city => ({ id: city.id, name: city.name })), catalogue: capabilityCatalogue(), projection: projectCapabilities(state, 0, 'city-0', time) };
 }
 
+await test('exact learning-site blockers use canonical named town requirements without inventing eligibility', () => {
+  const input = fixture();
+  const campus = input.projection.buildings.find(row => row.nodeId === 'building:campus');
+  const library = input.projection.buildings.find(row => row.nodeId === 'building:library');
+  assert.ok(campus && library);
+  campus.blockers = [{ kind: 'district-site', cityId: 'city-0' }, { kind: 'district-capacity', cityId: 'city-0', required: 1, available: 0 }];
+  library.blockers = [{ kind: 'building', cityId: 'city-0', buildingId: 'campus' }];
+  const nodes = capabilityTreeNodes(input);
+  assert.deepEqual(nodes.find(node => node.id === campus.nodeId)?.blockers, ['Dawnwell needs an available district site', 'Dawnwell needs 1 district slot; 0 available']);
+  assert.deepEqual(nodes.find(node => node.id === library.nodeId)?.blockers, ['Build Campus in Dawnwell']);
+});
+
+await test('the learning tree shows captured exact sites and potential base output separately from work', () => {
+  const input = fixture();
+  const campus = input.projection.buildings.find(row => row.nodeId === 'building:campus');
+  assert.ok(campus);
+  campus.district = { capacity: 2, used: 0, siteId: null, siteBaseProduction: null, availableSites: [{ tileId: 39, baseProduction: { science: 2 } }, { tileId: 56, baseProduction: { science: 1 } }] };
+  const facts = capabilityTreeNodes(input).find(node => node.id === campus.nodeId)?.facts;
+  assert.ok(facts?.some(fact => fact.label === 'District slots' && fact.value === '0 used / 2 capacity'));
+  assert.ok(facts?.some(fact => fact.label === 'Available site 39' && fact.value === '2 Science base before town productivity'));
+  assert.ok(facts?.some(fact => fact.label === 'Available site 56' && fact.value === '1 Science base before town productivity'));
+});
+
 await test('complete tree retains every canonical node and both incoming fuel prerequisites', () => {
   const input = fixture();
   const before = structuredClone(input);

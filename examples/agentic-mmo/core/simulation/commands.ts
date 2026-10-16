@@ -109,17 +109,19 @@ export function executeAction(
       const city = cities.find((candidate) => (!specialized || candidate.id === action.cityId) && !candidate.buildings.includes(action.project));
       if (!definition || !city)
         throw new RangeError('Construction requires a released building and eligible settlement');
+      if (definition.district && action.tileId === undefined) throw new RangeError('District construction requires its exact site');
       transferCost(civilization.resources, definition.cost);
       if (hasFeatures(state, ['recurring-decisions'])) {
         city.construction ??= { active: null, lastCompleted: null };
         city.construction.active = {
           id: `construction-${state.revision}`, cityId: city.id, buildingId: definition.id,
           ruleVersion: CONSTRUCTION_RULES.version, startedRound: state.round,
+          ...(definition.district ? { tileId: action.tileId } : {}),
           paid: structuredClone(definition.cost), workRequired: requiredConstructionWork(definition.id), workDone: 0,
         };
         emitEvent(state, events, {
           type: 'construction-started', title: `${city.name} starts ${definition.name}`,
-          detail: city.construction.active.id, actor: seat, target: seat, tileId: city.tileId,
+          detail: city.construction.active.id, actor: seat, target: seat, tileId: definition.district ? action.tileId ?? null : city.tileId,
           cause: 'The exact town committed its full construction cost once to a strategic work order',
           effects: [
             ...RESOURCE_IDS.filter(resource => (definition.cost[resource] ?? 0) > 0).map(resource => `Paid ${definition.cost[resource]} ${resource}`),

@@ -1,5 +1,6 @@
+import { availableDistrictSites, districtCapacity, districtCount } from './districts.ts';
 import { isCoastalSite } from './coastal.ts';
-import { ACTION_FEATURES, RESOURCE_IDS } from '../content.ts';
+import { ACTION_FEATURES, BUILDINGS, RESOURCE_IDS } from '../content.ts';
 import type { BuildingDefinition, TechnologyDefinition, WorldState } from '../types.ts';
 import { hasFeatures } from './history.ts';
 import { citiesOf } from './world.ts';
@@ -11,6 +12,9 @@ export type CapabilityBlocker =
   | { kind: 'era'; required: number; available: number }
   | { kind: 'resource'; resource: typeof RESOURCE_IDS[number]; required: number; available: number }
   | { kind: 'coastal-site'; cityId: string }
+  | { kind: 'building'; buildingId: string; cityId: string }
+  | { kind: 'district-site'; cityId: string }
+  | { kind: 'district-capacity'; cityId: string; required: number; available: number }
   | { kind: 'city-selection' }
   | { kind: 'missing-city'; cityId: string }
   | { kind: 'foreign-city'; cityId: string; owner: number }
@@ -61,6 +65,16 @@ export function buildingEligibility(state: WorldState, civilizationId: number, b
   else if (specialized && !state.tiles.some(tile => tile.id === city.tileId)) blockers.push({ kind: 'missing-site', cityId: city.id });
   else if (!specialized && cityId !== undefined && !city.buildings.includes(building.id) && first && first.id !== city.id) blockers.push({ kind: 'legacy-target', cityId: first.id });
   if (city?.civId === civilizationId && building.siteRequirement === 'coastal' && !isCoastalSite(state, city.tileId)) blockers.push({ kind: 'coastal-site', cityId: city.id });
+  if (city?.civId === civilizationId) {
+    for (const buildingId of building.requiresBuildings ?? []) {
+      const prerequisite = BUILDINGS.find(candidate => candidate.id === buildingId);
+      if (!city.buildings.includes(buildingId) || (prerequisite?.district && city.districtSites?.[buildingId] === undefined)) blockers.push({ kind: 'building', buildingId, cityId: city.id });
+    }
+    if (building.district && !city.buildings.includes(building.id)) {
+      if (districtCount(city) >= districtCapacity(city)) blockers.push({ kind: 'district-capacity', cityId: city.id, required: districtCount(city) + 1, available: districtCapacity(city) });
+      else if (!availableDistrictSites(state, city, building).length) blockers.push({ kind: 'district-site', cityId: city.id });
+    }
+  }
   if (hasFeatures(state, ['recurring-decisions']) && city?.construction?.active)
     blockers.push({ kind: 'active-commitment', targetId: city.construction.active.buildingId });
   return {

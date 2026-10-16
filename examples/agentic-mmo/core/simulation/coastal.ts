@@ -1,3 +1,4 @@
+import { districtSiteOccupied } from './districts.ts';
 import { ACTION_FEATURES, BUILDINGS, COASTAL_FOUNDING_RULES, ECONOMY_RULES, RESOURCE_IDS } from '../content.ts';
 import type { ActionOption, BuildingCapability, City, CoastalFoundingQuote, GameEvent, HexTile, Resources, WorldState } from '../types.ts';
 import { hexDistance } from './geography.ts';
@@ -20,7 +21,7 @@ export function foundingSourceEligible(city: City): boolean {
 }
 
 export function foundingSiteEligible(state: WorldState, tile: HexTile): boolean {
-  return tile.owner === null && tile.terrain !== 'ocean' && tile.terrain !== 'mountain' && !state.cities.some(city => {
+  return (!hasFeatures(state, ['district-planning']) || !districtSiteOccupied(state, tile.id)) && tile.owner === null && tile.terrain !== 'ocean' && tile.terrain !== 'mountain' && !state.cities.some(city => {
     const site = state.tiles.find(candidate => candidate.id === city.tileId);
     return site !== undefined && hexDistance(site, tile) < 2;
   });

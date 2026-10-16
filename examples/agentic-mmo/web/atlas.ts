@@ -4,6 +4,7 @@ import type { RouteView } from '../visuals/route-visuals.ts';
 import { routePathPoints, routePathOmission } from '../visuals/route-paths.ts';
 import type { SettlementFacts } from '../visuals/world-visuals.ts';
 import { hexPosition } from '../visuals/landscape.ts';
+import type { DistrictView } from '../visuals/district-visuals.ts';
 export { hexPosition } from '../visuals/landscape.ts';
 
 export type AtlasCue = VisualEvent | RouteResultCue;
@@ -38,6 +39,7 @@ export interface AtlasWorld {
   tiles: AtlasTile[];
   cities: AtlasCivilization[];
   routes: RouteView[];
+  districts?: DistrictView[];
   illustrative?: boolean;
 }
 

@@ -57,6 +57,9 @@ function blockerText(blocker: CapabilityBlocker, input: CapabilityTreeInput): st
     case 'missing-city': return `Town unavailable: ${town(blocker.cityId)}`;
     case 'foreign-city': return `${town(blocker.cityId)} belongs to another civilization`;
     case 'coastal-site': return 'Needs a coastal town';
+    case 'building': return `Build ${capabilityName(input, blocker.buildingId)} in ${town(blocker.cityId)}`;
+    case 'district-site': return `${town(blocker.cityId)} needs an available district site`;
+    case 'district-capacity': return `${town(blocker.cityId)} needs ${number(blocker.required)} district slot; ${number(blocker.available)} available`;
     case 'missing-site': return `The site for ${town(blocker.cityId)} is unavailable`;
     case 'legacy-target': return `This world's building choice targets ${town(blocker.cityId)}`;
     case 'active-commitment': return `Finish the active commitment: ${capabilityName(input, blocker.targetId)}`;
@@ -108,16 +111,27 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
         { label: 'Build once', value: amounts(definition.cost) },
         ...(definition.capabilities?.includes('coastal-departure') ? [{ label: 'Enables', value: 'Coastal departure with Navigation; no operating output' }, { label: 'Site', value: 'A coastal town' }] : [
           { label: 'Uses each operating season', value: amounts(definition.operatingInputs ?? {}) },
-          { label: 'Base production before productivity', value: amounts(definition.production) },
+          { label: definition.district ? 'Building base before nearby terrain' : 'Base production before productivity', value: amounts(definition.production) },
         ]),
       ];
     if (research?.remaining) facts.push({ label: 'Remaining research work', value: research.remaining });
+    if (row?.district) {
+      const district = row.district;
+      facts.push({ label: 'District slots', value: `${district.used} used / ${district.capacity} capacity` });
+      if (district.siteId !== null) facts.push({ label: row.construction ? 'Reserved site' : 'Built site', value: `Tile ${district.siteId}` });
+      if (district.siteBaseProduction) facts.push({ label: 'Site base with nearby terrain', value: amounts(district.siteBaseProduction) });
+      for (const site of district.availableSites) facts.push({ label: `Available site ${site.tileId}`, value: `${amounts(site.baseProduction)} base before town productivity` });
+    }
     if (row?.operation) facts.push({ label: 'Operating now', value: row.operation.enabled ? 'On' : 'Paused' });
     if (row?.construction) facts.push(
       { label: 'Construction work', value: `${number(row.construction.workDone)} / ${number(row.construction.workRequired)}` },
       { label: 'Already paid for this order', value: amounts(row.construction.paid) },
       { label: 'Order started', value: `Round ${row.construction.startedRound} · ${row.construction.id}` },
     );
+    if ('requiresBuildings' in definition && definition.requiresBuildings?.includes('campus')) {
+      const campus = rows.get('building:campus')?.district;
+      facts.push({ label: 'Belongs to', value: campus?.siteId === null || campus?.siteId === undefined ? 'This town’s completed Campus' : `This town’s Campus · Tile ${campus.siteId}` });
+    }
     return {
       id, name: definition.name, kind: item.kind, level: level(id),
       status: row?.status ?? null, label: row ? STATUS_LABELS[row.status] : 'Facts unavailable',
@@ -240,6 +254,7 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
     }
     details.append(facts);
     if (node.researchExplanation) details.append(text('p', node.researchExplanation, 'capability-note'));
+    else if (node.facts.some(fact => fact.label === 'Building base before nearby terrain')) details.append(text('p', 'Nearby terrain changes a site’s base production. Actual output also depends on town productivity and is recorded after completion on later seasons.', 'capability-note'));
     else if (node.facts.some(fact => fact.label === 'Base production before productivity')) details.append(text('p', 'Production here is catalogue capacity. Actual paid inputs and output are recorded in the town details.', 'capability-note'));
     details.append(relations(node, nodes, 'leadsTo'));
     article.append(details, relations(node, nodes, 'requires'));

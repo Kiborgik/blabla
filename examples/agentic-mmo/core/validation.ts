@@ -7,6 +7,7 @@ import {
   HISTORICAL_MILESTONES,
   RESOURCE_IDS,
   PUBLIC_PROJECT_RULES,
+  DISTRICT_RULES,
   TECHNOLOGIES,
   TRADE_RULES,
   TURN_RULES,
@@ -14,6 +15,7 @@ import {
 import { parseUtcTimestamp } from './simulation/clock.ts';
 import { isLandTransportQuote, landTransportTopologyBlock } from './simulation/transport.ts';
 import { coastalTopologyBlock, isCoastalFoundingQuote } from './simulation/coastal.ts';
+import { hexDistance } from './simulation/geography.ts';
 import { isPersistedActionPlan } from './planning.ts';
 import {
   CIV_COUNT,
@@ -235,7 +237,8 @@ function construction(value: unknown, settlement: City, round: number, revision:
   if (!record(value) || !exactKeys(value, ['active', 'lastCompleted'])) return false;
   const active = value.active;
   if (active !== null) {
-    if (!record(active) || !exactKeys(active, ['id', 'cityId', 'buildingId', 'ruleVersion', 'startedRound', 'paid', 'workRequired', 'workDone'])
+    if (!record(active) || !exactKeys(active, ['id', 'cityId', 'buildingId', 'ruleVersion', 'startedRound', 'paid', 'workRequired', 'workDone', ...(Object.hasOwn(active, 'tileId') ? ['tileId'] : [])])
+      || Object.hasOwn(active, 'tileId') && !integer(active.tileId)
       || orderRevision(active.id, revision) === null || typeof active.id !== 'string'
       || active.cityId !== settlement.id || !BUILDINGS.some(building => building.id === active.buildingId)
       || typeof active.buildingId !== 'string' || settlement.buildings.includes(active.buildingId)
@@ -246,7 +249,8 @@ function construction(value: unknown, settlement: City, round: number, revision:
   }
   const completed = value.lastCompleted;
   if (completed !== null) {
-    if (!record(completed) || !exactKeys(completed, ['orderId', 'cityId', 'buildingId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId'])) return false;
+    if (!record(completed) || !exactKeys(completed, ['orderId', 'cityId', 'buildingId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId', ...(Object.hasOwn(completed, 'tileId') ? ['tileId'] : [])])
+      || Object.hasOwn(completed, 'tileId') && !integer(completed.tileId)) return false;
     const startedRevision = orderRevision(completed.orderId, revision);
     const endedRevision = completionRevision(completed.eventId, revision);
     if (startedRevision === null || endedRevision === null || endedRevision <= startedRevision
@@ -275,6 +279,50 @@ function recurringRecords(cities: City[], civilizations: Civilization[], feature
       || !integer(completed.completedRound, 0, round) || completionRevision(completed.eventId, revision) === null) return false;
   }
   return unique(orderIds);
+}
+
+function districtRecords(cities: City[], tiles: HexTile[], events: GameEvent[], features: string[]): boolean {
+  const enabled = features.includes(DISTRICT_RULES.featureId);
+  const occupied = new Set<number>();
+  const sites = new Map(tiles.map(site => [site.id, site]));
+  const centers = new Set(cities.map(settlement => settlement.tileId));
+  const reserve = (settlement: City, buildingId: string, tileId: unknown): boolean => {
+    const district = BUILDINGS.find(building => building.id === buildingId)?.district;
+    if (!enabled || !district || !integer(tileId) || occupied.has(tileId) || centers.has(tileId)) return false;
+    const site = sites.get(tileId);
+    const center = sites.get(settlement.tileId);
+    if (!site || !center || site.owner !== settlement.civId || site.terrain === 'ocean' || site.terrain === 'mountain'
+      || hexDistance(center, site) > district.range) return false;
+    occupied.add(tileId);
+    return true;
+  };
+  for (const settlement of cities) {
+    const installed = BUILDINGS.filter(building => building.district && settlement.buildings.includes(building.id));
+    const mapping: unknown = settlement.districtSites;
+    if (Object.hasOwn(settlement, 'districtSites')) {
+      if (!enabled || !record(mapping) || !exactKeys(mapping, installed.map(building => building.id))) return false;
+      for (const building of installed) if (!reserve(settlement, building.id, mapping[building.id])) return false;
+    } else if (installed.length > 0) return false;
+    const active = settlement.construction?.active;
+    const completed = settlement.construction?.lastCompleted;
+    const commitments = [...settlement.buildings, ...(active ? [active.buildingId] : [])];
+    if (commitments.some(id => BUILDINGS.find(building => building.id === id)?.requiresBuildings?.some(required => !settlement.buildings.includes(required)))) return false;
+    for (const entry of [active, completed]) {
+      if (!entry) continue;
+      const district = BUILDINGS.find(building => building.id === entry.buildingId)?.district;
+      if (Boolean(district) !== Object.hasOwn(entry, 'tileId')) return false;
+      if (!district) continue;
+      if (entry === active) {
+        if (!reserve(settlement, entry.buildingId, entry.tileId)) return false;
+      } else {
+        if (!record(mapping) || mapping[entry.buildingId] !== entry.tileId || !completed) return false;
+        const event = events.find(value => value.id === completed.eventId);
+        if (event && (event.type !== 'building-completed' || event.round !== completed.completedRound || event.tileId !== completed.tileId
+          || event.actor !== settlement.civId || event.target !== settlement.civId)) return false;
+      }
+    }
+  }
+  return true;
 }
 
 function tile(value: unknown): value is HexTile {
@@ -628,6 +676,7 @@ export function isWorldState(
     !unique(cities.map((item) => item.tileId)) ||
     !cities.every((item) => buildingOperations(item, round, features)) ||
     !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
+    !districtRecords(cities, tiles, value.events, features) ||
     !coastalRecords(cities, value.events, tiles, features, round, value.revision) ||
     !value.civilizations.every((item) =>
       cities.some((settlement) => settlement.civId === item.id),

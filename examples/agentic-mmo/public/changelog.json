@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-live.17",
+    "date": "2026-10-16",
+    "title": "Choose where a town learns",
+    "changes": [
+      "Writing opens a Campus on an exact owned site near its town. Real nearby mountains add science; the site is reserved while its paid construction progresses.",
+      "A completed Campus supports its own town’s Library. Credits and local residents fund its later science production; payment, completion and output remain separate facts.",
+      "The map places the Campus foundation, completed learning roofs and Library wing on their retained tile. Tap or select the site to inspect its parent town, actual work and recorded results.",
+      "The current world and its actual coastal towns are preserved. Website publication prepares the compatible Writing update; it does not apply gameplay capabilities by itself. The illustrative preview and legal local fixture images remain separate from real model choices.",
+      "The new desktop and 360px views were inspected with legal local states. Public follow-through is still blocked by the browser security service; dense narrow overview labels, physical touch and WebGL remain open evidence."
+    ]
+  },
+  {
     "version": "0.1.0-live.16",
     "date": "2026-10-16",
     "title": "Research advances, new shores become reachable",

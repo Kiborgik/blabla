@@ -63,3 +63,10 @@ export function shapeTriangles(shape: VisualPart['shape']): number[] {
   const { vertices, faces } = partShape(shape);
   return faces.flatMap((face) => face.slice(1, -1).flatMap((_, i) => [face[0], face[i + 2], face[i + 1]].flatMap((index) => index === undefined ? [] : vertices[index] ?? [])));
 }
+export function mapOverlayBounds(container: HTMLElement): Array<{ x: number; y: number; width: number; height: number }> {
+  const origin = container.getBoundingClientRect();
+  return [...(container.parentElement?.querySelectorAll('.civilization-panel, .inspection, .world-heading, .chronicle, .map-controls') ?? [])].flatMap(element => {
+    const box = element.getBoundingClientRect();
+    return box.width && box.height ? [{ x: box.left + box.width / 2 - origin.left, y: box.top - origin.top, width: box.width, height: box.height }] : [];
+  });
+}

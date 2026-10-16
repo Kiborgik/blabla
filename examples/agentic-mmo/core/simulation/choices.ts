@@ -1,3 +1,4 @@
+import { availableDistrictSites, describeDistrictProduction } from './districts.ts';
 import { availableCoastalActions, foundingSiteEligible, foundingSourceEligible } from './coastal.ts';
 import {
   ACTION_FEATURES,
@@ -112,6 +113,14 @@ export function availableActions(
           if (eligibility.completed || eligibility.blockers.length) continue;
           const site = state.tiles.find((tile) => tile.id === city.tileId);
           if (!site) continue;
+          if (building.district) {
+            for (const tileId of availableDistrictSites(state, city, building)) choices.push({
+              action: { type: 'build', project: building.id, cityId: city.id, tileId },
+              label: `Build ${building.name} for ${city.name} at site ${tileId}`,
+              reason: `${building.description} ${describeConstruction(building)} Paid once at start; ${requiredConstructionWork(building.id)} work required; first output after completion. ${describeDistrictProduction(state, city, building, tileId)}`,
+            });
+            continue;
+          }
           choices.push({
             action: { type: 'build', project: building.id, cityId: city.id },
             label: `Build ${building.name} in ${city.name}`,
@@ -217,7 +226,7 @@ export function sameAction(left: GameAction, right: unknown): boolean {
     case 'research':
       return 'technology' in right && left.technology === right.technology;
     case 'build':
-      return 'project' in right && left.project === right.project && left.cityId === ('cityId' in right ? right.cityId : undefined);
+      return 'project' in right && left.project === right.project && left.cityId === ('cityId' in right ? right.cityId : undefined) && left.tileId === ('tileId' in right ? right.tileId : undefined);
     case 'set-building-operation':
       return 'cityId' in right && 'buildingId' in right && 'enabled' in right && left.cityId === right.cityId && left.buildingId === right.buildingId && left.enabled === right.enabled;
     case 'settle-coast':

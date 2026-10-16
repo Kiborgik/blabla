@@ -16,7 +16,9 @@ import type { ViewerPreferences } from './viewer-state.ts';
 import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor } from './inspection-camera.ts';
 import type { CameraView, ScreenPoint } from './inspection-camera.ts';
-import { createSettlementMeshes } from './settlement-three.ts';
+import { createSettlementMeshes, createDistrictMeshes } from './settlement-three.ts';
+import { districtCaptionPlacement, districtLabel } from '../visuals/district-visuals.ts';
+import { mapOverlayBounds } from './settlement-parts.ts';
 import { createWorldCues, visualIcon } from './world-cues.ts';
 import { mapLabelVisibility } from './map-labels.ts';
 
@@ -241,8 +243,21 @@ export function createAtlasRenderer(
     cityLabels.push({ element, point: new THREE.Vector3(x, floor + 1.45, z), id: cityKey(city) });
   }
   const settlements = createSettlementMeshes(world, material);
+  const districtMeshes = createDistrictMeshes(world, material);
+  const districtLabels = (world.districts ?? []).map(district => {
+    const point = hexPosition(district.q, district.r);
+    const element = document.createElement('button');
+    element.type = 'button'; element.className = 'city-label district-label';
+    element.dataset['districtId'] = district.id; element.dataset['tileId'] = String(district.tileId);
+    element.style.setProperty('--civ-color', district.color);
+    element.textContent = districtLabel(district);
+    element.setAttribute('aria-label', `Inspect ${districtLabel(district)} of ${district.townName}, tile ${district.tileId}`);
+    element.addEventListener('click', () => onSelect(district.cityId));
+    labels.append(element);
+    return { element, point: new THREE.Vector3(point.x, district.height + .8, point.z), id: district.id };
+  });
   const landscapeMeshes = createLandscapeMeshes(world, material);
-  scene.add(landscapeMeshes.group, settlements.group);
+  scene.add(landscapeMeshes.group, settlements.group, districtMeshes.group);
   const cues = createWorldCues(container, world, (x, z, height) => {
     const point = new THREE.Vector3(x, height, z).project(camera);
     return { x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight };
@@ -354,16 +369,29 @@ export function createAtlasRenderer(
     const tilePixels = Math.hypot((right.x - left.x) * container.clientWidth / 2, (right.y - left.y) * container.clientHeight / 2);
     const detail = settlements.update(tilePixels);
     landscapeMeshes.update(tilePixels);
-    const positions = cityLabels.map((label) => {
+    districtMeshes.update(tilePixels);
+    const mapLabels = [...cityLabels, ...districtLabels];
+    const positions = mapLabels.map((label) => {
       const point = label.point.clone().project(camera);
       return { id: label.id, x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight, width: Math.max(76, label.element.offsetWidth), height: Math.max(44, label.element.offsetHeight) };
     });
     const projectedRoute = routePoint?.clone().project(camera);
-    const townTargets = positions.map((position) => ({ ...position, y: position.y - position.height * 1.1, height: position.height * 1.1 + 8 }));
+    const townTargets = positions.slice(0, cityLabels.length).map((position) => ({ ...position, y: position.y - position.height * 1.1, height: position.height * 1.1 + 8 }));
+    const overlayBounds = mapOverlayBounds(container);
+    for (let index = cityLabels.length; index < positions.length; index++) {
+      const position = positions[index];
+      if (!position) continue;
+      const placement = districtCaptionPlacement(position, [...townTargets, ...overlayBounds], container.clientWidth, container.clientHeight, position.width, position.height);
+      positions[index] = { ...position, ...(placement ? { x: placement.x, y: placement.y + placement.height * 1.1 } : { x: -1000, y: -1000 }) };
+    }
     const placedRouteLabel = projectedRoute && selectedRoute && routes.visible
       ? routeLabelPlacement({ x: (projectedRoute.x + 1) / 2 * container.clientWidth, y: (1 - projectedRoute.y) / 2 * container.clientHeight }, townTargets, container.clientWidth, container.clientHeight) : null;
     if (placedRouteLabel && selectedRoute) positions.unshift({ id: routeLabelKey(selectedRoute), ...placedRouteLabel });
-    const visible = mapLabelVisibility(positions, selected, detail, container.clientWidth, container.clientHeight);
+    const selectedDistricts = new Set((world.districts ?? []).filter(district => district.cityId === selected).map(district => district.id));
+    const prioritized = positions.toSorted((a, b) => Number(selectedDistricts.has(b.id)) - Number(selectedDistricts.has(a.id)));
+    const shown = mapLabelVisibility(prioritized, selected, detail, container.clientWidth, container.clientHeight);
+    const visibilityById = new Map(prioritized.map((label, index) => [label.id, shown[index]]));
+    const visible = positions.map(label => visibilityById.get(label.id));
     const routeLabelOffset = placedRouteLabel ? 1 : 0;
     routeLabel.hidden = !routeLabelOffset || !projectedRoute || projectedRoute.z > 1 || projectedRoute.z < -1 || !visible[0];
     if (placedRouteLabel) {
@@ -372,10 +400,11 @@ export function createAtlasRenderer(
     }
     const pixelsPerUnit = Math.max(0.01, Math.hypot((right.x - left.x) * container.clientWidth / 2, (right.y - left.y) * container.clientHeight / 2) / 2);
     for (const line of routeLines) line.material.dashScale = pixelsPerUnit;
-    for (const [index, label] of cityLabels.entries()) {
+    for (const [index, label] of mapLabels.entries()) {
       const projected = label.point.clone().project(camera);
-      label.element.style.left = `${(projected.x * 0.5 + 0.5) * container.clientWidth}px`;
-      label.element.style.top = `${(-projected.y * 0.5 + 0.5) * container.clientHeight}px`;
+      const position = positions[index + routeLabelOffset];
+      label.element.style.left = `${position?.x ?? -1000}px`;
+      label.element.style.top = `${position?.y ?? -1000}px`;
       label.element.hidden = projected.z > 1 || projected.z < -1 || !visible[index + routeLabelOffset];
     }
     cues.update();
@@ -445,6 +474,7 @@ export function createAtlasRenderer(
       observer.disconnect();
       controls.dispose();
       settlements.dispose();
+      districtMeshes.dispose();
       landscapeMeshes.dispose();
       cues.dispose();
       const geometries = new Set<THREE.BufferGeometry>();
