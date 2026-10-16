@@ -9,14 +9,20 @@ import {
 import { DIRECTOR_SEAT, type ActionOption, type GameAction, type WorldState } from '../types.ts';
 import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
-import { canAfford, citiesOf, civilizationById } from './world.ts';
+import { canAfford, citiesOf } from './world.ts';
+import { availableTradeActions } from './trade.ts';
+import { canAct } from './turns.ts';
 
 export function actionFeatureAvailable(state: WorldState, action: GameAction['type']): boolean {
   return hasFeatures(state, ACTION_FEATURES[action]);
 }
 
-export function availableActions(state: WorldState, seat: number): ActionOption[] {
-  if (!Number.isInteger(seat) || seat !== state.phase || state.outcome) return [];
+export function availableActions(
+  state: WorldState,
+  seat: number,
+  timestamp?: string,
+): ActionOption[] {
+  if (!canAct(state, seat, timestamp)) return [];
   const choices: ActionOption[] = [];
   if (actionFeatureAvailable(state, 'wait'))
     choices.push({
@@ -109,35 +115,18 @@ export function availableActions(state: WorldState, seat: number): ActionOption[
       });
     }
   }
-  if (
-    actionFeatureAvailable(state, 'trade') &&
-    canAfford(civilization.resources, ECONOMY_RULES.trade.cost)
-  ) {
-    for (const partner of state.civilizations) {
-      if (
-        partner.id === seat ||
-        !citiesOf(state, partner.id).length ||
-        state.routes.some(
-          (route) =>
-            (route.owner === seat && route.partner === partner.id) ||
-            (route.owner === partner.id && route.partner === seat),
-        )
-      )
-        continue;
-      choices.push({
-        action: { type: 'trade', partner: partner.id },
-        label: `Open route to ${partner.name}`,
-        reason:
-          'Exchange actual food and materials cargo, paying energy upkeep before earning commerce',
-      });
-    }
-  }
+  choices.push(...availableTradeActions(state, seat));
   if (
     actionFeatureAvailable(state, 'repair') &&
     canAfford(civilization.resources, ECONOMY_RULES.repair.cost)
   ) {
     for (const route of state.routes) {
-      if (route.damage <= 0 || (route.owner !== seat && route.partner !== seat)) continue;
+      if (
+        !route.agreement?.enabled ||
+        route.damage <= 0 ||
+        (route.owner !== seat && route.partner !== seat)
+      )
+        continue;
       choices.push({
         action: { type: 'repair', routeId: route.id },
         label: `Repair ${route.id}`,
@@ -168,6 +157,24 @@ export function sameAction(left: GameAction, right: unknown): boolean {
     case 'trade':
     case 'federate':
       return 'partner' in right && left.partner === right.partner;
+    case 'propose-trade':
+      return (
+        'partner' in right &&
+        'recipeId' in right &&
+        left.partner === right.partner &&
+        left.recipeId === right.recipeId
+      );
+    case 'respond-trade':
+      return (
+        'offerId' in right &&
+        'accept' in right &&
+        left.offerId === right.offerId &&
+        left.accept === right.accept
+      );
+    case 'withdraw-trade':
+      return 'offerId' in right && left.offerId === right.offerId;
+    case 'stop-trade':
+      return 'routeId' in right && left.routeId === right.routeId;
     case 'repair':
       return 'routeId' in right && left.routeId === right.routeId;
     case 'event':
@@ -183,17 +190,4 @@ export function sameAction(left: GameAction, right: unknown): boolean {
     default:
       return false;
   }
-}
-
-export function routeEndpoints(
-  state: WorldState,
-  owner: number,
-  partner: number,
-): { from: string; to: string } {
-  civilizationById(state, owner);
-  civilizationById(state, partner);
-  const from = citiesOf(state, owner)[0];
-  const to = citiesOf(state, partner)[0];
-  if (!from || !to) throw new RangeError('Trade requires two existing settlements');
-  return { from: from.id, to: to.id };
 }

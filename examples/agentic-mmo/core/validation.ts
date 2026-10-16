@@ -1,11 +1,14 @@
 import {
   BUILDINGS,
   ERAS,
+  DIRECTOR_EVENTS,
   FEATURES,
   FOCUS_IDS,
   HISTORICAL_MILESTONES,
   RESOURCE_IDS,
   TECHNOLOGIES,
+  TRADE_RULES,
+  TURN_RULES,
 } from './content.ts';
 import { parseUtcTimestamp } from './simulation/clock.ts';
 import {
@@ -16,10 +19,14 @@ import {
   type City,
   type Civilization,
   type GameEvent,
+  type EventKind,
   type HexTile,
   type Outcome,
   type Route,
   type Treaty,
+  type TradeAgreement,
+  type TradeOffer,
+  type TradeTerms,
   type WorldState,
 } from './types.ts';
 
@@ -53,6 +60,33 @@ function unique(values: readonly unknown[]): boolean {
 
 function knownStrings(value: unknown, allowed: readonly string[]): value is string[] {
   return strings(value) && unique(value) && value.every((id) => allowed.includes(id));
+}
+
+export function isDirectorEvent(value: unknown): value is EventKind {
+  return DIRECTOR_EVENTS.some((definition) => definition.id === value);
+}
+
+function historyAdvances(value: unknown, revision: number, year: number, features: string[]): boolean {
+  if (!record(value)) return false;
+  const revisions: number[] = [];
+  for (const [key, receipt] of Object.entries(value)) {
+    if (!record(receipt) || !record(receipt.cause)) return false;
+    const cause = receipt.cause;
+    if ((cause.kind !== 'feature' && cause.kind !== 'event') || !text(cause.id)
+      || cause.id.trim().length === 0 || cause.id.length > 128 || key !== `${cause.kind}:${cause.id}`
+      || (cause.kind === 'feature' && !features.includes(cause.id))
+      || !text(receipt.reason) || receipt.reason.trim().length === 0 || receipt.reason.length > 1000
+      || !integer(receipt.deltaYears) || !integer(receipt.revision, 1, revision)
+      || !integer(receipt.yearBefore, -Number.MAX_SAFE_INTEGER)
+      || !integer(receipt.yearAfter, -Number.MAX_SAFE_INTEGER, year)
+      || !Number.isSafeInteger(receipt.yearBefore + receipt.deltaYears)
+      || receipt.yearAfter !== receipt.yearBefore + receipt.deltaYears
+      || typeof receipt.timestamp !== 'string' || parseUtcTimestamp(receipt.timestamp) === null
+      || !strings(receipt.evidence) || receipt.evidence.length === 0
+      || !receipt.evidence.every((item) => item.trim().length > 0)) return false;
+    revisions.push(receipt.revision);
+  }
+  return unique(revisions);
 }
 
 function civilization(value: unknown): value is Civilization {
@@ -122,8 +156,95 @@ function route(value: unknown): value is Route {
     value.owner !== value.partner &&
     typeof value.active === 'boolean' &&
     finite(value.damage, 0, 100) &&
-    finite(value.volume)
+    finite(value.volume) &&
+    (!('agreement' in value) || tradeAgreement(value.agreement))
   );
+}
+
+const tradeResourceFields = ['constructionCost', 'proposerCargo', 'recipientCargo', 'proposerUpkeep', 'recipientUpkeep', 'proposerYield', 'recipientYield'] as const;
+
+function tradeTerms(value: unknown): value is TradeTerms {
+  return record(value) && text(value.recipeId) && integer(value.recipeVersion, 1)
+    && integer(value.cadenceRounds, 1) && finite(value.damageDisableAt, Number.MIN_VALUE, 100)
+    && tradeResourceFields.every((field) => {
+      const amounts = value[field];
+      return record(amounts) && Object.entries(amounts).every(([resource, amount]) => RESOURCE_IDS.some((known) => known === resource) && finite(amount));
+    });
+}
+
+function tradeAgreement(value: unknown): value is TradeAgreement {
+  return record(value) && text(value.offerId) && tradeTerms(value.terms)
+    && typeof value.enabled === 'boolean' && integer(value.acceptedRound)
+    && integer(value.nextDeliveryRound) && integer(value.deliveryCount)
+    && (value.lastAttemptRound === null || integer(value.lastAttemptRound))
+    && (value.lastDeliveryRound === null || integer(value.lastDeliveryRound))
+    && (value.closedRound === null || integer(value.closedRound))
+    && (value.blockedBy === null || integer(value.blockedBy, 0, CIV_COUNT - 1))
+    && (value.blockedReason === null || text(value.blockedReason));
+}
+
+function tradeOffer(value: unknown): value is TradeOffer {
+  return record(value) && text(value.id) && integer(value.proposer, 0, CIV_COUNT - 1)
+    && integer(value.recipient, 0, CIV_COUNT - 1) && value.proposer !== value.recipient
+    && text(value.from) && text(value.to) && tradeTerms(value.terms)
+    && integer(value.createdRound) && integer(value.expiresRound)
+    && value.expiresRound > value.createdRound
+    && typeof value.status === 'string' && ['pending', 'accepted', 'declined', 'withdrawn', 'expired'].includes(value.status)
+    && (value.routeId === null || text(value.routeId));
+}
+
+function sameTradeTerms(first: TradeTerms, second: TradeTerms): boolean {
+  return first.recipeId === second.recipeId && first.recipeVersion === second.recipeVersion
+    && first.cadenceRounds === second.cadenceRounds && first.damageDisableAt === second.damageDisableAt
+    && tradeResourceFields.every((field) => RESOURCE_IDS.every((resource) => first[field][resource] === second[field][resource]));
+}
+
+function tradePair(first: number, second: number): string {
+  return `${Math.min(first, second)}:${Math.max(first, second)}`;
+}
+
+function tradeState(value: unknown, routes: Route[], cities: City[], round: number): boolean {
+  if (!Array.isArray(value) || !value.every(tradeOffer) || !unique(value.map((offer) => offer.id))) return false;
+  const pendingPairs = new Map<string, number>();
+  const enabledPairs = new Map<string, number>();
+  for (const offer of value) {
+    if (offer.createdRound > round || !cities.some((settlement) => settlement.id === offer.from && settlement.civId === offer.proposer)
+      || !cities.some((settlement) => settlement.id === offer.to && settlement.civId === offer.recipient)) return false;
+    if (offer.status === 'accepted') {
+      const accepted = routes.find((connection) => connection.id === offer.routeId);
+      if (!accepted?.agreement || accepted.agreement.offerId !== offer.id) return false;
+    } else if (offer.routeId !== null) return false;
+    if (offer.status === 'pending' && round < offer.expiresRound) {
+      const key = tradePair(offer.proposer, offer.recipient);
+      const count = (pendingPairs.get(key) ?? 0) + 1;
+      if (count > TRADE_RULES.maxPendingPerPair) return false;
+      pendingPairs.set(key, count);
+    }
+  }
+  for (const connection of routes) {
+    const agreement = connection.agreement;
+    if (!agreement) continue;
+    const offer = value.find((candidate) => candidate.id === agreement.offerId);
+    if (!offer || offer.status !== 'accepted' || offer.routeId !== connection.id
+      || offer.proposer !== connection.owner || offer.recipient !== connection.partner
+      || offer.from !== connection.from || offer.to !== connection.to || !sameTradeTerms(offer.terms, agreement.terms)
+      || agreement.acceptedRound < offer.createdRound || agreement.acceptedRound >= offer.expiresRound
+      || agreement.acceptedRound > round || agreement.nextDeliveryRound <= agreement.acceptedRound
+      || agreement.nextDeliveryRound % agreement.terms.cadenceRounds !== 0
+      || (agreement.enabled && agreement.nextDeliveryRound <= round)
+      || (agreement.lastAttemptRound !== null && (agreement.lastAttemptRound <= agreement.acceptedRound || agreement.lastAttemptRound > round || agreement.lastAttemptRound % agreement.terms.cadenceRounds !== 0))
+      || (agreement.lastDeliveryRound !== null && (agreement.lastAttemptRound === null || agreement.lastDeliveryRound > agreement.lastAttemptRound || agreement.lastDeliveryRound <= agreement.acceptedRound || agreement.lastDeliveryRound % agreement.terms.cadenceRounds !== 0))
+      || ((agreement.deliveryCount === 0) !== (agreement.lastDeliveryRound === null))
+      || (agreement.blockedBy !== null && (agreement.blockedBy !== connection.owner && agreement.blockedBy !== connection.partner || agreement.blockedReason === null))
+      || (agreement.enabled ? agreement.closedRound !== null : agreement.closedRound === null || agreement.closedRound < agreement.acceptedRound || agreement.closedRound > round || agreement.blockedBy !== null || agreement.blockedReason !== null || connection.active || connection.volume !== 0)) return false;
+    if (agreement.enabled) {
+      const key = tradePair(connection.owner, connection.partner);
+      const count = (enabledPairs.get(key) ?? 0) + 1;
+      if (count > TRADE_RULES.maxActivePerPair) return false;
+      enabledPairs.set(key, count);
+    }
+  }
+  return true;
 }
 
 function treaty(value: unknown): value is Treaty {
@@ -168,6 +289,22 @@ function outcome(value: unknown): value is Outcome | null {
   );
 }
 
+function independentTurns(value: unknown, round: number): boolean {
+  if (!record(value) || typeof value.epoch !== 'string') return false;
+  const epoch = parseUtcTimestamp(value.epoch);
+  if (epoch === null || !integer(value.strategyTicks, 0, round)
+    || !Number.isFinite(new Date(epoch + (value.strategyTicks + 1) * TURN_RULES.strategyIntervalMs).getTime())
+    || !Array.isArray(value.lastActionWindow) || value.lastActionWindow.length !== DIRECTOR_SEAT + 1
+    || !Array.isArray(value.actionsInWindow) || value.actionsInWindow.length !== DIRECTOR_SEAT + 1) return false;
+  const counts = value.actionsInWindow;
+  const nextBoundary = epoch + (value.strategyTicks + 1) * TURN_RULES.strategyIntervalMs;
+  return value.lastActionWindow.every((window: unknown, seat: number) => integer(window, -1)
+    && Number.isFinite(new Date(epoch + (window + 1) * TURN_RULES.tacticalWindowMs).getTime())
+    && epoch + window * TURN_RULES.tacticalWindowMs < nextBoundary
+    && integer(counts[seat], 0, TURN_RULES.actionsPerWindow)
+    && (window === -1 ? counts[seat] === 0 : counts[seat] > 0));
+}
+
 export function isWorldState(
   value: unknown,
   options: { allowLegacyClock?: boolean } = {},
@@ -204,6 +341,9 @@ export function isWorldState(
         typeof timestamp === 'string' &&
         parseUtcTimestamp(timestamp) !== null,
     ) ||
+    ('historyAdvances' in value && !historyAdvances(value.historyAdvances, value.revision, value.year, value.unlockedFeatures)) ||
+    (value.unlockedFeatures.includes('independent-actions') !== ('independentTurns' in value)) ||
+    ('independentTurns' in value && !independentTurns(value.independentTurns, value.round)) ||
     !outcome(value.outcome)
   )
     return false;
@@ -265,6 +405,7 @@ export function isWorldState(
         cities.some((endpoint) => endpoint.id === item.from && endpoint.civId === item.owner) &&
         cities.some((endpoint) => endpoint.id === item.to && endpoint.civId === item.partner),
     ) ||
+    !tradeState('tradeOffers' in value ? value.tradeOffers : [], value.routes, cities, round) ||
     !value.treaties.every((item) => item.since <= round) ||
     !value.events.every(
       (item) =>

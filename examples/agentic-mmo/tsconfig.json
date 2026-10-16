@@ -34,6 +34,8 @@
     "web/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",
-    "vite.config.ts"
+    "vite.config.ts",
+    "benchmarks/**/*.ts",
+    "visuals/**/*.ts"
   ]
 }

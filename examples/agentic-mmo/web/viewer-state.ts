@@ -50,8 +50,8 @@ export function parsePreferences(value: unknown): ViewerPreferences {
   return {
     schemaVersion: 1,
     zoom: bounded(data['zoom'], 1, 0.65, 2.2),
-    x: bounded(data['x'], 0, -20, 20),
-    z: bounded(data['z'], 0, -15, 15),
+    x: bounded(data['x'], 0, -100, 100),
+    z: bounded(data['z'], 0, -100, 100),
     selected:
       typeof selected === 'number' && Number.isInteger(selected) && selected >= 0 && selected < 5
         ? selected

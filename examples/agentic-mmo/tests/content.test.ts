@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   ACTION_FEATURES, BUILDINGS, CIVILIZATIONS, CONTENT, DIRECTOR_CLOCK_RULES,
-  DIRECTOR_EVENTS, ERAS, HISTORICAL_MILESTONES, TECHNOLOGIES, VICTORY_RULES, validateContent,
+  DIRECTOR_EVENTS, ERAS, HISTORICAL_MILESTONES, TECHNOLOGIES, TRADE_RECIPES, TRADE_RULES, VICTORY_RULES, validateContent,
 } from '../core/content.ts';
 import { CIV_COUNT } from '../core/types.ts';
 
@@ -143,4 +143,23 @@ await test('a capability milestone cannot require a building unlocked by that sa
   const circular = structuredClone(CONTENT);
   required(circular.milestones.find(milestone => milestone.id === 'rise-of-states')).conditions = [{ kind: 'building-count', building: 'monument', minimum: 1 }];
   assert.ok(validateContent(circular).some(error => error.includes('circular building eligibility')));
+});
+
+await test('trade recipes and pacing are validated shared content rather than hidden engine constants', () => {
+  assert.equal(TRADE_RULES.offerExpiryRounds, 8);
+  assert.equal(required(TRADE_RECIPES[0]).terms.cadenceRounds, 4);
+  const base = { ...structuredClone(CONTENT), tradeRecipes: structuredClone(TRADE_RECIPES), tradeRules: { ...TRADE_RULES } };
+  required(base.tradeRecipes[0]).terms.cadenceRounds = 0;
+  assert.ok(validateContent(base).some(error => error.includes('trade')));
+  const invalidCost = { ...structuredClone(CONTENT), tradeRecipes: structuredClone(TRADE_RECIPES), tradeRules: { ...TRADE_RULES } };
+  required(invalidCost.tradeRecipes[0]).terms.proposerCargo.food = -1;
+  assert.ok(validateContent(invalidCost).some(error => error.includes('trade')));
+  const invalidIdentity = { ...structuredClone(CONTENT), tradeRecipes: structuredClone(TRADE_RECIPES), tradeRules: { ...TRADE_RULES } };
+  required(invalidIdentity.tradeRecipes[0]).terms.recipeVersion = 2;
+  assert.ok(validateContent(invalidIdentity).some(error => error.includes('trade')));
+  const invalidFeature = { ...structuredClone(CONTENT), tradeRecipes: structuredClone(TRADE_RECIPES), tradeRules: { ...TRADE_RULES } };
+  required(invalidFeature.tradeRecipes[0]).requiredFeatures = ['missing-trade-feature'];
+  assert.ok(validateContent(invalidFeature).some(error => error.includes('missing-trade-feature')));
+  const invalidLimit = { ...structuredClone(CONTENT), tradeRecipes: structuredClone(TRADE_RECIPES), tradeRules: { ...TRADE_RULES, maxPendingPerPair: 0 } };
+  assert.ok(validateContent(invalidLimit).some(error => error.includes('trade')));
 });

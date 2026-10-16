@@ -15,14 +15,22 @@ import {
 import { availableActions, sameAction } from './simulation/choices.ts';
 import { executeAction } from './simulation/commands.ts';
 import { parseUtcTimestamp } from './simulation/clock.ts';
-import { resolveEconomy } from './simulation/economy.ts';
 import { commitEvents } from './simulation/events.ts';
 import { createMap, hexDistance } from './simulation/geography.ts';
 import { resolveHistory } from './simulation/history.ts';
 import { normalizeSeed } from './simulation/random.ts';
 import { citiesOf, totalPopulation } from './simulation/world.ts';
+import {
+  admissionError,
+  createIndependentTurns,
+  finishAction,
+  turnAdmission,
+  usesIndependentTurns,
+} from './simulation/turns.ts';
 
 export { applyDirectorTick, catchUpClock } from './simulation/clock.ts';
+export { applyHistoryAdvance, applyRelease } from './simulation/evolution.ts';
+export { catchUpStrategy } from './simulation/turns.ts';
 
 export function createWorld(seed: number, clockEpoch?: string): WorldState {
   const errors = validateContent();
@@ -61,6 +69,11 @@ export function createWorld(seed: number, clockEpoch?: string): WorldState {
     climate: 0,
     directorCooldown: 0,
   };
+  if (usesIndependentTurns(state)) {
+    if (clockEpoch === undefined)
+      throw new RangeError('Independent worlds require an explicit epoch');
+    state.independentTurns = createIndependentTurns(clockEpoch);
+  }
   const anchors = [
     { q: 3, r: 3 },
     { q: 12, r: 2 },
@@ -128,11 +141,11 @@ export function createWorld(seed: number, clockEpoch?: string): WorldState {
   return state;
 }
 
-export function legalActions(state: WorldState, seat: number): ActionOption[] {
-  return availableActions(state, seat);
+export function legalActions(state: WorldState, seat: number, timestamp?: string): ActionOption[] {
+  return availableActions(state, seat, timestamp);
 }
 
-export function observe(state: WorldState, seat: number): Observation {
+export function observe(state: WorldState, seat: number, timestamp?: string): Observation {
   const civilization = state.civilizations.find((candidate) => candidate.id === seat) ?? null;
   const director = seat === DIRECTOR_SEAT;
   return structuredClone({
@@ -141,7 +154,8 @@ export function observe(state: WorldState, seat: number): Observation {
     round: state.round,
     year: state.year,
     seat,
-    activeSeat: state.phase,
+    activeSeat: usesIndependentTurns(state) ? null : state.phase,
+    admission: turnAdmission(state, seat),
     civilization,
     cities: director ? state.cities : citiesOf(state, seat),
     rivals: state.civilizations
@@ -154,11 +168,19 @@ export function observe(state: WorldState, seat: number): Observation {
         objective: candidate.objective,
       })),
     routes: state.routes.filter(
-      (route) => director || route.owner === seat || route.partner === seat,
+      (route) =>
+        (route.agreement?.enabled ?? true) &&
+        (director || route.owner === seat || route.partner === seat),
     ),
     treaties: state.treaties.filter((treaty) => director || treaty.a === seat || treaty.b === seat),
+    tradeOffers: (state.tradeOffers ?? []).filter(
+      (offer) =>
+        offer.status === 'pending' &&
+        state.round < offer.expiresRound &&
+        (director || offer.proposer === seat || offer.recipient === seat),
+    ),
     recentEvents: state.events.slice(-12),
-    legalActions: legalActions(state, seat),
+    legalActions: legalActions(state, seat, timestamp),
     outcome: state.outcome,
   });
 }
@@ -173,7 +195,7 @@ export function applyCommand(state: WorldState, command: Command): TransitionRes
     !Number.isSafeInteger(command.expectedRevision) ||
     command.expectedRevision !== state.revision ||
     state.outcome ||
-    command.seat !== state.phase
+    !Number.isSafeInteger(state.revision + 1)
   ) {
     return {
       ok: false,
@@ -182,7 +204,9 @@ export function applyCommand(state: WorldState, command: Command): TransitionRes
       error: 'Command is terminal, out of turn, or has an invalid revision or seat',
     };
   }
-  const available = legalActions(state, command.seat);
+  const denied = admissionError(state, command.seat, command.timestamp);
+  if (denied) return { ok: false, state, events: [], error: denied };
+  const available = legalActions(state, command.seat, command.timestamp);
   if (!available.some((choice) => sameAction(choice.action, command.action))) {
     return {
       ok: false,
@@ -195,12 +219,7 @@ export function applyCommand(state: WorldState, command: Command): TransitionRes
   const events: GameEvent[] = [];
   next.revision += 1;
   executeAction(next, command.seat, command.action, events);
-  next.phase = (next.phase + 1) % (DIRECTOR_SEAT + 1);
-  if (next.phase === 0) {
-    next.round += 1;
-    if (next.directorCooldown > 0 && command.action.type !== 'event') next.directorCooldown -= 1;
-    resolveEconomy(next, events);
-  }
+  finishAction(next, command, events);
   resolveHistory(next, events);
   commitEvents(next, events);
   return { ok: true, state: next, events };

@@ -1,7 +1,8 @@
 import { BUILDINGS, ECONOMY_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
 import type { City, GameEvent, Resources, WorldState } from '../types.ts';
 import { emitEvent } from './events.ts';
-import { canAfford, citiesOf, civilizationById, clamp, transferCost } from './world.ts';
+import { citiesOf, civilizationById, clamp } from './world.ts';
+import { resolveTrade } from './trade.ts';
 
 function quantize(value: number): number {
   return Math.round(value * 100) / 100;
@@ -104,55 +105,6 @@ function supplyCity(state: WorldState, city: City, events: GameEvent[]): boolean
   return false;
 }
 
-function resolveRoutes(state: WorldState, events: GameEvent[]): void {
-  for (const route of state.routes) {
-    const owner = civilizationById(state, route.owner);
-    const partner = civilizationById(state, route.partner);
-    const endpointsExist =
-      state.cities.some((city) => city.id === route.from && city.civId === owner.id) &&
-      state.cities.some((city) => city.id === route.to && city.civId === partner.id);
-    const active =
-      endpointsExist &&
-      route.damage < ECONOMY_RULES.trade.damageDisableAt &&
-      canAfford(owner.resources, ECONOMY_RULES.trade.ownerCargo) &&
-      canAfford(partner.resources, ECONOMY_RULES.trade.partnerCargo) &&
-      canAfford(owner.resources, ECONOMY_RULES.trade.upkeep) &&
-      canAfford(partner.resources, ECONOMY_RULES.trade.upkeep);
-    route.active = active;
-    route.volume = 0;
-    if (!active) continue;
-    transferCost(owner.resources, ECONOMY_RULES.trade.upkeep);
-    transferCost(partner.resources, ECONOMY_RULES.trade.upkeep);
-    transferCost(owner.resources, ECONOMY_RULES.trade.ownerCargo);
-    transferCost(partner.resources, ECONOMY_RULES.trade.partnerCargo);
-    transferCost(partner.resources, ECONOMY_RULES.trade.ownerCargo, 1);
-    transferCost(owner.resources, ECONOMY_RULES.trade.partnerCargo, 1);
-    transferCost(owner.resources, ECONOMY_RULES.trade.commerceYield, 1);
-    transferCost(partner.resources, ECONOMY_RULES.trade.commerceYield, 1);
-    const ownerCargo: Partial<Resources> = ECONOMY_RULES.trade.ownerCargo;
-    const partnerCargo: Partial<Resources> = ECONOMY_RULES.trade.partnerCargo;
-    route.volume = RESOURCE_IDS.reduce(
-      (total, resource) => total + (ownerCargo[resource] ?? 0) + (partnerCargo[resource] ?? 0),
-      0,
-    );
-    emitEvent(state, events, {
-      type: 'trade-delivered',
-      title: `${owner.name} and ${partner.name} exchange cargo`,
-      detail: 'Both route endpoints supplied real goods and paid transport upkeep',
-      actor: owner.id,
-      target: partner.id,
-      tileId: state.cities.find((city) => city.id === route.to)?.tileId ?? null,
-      cause: `Route ${route.id} was intact and both partners could supply cargo and energy`,
-      effects: [
-        `${route.volume} cargo exchanged`,
-        'Commerce income credited to both partners',
-        'Transport energy consumed at both endpoints',
-      ],
-      importance: 2,
-    });
-  }
-}
-
 function resolveResearch(state: WorldState, civilizationId: number, events: GameEvent[]): void {
   const civilization = civilizationById(state, civilizationId);
   const technology = TECHNOLOGIES.find((candidate) => candidate.id === civilization.researchTarget);
@@ -222,6 +174,6 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
       importance: 1,
     });
   }
-  resolveRoutes(state, events);
+  resolveTrade(state, events);
   for (const civilization of state.civilizations) resolveResearch(state, civilization.id, events);
 }

@@ -3,7 +3,15 @@
 Independent reviewer: `gpt-6-astra`, task `review-hosted-release`.
 Reviewed 2026-10-16 08:06–08:09 UTC against the frozen host source and current built artifact.
 
-## Result
+## 08:29 UTC source refresh
+
+Reaccepted after the newer source/mission changes. Independently reran the exact declared `node scripts/check-task.ts hosting`: **22 tests passed, 0 failed/skipped; scoped strict lint passed; overall exit 0**. No new deploy-blocking defect was found in the changed hosting boundary.
+
+This refresh read the new HTTP/MCP release and hybrid-history routes, their repository branches, the called pure transition implementations and the six added hosting tests. Both transports retain the same authorization before dispatch (`server/worker.ts:80-92,153-164`). `server/repository.ts:85-168` retains request/actor fingerprints, operation-specific receipt namespaces, current revision checks, canonical result validation and the existing atomic CAS batch for the new operations. History advancement rejects future timestamps, malformed causes/reasons/years and engine-refused requests; the core requires a released capability, a real released feature or recorded event, safe arithmetic and a previously unconsumed cause (`core/simulation/evolution.ts:28-109`). Release application names a registered additive compatible successor and preserves existing state (`112-163`). The new tests exercise HTTP/MCP protection, exact retry, concurrent release/history races, changed/stale/invalid requests, durable replay, corruption rejection and normal six-minute ticks after an intentional jump (`tests/hosting.test.ts:330-453`). The previous duplicate event catalogue is now replaced by shared definitions/validation.
+
+The artifact hash and bundle inspection below remain **historical evidence for the initial host artifact**. They must not be presented as inspection of version 4. A current local Worker file was observed with SHA-256 `b75436c030d6057644163158060655ff858651d4eb0656097b1a85eb5df57c45`, but this refresh did not rerun or repeat full artifact inspection. The orchestrator owns the newer frozen artifact, full verification and publication evidence. This source refresh does not certify deployed new operations, OAuth/header isolation or unattended scheduling; those need their own actual runtime evidence. The initial empty-allowlist conditions below describe the initial publication, not an instruction to undo later separately authorized enrollment.
+
+## Initial artifact result (historical)
 
 **No demonstrated deploy-blocking source integrity or security defect was found.** The focused declared check independently passed **16 tests, 0 failed/skipped, and scoped strict lint, overall exit 0**.
 

@@ -1,6 +1,6 @@
 import { BUILDINGS, DIRECTOR_EVENTS, ECONOMY_RULES, RESOURCE_IDS } from '../content.ts';
 import { DIRECTOR_SEAT, type GameAction, type GameEvent, type WorldState } from '../types.ts';
-import { routeEndpoints } from './choices.ts';
+import { executeTradeAction } from './trade.ts';
 import { applyEffects } from './effects.ts';
 import { emitEvent } from './events.ts';
 import { citiesOf, civilizationById, clamp, transferCost } from './world.ts';
@@ -153,39 +153,14 @@ export function executeAction(
       });
       return;
     }
-    case 'trade': {
-      transferCost(civilization.resources, ECONOMY_RULES.trade.cost);
-      const route = {
-        id: `route-${state.revision}`,
-        ...routeEndpoints(state, seat, action.partner),
-        owner: seat,
-        partner: action.partner,
-        active: false,
-        damage: 0,
-        volume: 0,
-      };
-      state.routes.push(route);
-      state.treaties.push({
-        id: `trade-${state.revision}`,
-        a: seat,
-        b: action.partner,
-        kind: 'trade',
-        since: state.round,
-      });
-      emitEvent(state, events, {
-        type: 'route-opened',
-        title: `${civilization.name} opens a shared trade route`,
-        detail: `Transport connects ${route.from} with ${route.to}`,
-        actor: seat,
-        target: action.partner,
-        tileId: location,
-        cause:
-          'The released route system and paid infrastructure connected two existing settlements',
-        effects: [`Route ${route.id} awaits its first supplied exchange`],
-        importance: 4,
-      });
+    case 'propose-trade':
+    case 'respond-trade':
+    case 'withdraw-trade':
+    case 'stop-trade':
+      executeTradeAction(state, seat, action, events);
       return;
-    }
+    case 'trade':
+      throw new RangeError('Legacy unilateral trade is unavailable; use an explicit consent offer');
     case 'repair': {
       const route = state.routes.find((candidate) => candidate.id === action.routeId);
       if (!route) throw new RangeError('Repair route is missing');

@@ -5,7 +5,8 @@ import { isWorldState } from '../core/validation.ts';
 export class RequestFailure extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string) { super(code); this.status = status; this.code = code; }
+  readonly details: Record<string, unknown>;
+  constructor(status: number, code: string, details: Record<string, unknown> = {}) { super(code); this.status = status; this.code = code; this.details = details; }
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

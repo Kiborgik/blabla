@@ -12,8 +12,9 @@ export function chooseAction(
   state: WorldState,
   seat: number,
   scenario: 'mars' | 'federation' | 'balanced' = 'balanced',
+  timestamp?: string,
 ): GameAction {
-  const choices = legalActions(state, seat);
+  const choices = legalActions(state, seat, timestamp);
   const civilization = state.civilizations.find((candidate) => candidate.id === seat);
   if (seat === DIRECTOR_SEAT) {
     const event = choices.filter((choice) => choice.action.type === 'event');
@@ -35,7 +36,11 @@ export function chooseAction(
   if (building) return building.action;
   const repair = choices.find((choice) => choice.action.type === 'repair');
   if (repair) return repair.action;
-  const trade = choices.find((choice) => choice.action.type === 'trade');
+  const response = choices.find(
+    (choice) => choice.action.type === 'respond-trade' && choice.action.accept,
+  );
+  if (response) return response.action;
+  const trade = choices.find((choice) => choice.action.type === 'propose-trade');
   if (trade) return trade.action;
   const expansion = choices.find((choice) => choice.action.type === 'settle');
   if (expansion && !foodRisk) return expansion.action;

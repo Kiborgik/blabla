@@ -4,3 +4,5 @@ dist/
 *.log
 playwright-report/
 test-results/
+
+node_modules

@@ -32,11 +32,14 @@ export function main(argv = process.argv.slice(2)): void {
     }
     const options = flags(argv.slice(1));
     const allowed: Record<string, string[]> = {
-      init: ['--seed', '--clock-epoch', '--state'], observe: ['--seat', '--state'], action: ['--seat', '--revision', '--choice', '--action', '--model', '--id', '--state'], replay: ['--out', '--state'],
+      init: ['--seed', '--clock-epoch', '--state'], observe: ['--seat', '--state'], action: ['--seat', '--revision', '--choice', '--action', '--at', '--model', '--id', '--state'], replay: ['--out', '--state'],
       tick: ['--revision', '--kind', '--interval', '--at', '--event', '--target', '--model', '--state'],
       catchup: ['--revision', '--at', '--id', '--model', '--state'],
+      'strategy-catchup': ['--revision', '--at', '--id', '--model', '--state'],
+      'history-advance': ['--revision', '--cause-kind', '--cause-id', '--reason', '--years', '--at', '--id', '--model', '--state'],
+      'release-apply': ['--revision', '--from', '--to', '--at', '--id', '--model', '--state'],
     };
-    if (!allowed[operation]) throw new ProtocolError('commands: init, observe, action, tick, catchup, replay, serve');
+    if (!allowed[operation]) throw new ProtocolError('commands: init, observe, action, tick, catchup, strategy-catchup, history-advance, release-apply, replay, serve');
     for (const name of options.keys()) if (!allowed[operation]?.includes(name)) throw new ProtocolError(`unknown option ${name}`);
     const store = new GameStore(options.get('--state'));
     const request: Record<string, unknown> = { op: operation };
@@ -51,6 +54,7 @@ export function main(argv = process.argv.slice(2)): void {
       request.choice = numberOption(options, '--choice');
       request.model = options.get('--model');
       request.commandId = options.get('--id');
+      request.timestamp = options.get('--at');
       const action = options.get('--action');
       if (action !== undefined) {
         let value: unknown;
@@ -59,7 +63,7 @@ export function main(argv = process.argv.slice(2)): void {
         request.action = value;
       }
     }
-    if (operation === 'tick' || operation === 'catchup') {
+    if (operation === 'tick' || operation === 'catchup' || operation === 'strategy-catchup') {
       request.expectedRevision = numberOption(options, '--revision');
       request.timestamp = options.get('--at');
       request.model = options.get('--model');
@@ -69,6 +73,21 @@ export function main(argv = process.argv.slice(2)): void {
         request.intervalId = options.get('--interval');
         request.event = options.get('--event') ?? 'calm';
         request.target = numberOption(options, '--target') ?? 0;
+      }
+    }
+    if (operation === 'history-advance' || operation === 'release-apply') {
+      request.expectedRevision = numberOption(options, '--revision');
+      request.model = options.get('--model');
+      request.commandId = options.get('--id');
+      if (operation === 'history-advance') {
+        request.cause = { kind: options.get('--cause-kind'), id: options.get('--cause-id') };
+        request.reason = options.get('--reason');
+        request.deltaYears = numberOption(options, '--years');
+        request.timestamp = options.get('--at');
+      } else {
+        request.timestamp = options.get('--at');
+        request.expectedFromReleaseId = options.get('--from');
+        request.targetReleaseId = options.get('--to');
       }
     }
     const result = new GameProtocol(store).handle(request);

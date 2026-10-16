@@ -17,13 +17,16 @@ import { ProtocolError } from '../../../adapters/typescript/blabla_adapter.ts';
 import {
   applyCommand,
   applyDirectorTick,
+  applyHistoryAdvance,
+  applyRelease,
   catchUpClock,
+  catchUpStrategy,
   createWorld,
   legalActions,
   observe,
 } from '../core/engine.ts';
 import { parseUtcTimestamp } from '../core/simulation/clock.ts';
-import { isWorldState } from '../core/validation.ts';
+import { isDirectorEvent, isWorldState } from '../core/validation.ts';
 import {
   GAME_VERSION,
   SCHEMA_VERSION,
@@ -31,6 +34,8 @@ import {
   type Command,
   type DirectorTickCommand,
   type GameAction,
+  type HistoryAdvanceCommand,
+  type ReleaseApplyCommand,
   type ReplayFrame,
   type TransitionResult,
   type WorldState,
@@ -39,7 +44,10 @@ import {
 export type RecordedTransition =
   | { kind: 'action'; command: Command }
   | { kind: 'director-tick'; command: DirectorTickCommand }
-  | { kind: 'clock-catchup'; timestamp: string; expectedRevision: number };
+  | { kind: 'clock-catchup'; timestamp: string; expectedRevision: number }
+  | { kind: 'strategy-catchup'; timestamp: string; expectedRevision: number }
+  | { kind: 'history-advance'; command: HistoryAdvanceCommand }
+  | { kind: 'release-apply'; command: ReleaseApplyCommand };
 
 export interface ActionProvenance {
   commandId: string;
@@ -47,7 +55,7 @@ export interface ActionProvenance {
   operation: RecordedTransition['kind'];
   model: string | null;
   seat: number;
-  action: GameAction | DirectorTickCommand | { timestamp: string };
+  action: GameAction | DirectorTickCommand | HistoryAdvanceCommand | ReleaseApplyCommand | { timestamp: string };
   revision: number;
   recordedAt: string;
   request: Record<string, unknown>;
@@ -64,6 +72,7 @@ export interface LocalCampaign {
   provenance: ActionProvenance[];
   lastValid: boolean;
   timeline: RecordedTransition[];
+  noOpReceipts?: Array<Pick<ActionProvenance, 'operation' | 'commandId' | 'request' | 'revision' | 'remainingTicks'>>;
 }
 
 export interface ActionReply {
@@ -180,6 +189,12 @@ function validateCampaign(value: unknown): asserts value is LocalCampaign {
     !Array.isArray(value.commands) ||
     !Array.isArray(value.frames) ||
     !Array.isArray(value.provenance) ||
+    (value.noOpReceipts !== undefined && (!Array.isArray(value.noOpReceipts)
+      || !value.noOpReceipts.every((entry: unknown) => isRecord(entry) && entry.operation === 'strategy-catchup'
+        && typeof entry.commandId === 'string' && entry.commandId.length > 0 && entry.commandId.length <= 500
+        && isRecord(entry.request) && integer(entry.revision) && entry.revision >= 0
+        && isRecord(value.state) && integer(value.state.revision) && entry.revision <= value.state.revision
+        && integer(entry.remainingTicks) && entry.remainingTicks >= 0))) ||
     typeof value.lastValid !== 'boolean' ||
     !Array.isArray(value.timeline) ||
     value.timeline.length !== value.provenance.length ||
@@ -196,7 +211,7 @@ function validateCampaign(value: unknown): asserts value is LocalCampaign {
         isRecord(entry) &&
         (entry.kind === 'action' ||
           entry.kind === 'director-tick' ||
-          entry.kind === 'clock-catchup'),
+          entry.kind === 'clock-catchup' || entry.kind === 'strategy-catchup' || entry.kind === 'history-advance' || entry.kind === 'release-apply'),
     ) ||
     !value.commands.every(
       (entry: unknown) =>
@@ -345,8 +360,10 @@ export class GameStore {
     return this.locked(() => {
       const campaign = this.load();
       const refuse = (error: string): ActionReply => {
-        campaign.lastValid = false;
-        atomicWrite(this.path, campaign);
+        if (!campaign.state.independentTurns) {
+          campaign.lastValid = false;
+          atomicWrite(this.path, campaign);
+        }
         return { ok: false, revision: campaign.state.revision, last_valid: false, error };
       };
       const seat = input.seat;
@@ -372,6 +389,7 @@ export class GameStore {
       };
       if (input.choice !== undefined) request.choice = input.choice;
       if (input.action !== undefined) request.action = input.action;
+      if (input.timestamp !== undefined) request.timestamp = input.timestamp;
       const prior = campaign.provenance.find(
         (entry) => entry.operation === 'action' && entry.commandId === commandId,
       );
@@ -392,9 +410,10 @@ export class GameStore {
           ...(prior.remainingTicks === undefined ? {} : { remainingTicks: prior.remainingTicks }),
         };
       }
-      if (expectedRevision !== campaign.state.revision)
+      const canRebase = campaign.state.independentTurns !== undefined && input.action !== undefined && input.choice === undefined;
+      if (expectedRevision > campaign.state.revision || (expectedRevision !== campaign.state.revision && !canRebase))
         return refuse(`stale revision: expected ${campaign.state.revision}`);
-      if (seat !== campaign.state.phase) return refuse(`active seat is ${campaign.state.phase}`);
+      if (!campaign.state.independentTurns && seat !== campaign.state.phase) return refuse(`active seat is ${campaign.state.phase}`);
       const options = legalActions(campaign.state, seat);
       let action: GameAction | undefined;
       if (input.choice !== undefined && input.action !== undefined)
@@ -407,7 +426,9 @@ export class GameStore {
         action = options.find((option) => isDeepStrictEqual(option.action, input.action))?.action;
       }
       if (!action) return refuse('action is not a currently legal option');
-      const command: Command = { seat, expectedRevision, action };
+      const timestamp = input.timestamp;
+      if ((timestamp !== undefined || campaign.state.independentTurns) && (typeof timestamp !== 'string' || parseUtcTimestamp(timestamp) === null)) return refuse('timestamp must be an explicit UTC ISO timestamp');
+      const command: Command = { seat, expectedRevision: campaign.state.revision, action, ...(typeof timestamp === 'string' ? { timestamp } : {}) };
       const result = applyCommand(campaign.state, command);
       if (!result.ok) return refuse(result.error ?? 'command refused by the engine');
       campaign.state = result.state;
@@ -439,13 +460,15 @@ export class GameStore {
 
   private systemTransition(
     input: Record<string, unknown>,
-    operation: 'director-tick' | 'clock-catchup',
+    operation: 'director-tick' | 'clock-catchup' | 'strategy-catchup',
   ): ActionReply {
     return this.locked(() => {
       const campaign = this.load();
       const refuse = (error: string): ActionReply => {
-        campaign.lastValid = false;
-        atomicWrite(this.path, campaign);
+        if (!campaign.state.independentTurns) {
+          campaign.lastValid = false;
+          atomicWrite(this.path, campaign);
+        }
         return { ok: false, revision: campaign.state.revision, last_valid: false, error };
       };
       if (!isWorldState(campaign.state))
@@ -456,7 +479,7 @@ export class GameStore {
       const timestamp = input.timestamp;
       const model = input.model ?? null;
       const clockService =
-        model === null && (operation === 'clock-catchup' || input.kind === 'clock');
+        model === null && (operation === 'clock-catchup' || operation === 'strategy-catchup' || input.kind === 'clock');
       if (!integer(revision) || revision < 0)
         return refuse('expectedRevision must be a nonnegative safe integer');
       if (typeof timestamp !== 'string' || parseUtcTimestamp(timestamp) === null)
@@ -476,12 +499,7 @@ export class GameStore {
           typeof intervalId !== 'string' ||
           intervalId.length === 0 ||
           intervalId.length > 200 ||
-          (event !== 'calm' &&
-            event !== 'drought' &&
-            event !== 'earthquake' &&
-            event !== 'resource-boom' &&
-            event !== 'crypto-boom' &&
-            event !== 'ufo-contact') ||
+          !isDirectorEvent(event) ||
           !integer(target) ||
           target < 0 ||
           target > 4)
@@ -503,7 +521,7 @@ export class GameStore {
         Object.assign(request, { kind, intervalId, event, target });
       const prior = campaign.provenance.find(
         (entry) => entry.operation === operation && entry.commandId === commandId,
-      );
+      ) ?? campaign.noOpReceipts?.find((entry) => entry.operation === operation && entry.commandId === commandId);
       if (prior) {
         if (!isDeepStrictEqual(prior.request, request))
           return refuse('interval or command id was already used with different content');
@@ -531,12 +549,7 @@ export class GameStore {
         if (
           (kind !== 'event' && kind !== 'review' && kind !== 'clock') ||
           typeof intervalId !== 'string' ||
-          (event !== 'calm' &&
-            event !== 'drought' &&
-            event !== 'earthquake' &&
-            event !== 'resource-boom' &&
-            event !== 'crypto-boom' &&
-            event !== 'ufo-contact') ||
+          !isDirectorEvent(event) ||
           !integer(target)
         )
           return refuse('invalid Director tick fields');
@@ -552,14 +565,21 @@ export class GameStore {
         transition = { kind: 'director-tick', command };
         action = command;
       } else {
-        const caught = catchUpClock(campaign.state, timestamp);
+        const caught = operation === 'strategy-catchup' ? catchUpStrategy(campaign.state, timestamp) : catchUpClock(campaign.state, timestamp);
         result = caught;
         remainingTicks = caught.remainingTicks;
-        transition = { kind: 'clock-catchup', timestamp, expectedRevision: revision };
+        transition = { kind: operation, timestamp, expectedRevision: revision };
         action = { timestamp };
       }
       if (!result.ok) return refuse(result.error ?? 'system transition refused by engine');
       if (result.state.revision === campaign.state.revision) {
+        if (operation === 'strategy-catchup') {
+          campaign.noOpReceipts ??= [];
+          campaign.noOpReceipts.push({ operation, commandId, request, revision, remainingTicks: remainingTicks ?? 0 });
+          campaign.lastValid = true;
+          atomicWrite(this.path, campaign);
+          return { ok: true, revision, acceptedRevision: revision, last_valid: true, commandId, remainingTicks: remainingTicks ?? 0 };
+        }
         if (!campaign.lastValid) {
           campaign.lastValid = true;
           atomicWrite(this.path, campaign);
@@ -600,12 +620,68 @@ export class GameStore {
     });
   }
 
+  authoredTransition(input: Record<string, unknown>, operation: 'history-advance' | 'release-apply'): ActionReply {
+    return this.locked(() => {
+      const campaign = this.load();
+      const refuse = (error: string): ActionReply => {
+        if (!campaign.state.independentTurns) {
+          campaign.lastValid = false;
+          atomicWrite(this.path, campaign);
+        }
+        return { ok: false, revision: campaign.state.revision, last_valid: false, error };
+      };
+      if (!isWorldState(campaign.state)) return refuse('legacy pre-clock history requires an explicit host migration before system operations');
+      const expectedRevision = input.expectedRevision;
+      const model = input.model;
+      const commandId = input.commandId;
+      if (!integer(expectedRevision) || expectedRevision < 0) return refuse('expectedRevision must be a nonnegative safe integer');
+      if (typeof model !== 'string' || model.trim().length === 0 || model.length > 200) return refuse('authored transitions require a nonempty model identifier');
+      if (typeof commandId !== 'string' || commandId.trim().length === 0 || commandId.length > 200) return refuse('commandId must contain 1 to 200 characters');
+      let transition: RecordedTransition;
+      let action: HistoryAdvanceCommand | ReleaseApplyCommand;
+      if (operation === 'history-advance') {
+        const cause = input.cause;
+        if (!isRecord(cause) || (cause.kind !== 'feature' && cause.kind !== 'event') || typeof cause.id !== 'string'
+          || typeof input.reason !== 'string' || !integer(input.deltaYears) || typeof input.timestamp !== 'string') return refuse('invalid history advance fields');
+        action = { expectedRevision, cause: { kind: cause.kind, id: cause.id }, reason: input.reason, deltaYears: input.deltaYears, timestamp: input.timestamp };
+        transition = { kind: 'history-advance', command: action };
+      } else {
+        if (typeof input.expectedFromReleaseId !== 'string' || typeof input.targetReleaseId !== 'string') return refuse('exact source and target release IDs are required');
+        if (input.timestamp !== undefined && (typeof input.timestamp !== 'string' || parseUtcTimestamp(input.timestamp) === null)) return refuse('timestamp must be an explicit UTC ISO timestamp');
+        action = { expectedRevision, expectedFromReleaseId: input.expectedFromReleaseId, targetReleaseId: input.targetReleaseId, ...(typeof input.timestamp === 'string' ? { timestamp: input.timestamp } : {}) };
+        transition = { kind: 'release-apply', command: action };
+      }
+      const request: Record<string, unknown> = { operation, model, ...action };
+      const prior = campaign.provenance.find((entry) => entry.operation === operation && entry.commandId === commandId);
+      if (prior) {
+        if (!isDeepStrictEqual(prior.request, request)) return refuse('commandId was already used with different content');
+        if (!campaign.lastValid) { campaign.lastValid = true; atomicWrite(this.path, campaign); }
+        return { ok: true, duplicate: true, revision: campaign.state.revision, acceptedRevision: prior.revision, last_valid: true, commandId };
+      }
+      if (expectedRevision !== campaign.state.revision) return refuse(`stale revision: expected ${campaign.state.revision}`);
+      const result = transition.kind === 'history-advance'
+        ? applyHistoryAdvance(campaign.state, transition.command) : applyRelease(campaign.state, transition.command);
+      if (!result.ok) return refuse(result.error ?? 'authored transition refused by engine');
+      campaign.state = result.state;
+      campaign.frames.push({ state: result.state, events: result.events });
+      campaign.timeline.push(transition);
+      campaign.provenance.push({ commandId, operation, kind: 'development-agent', model, seat: 5, action, revision: result.state.revision, recordedAt: new Date().toISOString(), request });
+      campaign.lastValid = true;
+      atomicWrite(this.path, campaign);
+      return { ok: true, revision: result.state.revision, acceptedRevision: result.state.revision, last_valid: true, commandId };
+    });
+  }
+
   directorTick(input: Record<string, unknown>): ActionReply {
     return this.systemTransition(input, 'director-tick');
   }
 
   catchUp(input: Record<string, unknown>): ActionReply {
     return this.systemTransition(input, 'clock-catchup');
+  }
+
+  strategyCatchUp(input: Record<string, unknown>): ActionReply {
+    return this.systemTransition(input, 'strategy-catchup');
   }
 
   probe(seat: number, choice: number): ActionReply {

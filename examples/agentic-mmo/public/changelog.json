@@ -1,5 +1,61 @@
 [
   {
+    "version": "0.1.0-live.5",
+    "date": "2026-10-16",
+    "title": "See the settlement grow",
+    "changes": [
+      "Built farms appear as planted fields and workshops as roofed work yards. House groups follow real population, using the same original shapes in the 2D map and 3D atlas.",
+      "Zoom reveals more rows and building detail. Shared Three geometry and instance batches keep only the active level; selected city names remain prioritized.",
+      "New recorded changes show short local icons and actual numbers. Drought is a brief loss cue, construction capacity is labeled as a base seasonal rate, and old history does not replay on load.",
+      "The compact story keeps the latest meaningful world change visible while clock entries remain in history. Resource icons make inspection easier to scan.",
+      "Independent worlds display their real economy beat. The sample preview stays labeled and does not represent live production or deliveries."
+    ]
+  },
+  {
+    "version": "0.1.0-live.4",
+    "date": "2026-10-16",
+    "title": "Each civilization can act",
+    "changes": [
+      "An explicit world release can enable independent civilization actions with individual action budgets and separate economy beats.",
+      "Consent-based trade offers and agreements become available through the released world features. Acceptance alone does not deliver cargo.",
+      "The viewer shows the actual independent economy beat when that mode is active. This release does not claim an unattended agent scheduler.",
+      "The sample preview stays separate from committed world activity."
+    ]
+  },
+  {
+    "version": "0.1.0-live.3",
+    "date": "2026-10-16",
+    "title": "Keep the place in sight",
+    "changes": [
+      "Opening civilization details on a narrow screen frames its city above the sheet, keeping the place and its facts together.",
+      "Closing details restores the previous map view. If you pan, zoom or reset the camera yourself, your chosen view takes priority.",
+      "The same framing calculation supports the 2D map and the 3D atlas. The sample preview remains explicitly labeled."
+    ]
+  },
+  {
+    "version": "0.1.0-live.2",
+    "date": "2026-10-16",
+    "title": "A world that fits your phone",
+    "changes": [
+      "The phone view keeps the map on screen with a compact civilization dock. Tap a city or civilization to open its scrollable details; close it to return to the map.",
+      "Fixed clipped mobile resources and research, and restored the latest event and Recent events button.",
+      "City names keep a readable screen size on the 2D map, with larger touch targets. Status, camera controls and history have their own space.",
+      "Version, update history and the BlaBla link remain available without a tall footer. The sample preview remains explicitly labeled."
+    ]
+  },
+  {
+    "version": "0.1.0-live.1",
+    "date": "2026-10-16",
+    "title": "The inhabited world comes into view",
+    "changes": [
+      "The atlas now reads committed shared-world data: real cities, borders, population, buildings, resources, research and recorded events.",
+      "Connection, waiting and offline states are explicit. The sample preview is available by choice and is always labeled.",
+      "Browsers without WebGL can inspect the same world on a 2D map. Camera and layer preferences stay with you as the view updates.",
+      "Recent world events are readable without moving the page as you read. Older release notes are collapsed, and BlaBla is one click away.",
+      "This release connects the spectator view. It does not claim continuous model activity or add future victory systems."
+    ]
+  },
+  {
     "version": "0.1.0-preview.2",
     "date": "2026-10-16",
     "title": "A public window on the world",

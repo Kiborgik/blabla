@@ -1,3 +1,5 @@
+import type { SettlementFacts } from '../visuals/world-visuals.ts';
+
 export interface AtlasCivilization {
   id: number;
   name: string;
@@ -9,13 +11,18 @@ export interface AtlasCivilization {
   ambition: string;
   q: number;
   r: number;
+  cityId?: string;
+  population?: number;
+  buildings?: string[];
+  settlement?: SettlementFacts;
 }
 
 export interface AtlasTile {
+  id?: number;
   q: number;
   r: number;
-  owner: number;
-  terrain: 'grassland' | 'forest' | 'desert' | 'mountain';
+  owner: number | null;
+  terrain: 'grassland' | 'forest' | 'desert' | 'mountain' | 'tundra';
   height: number;
 }
 
@@ -23,7 +30,13 @@ export interface AtlasWorld {
   tiles: AtlasTile[];
   cities: AtlasCivilization[];
   routes: Array<readonly [number, number]>;
+  illustrative?: boolean;
 }
+
+export const TERRAIN_COLORS = {
+  grassland: '#8c9b6e', forest: '#637f5c', desert: '#c5ad7a',
+  mountain: '#8f9785', tundra: '#bbc4b4',
+};
 
 export const CIVILIZATIONS: readonly AtlasCivilization[] = [
   {
@@ -130,6 +143,7 @@ export function createPreviewWorld(): AtlasWorld {
     if (tile) tile.terrain = 'grassland';
   }
   return {
+    illustrative: true,
     tiles,
     cities: [...CIVILIZATIONS],
     routes: [

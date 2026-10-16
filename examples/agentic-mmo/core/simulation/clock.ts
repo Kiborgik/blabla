@@ -9,18 +9,10 @@ import {
 import { applyDirectorEvent } from './commands.ts';
 import { commitEvents, emitEvent } from './events.ts';
 import { hasFeatures, resolveHistory } from './history.ts';
+import { parseUtcTimestamp } from './time.ts';
+import { strategyTimingError } from './turns.ts';
 
-export function parseUtcTimestamp(timestamp: string): number | null {
-  if (
-    typeof timestamp !== 'string' ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(timestamp)
-  )
-    return null;
-  const value = Date.parse(timestamp);
-  if (!Number.isFinite(value)) return null;
-  const normalized = new Date(value).toISOString();
-  return normalized === timestamp || normalized.replace('.000Z', 'Z') === timestamp ? value : null;
-}
+export { parseUtcTimestamp } from './time.ts';
 
 function rejected(state: WorldState, error: string): TransitionResult {
   return { ok: false, state, events: [], error };
@@ -63,6 +55,8 @@ export function applyDirectorTick(
       return rejected(state, 'Clock tick must be the next due interval from the persisted epoch');
     }
   } else {
+    const chronology = strategyTimingError(state, command.timestamp);
+    if (chronology) return rejected(state, chronology);
     const event = DIRECTOR_EVENTS.find((candidate) => candidate.id === command.event);
     const era = Math.max(...state.civilizations.map((civilization) => civilization.era));
     if (

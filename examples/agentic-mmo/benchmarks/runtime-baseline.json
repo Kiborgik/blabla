@@ -1,0 +1,1141 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-16T08:27:30.547Z",
+  "identity": {
+    "gameVersion": "0.1.0",
+    "worldSchemaVersion": 1,
+    "defaultReleaseId": "settlement-foundations-1",
+    "actionSource": "builtin-policies",
+    "source": {
+      "sha256": "f2673d95625797afc961dd0f87b4a948b63ee9cce128ee43b759df6476cd3470",
+      "files": [
+        {
+          "path": "benchmarks/runtime.ts",
+          "bytes": 14813,
+          "sha256": "979e5f0b638be78516669c9f8dc2bd38caaf72d00b147f1f96c7050cf1c393ec"
+        },
+        {
+          "path": "core/content.ts",
+          "bytes": 26960,
+          "sha256": "f834d21989b2dcb792fe699a3dbce422ade774c7696ff12618a78165babb6ad7"
+        },
+        {
+          "path": "core/engine.ts",
+          "bytes": 6779,
+          "sha256": "0b51c8f38e13e34318272c242ea1c95707bb8394e977da5928e1f07567394219"
+        },
+        {
+          "path": "core/policies.ts",
+          "bytes": 3270,
+          "sha256": "0e968b55c80d73e5ebf174b3a32274304030874ab06f5bc17cbd0f184893de94"
+        },
+        {
+          "path": "core/release.ts",
+          "bytes": 973,
+          "sha256": "85345707b77249883a86080f79c7fc737b012c121224a728f9bed394d42e6f1c"
+        },
+        {
+          "path": "core/simulation/choices.ts",
+          "bytes": 7000,
+          "sha256": "856dda68590a7eb23e3f3551346eb17610c23c120f675441d8020b0eaed9d8d2"
+        },
+        {
+          "path": "core/simulation/clock.ts",
+          "bytes": 6187,
+          "sha256": "743203a3e9ebcc17baea092b7cb6892611ebd1404dbd08772e55295a871bef87"
+        },
+        {
+          "path": "core/simulation/commands.ts",
+          "bytes": 7794,
+          "sha256": "ff272f2055117d6d1eb9bb8679aa644aa328e566893171c1856dc11bf5fe029b"
+        },
+        {
+          "path": "core/simulation/economy.ts",
+          "bytes": 9543,
+          "sha256": "4391f3d6921dc59e323420da123b5d79fd9c9ba99c053c422fef84796c16836e"
+        },
+        {
+          "path": "core/simulation/effects.ts",
+          "bytes": 2344,
+          "sha256": "f87dfb9d66f7ebe9b546258862e3d082366c4a93c75119f745b2240ef207d238"
+        },
+        {
+          "path": "core/simulation/events.ts",
+          "bytes": 603,
+          "sha256": "7795a5490e9c901d695b7fd3d0e020f2cdd88bc0aee0bcf67dca2f7dafe1614e"
+        },
+        {
+          "path": "core/simulation/evolution.ts",
+          "bytes": 5929,
+          "sha256": "2f778a1eeb0cf2da3da834fba0128e1423e8796ce66d9ac0a5f74dc636039eff"
+        },
+        {
+          "path": "core/simulation/geography.ts",
+          "bytes": 1285,
+          "sha256": "0bbba564114b8f1ea3b2354db1c61560a62684e4918ea75e8964c7a04b1eca90"
+        },
+        {
+          "path": "core/simulation/history.ts",
+          "bytes": 3081,
+          "sha256": "48f7b94ad5b9a953a480f973344578c9a50b0fd4466b77ad2e7135771d1f36bd"
+        },
+        {
+          "path": "core/simulation/random.ts",
+          "bytes": 409,
+          "sha256": "5ac093366f2e39b112ab3de0851f6323253249598177b156f2e6f2d6fe9124db"
+        },
+        {
+          "path": "core/simulation/world.ts",
+          "bytes": 1269,
+          "sha256": "e636b2fa9216df95acef3b40e640b0cccdb262a90368cf1a980dbd206ffbe692"
+        },
+        {
+          "path": "core/types.ts",
+          "bytes": 7030,
+          "sha256": "b557c024f3cc6df02f5f54286b6b7af9da38181688dbfbd1e7c9f7242733da12"
+        },
+        {
+          "path": "core/validation.ts",
+          "bytes": 10829,
+          "sha256": "b564672552a0cb53f448eeb62d54ad2430924fb1b6be2e48514bff069befb4a4"
+        },
+        {
+          "path": "package-lock.json",
+          "bytes": 148971,
+          "sha256": "23b05db33f17724d0c5ac5b75e92dc7eb3432aa041ac4c483a52e017fd5527af"
+        },
+        {
+          "path": "package.json",
+          "bytes": 1119,
+          "sha256": "2de109336ac5a7b8204079ce202f552b31571c73c092240d1acb7d6b2ab70234"
+        }
+      ]
+    },
+    "environment": {
+      "node": "v24.19.0",
+      "v8": "13.6.233.17-node.51",
+      "platform": "linux",
+      "architecture": "x64",
+      "osRelease": "6.18.44",
+      "cpu": "AMD EPYC 9V74 80-Core Processor",
+      "logicalCpus": 9
+    }
+  },
+  "methodology": [
+    "Single local Node process; finite seeded workloads; policy actions are scripted, not genuine model play",
+    "Per-action timings separate policy choice, pure transition and detached observation plus JSON serialization",
+    "Byte counts are UTF-8 JSON without compression; cumulative state bytes model full-snapshot volume, not measured database writes",
+    "RSS/heap samples are process-level before/after values, not isolated peak allocation or per-system memory attribution",
+    "Timing distributions are observations of this environment, never universal latency guarantees"
+  ],
+  "configuration": {
+    "seeds": [
+      17,
+      1701,
+      2026
+    ],
+    "actionCounts": [
+      600,
+      1200
+    ],
+    "historyAdvanceCounts": [
+      0,
+      8,
+      32
+    ],
+    "clockDueTicks": 480
+  },
+  "workloads": [
+    {
+      "deterministic": {
+        "seed": 17,
+        "actions": 600,
+        "rounds": 100,
+        "revision": 600,
+        "year": -10000,
+        "releaseId": "settlement-foundations-1",
+        "finalStateSha256": "2e7cef125d522fb25218912882c3878afda4b7a4c81e88824c839e028b82be6b",
+        "civilizations": 5,
+        "cities": 5,
+        "tiles": 216,
+        "buildings": 10,
+        "routes": 0,
+        "retainedRecentEvents": 96,
+        "retainedRecentEventBytes": 32627,
+        "totalRecordedEvents": 1177,
+        "stateBytes": {
+          "count": 600,
+          "minimum": 22612,
+          "median": 55074,
+          "p95": 55235,
+          "maximum": 55361,
+          "mean": 53957.67833333334
+        },
+        "observationBytes": {
+          "count": 600,
+          "minimum": 2655,
+          "median": 5930,
+          "p95": 8977,
+          "maximum": 9327,
+          "mean": 6124.2266666666665
+        },
+        "emittedEventBytes": {
+          "count": 600,
+          "minimum": 293,
+          "median": 297,
+          "p95": 2314,
+          "maximum": 4978,
+          "mean": 663.975
+        },
+        "observationEventCount": {
+          "count": 600,
+          "minimum": 2,
+          "median": 12,
+          "p95": 12,
+          "maximum": 12,
+          "mean": 11.933333333333334
+        },
+        "cumulativeStateBytes": 32374607,
+        "cumulativeEmittedEventBytes": 398385,
+        "emittedByType": {
+          "research-started": {
+            "count": 5,
+            "utf8Bytes": 1472
+          },
+          "drought": {
+            "count": 13,
+            "utf8Bytes": 5349
+          },
+          "population-growth": {
+            "count": 70,
+            "utf8Bytes": 21363
+          },
+          "settlement-production": {
+            "count": 500,
+            "utf8Bytes": 188819
+          },
+          "hold-position": {
+            "count": 527,
+            "utf8Bytes": 155578
+          },
+          "research-completed": {
+            "count": 5,
+            "utf8Bytes": 2097
+          },
+          "building-completed": {
+            "count": 10,
+            "utf8Bytes": 3975
+          },
+          "history-milestone": {
+            "count": 1,
+            "utf8Bytes": 524
+          },
+          "resource-boom": {
+            "count": 14,
+            "utf8Bytes": 6494
+          },
+          "focus-changed": {
+            "count": 12,
+            "utf8Bytes": 3710
+          },
+          "calm": {
+            "count": 19,
+            "utf8Bytes": 7228
+          }
+        }
+      },
+      "timings": {
+        "createWorldMs": 1.777794,
+        "policyMs": {
+          "count": 600,
+          "minimum": 0.001492999999982203,
+          "median": 0.005747999999982767,
+          "p95": 0.018888000000004013,
+          "maximum": 0.7092269999999985,
+          "mean": 0.01018819333333371
+        },
+        "transitionMs": {
+          "count": 600,
+          "minimum": 0.2346069999999827,
+          "median": 0.3997999999999138,
+          "p95": 0.7372780000000034,
+          "maximum": 1.9091080000000034,
+          "mean": 0.46555544333333443
+        },
+        "tacticalTransitionMs": {
+          "count": 500,
+          "minimum": 0.2346069999999827,
+          "median": 0.387061000000017,
+          "p95": 0.7246289999999931,
+          "maximum": 1.9091080000000034,
+          "mean": 0.45575402400000153
+        },
+        "roundResolutionMs": {
+          "count": 100,
+          "minimum": 0.36127299999998286,
+          "median": 0.4408300000000054,
+          "p95": 0.8131799999999885,
+          "maximum": 1.6067019999999843,
+          "mean": 0.5145625399999991
+        },
+        "observeAndSerializeMs": {
+          "count": 600,
+          "minimum": 0.04719999999997526,
+          "median": 0.0649659999999983,
+          "p95": 0.14826800000003004,
+          "maximum": 0.9085010000000011,
+          "mean": 0.08260850333333243
+        },
+        "totalWorkloadMs": 490.70185299999997
+      },
+      "processMemory": {
+        "heapUsedBefore": 12865456,
+        "heapUsedAfter": 20196800,
+        "rssBefore": 78610432,
+        "rssAfter": 93683712
+      }
+    },
+    {
+      "deterministic": {
+        "seed": 17,
+        "actions": 1200,
+        "rounds": 200,
+        "revision": 1200,
+        "year": -10000,
+        "releaseId": "settlement-foundations-1",
+        "finalStateSha256": "a3faa6fcab065c28d1e35ca51c58bca7961c012429d66cb5ff223f007e6e8305",
+        "civilizations": 5,
+        "cities": 5,
+        "tiles": 216,
+        "buildings": 10,
+        "routes": 0,
+        "retainedRecentEvents": 96,
+        "retainedRecentEventBytes": 32935,
+        "totalRecordedEvents": 2277,
+        "stateBytes": {
+          "count": 1200,
+          "minimum": 22612,
+          "median": 55148,
+          "p95": 55360,
+          "maximum": 55459,
+          "mean": 54588.6325
+        },
+        "observationBytes": {
+          "count": 1200,
+          "minimum": 2655,
+          "median": 5932,
+          "p95": 8990,
+          "maximum": 9327,
+          "mean": 6147.63
+        },
+        "emittedEventBytes": {
+          "count": 1200,
+          "minimum": 293,
+          "median": 298,
+          "p95": 2311,
+          "maximum": 4978,
+          "mean": 644.4208333333333
+        },
+        "observationEventCount": {
+          "count": 1200,
+          "minimum": 2,
+          "median": 12,
+          "p95": 12,
+          "maximum": 12,
+          "mean": 11.966666666666667
+        },
+        "cumulativeStateBytes": 65506359,
+        "cumulativeEmittedEventBytes": 773305,
+        "emittedByType": {
+          "research-started": {
+            "count": 5,
+            "utf8Bytes": 1472
+          },
+          "drought": {
+            "count": 27,
+            "utf8Bytes": 11168
+          },
+          "population-growth": {
+            "count": 70,
+            "utf8Bytes": 21363
+          },
+          "settlement-production": {
+            "count": 1000,
+            "utf8Bytes": 378370
+          },
+          "hold-position": {
+            "count": 1079,
+            "utf8Bytes": 319363
+          },
+          "research-completed": {
+            "count": 5,
+            "utf8Bytes": 2097
+          },
+          "building-completed": {
+            "count": 10,
+            "utf8Bytes": 3975
+          },
+          "history-milestone": {
+            "count": 1,
+            "utf8Bytes": 524
+          },
+          "resource-boom": {
+            "count": 27,
+            "utf8Bytes": 12538
+          },
+          "focus-changed": {
+            "count": 12,
+            "utf8Bytes": 3710
+          },
+          "calm": {
+            "count": 40,
+            "utf8Bytes": 15249
+          }
+        }
+      },
+      "timings": {
+        "createWorldMs": 0.5071689999999762,
+        "policyMs": {
+          "count": 1200,
+          "minimum": 0.000630999999884807,
+          "median": 0.004686999999989894,
+          "p95": 0.011766999999963446,
+          "maximum": 0.15825300000005882,
+          "mean": 0.006149826666669185
+        },
+        "transitionMs": {
+          "count": 1200,
+          "minimum": 0.21021999999993568,
+          "median": 0.3810329999998885,
+          "p95": 0.6861720000001696,
+          "maximum": 1.2502959999999348,
+          "mean": 0.44745002583333066
+        },
+        "tacticalTransitionMs": {
+          "count": 1000,
+          "minimum": 0.21021999999993568,
+          "median": 0.37072699999998804,
+          "p95": 0.6735439999999926,
+          "maximum": 1.2502959999999348,
+          "mean": 0.4417084979999981
+        },
+        "roundResolutionMs": {
+          "count": 200,
+          "minimum": 0.2559880000000021,
+          "median": 0.4072009999999864,
+          "p95": 0.711439999999925,
+          "maximum": 0.7919089999999187,
+          "mean": 0.47615766499999324
+        },
+        "observeAndSerializeMs": {
+          "count": 1200,
+          "minimum": 0.03769599999998263,
+          "median": 0.0626119999999446,
+          "p95": 0.1277989999999818,
+          "maximum": 1.670496000000071,
+          "mean": 0.07789851333333313
+        },
+        "totalWorkloadMs": 928.5790330000001
+      },
+      "processMemory": {
+        "heapUsedBefore": 21027456,
+        "heapUsedAfter": 14012744,
+        "rssBefore": 93683712,
+        "rssAfter": 94994432
+      }
+    },
+    {
+      "deterministic": {
+        "seed": 1701,
+        "actions": 600,
+        "rounds": 100,
+        "revision": 600,
+        "year": -10000,
+        "releaseId": "settlement-foundations-1",
+        "finalStateSha256": "cf301955de6ba4340a133128d6c2ed2839c092cef15858a452e9350f9bc85f6f",
+        "civilizations": 5,
+        "cities": 5,
+        "tiles": 216,
+        "buildings": 10,
+        "routes": 0,
+        "retainedRecentEvents": 96,
+        "retainedRecentEventBytes": 32698,
+        "totalRecordedEvents": 1177,
+        "stateBytes": {
+          "count": 600,
+          "minimum": 22594,
+          "median": 55056,
+          "p95": 55219,
+          "maximum": 55360,
+          "mean": 53984.068333333336
+        },
+        "observationBytes": {
+          "count": 600,
+          "minimum": 2657,
+          "median": 5930,
+          "p95": 8977,
+          "maximum": 9614,
+          "mean": 6135.02
+        },
+        "emittedEventBytes": {
+          "count": 600,
+          "minimum": 293,
+          "median": 297,
+          "p95": 2311,
+          "maximum": 5482,
+          "mean": 664.1433333333333
+        },
+        "observationEventCount": {
+          "count": 600,
+          "minimum": 2,
+          "median": 12,
+          "p95": 12,
+          "maximum": 12,
+          "mean": 11.933333333333334
+        },
+        "cumulativeStateBytes": 32390441,
+        "cumulativeEmittedEventBytes": 398486,
+        "emittedByType": {
+          "research-started": {
+            "count": 5,
+            "utf8Bytes": 1472
+          },
+          "resource-boom": {
+            "count": 14,
+            "utf8Bytes": 6445
+          },
+          "population-growth": {
+            "count": 70,
+            "utf8Bytes": 21356
+          },
+          "settlement-production": {
+            "count": 500,
+            "utf8Bytes": 188835
+          },
+          "hold-position": {
+            "count": 527,
+            "utf8Bytes": 155572
+          },
+          "research-completed": {
+            "count": 5,
+            "utf8Bytes": 2097
+          },
+          "building-completed": {
+            "count": 10,
+            "utf8Bytes": 3974
+          },
+          "history-milestone": {
+            "count": 1,
+            "utf8Bytes": 524
+          },
+          "focus-changed": {
+            "count": 10,
+            "utf8Bytes": 3087
+          },
+          "calm": {
+            "count": 21,
+            "utf8Bytes": 7988
+          },
+          "drought": {
+            "count": 13,
+            "utf8Bytes": 5360
+          }
+        }
+      },
+      "timings": {
+        "createWorldMs": 0.23518699999999626,
+        "policyMs": {
+          "count": 600,
+          "minimum": 0.0006710000000111904,
+          "median": 0.0038460000000668515,
+          "p95": 0.0071210000000974105,
+          "maximum": 0.04218300000002273,
+          "mean": 0.004056704999996252
+        },
+        "transitionMs": {
+          "count": 600,
+          "minimum": 0.19976500000007036,
+          "median": 0.3675429999998414,
+          "p95": 0.5842629999999644,
+          "maximum": 2.7928830000000744,
+          "mean": 0.40332210166666904
+        },
+        "tacticalTransitionMs": {
+          "count": 500,
+          "minimum": 0.19976500000007036,
+          "median": 0.36354599999981474,
+          "p95": 0.5842629999999644,
+          "maximum": 2.7928830000000744,
+          "mean": 0.3958593960000062
+        },
+        "roundResolutionMs": {
+          "count": 100,
+          "minimum": 0.25078999999982443,
+          "median": 0.39069599999993443,
+          "p95": 0.5414900000000671,
+          "maximum": 2.508722999999918,
+          "mean": 0.4406356299999834
+        },
+        "observeAndSerializeMs": {
+          "count": 600,
+          "minimum": 0.03425999999990381,
+          "median": 0.05778499999996711,
+          "p95": 0.10067800000001625,
+          "maximum": 0.317538999999897,
+          "mean": 0.06535538333332815
+        },
+        "totalWorkloadMs": 409.6589419999998
+      },
+      "processMemory": {
+        "heapUsedBefore": 15349048,
+        "heapUsedAfter": 23373512,
+        "rssBefore": 94994432,
+        "rssAfter": 111509504
+      }
+    },
+    {
+      "deterministic": {
+        "seed": 1701,
+        "actions": 1200,
+        "rounds": 200,
+        "revision": 1200,
+        "year": -10000,
+        "releaseId": "settlement-foundations-1",
+        "finalStateSha256": "b3aca4794257282bdefe1b602ad4cd5332e2dcc12f1cb4b04d48a005e44e4ee1",
+        "civilizations": 5,
+        "cities": 5,
+        "tiles": 216,
+        "buildings": 10,
+        "routes": 0,
+        "retainedRecentEvents": 96,
+        "retainedRecentEventBytes": 32820,
+        "totalRecordedEvents": 2277,
+        "stateBytes": {
+          "count": 1200,
+          "minimum": 22594,
+          "median": 55130,
+          "p95": 55338,
+          "maximum": 55439,
+          "mean": 54590.445
+        },
+        "observationBytes": {
+          "count": 1200,
+          "minimum": 2657,
+          "median": 5931,
+          "p95": 8990,
+          "maximum": 9614,
+          "mean": 6144.75
+        },
+        "emittedEventBytes": {
+          "count": 1200,
+          "minimum": 293,
+          "median": 298,
+          "p95": 2307,
+          "maximum": 5482,
+          "mean": 644.3375
+        },
+        "observationEventCount": {
+          "count": 1200,
+          "minimum": 2,
+          "median": 12,
+          "p95": 12,
+          "maximum": 12,
+          "mean": 11.966666666666667
+        },
+        "cumulativeStateBytes": 65508534,
+        "cumulativeEmittedEventBytes": 773205,
+        "emittedByType": {
+          "research-started": {
+            "count": 5,
+            "utf8Bytes": 1472
+          },
+          "resource-boom": {
+            "count": 28,
+            "utf8Bytes": 12946
+          },
+          "population-growth": {
+            "count": 70,
+            "utf8Bytes": 21356
+          },
+          "settlement-production": {
+            "count": 1000,
+            "utf8Bytes": 378386
+          },
+          "hold-position": {
+            "count": 1082,
+            "utf8Bytes": 320258
+          },
+          "research-completed": {
+            "count": 5,
+            "utf8Bytes": 2097
+          },
+          "building-completed": {
+            "count": 10,
+            "utf8Bytes": 3974
+          },
+          "history-milestone": {
+            "count": 1,
+            "utf8Bytes": 524
+          },
+          "focus-changed": {
+            "count": 10,
+            "utf8Bytes": 3087
+          },
+          "calm": {
+            "count": 39,
+            "utf8Bytes": 14864
+          },
+          "drought": {
+            "count": 26,
+            "utf8Bytes": 10765
+          }
+        }
+      },
+      "timings": {
+        "createWorldMs": 0.31608699999992496,
+        "policyMs": {
+          "count": 1200,
+          "minimum": 0.0006410000000869331,
+          "median": 0.003986000000168133,
+          "p95": 0.00887300000022151,
+          "maximum": 0.10108900000022913,
+          "mean": 0.005145597500004252
+        },
+        "transitionMs": {
+          "count": 1200,
+          "minimum": 0.19575899999995272,
+          "median": 0.3698660000000018,
+          "p95": 0.6524229999999989,
+          "maximum": 3.8188720000000558,
+          "mean": 0.42846126499999493
+        },
+        "tacticalTransitionMs": {
+          "count": 1000,
+          "minimum": 0.19575899999995272,
+          "median": 0.36264600000004066,
+          "p95": 0.6427490000000944,
+          "maximum": 3.8188720000000558,
+          "mean": 0.4221189459999953
+        },
+        "roundResolutionMs": {
+          "count": 200,
+          "minimum": 0.23097100000018145,
+          "median": 0.398729000000003,
+          "p95": 0.6891669999999976,
+          "maximum": 1.675452999999834,
+          "mean": 0.4601728599999933
+        },
+        "observeAndSerializeMs": {
+          "count": 1200,
+          "minimum": 0.03547200000002704,
+          "median": 0.05876699999998891,
+          "p95": 0.12309200000004239,
+          "maximum": 3.2842390000000705,
+          "mean": 0.07300672166667103
+        },
+        "totalWorkloadMs": 873.9111599999999
+      },
+      "processMemory": {
+        "heapUsedBefore": 24114128,
+        "heapUsedAfter": 22658544,
+        "rssBefore": 111509504,
+        "rssAfter": 117276672
+      }
+    },
+    {
+      "deterministic": {
+        "seed": 2026,
+        "actions": 600,
+        "rounds": 100,
+        "revision": 600,
+        "year": -10000,
+        "releaseId": "settlement-foundations-1",
+        "finalStateSha256": "2266c57c6cc9711ffe5c9d9c816b16b35eda15e83119cb4cfeead1a8c0a13542",
+        "civilizations": 5,
+        "cities": 5,
+        "tiles": 216,
+        "buildings": 10,
+        "routes": 0,
+        "retainedRecentEvents": 96,
+        "retainedRecentEventBytes": 32625,
+        "totalRecordedEvents": 1177,
+        "stateBytes": {
+          "count": 600,
+          "minimum": 22546,
+          "median": 55002,
+          "p95": 55167,
+          "maximum": 55270,
+          "mean": 53867.535
+        },
+        "observationBytes": {
+          "count": 600,
+          "minimum": 2657,
+          "median": 5930,
+          "p95": 8977,
+          "maximum": 9447,
+          "mean": 6130.415
+        },
+        "emittedEventBytes": {
+          "count": 600,
+          "minimum": 293,
+          "median": 297,
+          "p95": 2321,
+          "maximum": 4556,
+          "mean": 663.9866666666667
+        },
+        "observationEventCount": {
+          "count": 600,
+          "minimum": 2,
+          "median": 12,
+          "p95": 12,
+          "maximum": 12,
+          "mean": 11.933333333333334
+        },
+        "cumulativeStateBytes": 32320521,
+        "cumulativeEmittedEventBytes": 398392,
+        "emittedByType": {
+          "research-started": {
+            "count": 5,
+            "utf8Bytes": 1472
+          },
+          "drought": {
+            "count": 14,
+            "utf8Bytes": 5777
+          },
+          "population-growth": {
+            "count": 70,
+            "utf8Bytes": 21367
+          },
+          "settlement-production": {
+            "count": 500,
+            "utf8Bytes": 188823
+          },
+          "hold-position": {
+            "count": 528,
+            "utf8Bytes": 155862
+          },
+          "research-completed": {
+            "count": 5,
+            "utf8Bytes": 2097
+          },
+          "building-completed": {
+            "count": 10,
+            "utf8Bytes": 3976
+          },
+          "history-milestone": {
+            "count": 1,
+            "utf8Bytes": 524
+          },
+          "focus-changed": {
+            "count": 10,
+            "utf8Bytes": 3089
+          },
+          "resource-boom": {
+            "count": 13,
+            "utf8Bytes": 6023
+          },
+          "calm": {
+            "count": 20,
+            "utf8Bytes": 7606
+          }
+        }
+      },
+      "timings": {
+        "createWorldMs": 0.18418199999996432,
+        "policyMs": {
+          "count": 600,
+          "minimum": 0.0008909999996831175,
+          "median": 0.0047170000002552115,
+          "p95": 0.009173000000373577,
+          "maximum": 0.04582699999991746,
+          "mean": 0.005304599999990387
+        },
+        "transitionMs": {
+          "count": 600,
+          "minimum": 0.2008059999998295,
+          "median": 0.36320599999999104,
+          "p95": 0.5493719999999485,
+          "maximum": 1.087496000000101,
+          "mean": 0.3854402633333219
+        },
+        "tacticalTransitionMs": {
+          "count": 500,
+          "minimum": 0.2008059999998295,
+          "median": 0.3596509999997579,
+          "p95": 0.5468080000000555,
+          "maximum": 1.087496000000101,
+          "mean": 0.3801229539999913
+        },
+        "roundResolutionMs": {
+          "count": 100,
+          "minimum": 0.3054109999998218,
+          "median": 0.38865400000031514,
+          "p95": 0.5589559999998528,
+          "maximum": 0.668416999999863,
+          "mean": 0.4120268099999748
+        },
+        "observeAndSerializeMs": {
+          "count": 600,
+          "minimum": 0.03971899999987727,
+          "median": 0.0579450000000179,
+          "p95": 0.10093899999992573,
+          "maximum": 0.279573000000255,
+          "mean": 0.06604303333332685
+        },
+        "totalWorkloadMs": 396.1379780000002
+      },
+      "processMemory": {
+        "heapUsedBefore": 23994896,
+        "heapUsedAfter": 23863400,
+        "rssBefore": 117276672,
+        "rssAfter": 117538816
+      }
+    },
+    {
+      "deterministic": {
+        "seed": 2026,
+        "actions": 1200,
+        "rounds": 200,
+        "revision": 1200,
+        "year": -10000,
+        "releaseId": "settlement-foundations-1",
+        "finalStateSha256": "85cd215bea5316213e86cae96cd646916ccbeb32f64aa188287fa7fa7c795c85",
+        "civilizations": 5,
+        "cities": 5,
+        "tiles": 216,
+        "buildings": 10,
+        "routes": 0,
+        "retainedRecentEvents": 96,
+        "retainedRecentEventBytes": 32848,
+        "totalRecordedEvents": 2277,
+        "stateBytes": {
+          "count": 1200,
+          "minimum": 22546,
+          "median": 55079,
+          "p95": 55286,
+          "maximum": 55386,
+          "mean": 54507.32083333333
+        },
+        "observationBytes": {
+          "count": 1200,
+          "minimum": 2657,
+          "median": 5932,
+          "p95": 8990,
+          "maximum": 9447,
+          "mean": 6147.450833333333
+        },
+        "emittedEventBytes": {
+          "count": 1200,
+          "minimum": 293,
+          "median": 298,
+          "p95": 2313,
+          "maximum": 4556,
+          "mean": 644.29
+        },
+        "observationEventCount": {
+          "count": 1200,
+          "minimum": 2,
+          "median": 12,
+          "p95": 12,
+          "maximum": 12,
+          "mean": 11.966666666666667
+        },
+        "cumulativeStateBytes": 65408785,
+        "cumulativeEmittedEventBytes": 773148,
+        "emittedByType": {
+          "research-started": {
+            "count": 5,
+            "utf8Bytes": 1472
+          },
+          "drought": {
+            "count": 28,
+            "utf8Bytes": 11603
+          },
+          "population-growth": {
+            "count": 70,
+            "utf8Bytes": 21367
+          },
+          "settlement-production": {
+            "count": 1000,
+            "utf8Bytes": 378374
+          },
+          "hold-position": {
+            "count": 1081,
+            "utf8Bytes": 319948
+          },
+          "research-completed": {
+            "count": 5,
+            "utf8Bytes": 2097
+          },
+          "building-completed": {
+            "count": 10,
+            "utf8Bytes": 3976
+          },
+          "history-milestone": {
+            "count": 1,
+            "utf8Bytes": 524
+          },
+          "focus-changed": {
+            "count": 10,
+            "utf8Bytes": 3089
+          },
+          "resource-boom": {
+            "count": 25,
+            "utf8Bytes": 11595
+          },
+          "calm": {
+            "count": 41,
+            "utf8Bytes": 15627
+          }
+        }
+      },
+      "timings": {
+        "createWorldMs": 0.23384500000020125,
+        "policyMs": {
+          "count": 1200,
+          "minimum": 0.0006710000002385641,
+          "median": 0.003995000000031723,
+          "p95": 0.008763000000271859,
+          "maximum": 0.05422999999973399,
+          "mean": 0.004629900833341101
+        },
+        "transitionMs": {
+          "count": 1200,
+          "minimum": 0.19472700000005716,
+          "median": 0.3779979999999341,
+          "p95": 0.6753570000000764,
+          "maximum": 7.216545000000224,
+          "mean": 0.4532887541666662
+        },
+        "tacticalTransitionMs": {
+          "count": 1000,
+          "minimum": 0.19472700000005716,
+          "median": 0.3684539999999288,
+          "p95": 0.6564990000001671,
+          "maximum": 5.180358999999953,
+          "mean": 0.44339005899999573
+        },
+        "roundResolutionMs": {
+          "count": 200,
+          "minimum": 0.25151099999993676,
+          "median": 0.39170800000010786,
+          "p95": 0.720354000000043,
+          "maximum": 7.216545000000224,
+          "mean": 0.5027822300000184
+        },
+        "observeAndSerializeMs": {
+          "count": 1200,
+          "minimum": 0.03460099999983868,
+          "median": 0.06091000000014901,
+          "p95": 0.13299600000027567,
+          "maximum": 0.4896929999999884,
+          "mean": 0.07494356416667756
+        },
+        "totalWorkloadMs": 914.166275
+      },
+      "processMemory": {
+        "heapUsedBefore": 24575008,
+        "heapUsedAfter": 24701424,
+        "rssBefore": 117538816,
+        "rssAfter": 119242752
+      }
+    }
+  ],
+  "clock": {
+    "dueTicks": 480,
+    "batches": [
+      {
+        "processedTicks": 240,
+        "remainingTicks": 240,
+        "elapsedMs": 96.70707700000003,
+        "resultEventBytes": 91031,
+        "stateBytes": 64452,
+        "intervalReceipts": 240
+      },
+      {
+        "processedTicks": 240,
+        "remainingTicks": 0,
+        "elapsedMs": 111.96056899999985,
+        "resultEventBytes": 91273,
+        "stateBytes": 73812,
+        "intervalReceipts": 480
+      }
+    ],
+    "finalTicks": 480,
+    "advancedYears": 4800,
+    "retainedRecentEvents": 96,
+    "intervalReceiptBytes": 18613
+  },
+  "history": [
+    {
+      "receipts": 0,
+      "ledgerBytes": 2,
+      "stateBytes": 22848,
+      "retainedRecentEvents": 2,
+      "clockTicks": 0,
+      "releaseId": "settlement-foundations-2",
+      "elapsedSincePriorSampleMs": 0.19122200000037992
+    },
+    {
+      "receipts": 8,
+      "ledgerBytes": 3410,
+      "stateBytes": 33631,
+      "retainedRecentEvents": 18,
+      "clockTicks": 0,
+      "releaseId": "settlement-foundations-2",
+      "elapsedSincePriorSampleMs": 8.139177000000018
+    },
+    {
+      "receipts": 32,
+      "ledgerBytes": 13704,
+      "stateBytes": 65979,
+      "retainedRecentEvents": 66,
+      "clockTicks": 0,
+      "releaseId": "settlement-foundations-2",
+      "elapsedSincePriorSampleMs": 28.792962999999872
+    }
+  ],
+  "requirements": [
+    {
+      "system": "simulation",
+      "measured": "seeded transition timing, full-state JSON bytes and deterministic counts",
+      "requirement": "Preserve deterministic results and five civilizations; measure again when released mechanics change"
+    },
+    {
+      "system": "agent-observation",
+      "measured": "one detached active-seat observation per action including its legal choices",
+      "requirement": "Send compact observations rather than replay archives; at most12 recent events in this current observation API"
+    },
+    {
+      "system": "canonical-events",
+      "measured": "emitted bytes, cumulative event counts and retained recent-event bytes in state",
+      "requirement": "Keep current96-event view bound while preserving durable count/receipt evidence; no silent historical deletion"
+    },
+    {
+      "system": "authoritative-clock",
+      "measured": "two bounded batches and growing interval receipt bytes",
+      "requirement": "Process at most240 ticks per catchup; expose remaining ticks; interval receipts grow and require an explicit archival design"
+    },
+    {
+      "system": "intentional-history",
+      "measured": "actual accepted event-backed ledger entries and serialized growth",
+      "requirement": "Retain all cause-idempotency receipts; no pruning that allows a historical cause to replay"
+    },
+    {
+      "system": "durable-storage",
+      "measured": "cumulative full-state serialization volume only",
+      "requirement": "Measure actual D1 write amplification, archive growth and restart cost before setting hosted storage budgets"
+    },
+    {
+      "system": "spectator-renderer",
+      "measured": "not measured by this headless harness",
+      "requirement": "Measure actual mobile/WebGL frame time, GPU memory and asset/network bytes separately; animations never block agent turns"
+    }
+  ],
+  "unmeasured": [
+    "hosted D1 latency, CPU quotas and durable archive growth",
+    "authenticated transport/network latency and concurrent service throughput",
+    "mobile WebGL/GPU memory, frame time and asset transfer budgets",
+    "future trade, institution, military, space and victory mechanics"
+  ]
+}

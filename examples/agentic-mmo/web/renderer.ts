@@ -1,24 +1,27 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { CIVILIZATIONS, hexPosition } from './atlas.ts';
+import { TERRAIN_COLORS, hexPosition } from './atlas.ts';
 import type { AtlasTile, AtlasWorld } from './atlas.ts';
 import type { ViewerPreferences } from './viewer-state.ts';
+import { cameraShiftForAnchor } from './inspection-camera.ts';
+import type { CameraView, ScreenPoint } from './inspection-camera.ts';
+import type { VisualEvent } from '../visuals/world-visuals.ts';
+import { createSettlementMeshes } from './settlement-three.ts';
+import { createWorldCues } from './world-cues.ts';
+import { mapLabelVisibility } from './map-labels.ts';
 
 export interface AtlasRenderer {
   zoom: (factor: number) => void;
   reset: () => void;
   select: (id: number) => void;
+  frameCity: (id: number, anchor: ScreenPoint) => void;
+  restoreCamera: (camera: CameraView) => void;
   setLayer: (layer: 'borders' | 'routes', visible: boolean) => void;
   snapshot: () => Pick<ViewerPreferences, 'zoom' | 'x' | 'z'>;
   setMotion: (moving: boolean) => void;
+  showEvents: (events: readonly VisualEvent[]) => void;
+  dispose: () => void;
 }
-
-const TERRAIN_COLORS = {
-  grassland: '#8c9b6e',
-  forest: '#637f5c',
-  desert: '#c5ad7a',
-  mountain: '#8f9785',
-};
 const NEIGHBORS: readonly (readonly [number, number])[] = [
   [1, 0],
   [0, 1],
@@ -36,8 +39,8 @@ export function createAtlasRenderer(
   onSelect: (id: number) => void,
 ): AtlasRenderer {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#204a51');
-  scene.fog = new THREE.Fog('#204a51', 44, 95);
+  scene.background = new THREE.Color('#163d50');
+  scene.fog = new THREE.Fog('#163d50', 44, 95);
   const camera = new THREE.OrthographicCamera(-24, 24, 18, -18, 0.1, 160);
   camera.position.set(19, 29, 31);
   camera.zoom = preferences.zoom;
@@ -54,7 +57,7 @@ export function createAtlasRenderer(
   renderer.toneMappingExposure = 1.35;
   renderer.domElement.setAttribute(
     'aria-label',
-    'Illustrative three dimensional civilization atlas. Drag to pan. Pinch or use map buttons to zoom. Select a civilization in the list to inspect.',
+    `${world.illustrative ? 'Sample' : 'Committed world'} three dimensional atlas. Drag to pan. Pinch or use map buttons to zoom. Select a city to inspect.`,
   );
   renderer.domElement.setAttribute('role', 'img');
   container.prepend(renderer.domElement);
@@ -91,7 +94,7 @@ export function createAtlasRenderer(
     materials.set(color, created);
     return created;
   };
-  const sea = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), material('#2c6269'));
+  const sea = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), material('#1f5670'));
   sea.rotation.x = -Math.PI / 2;
   sea.position.y = -0.23;
   sea.receiveShadow = true;
@@ -124,7 +127,7 @@ export function createAtlasRenderer(
   const cityTiles = new Set(world.cities.map((city) => `${city.q},${city.r}`));
   const addTile = (tile: AtlasTile): void => {
     const { x, z } = hexPosition(tile.q, tile.r);
-    const owner = CIVILIZATIONS[tile.owner];
+    const owner = world.cities.find((city) => city.id === tile.owner);
     const tint = new THREE.Color(TERRAIN_COLORS[tile.terrain]).lerp(
       new THREE.Color(owner?.color ?? '#c7b681'),
       0.12,
@@ -162,7 +165,7 @@ export function createAtlasRenderer(
         ]);
       }
     }
-    for (let i = 0; i < NEIGHBORS.length; i += 1) {
+    for (let i = 0; tile.owner !== null && i < NEIGHBORS.length; i += 1) {
       const neighbor = NEIGHBORS[i];
       if (!neighbor) continue;
       const next = tileLookup.get(`${tile.q + neighbor[0]},${tile.r + neighbor[1]}`);
@@ -195,6 +198,7 @@ export function createAtlasRenderer(
   for (const city of world.cities) {
     const { x, z } = hexPosition(city.q, city.r);
     const floor = tileLookup.get(`${city.q},${city.r}`)?.height ?? 0.4;
+    if (!city.settlement) {
     const base = addMesh(
       new THREE.CylinderGeometry(0.88, 1, 0.11, 6),
       '#c6bd9e',
@@ -237,15 +241,33 @@ export function createAtlasRenderer(
       z,
     );
     flag.material = new THREE.MeshBasicMaterial({ color: city.color, side: THREE.DoubleSide });
+    for (const [index, building] of (city.buildings ?? []).entries()) {
+      const bx = x + 0.9 + (index % 2) * 0.35;
+      const bz = z - 0.7 + Math.floor(index / 2) * 0.35;
+      addMesh(boxGeometry, building === 'farm' ? '#d4bd6d' : '#94795c', bx, floor + 0.12, bz,
+        building === 'farm' ? [0.28, 0.08, 0.55] : [0.3, 0.3, 0.3]);
+    }
+    }
     const element = document.createElement('button');
     element.className = 'city-label';
     element.style.setProperty('--civ-color', city.color);
-    element.innerHTML = `<span class="capital-star">✦</span><strong>${city.capital}</strong><small>${city.shortName}</small>`;
-    element.setAttribute('aria-label', `Inspect ${city.name}, capital ${city.capital}`);
+    const title = document.createElement('strong');
+    title.textContent = city.capital;
+    const subtitle = document.createElement('small');
+    subtitle.textContent = `${city.shortName}${city.population === undefined ? '' : ` · ${city.population} people`}`;
+    element.append(title, subtitle);
+    element.setAttribute('aria-label', `Inspect ${city.name}, ${city.capital}`);
     element.addEventListener('click', () => onSelect(city.id));
     labels.append(element);
     cityLabels.push({ element, point: new THREE.Vector3(x, floor + 1.45, z), id: city.id });
   }
+  const settlements = createSettlementMeshes(world, material);
+  scene.add(settlements.group);
+  const cues = createWorldCues(container, world, (x, z, height) => {
+    const point = new THREE.Vector3(x, height, z).project(camera);
+    return { x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight };
+  });
+  let selected = preferences.selected;
   const ships: Array<{ mesh: THREE.Mesh; curve: THREE.QuadraticBezierCurve3; offset: number }> = [];
   for (const [from, to] of world.routes) {
     const origin = world.cities[from];
@@ -274,8 +296,13 @@ export function createAtlasRenderer(
       new THREE.OctahedronGeometry(0.07),
       new THREE.MeshBasicMaterial({ color: '#fff2bf' }),
     );
-    routes.add(ship);
-    ships.push({ mesh: ship, curve, offset: from * 0.17 });
+    if (world.illustrative) {
+      routes.add(ship);
+      ships.push({ mesh: ship, curve, offset: from * 0.17 });
+    } else {
+      ship.geometry.dispose();
+      ship.material.dispose();
+    }
   }
   routes.visible = preferences.routes;
   scene.add(routes);
@@ -291,8 +318,9 @@ export function createAtlasRenderer(
   ring.rotation.x = -Math.PI / 2;
   scene.add(ring);
   const select = (id: number): void => {
-    const city = world.cities[id];
+    const city = world.cities.find((candidate) => candidate.id === id);
     if (!city) return;
+    selected = id;
     const point = hexPosition(city.q, city.r);
     ring.position.set(point.x, 0.58, point.z);
     for (const label of cityLabels) {
@@ -319,25 +347,38 @@ export function createAtlasRenderer(
   resize();
   let moving =
     !preferences.paused && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  cues.setMotion(moving);
   let elapsed = 0;
   let previousTime = 0;
+  let frame = 0;
   const animate = (time: number): void => {
+    if (document.hidden) { previousTime = time; frame = requestAnimationFrame(animate); return; }
     const delta = Math.min((time - previousTime) / 1000, 0.1);
     previousTime = time;
     if (moving) elapsed += delta;
     controls.update();
     for (const ship of ships)
       ship.mesh.position.copy(ship.curve.getPoint((elapsed * 0.035 + ship.offset) % 1));
-    for (const label of cityLabels) {
+    camera.updateMatrixWorld();
+    const left = new THREE.Vector3(-1, 0, 0).project(camera);
+    const right = new THREE.Vector3(1, 0, 0).project(camera);
+    const detail = settlements.update(Math.hypot((right.x - left.x) * container.clientWidth / 2, (right.y - left.y) * container.clientHeight / 2));
+    const positions = cityLabels.map((label) => {
+      const point = label.point.clone().project(camera);
+      return { id: label.id, x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight, width: Math.max(76, label.element.offsetWidth), height: Math.max(44, label.element.offsetHeight) };
+    });
+    const visible = mapLabelVisibility(positions, selected, detail, container.clientWidth, container.clientHeight);
+    for (const [index, label] of cityLabels.entries()) {
       const projected = label.point.clone().project(camera);
       label.element.style.left = `${(projected.x * 0.5 + 0.5) * container.clientWidth}px`;
       label.element.style.top = `${(-projected.y * 0.5 + 0.5) * container.clientHeight}px`;
-      label.element.hidden = projected.z > 1 || projected.z < -1;
+      label.element.hidden = projected.z > 1 || projected.z < -1 || !visible[index];
     }
+    cues.update();
     renderer.render(scene, camera);
-    requestAnimationFrame(animate);
+    frame = requestAnimationFrame(animate);
   };
-  requestAnimationFrame(animate);
+  frame = requestAnimationFrame(animate);
   return {
     zoom: (factor) => {
       camera.zoom = THREE.MathUtils.clamp(camera.zoom * factor, 0.65, 2.2);
@@ -351,12 +392,73 @@ export function createAtlasRenderer(
       controls.update();
     },
     select,
+    frameCity: (id, anchor) => {
+      const city = cityLabels.find((candidate) => candidate.id === id);
+      if (!city) return;
+      const damping = controls.enableDamping;
+      controls.enableDamping = false;
+      controls.update();
+      camera.updateMatrixWorld();
+      const screen = (point: THREE.Vector3): ScreenPoint => {
+        const projected = point.clone().project(camera);
+        return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 };
+      };
+      const current = screen(city.point);
+      const unitX = screen(city.point.clone().add(new THREE.Vector3(1, 0, 0)));
+      const unitZ = screen(city.point.clone().add(new THREE.Vector3(0, 0, 1)));
+      const shift = cameraShiftForAnchor(current, anchor,
+        { x: unitX.x - current.x, y: unitX.y - current.y },
+        { x: unitZ.x - current.x, y: unitZ.y - current.y });
+      const translation = new THREE.Vector3(shift.x, 0, shift.z);
+      camera.position.add(translation);
+      controls.target.add(translation);
+      controls.update();
+      controls.enableDamping = damping;
+    },
+    restoreCamera: (view) => {
+      const damping = controls.enableDamping;
+      controls.enableDamping = false;
+      controls.update();
+      controls.target.set(view.x, 0, view.z);
+      camera.position.set(view.x + 19, 29, view.z + 31);
+      camera.zoom = view.zoom;
+      camera.updateProjectionMatrix();
+      controls.update();
+      controls.enableDamping = damping;
+    },
     setLayer: (layer, visible) => {
       (layer === 'borders' ? borders : routes).visible = visible;
     },
     snapshot: () => ({ zoom: camera.zoom, x: controls.target.x, z: controls.target.z }),
+    showEvents: cues.show,
     setMotion: (value) => {
       moving = value;
+      cues.setMotion(value);
+    },
+    dispose: () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      controls.dispose();
+      settlements.dispose();
+      cues.dispose();
+      const geometries = new Set<THREE.BufferGeometry>();
+      const resources = new Set<THREE.Material>(materials.values());
+      scene.traverse((object) => {
+        if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+          const geometry: unknown = object.geometry;
+          const entries: unknown = object.material;
+          if (geometry instanceof THREE.BufferGeometry) geometries.add(geometry);
+          if (entries instanceof THREE.Material) resources.add(entries);
+          else if (Array.isArray(entries)) {
+            for (const entry of entries) if (entry instanceof THREE.Material) resources.add(entry);
+          }
+        }
+      });
+      for (const geometry of geometries) geometry.dispose();
+      for (const resource of resources) resource.dispose();
+      renderer.dispose();
+      renderer.domElement.remove();
+      labels.replaceChildren();
     },
   };
 }

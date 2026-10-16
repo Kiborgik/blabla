@@ -2,7 +2,7 @@ import { CIV_COUNT } from './types.ts';
 import type {
   BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
   EraDefinition, FeatureDefinition, Focus, GameAction, HistoricalMilestone, Resource,
-  Resources, TechnologyDefinition,
+  Resources, TechnologyDefinition, TradeRecipe,
 } from './types.ts';
 
 export const RESOURCE_IDS: readonly Resource[] = ['food', 'materials', 'energy', 'credits', 'science', 'culture'];
@@ -22,6 +22,10 @@ export const FEATURES: FeatureDefinition[] = [
   { id: 'settlement-production', name: 'Working settlements', description: 'Food, materials, city focus and buildings sustain actual populations.' },
   { id: 'settlement-research', name: 'First discoveries', description: 'Civilizations invest their knowledge in released discoveries.' },
   { id: 'director-events', name: 'A changing world', description: 'The World Director introduces real environmental pressures and opportunities.' },
+  { id: 'history-advancement', name: 'Turning points in history', description: 'Deliberate, explained historical advances move the calendar once without changing the regular clock or unlocking unfinished capabilities.' },
+  { id: 'release-evolution', name: 'A world that keeps growing', description: 'Compatible delivered releases enter the inhabited world once while preserving its state, identity and history.' },
+  { id: 'independent-actions', name: 'Civilizations act together', description: 'Independent fair tactical windows and shared strategic beats let each civilization act without waiting for another actor.' },
+  { id: 'bounded-plans', name: 'The next useful step', description: 'At most two explicit actionable intentions guide real agent decisions and retain concrete lifecycle results without automatic execution.' },
   { id: 'settlement-expansion', name: 'Beyond the first hearth', description: 'New settlements make land, migration and supply consequential.' },
   { id: 'trade-routes', name: 'Roads between peoples', description: 'Routes exchange scarce goods and can be disrupted and repaired.' },
   { id: 'statecraft', name: 'Institutions and belonging', description: 'Public institutions connect knowledge, culture, welfare and political cooperation.' },
@@ -41,6 +45,7 @@ export const FEATURES: FeatureDefinition[] = [
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
   focus: ['settlement-production'], research: ['settlement-research'], build: ['settlement-production'],
   settle: ['settlement-expansion'], trade: ['trade-routes'], federate: ['federations'],
+  'propose-trade': ['trade-routes'], 'respond-trade': ['trade-routes'], 'withdraw-trade': ['trade-routes'], 'stop-trade': ['trade-routes'],
   repair: ['trade-routes'], expedition: ['interplanetary-logistics'], event: ['director-events'],
   wait: ['settlement-turns'],
 };
@@ -108,6 +113,12 @@ export const ECONOMY_RULES = {
   expedition: { cost: { food: 5, materials: 8, energy: 8, credits: 6 }, progress: 25, population: 1 },
 };
 
+export const TRADE_RULES = { offerExpiryRounds: 8, maxPendingPerPair: 1, maxActivePerPair: 1 };
+
+export const TRADE_RECIPES: TradeRecipe[] = [
+  { id: 'harvest-for-materials', version: 1, name: 'Harvest for materials', description: 'A food surplus supports a partner while materials return to build the next settlement project.', requiredFeatures: ['trade-routes'], terms: { recipeId: 'harvest-for-materials', recipeVersion: 1, constructionCost: { materials: 6, credits: 8 }, proposerCargo: { food: 4 }, recipientCargo: { materials: 3 }, proposerUpkeep: { energy: 1 }, recipientUpkeep: { energy: 1 }, proposerYield: { credits: 2 }, recipientYield: { credits: 2 }, cadenceRounds: 4, damageDisableAt: 50 } },
+];
+
 export const VICTORY_RULES = {
   mars: { requiredFeatures: ['interplanetary-logistics'], minEra: 5, requiredTechnology: 'spaceflight', requiredBuilding: 'launchpad', progress: 100, population: 3, suppliedRounds: 3, upkeep: { food: 3, materials: 1, energy: 4 } as Partial<Resources> },
   federation: { requiredFeatures: ['federations', 'planetary-networks'], minEra: 4, members: 3, infrastructurePerMember: 4, wellbeing: 60, legitimacy: 55, suppliedRounds: 4, upkeep: { food: 2, energy: 2 } as Partial<Resources> },
@@ -116,7 +127,7 @@ export const VICTORY_RULES = {
 export const HISTORICAL_MILESTONES: HistoricalMilestone[] = [
   { id: 'first-harvest', name: 'The first reliable harvest', requiredFeatures: ['settlement-production', 'settlement-research'], requiresMilestones: [], conditions: [{ kind: 'building-count', building: 'farm', minimum: 1 }, { kind: 'technology', technology: 'agriculture', civilizations: 1 }], year: -9500, era: 0, explanation: 'Cultivation and working fields have changed how people live. The released settlement systems have produced their first historical transition.' },
   { id: 'beyond-the-hearth', name: 'Beyond the first hearths', requiredFeatures: ['settlement-expansion'], requiresMilestones: ['first-harvest'], conditions: [{ kind: 'city-count', minimum: 8 }, { kind: 'total-population', minimum: 40 }], year: -8000, era: 0, explanation: 'The expansion feature has become lived history: new communities now support a larger population.' },
-  { id: 'roads-between-peoples', name: 'Roads between peoples', requiredFeatures: ['trade-routes'], requiresMilestones: ['beyond-the-hearth'], conditions: [{ kind: 'active-routes', minimum: 2 }], year: -6000, era: 0, explanation: 'Working exchanges now connect independent civilizations. Trade is a world fact, not just a newly installed feature.' },
+  { id: 'roads-between-peoples', name: 'Roads between peoples', requiredFeatures: ['trade-routes'], requiresMilestones: ['first-harvest'], conditions: [{ kind: 'active-routes', minimum: 2 }], year: -6000, era: 0, explanation: 'Working exchanges now connect independent civilizations. Trade is a world fact, not just a newly installed feature.' },
   { id: 'rise-of-states', name: 'The rise of states', requiredFeatures: ['statecraft'], requiresMilestones: ['roads-between-peoples'], conditions: [{ kind: 'technology', technology: 'civic-institutions', civilizations: 2 }, { kind: 'active-routes', minimum: 3 }], year: -3000, era: 1, explanation: 'Civic discoveries and functioning exchanges have made organized states possible. Public institutions can now be built.' },
   { id: 'connected-world', name: 'A connected world', requiredFeatures: ['navigation'], requiresMilestones: ['rise-of-states'], conditions: [{ kind: 'technology', technology: 'navigation', civilizations: 1 }, { kind: 'active-routes', minimum: 3 }], year: -500, era: 2, explanation: 'The released navigation system and an expanding exchange network have connected the world.' },
   { id: 'industrial-world', name: 'The industrial transformation', requiredFeatures: ['industrialization'], requiresMilestones: ['connected-world'], conditions: [{ kind: 'technology', technology: 'industrialization', civilizations: 1 }, { kind: 'building-count', building: 'workshop', minimum: 5 }], year: 1750, era: 3, explanation: 'Industrial capability is now supported by an actual productive foundation.' },
@@ -134,12 +145,15 @@ export interface ContentCatalog {
   milestones: HistoricalMilestone[];
   actionFeatures: Record<GameAction['type'], readonly string[]>;
   victoryRules: typeof VICTORY_RULES;
+  tradeRecipes: TradeRecipe[];
+  tradeRules: typeof TRADE_RULES;
 }
 
 export const CONTENT: ContentCatalog = {
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
   buildings: BUILDINGS, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
   actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES,
+  tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES,
 };
 
 function positive(value: number): boolean {
@@ -163,6 +177,19 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     if (required.length === 0) errors.push(`${label}: missing release feature gate`);
     for (const id of required) if (!features.has(id)) errors.push(`${label}: unknown feature ${id}`);
   };
+  unique('trade recipes', catalog.tradeRecipes.map(recipe => recipe.id));
+  for (const [name, value] of Object.entries(catalog.tradeRules)) {
+    if (!Number.isSafeInteger(value) || value < 1) errors.push(`trade rules: invalid ${name}`);
+  }
+  for (const recipe of catalog.tradeRecipes) {
+    const label = `trade ${recipe.id}`;
+    const terms = recipe.terms;
+    requireFeatures(label, recipe.requiredFeatures);
+    if (!Number.isSafeInteger(recipe.version) || recipe.version < 1 || terms.recipeId !== recipe.id || terms.recipeVersion !== recipe.version) errors.push(`${label}: inconsistent recipe identity`);
+    if (!Number.isSafeInteger(terms.cadenceRounds) || terms.cadenceRounds < 1 || !positive(terms.damageDisableAt) || terms.damageDisableAt > 100) errors.push(`${label}: invalid strategic cadence or damage threshold`);
+    for (const [name, values] of Object.entries({ constructionCost: terms.constructionCost, proposerCargo: terms.proposerCargo, recipientCargo: terms.recipientCargo, proposerUpkeep: terms.proposerUpkeep, recipientUpkeep: terms.recipientUpkeep, proposerYield: terms.proposerYield, recipientYield: terms.recipientYield })) resources(`${label} ${name}`, values);
+    if (![terms.proposerCargo, terms.recipientCargo].every(cargo => Object.values(cargo).some(positive))) errors.push(`${label}: both partners require meaningful cargo`);
+  }
   const technologies = new Map(catalog.technologies.map(technology => [technology.id, technology]));
   const buildings = new Map(catalog.buildings.map(building => [building.id, building]));
   const milestones = new Map(catalog.milestones.map(milestone => [milestone.id, milestone]));
@@ -264,3 +291,5 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   if (federation.minEra < 4 || !eraValid(federation.minEra) || !Number.isInteger(federation.members) || federation.members < 3 || federation.members > CIV_COUNT || !Number.isInteger(federation.suppliedRounds) || federation.suppliedRounds < 2 || !positive(federation.infrastructurePerMember) || !positive(federation.wellbeing) || !positive(federation.legitimacy)) errors.push('federation: immediate or unsupported pact victory');
   return errors;
 }
+
+export const TURN_RULES = { tacticalWindowMs: 10_000, actionsPerWindow: 1, strategyIntervalMs: 60_000, maximumCatchupTicks: 60, maximumPlanItems: 2 } as const;

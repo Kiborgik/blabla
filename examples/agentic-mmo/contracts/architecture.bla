@@ -33,3 +33,17 @@ forbid "engine-does-not-import-renderer": dependency engine -> "three"
 forbid "engine-does-not-import-filesystem": dependency engine -> "node:fs"
 forbid "engine-does-not-import-policies": dependency engine -> policies
 forbid "history-does-not-import-policies": dependency history -> policies
+
+module evolution "core/simulation/evolution.ts"
+module validation "core/validation.ts"
+module host "server/repository.ts"
+module hostValidation "server/validation.ts"
+module liveProjection "web/live-world.ts"
+require "release-upgrades-use-registered-definitions": dependency evolution -> release
+require "history-advancement-has-one-engine-operation": symbol evolution::applyHistoryAdvance
+require "compatible-release-has-one-engine-operation": symbol evolution::applyRelease
+require "host-uses-authoritative-transitions": dependency host -> engine
+require "host-reuses-canonical-validation": dependency hostValidation -> validation
+require "live-view-reuses-canonical-validation": dependency liveProjection -> validation
+forbid "evolution-is-independent-of-rendering": dependency evolution -> "three"
+forbid "evolution-is-independent-of-storage": dependency evolution -> "node:fs"

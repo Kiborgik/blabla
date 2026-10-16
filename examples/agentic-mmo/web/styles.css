@@ -904,350 +904,187 @@ dialog h2 {
     padding: 0 24px;
   }
 }
-@media (max-width: 760px) {
-  .masthead {
-    height: 72px;
-    padding: 0 18px;
-    gap: 0;
-  }
-  .brand {
-    font-size: 23px;
-    gap: 9px;
-    letter-spacing: 4px;
-  }
-  .brand-mark {
-    width: 34px;
-    height: 39px;
-    font-size: 28px;
-  }
-  .brand small {
-    font-size: 6px;
-    letter-spacing: 1.5px;
-    margin-top: 4px;
-  }
-  .top-nav {
-    margin-left: auto;
-  }
-  .top-nav .nav-active {
-    display: none;
-  }
-  .text-button {
-    font-size: 9px;
-  }
-  .mode {
-    display: none;
-  }
-  .observatory {
-    height: calc(100svh - 118px);
-    min-height: 710px;
-  }
-  .world-heading {
-    left: 20px;
-    top: 25px;
-  }
-  .world-heading .eyebrow {
-    font-size: 6px;
-    letter-spacing: 1.4px;
-  }
-  h1 {
-    font-size: 31px;
-    margin-top: 12px;
-  }
-  .world-heading p {
-    font-size: 8px;
-  }
-  .era-pill {
-    top: 140px;
-    left: 20px;
-    right: auto;
-    padding-left: 0;
-    border-left: 0;
-    gap: 9px;
-  }
-  .era-icon {
-    font-size: 21px;
-  }
-  .era-pill strong {
-    font-size: 12px;
-  }
-  .era-pill small {
-    font-size: 5px;
-    margin-top: 4px;
-    letter-spacing: 1px;
-  }
-  .civilization-panel {
-    top: auto;
-    bottom: 158px;
-    left: 14px;
-    right: 14px;
-    width: auto;
-    background: #f7f4eaf5;
-  }
-  .panel-heading {
-    padding: 11px 13px 5px;
-  }
-  .panel-heading .eyebrow {
-    font-size: 6px;
-  }
-  .count {
-    font-size: 11px;
-  }
-  .civilization-list {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    padding: 0 5px 6px;
-    gap: 2px;
-  }
-  .civilization-row {
-    flex-direction: column;
-    gap: 5px;
-    text-align: center;
-    padding: 7px 2px 6px;
-    min-height: 65px;
-  }
-  .civilization-row .civ-emblem {
-    width: 25px;
-    height: 28px;
-    font-size: 19px;
-  }
-  .civilization-row strong {
-    font-size: 6px;
-    font-weight: 500;
-    white-space: nowrap;
-  }
-  .civilization-row small,
-  .row-arrow,
-  .director,
-  .civilization-row[aria-pressed='true']::before {
-    display: none;
-  }
-  .inspection {
-    top: auto;
-    bottom: 39px;
-    left: 14px;
-    right: 14px;
-    width: auto;
-    padding: 12px 15px;
-    height: 111px;
-  }
-  .inspection-top {
-    display: none;
-  }
-  .inspection-title {
-    margin: 0;
-    gap: 8px;
-  }
-  .inspection h2 {
-    font-size: 15px;
-  }
-  .focus-symbol {
-    font-size: 28px;
-  }
-  .inspection-title p {
-    font-size: 7px;
-    margin-top: 4px;
-  }
-  .ambition {
-    margin: 8px 0 0;
-    font-size: 10px;
-    padding-right: 60px;
-    line-height: 1.3;
-  }
-  .capital-detail {
-    border: 0;
-    position: absolute;
-    right: 15px;
-    top: 14px;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 5px;
-    padding: 0;
-  }
-  .capital-detail > span:first-child {
-    font-size: 5px;
-    letter-spacing: 0.6px;
-  }
-  .capital-detail strong {
-    font-size: 11px;
-  }
-  .capital-detail .tiny-star {
-    display: none;
-  }
-  .inspection-note {
-    font-size: 6px;
-    margin-top: 8px;
-  }
-  .chronicle {
-    top: 22px;
-    right: 16px;
-    left: auto;
-    bottom: auto;
-    width: 43px;
-    height: 43px;
-    padding: 0;
-    transform: none;
-    background: transparent;
-    border-color: #a3b69d54;
-    box-shadow: none;
-    border-radius: 50%;
-    display: none;
-  }
-  .chronicle-icon,
-  .chronicle > div {
-    display: none;
-  }
-  .chronicle-arrow {
-    color: #d5dec2;
-    width: 100%;
-    height: 100%;
-  }
-  .map-tools {
-    bottom: 285px;
-    right: 16px;
-  }
-  .map-tools button {
-    width: 34px;
-    height: 36px;
-    font-size: 20px;
-  }
-  .compass {
-    top: 125px;
-    right: 17px;
-    bottom: auto;
-    width: 43px;
-    opacity: 0.7;
-  }
-  .compass > span {
-    font-size: 8px;
-  }
-  .layer-controls {
-    bottom: 285px;
-    left: 16px;
-    padding: 2px;
-  }
-  .layer-controls button {
-    font-size: 8px;
-    padding: 8px;
-  }
-  .layer-controls button span {
-    font-size: 11px;
-    margin-right: 3px;
-  }
-  .map-hint {
-    bottom: 17px;
-    font-size: 6px;
-    letter-spacing: 0;
-  }
-  .map-hint span {
-    margin: 0 3px;
-  }
-  .map-hint span:first-child {
-    font-size: 10px;
-  }
-  .ambient-control {
-    left: auto;
-    right: 16px;
-    top: 186px;
-    bottom: auto;
-    gap: 0;
-  }
-  .ambient-control > span {
-    display: none;
-  }
-  .ambient-control button {
-    width: 29px;
-    height: 29px;
-  }
-  .ocean-name-one {
-    top: 41%;
-    right: 14%;
-    font-size: 7px;
-    letter-spacing: 3px;
-  }
-  .ocean-name-two {
-    display: none;
-  }
-  .city-label {
-    min-width: 60px;
-    padding: 5px 7px;
-  }
-  .city-label strong {
-    font-size: 10px;
-  }
-  .city-label small {
-    font-size: 5px;
-    letter-spacing: 0.8px;
-    margin-top: 2px;
-  }
-  .city-label .capital-star {
-    font-size: 7px;
-    margin-right: 3px;
-  }
-  .footer {
-    height: 46px;
-    padding: 0 16px;
-  }
-  .footer-status {
-    display: none;
-  }
-  .release-links {
-    width: 100%;
-    justify-content: space-between;
-    gap: 7px;
-    font-size: 7px;
-  }
-  .release-links button {
-    font-size: 8px;
-  }
-  dialog {
-    padding: 23px;
-    max-height: 85svh;
-  }
-  dialog h2 {
-    font-size: 32px;
-  }
-  .dialog-top .eyebrow {
-    font-size: 6px;
-    letter-spacing: 1px;
-  }
-  .dialog-intro {
-    font-size: 11px;
-  }
-  .fallback-message {
-    top: 38%;
-    width: 255px;
-  }
-  .fallback-message > span {
-    font-size: 45px;
-  }
-  .fallback-message h2 {
-    font-size: 21px;
-  }
-  .fallback-message p {
-    font-size: 10px;
-  }
-  .update-notice {
-    width: calc(100% - 32px);
-    top: 85px;
-    font-size: 11px;
-    text-align: center;
-  }
-}
-@media (max-width: 380px) {
-  .civilization-row strong {
-    font-size: 5.5px;
-  }
-  h1 {
-    font-size: 28px;
-  }
-  .text-button {
-    font-size: 8px;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   * {
     scroll-behavior: auto !important;
     transition: none !important;
   }
 }
+
+.live-observatory .world-heading { top: 25px; left: 24px; max-width: calc(100% - 330px); }
+.live-observatory .world-heading h1 { margin: 9px 0; font-size: 34px; }
+.live-observatory .world-heading p { font-size: 12px; line-height: 1.55; max-width: 650px; }
+.live-observatory .world-heading .eyebrow { font-size: 10px; }
+.live-observatory .era-pill { top: 30px; right: 24px; }
+.live-observatory .era-pill small { font-size: 9px; letter-spacing: 0.4px; }
+.live-observatory .civilization-panel { top: 155px; left: 24px; width: 210px; }
+.live-observatory .civilization-row strong { font-size: 13px; }
+.live-observatory .civilization-row small { font-size: 10px; color: #66705e; }
+.live-observatory .civ-emblem { font: 600 17px Georgia, serif; }
+.live-observatory .panel-heading .eyebrow { font-size: 9px; }
+.live-observatory .director strong { font-size: 12px; }
+.live-observatory .director small { font-size: 9px; letter-spacing: 0; color: #67725e; }
+.live-observatory .inspection { top: 130px; right: 24px; width: 270px; max-height: calc(100% - 230px); overflow: auto; }
+.live-observatory .inspection h2 { font-size: 22px; }
+.live-observatory .inspection-title p { font-size: 12px; }
+.live-observatory .inspection-top .eyebrow, .live-observatory .preview-tag { font-size: 9px; letter-spacing: 0.5px; }
+.live-observatory .ambition { font-size: 14px; color: #53634f; margin: 15px 0; }
+.resources { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 15px 0; }
+.resources div { border: 1px solid #d9dece; border-radius: 4px; padding: 8px 5px; background: #edeedf; }
+.resources dt { font-size: 10px; text-transform: capitalize; color: #4d604d; }
+.resources dd { margin: 4px 0 0; font-size: 18px; font-weight: 600; }
+.research-detail { font-size: 12px; line-height: 1.5; color: #52614e; }
+.city-details { list-style: none; padding: 0; margin-bottom: 0; }
+.city-details li { border-top: 1px solid #d9dece; padding: 10px 0; }
+.city-details strong { display: block; font-size: 14px; margin-bottom: 5px; }
+.city-details span { display: block; font-size: 11px; line-height: 1.7; color: #52614e; }
+.live-observatory .layer-controls { left: 24px; bottom: 28px; }
+.live-observatory .layer-controls button { min-height: 40px; font-size: 12px; }
+.live-observatory .map-tools { right: 24px; bottom: 28px; }
+.live-observatory .map-tools button { width: 44px; height: 44px; }
+.live-observatory #reset-camera { font-size: 10px; }
+.live-observatory .chronicle { width: min(450px, calc(100% - 550px)); bottom: 54px; padding: 14px 18px; }
+.live-observatory .chronicle strong { font-size: 20px; }
+.live-observatory .chronicle p { font-size: 12px; color: #58654f; line-height: 1.6; }
+.live-observatory .chronicle .eyebrow { font-size: 9px; }
+.live-observatory .map-hint { bottom: 18px; font-size: 10px; }
+.live-observatory .ambient-control { left: 250px; bottom: 20px; }
+.live-observatory .ambient-control button { width: 44px; height: 44px; font-size: 10px; }
+.connection-actions { position: absolute; top: 123px; left: 24px; z-index: 3; display: flex; align-items: center; gap: 14px; color: #e6edd9; font-size: 11px; }
+.connection-actions button { background: #f2ecd9; color: #294d47; padding: 9px 13px; border-radius: 4px; min-height: 40px; }
+.flat-atlas { width: 100%; height: 100%; display: block; background: #153d54; touch-action: none; }
+.flat-city { cursor: pointer; outline: none; }
+.flat-city.selected > .city-marker { stroke-width: 0.25; fill: #466c5c; }
+.flat-city:focus > .city-marker { stroke: #fff; stroke-width: 0.3; }
+.mode[data-connection='offline'] .status-dot { background: #b9894d; }
+.release-links a { text-decoration: underline; text-underline-offset: 3px; }
+.release-entry summary { cursor: pointer; font-size: 15px; line-height: 1.6; }
+.release-entry time { display: block; margin-top: 10px; }
+#event-list { padding-left: 20px; }
+#event-list li { padding: 12px 0; border-bottom: 1px solid #d7dece; }
+#event-list strong { display: block; font-size: 17px; }
+#event-list span { font-size: 11px; color: #64755f; }
+#event-list p { font-size: 13px; line-height: 1.6; }
+
+.sheet-close { display: none; }
+.city-label { min-height: 44px; }
+.city-label small { font-size: 10px; letter-spacing: 0.3px; text-transform: none; }
+.city-hit { fill: transparent; stroke: none; pointer-events: all; }
+@media (max-width: 1000px) {
+  html, body { height: 100%; overflow: hidden; }
+  #app { height: 100svh; display: grid; grid-template-rows: 54px minmax(0, 1fr) auto; }
+  .masthead { height: 54px; padding: 0 14px; gap: 10px; }
+  .brand { font-size: 20px; gap: 8px; letter-spacing: 3px; }
+  .brand-mark { width: 29px; height: 34px; font-size: 24px; }
+  .brand small, .mode, .top-nav .nav-active { display: none; }
+  .top-nav { display: flex; margin-left: auto; }
+  .text-button, .top-nav button { font-size: 12px; min-height: 44px; }
+  .live-observatory { height: 100%; min-height: 0; padding: 0; display: block; overflow: hidden; }
+  .live-observatory .map { inset: 0; height: 100%; }
+  .live-observatory .world-heading { top: 12px; left: 14px; max-width: calc(100% - 28px); padding: 8px 12px; background: #193c43e8; border-radius: 6px; }
+  .live-observatory .world-heading .eyebrow { display: none; }
+  .live-observatory .world-heading h1 { margin: 0 0 5px; font-size: 27px; }
+  .live-observatory .world-heading p { margin: 0; font-size: 11px; max-width: none; line-height: 1.4; }
+  .live-observatory .era-pill { display: none; }
+  .connection-actions { top: 91px; left: 16px; gap: 10px; font-size: 10px; padding: 3px 7px; border-radius: 4px; background: #193c43db; }
+  .connection-actions:has(button:not([hidden])) { font-size: 11px; }
+  .connection-actions button { min-height: 44px; }
+  .live-observatory .civilization-panel { top: auto; bottom: 0; left: 0; right: 0; width: 100%; height: 70px; border: 0; border-radius: 0; z-index: 5; box-shadow: 0 -6px 24px #082a3540; }
+  .live-observatory .civilization-panel .panel-heading, .live-observatory .director { display: none; }
+  .live-observatory .civilization-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 3px 7px; gap: 2px; height: 100%; }
+  .live-observatory .civilization-row { display: flex; flex-direction: column; justify-content: center; gap: 4px; text-align: center; padding: 3px 1px; min-height: 44px; min-width: 0; }
+  .live-observatory .civilization-row .civ-emblem { width: 24px; height: 27px; font-size: 15px; }
+  .live-observatory .civilization-row strong { font-size: 11px; line-height: 1.2; font-weight: 600; overflow-wrap: anywhere; }
+  .live-observatory .civilization-row small, .live-observatory .civilization-row[aria-pressed='true']::before { display: none; }
+  .live-observatory .inspection { display: none; position: absolute; inset: auto 8px 78px; width: auto; height: auto; max-height: min(54svh, 420px); padding: 16px; border-radius: 12px; z-index: 6; overflow: auto; overscroll-behavior: contain; box-shadow: 0 -10px 35px #082a3560; }
+  .live-observatory[data-inspection='true'] .inspection:not([hidden]) { display: block; }
+  .sheet-close { display: block; position: sticky; float: right; top: 0; min-width: 74px; min-height: 44px; padding: 8px 10px; margin: -4px -4px 0 8px; background: #e3e7da; border: 1px solid #bfcbb8; border-radius: 6px; font-size: 12px; z-index: 1; }
+  .live-observatory .inspection-top { display: block; padding-top: 6px; }
+  .live-observatory .inspection-top .eyebrow { display: none; }
+  .live-observatory .preview-tag { font-size: 10px; }
+  .live-observatory .inspection-title { margin: 12px 0 0; gap: 10px; }
+  .live-observatory .inspection h2 { font-size: 24px; }
+  .live-observatory .inspection-title p { font-size: 12px; margin-top: 5px; }
+  .live-observatory .ambition { font-size: 14px; margin: 12px 0; padding: 0; line-height: 1.5; }
+  .resources dt { font-size: 11px; }
+  .resources dd { font-size: 20px; }
+  .city-details span, .research-detail { font-size: 13px; }
+  .live-observatory .chronicle { display: block; position: absolute; inset: auto 10px 80px; transform: none; width: auto; height: auto; min-height: 64px; max-height: 115px; padding: 10px 12px; border-radius: 8px; background: #f7f4eaf5; border: 1px solid #fff7; z-index: 4; overflow: auto; }
+  .live-observatory .chronicle > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 9px; align-items: center; }
+  .live-observatory .chronicle .eyebrow { font-size: 8px; grid-column: 1; }
+  .live-observatory .chronicle strong { font-size: 16px; grid-column: 1; line-height: 1.25; }
+  .live-observatory .chronicle p { font-size: 11px; line-height: 1.35; margin: 3px 0 0; grid-column: 1 / -1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .live-observatory #events-open { grid-column: 2; grid-row: 1 / 3; min-height: 44px; padding: 5px 9px; background: #e4e8da; border-radius: 5px; font-size: 11px; max-width: 75px; }
+  .live-observatory[data-inspection='true'] .chronicle { display: none; }
+  .live-observatory .map-tools { top: 110px; right: 10px; bottom: auto; z-index: 4; }
+  .live-observatory .map-tools button { width: 44px; height: 44px; }
+  .live-observatory .layer-controls { left: 10px; bottom: 203px; top: auto; z-index: 4; }
+  .live-observatory .layer-controls button { min-height: 44px; font-size: 11px; padding: 8px; }
+  .live-observatory[data-inspection='true'] .layer-controls { display: none; }
+  .live-observatory .map-hint { display: none; }
+  .live-observatory .ambient-control { top: 110px; right: 64px; left: auto; bottom: auto; }
+  .live-observatory .ambient-control > span { display: none; }
+  .live-observatory .ambient-control button { min-height: 44px; min-width: 44px; }
+  .city-label { min-width: 76px; min-height: 44px; padding: 6px 8px; }
+  .city-label strong { font-size: 12px; }
+  .city-label small { font-size: 10px; letter-spacing: 0; }
+  .footer { height: auto; min-height: 38px; padding: 0 12px max(0px, env(safe-area-inset-bottom)); display: flex; }
+  .footer-status { display: none; }
+  .release-links { width: 100%; display: flex; justify-content: space-between; gap: 10px; font-size: 10px; flex-wrap: nowrap; }
+  .release-links button, .release-links a { display: inline-flex; align-items: center; min-height: 38px; font-size: 10px; padding: 0; }
+  dialog { width: calc(100% - 20px); max-width: 600px; max-height: calc(100svh - 24px); padding: 20px; border-radius: 10px; }
+  dialog h2 { font-size: 30px; }
+  .dialog-top .eyebrow { font-size: 9px; }
+  .dialog-intro { font-size: 14px; }
+  .dialog-close { min-width: 44px; min-height: 44px; }
+  #event-list p, .release-entry li { font-size: 14px; }
+  .update-notice { top: 60px; max-width: calc(100% - 24px); font-size: 12px; }
+}
+@media (max-width: 1000px) and (max-height: 570px) {
+  #app { grid-template-rows: 44px minmax(0, 1fr) auto; }
+  .masthead { height: 44px; }
+  .live-observatory .civilization-panel { height: 58px; }
+  .live-observatory .civilization-row { flex-direction: row; gap: 6px; }
+  .live-observatory .chronicle { bottom: 66px; max-height: 75px; min-height: 50px; }
+  .live-observatory .chronicle p { display: none; }
+  .live-observatory .inspection { bottom: 66px; max-height: calc(100% - 220px); }
+  .live-observatory .world-heading { top: 6px; padding: 6px 10px; }
+  .live-observatory .world-heading h1 { font-size: 22px; }
+  .connection-actions { display: none; }
+  .live-observatory .map-tools { top: 15px; }
+  .live-observatory .layer-controls { bottom: 150px; }
+}
+
+.visual-icon { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
+.resources dt { display: flex; align-items: center; gap: 5px; }
+.resources dt .visual-icon { width: 14px; height: 14px; flex-basis: 14px; }
+#event-title { display: flex; align-items: center; gap: 8px; }
+#event-title > .visual-icon { width: 24px; height: 24px; flex-basis: 24px; color: #82622c; }
+.story-deltas, .cue-deltas { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.visual-delta { display: inline-flex; align-items: center; gap: 4px; border: 1px solid currentColor; border-radius: 4px; padding: 4px 6px; color: #3f574b; background: #fbf8e9; }
+.visual-delta > strong { font-family: Arial, sans-serif; font-size: 13px !important; font-weight: 700; white-space: nowrap; }
+.visual-delta > span { font-size: 11px; }
+.visual-delta.positive { color: #355b34; background: #e8efd7; }
+.visual-delta.negative { color: #873e29; background: #f7e3d3; }
+.world-cues { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 2; }
+.world-cue { position: absolute; width: 172px; transform: translate(-50%, -100%); }
+.cue-card { padding: 8px; color: #f5e6bc; background: #173e45f2; border: 1px solid #dbc383; border-radius: 6px; box-shadow: 0 3px 12px #0b262b80; animation: cue-arrive .24s ease-out; }
+.cue-title { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.cue-deltas { gap: 4px; margin-top: 6px; }
+.cue-deltas .visual-delta { padding: 3px 4px; }
+.cue-deltas .visual-delta > span { font-size: 10px; }
+.cue-deltas .visual-icon { width: 14px; height: 14px; flex-basis: 14px; }
+.world-cue.dry-wind::after { content: ''; position: absolute; top: 100%; left: 10%; width: 80%; height: 25px; background: repeating-linear-gradient(-12deg, transparent 0 6px, #d7bd6060 7px 8px, transparent 9px 13px); border-radius: 50%; animation: dry-wind .8s ease-in-out 4; }
+.world-cues.still *, .world-cues.still ::after { animation: none; }
+@keyframes cue-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes dry-wind { 0%, 100% { opacity: 0; transform: translateX(-8px); } 50% { opacity: .8; transform: translateX(8px); } }
+@media (prefers-reduced-motion: reduce) { .world-cues *, .world-cues ::after { animation: none; } }
+@media (max-width: 1000px) {
+  .live-observatory .chronicle:has(.story-deltas:not(:empty)) { padding: 9px 12px; }
+  .story-deltas { gap: 4px; margin-top: 7px; grid-column: 1 / -1; }
+  .story-deltas .visual-delta { padding: 3px 5px; }
+  .story-deltas .visual-delta > span { font-size: 10px; }
+  .live-observatory .chronicle:has(.story-deltas:not(:empty)) #event-title { padding-right: 0; }
+}
+
+@media (max-width: 1000px) and (max-height: 570px) { .chronicle:has(.story-deltas:not(:empty)) .eyebrow { display: none; } }

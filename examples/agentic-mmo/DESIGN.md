@@ -10,13 +10,13 @@ The service persists while individual runs can end. A victory or universal colla
 
 Fun and balance are learned in real play. They are not prerequisites for launching an otherwise correct increment. Correctness, durable state, honest presentation and access boundaries remain release obligations. After a functional stage works, the Creative Director chooses the next meaningful expansion instead of indefinitely polishing the same stage.
 
-## Three clocks, three responsibilities
+## Action cadence, history and delivered capability
 
 - Actor turns are the fast execution sequence. The initial implementation uses explicit seats 0–4 for civilizations and seat 5 for the World Director. An accepted command advances the revision; a full cycle resolves recurring world production. Repeated turns alone do not move the calendar.
-- Calendar time is explicit world history. The authoritative server clock advances 10 years every 6 real minutes; every 10 ticks marks a 100-year milestone. Clock catch-up is bounded to 240 ticks per operation. The separate 10-minute director event and hourly review add zero years. Missing or unfinished features must not freeze this clock. Supported, idempotent clock commands record each interval once, so retries cannot add years twice. The server owns timing; a viewer’s clock or playback position does not.
+- Calendar time is explicit world history. The authoritative server clock advances 10 years every 6 real minutes; every 10 ticks marks a 100-year milestone. Clock catch-up is bounded to 240 ticks per operation. Routine 10-minute director passes and hourly reviews add zero years by default. A deliberate feature or event turning point may additionally advance history through a separately identified, explained operation. Missing or unfinished features must not freeze this clock. Supported, idempotent clock commands record each interval once, so retries cannot add years twice. The server owns timing; a viewer’s clock or playback position does not.
 - Capability stage is what the implementation actually supports. A new release enables named features. Historical milestones combine those features with observed world facts, such as a working farm, a new discovery or active routes. A milestone records why the world changed. An advanced date must never pretend that unimplemented systems exist.
 
-The era dates in the content catalogue are roadmap/presentation metadata, not a formula that maps round number to age. Only clock ticks change the calendar year. Capability milestones record the current year without jumps or rewinds. A capability release should fit the current world where possible. An incompatible change requires an explicit migration or an archived restart, rather than silent reinterpretation of old state.
+The era dates in the content catalogue are roadmap/presentation metadata, not a formula that maps round number to age. The regular clock and deliberate historical advances are distinct causes. A deliberate advance records its feature or event evidence, reason, old and new year, and stable identity exactly once. It never rewinds time, rebases the regular clock epoch or consumes regular clock ticks. Capability milestones normally record the current year; an explicit associated historical advance is a separate operation, never an implicit side effect of a label. A capability release should fit the current world where possible. An incompatible change requires an explicit migration or an archived restart, rather than silent reinterpretation of old state.
 
 ## The first live stage
 
@@ -32,7 +32,20 @@ The first operative content is settlement foundations:
 
 Current catalogue declarations do not establish that an online release has happened. The integration-owned release manifest names the capabilities eligible for a particular build; deployment and runtime evidence establish what is actually available.
 
-The next meaningful expansion should connect the civilizations: settlement expansion followed by real trade routes is the proposed next sequence. Land, surplus, shortage, repair and access then create decisions between neighbors. Do not add another decorative counter when one new connection can change the behavior of several existing systems.
+The next meaningful expansion should connect the civilizations: first make compatible releases enter an inhabited world without resetting it, then add consensual trade between existing cities, followed by useful settlement expansion. Land, surplus, shortage, repair and access then create decisions between neighbors. Do not add another decorative counter when one new connection can change the behavior of several existing systems.
+
+## Tactical choices and strategic commitments
+
+Every system needs both layers. A fast tactical choice changes an immediate situation; a slower strategic commitment creates obligations, accumulates work or changes the available future. These are simulation responsibilities, separate from six-minute calendar ticks and human animation speed.
+
+- Production: change a city focus or spend supplies now; specialize its buildings and dependencies over several rounds.
+- Research: choose or redirect a project now; commit productive capacity until a discovery opens a new action.
+- Trade: propose, accept, refuse or stop an agreement immediately; receive due deliveries and live with a continuing supply dependency across strategic beats.
+- Culture: choose a festival, patronage or response when those actions exist; institutions and recurring conditions gradually change affiliation and migration.
+- Politics: make or withdraw a specific commitment now; shared projects and sustained fulfilled promises create durable collective power.
+- Conflict: maneuver, supply or contest access tactically; mobilization, campaigns, occupation and reconstruction carry slower material and political consequences.
+
+The locally implemented trade design uses one shared strategic beat every four completed actor rounds, rather than a separate timer per subsystem. Standing deliveries first become due on a strictly later beat after acceptance. Future projects can use this shared cadence where appropriate. This is provisional pacing to learn from live play, not a claim of balance. Local implementation does not activate trade in the online world: that needs a delivered release and an explicit compatible application. Existing settlement production remains per round until a separately specified change is delivered.
 
 ## One world, several strategies
 
@@ -43,6 +56,18 @@ Research unlocks capabilities. Culture changes attraction, belonging and coopera
 This is the intended causal depth, not a claim that every subsystem is already implemented. In the settlement stage, culture and legitimacy are groundwork. They do not yet establish a complete cultural or political game. A stock of science is useful because it can become a released discovery; it is not a separate science-victory bar.
 
 A trade route must exchange real cargo between endpoints. A broken route must change delivered supply, not merely its line color. A settlement that attracts people must offer something observable. An off-world colony must consume a sustained supply through real infrastructure. Narrative text explains these changes; it does not substitute for them.
+
+## The next connected choices
+
+Trade now has a concrete local contract: one pending offer and one enabled agreement per civilization pair; exact food/material terms are recorded when offered; the recipient chooses whether to accept; either partner can stop future deliveries. The proposer pays construction only on acceptance. A due delivery checks each partner's combined cargo and transport cost before spending anything. A shortage stops that whole exchange and records who could not supply it. Existing accepted terms do not change when a recipe is edited in a later release.
+
+Consent and delivery are different facts. An accepted route can be waiting for its first delivery or temporarily unable to deliver. Its last shipment result does not erase the agreement. The map should show an offer, an agreed connection, a completed delivery and a blocked connection differently. Moving goods must correspond to an actual delivery record.
+
+The next geography increment is useful founding. Three people move from an explicit owned source city to a legal new site, leaving at least three behind. Supplies and people transfer atomically; creating a city must not create people from nothing. Existing settlement costs remain canonical data. A small released terrain-output table makes grassland useful for food and forest useful for materials. The engine reads the same table that observations explain. Preserve the inhabited map, city identities and stocks when applying the release; do not regenerate the world to manufacture variety.
+
+Founding is the immediate tactical choice. The resulting location, divided population, buildings and ongoing output are its strategic commitment. The next separate increment lets an actor choose focus and construction for a named owned city, so a food-producing home and a material-producing frontier can serve different purposes. Initial civilization-wide stockpiles remain explicit; city-to-city warehousing, transport labor and a full market are later capabilities, not implied by a road animation.
+
+These priorities respond to actual opening play: by round 2, four civilizations had selected research focus, two had completed Cultivation, and no buildings or routes yet existed. This short sample does not prove that research is overpowered. It reveals the next useful choices to create and observe: use a discovery, protect food, found on a different site, or exchange a surplus. Do not force different strategies through permanent civilization classes.
 
 ## The historical horizon
 
@@ -71,6 +96,8 @@ Examples of later connected effects:
 - A resource boom changes productive opportunities and relationships between neighbors.
 - A crypto boom increases liquidity while creating investment and political consequences.
 - UFO contact creates scientific opportunity, cultural fascination and disagreement over access.
+
+Before every scheduled event, the coordinator brings the current authoritative snapshot to the Creative Director. The Director selects a supported event, target, purpose and result to inspect; application is verified afterward. Routine event consultation does not automatically add calendar years. A meaningful extra historical advance must have explicit evidence and a distinct idempotent record.
 
 Event cooldowns and economic numbers are initial tuning data. Live observations should change them when useful. No claim of balance follows from their presence or from a passing catalogue test.
 
@@ -112,6 +139,10 @@ Show declared in-world objectives and short action summaries. Do not expose hidd
 
 The map is the experience, not a dashboard surrounded by command panels. Desktop inspection can use a side panel. Mobile uses tap inspection and a collapsible bottom sheet; important information cannot depend on hover. Playback controls need usable touch targets and safe-area spacing. Labels declutter with zoom. Civilization identity uses names or symbols as well as color. Event captions stay legible and identify affected places.
 
+Humans can choose visual intensity and light, dark or system theme. Reduced motion takes precedence over spectacle. Simple English, consistent icons plus color, clear emphasis, and touch-accessible explanations make the same facts readable at different levels of detail. These are intended spectator features; an initial connected viewer does not establish that every setting exists.
+
+The dedicated Astra Art Director owns visual implementation and reusable original assets; the Creative Director supplies the gameplay meaning and event direction. New server and multiplayer work belongs to the Astra server-owner role.
+
 Visual review uses the actual build on desktop and narrow portrait viewports. Check a city inspection, an event, a route when implemented and a calendar change. Correct clipping, unreadable controls and misleading presentation. Do not wait for perfect art or balance before moving the world forward.
 
 ## Evidence and the ongoing creative loop
@@ -119,7 +150,7 @@ Visual review uses the actual build on desktop and narrow portrait viewports. Ch
 For each meaningful increment:
 
 1. Choose the next capability that changes how the world works, using current live play and the historical horizon.
-2. Record its observable intent and bounded tasks through the current BlaBla workflow before editing.
+2. Inspect the relevant current systems and applicable primary references or prior verified research. Record the chosen approach, observable intent and bounded tasks through the current BlaBla workflow before editing.
 3. Implement data, mechanics and the smallest clear visual presentation together; keep unavailable work explicit.
 4. Run focused checks, independent review and the canonical project gate. Fix correctness blockers.
 5. Have development agents actually play through the supported action interface. Record commands, outcomes and friction honestly. A scripted fixture is useful evidence, but is not an agent play session.
@@ -127,5 +158,7 @@ For each meaningful increment:
 7. Choose the next consequential expansion. Learn from live fun and balance without turning them into an endless acceptance gate.
 
 Useful future gameplay evidence includes route disruption changing supply, a discovery enabling a previously impossible project, a treaty changing access, a director pulse applying exactly once, a release preserving an inhabited world, and an archived restart preserving the prior run. Catalogue checks alone prove none of those behaviors.
+
+Each hourly creative review inspects the actual mission, goals, systems and process through current BlaBla routes, compares them with the latest owner intent and observed world, and proposes specific changes to the orchestrator. Update affected records rather than rewriting all project memory on a timer. Preserve the distinction between executable evidence, semantic review and future intent.
 
 BlaBla goals remain active while their intended outcome is still open. Passing contracts establish the behaviors exercised by those contracts; they do not prove the prose, strategic depth, visual quality or all possible play. Do not mark a whole historical stage done merely because a subset of its data or UI exists.

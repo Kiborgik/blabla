@@ -21,7 +21,10 @@ export class GameProtocol extends Adapter {
         case 'observe': return this.store.observation(request.seat);
         case 'action': return this.store.submit(request);
         case 'tick': return this.store.directorTick(request);
+        case 'strategy-catchup': return this.store.strategyCatchUp(request);
         case 'catchup': return this.store.catchUp(request);
+        case 'history-advance': return this.store.authoredTransition(request, 'history-advance');
+        case 'release-apply': return this.store.authoredTransition(request, 'release-apply');
         case 'replay': return this.store.replay();
         default: throw new ProtocolError(`unknown op: ${String(request.op)}`);
       }
