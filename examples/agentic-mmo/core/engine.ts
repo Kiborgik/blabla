@@ -1,5 +1,5 @@
 import type { TradePresentation } from './simulation/trade.ts';
-import { observedRecipes } from './simulation/operations.ts';
+import { observedRecipes, observedResidentCapacity } from './simulation/operations.ts';
 import { CIVILIZATIONS, ECONOMY_RULES, validateContent } from './content.ts';
 import { CURRENT_RELEASE } from './release.ts';
 import { completeAttachedPlan, observeActionPlan, validateAttachedPlan } from './planning.ts';
@@ -168,6 +168,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
       : {}),
     ...(!director && hasFeatures(state, ['recurring-decisions']) ? { decisions: decisionObligations(state, seat) } : {}),
     ...(hasFeatures(state, ['building-operations']) ? { buildingRecipes: observedRecipes(director ? state.cities : citiesOf(state, seat)) } : {}),
+    ...(hasFeatures(state, ['resident-capacity']) ? { residentCapacity: observedResidentCapacity(director ? state.cities : citiesOf(state, seat)) } : {}),
     civilization,
     cities: director ? state.cities : citiesOf(state, seat),
     rivals: state.civilizations

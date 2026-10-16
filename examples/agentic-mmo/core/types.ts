@@ -14,7 +14,9 @@ export type EventKind = 'drought' | 'earthquake' | 'resource-boom' | 'crypto-boo
 export type VictoryKind = 'mars' | 'federation' | 'cultural' | 'economic' | 'military';
 
 export interface HexTile { id: number; q: number; r: number; terrain: Terrain; elevation: number; owner: number | null; resource: Resource | null }
-export interface BuildingOperationResult { round: number; status: 'operated' | 'blocked' | 'paused'; paid: Partial<Resources>; produced: Partial<Resources>; shortages: Array<{ resource: Resource; required: number; available: number }> }
+export interface ResidentAllocationResult { ruleVersion: 1; openingPopulation: number; communityReserve: number; required: number; available: number; allocated: number }
+export interface ResidentCapacityObservation { ruleVersion: 1; communityReserve: number; perPaidRecipe: number; cities: Array<{ cityId: string; capacity: number }> }
+export interface BuildingOperationResult { residents?: ResidentAllocationResult; round: number; status: 'operated' | 'blocked' | 'paused'; paid: Partial<Resources>; produced: Partial<Resources>; shortages: Array<{ resource: Resource; required: number; available: number }> }
 export interface BuildingOperation { enabled: boolean; lastResult: BuildingOperationResult | null }
 export interface ConstructionOrder { id: string; cityId: string; buildingId: string; ruleVersion: 1; startedRound: number; paid: Partial<Resources>; workRequired: number; workDone: number }
 export interface ConstructionCompletion { orderId: string; cityId: string; buildingId: string; startedRound: number; completedRound: number; paid: Partial<Resources>; workRequired: number; eventId: string }
@@ -23,7 +25,9 @@ export interface ResearchCompletion { technologyId: string; completedRound: numb
 export type DecisionBlocker = CapabilityBlocker | { kind: 'no-available-choice' } | { kind: 'zero-work' } | { kind: 'active-commitment'; targetId: string };
 export interface DecisionObligation { kind: 'research' | 'construction'; cityId: string | null; status: 'required' | 'active' | 'blocked'; targetId: string | null; progress: { done: number; required: number } | null; availableIds: string[]; blockers: Array<{ capabilityId: string | null; reason: DecisionBlocker }> }
 export interface DecisionObligations { research: DecisionObligation; construction: DecisionObligation[] }
-export interface City { id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
+export interface CoastalFoundingQuote { mode: 'coast'; ruleVersion: 1; tileIds: number[]; edges: number }
+export interface CoastalFoundingReceipt { ruleVersion: 1; sourceCityId: string; sourceTileId: number; destinationTileId: number; pathTileIds: number[]; population: number; paid: Partial<Resources>; foundedRound: number; eventId: string }
+export interface City { coastalFounding?: CoastalFoundingReceipt; id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
 export interface Civilization { id: number; name: string; color: string; adjective: string; objective: string; era: number; resources: Resources; technologies: string[]; researchTarget: string; researchProgress: number; lastResearchCompletion?: ResearchCompletion; influence: number; legitimacy: number; marsProgress: number; marsPopulation: number; marsSupplyStreak: number; federationStreak: number; score: number }
 export interface Route { id: string; from: string; to: string; owner: number; partner: number; active: boolean; damage: number; volume: number; agreement?: TradeAgreement }
 export interface LandTransportQuote { mode: 'land'; ruleVersion: 1; tileIds: number[]; edges: number }
@@ -37,7 +41,7 @@ export interface PublicProjectBase { id: string; routeId: string; agreementOffer
 export type PublicProject = PublicProjectBase & ({ status: 'pending'; expiresRound: number } | { status: 'committed'; acceptedRound: number; dueRound: number });
 export interface PublicProjectResult { projectId: string; routeId: string; agreementOfferId: string; outcome: 'completed' | 'declined' | 'cancelled' | 'expired' | 'failed' | 'no-work-needed'; reason: string; proposer: number; recipient: number; proposerPaid: Partial<Resources>; recipientPaid: Partial<Resources>; damageBefore: number | null; damageAfter: number | null }
 export interface Treaty { id: string; a: number; b: number; kind: 'trade' | 'federation' | 'peace'; since: number }
-export interface GameEvent { id: string; round: number; type: string; title: string; detail: string; actor: number | null; target: number | null; tileId: number | null; cause: string; effects: string[]; importance: number; publicProjectResult?: PublicProjectResult }
+export interface GameEvent { id: string; round: number; type: string; title: string; detail: string; actor: number | null; target: number | null; tileId: number | null; cause: string; effects: string[]; importance: number; publicProjectResult?: PublicProjectResult; coastalFounding?: CoastalFoundingReceipt }
 export interface Outcome { kind: VictoryKind; winners: number[]; round: number; reason: string }
 export interface IndependentTurns { epoch: string; strategyTicks: number; lastActionWindow: number[]; actionsInWindow: number[] }
 export interface TurnAdmission { mode: 'sequential' | 'independent'; nextActionAt: string | null; nextStrategyAt: string | null }
@@ -49,6 +53,7 @@ export type GameAction =
   | { type: 'build'; project: string; cityId?: string }
   | { type: 'set-building-operation'; cityId: string; buildingId: string; enabled: boolean }
   | { type: 'settle'; tileId: number; sourceCityId?: string }
+  | { type: 'settle-coast'; tileId: number; sourceCityId: string }
   | { type: 'trade'; partner: number }
   | { type: 'propose-trade'; partner: number; recipeId: string; sourceCityId?: string; recipientCityId?: string }
   | { type: 'respond-trade'; offerId: string; accept: boolean }
@@ -64,8 +69,8 @@ export type GameAction =
   | { type: 'event'; event: EventKind; target: number }
   | { type: 'wait' };
 export interface Command { seat: number; expectedRevision: number; action: GameAction; timestamp?: string; plan?: ActionPlanItem[]; observedRevision?: number }
-export interface ActionOption { action: GameAction; label: string; reason: string; tradeQuote?: { transport: LandTransportQuote; cadenceRounds: number } }
-export interface Observation { gameVersion: string; revision: number; round: number; year: number; seat: number; activeSeat: number | null; admission?: TurnAdmission; decisions?: DecisionObligations; actionPlan?: ActionPlan | null; buildingRecipes?: Array<{ buildingId: string; inputs: Partial<Resources>; outputs: Partial<Resources> }>; civilization: Civilization | null; cities: City[]; rivals: Array<{ id: number; name: string; era: number; population: number; objective: string }>; routes: Route[]; treaties: Treaty[]; tradeOffers?: TradeOffer[]; publicProjects?: PublicProject[]; recentEvents: GameEvent[]; legalActions: ActionOption[]; outcome: Outcome | null }
+export interface ActionOption { coastalQuote?: CoastalFoundingQuote; action: GameAction; label: string; reason: string; tradeQuote?: { transport: LandTransportQuote; cadenceRounds: number } }
+export interface Observation { residentCapacity?: ResidentCapacityObservation; gameVersion: string; revision: number; round: number; year: number; seat: number; activeSeat: number | null; admission?: TurnAdmission; decisions?: DecisionObligations; actionPlan?: ActionPlan | null; buildingRecipes?: Array<{ buildingId: string; inputs: Partial<Resources>; outputs: Partial<Resources> }>; civilization: Civilization | null; cities: City[]; rivals: Array<{ id: number; name: string; era: number; population: number; objective: string }>; routes: Route[]; treaties: Treaty[]; tradeOffers?: TradeOffer[]; publicProjects?: PublicProject[]; recentEvents: GameEvent[]; legalActions: ActionOption[]; outcome: Outcome | null }
 export interface ActionOutcome { status: 'completed' | 'blocked' | 'failed'; code: string; reason: string }
 export interface TransitionResult { ok: boolean; state: WorldState; events: GameEvent[]; error?: string; actionOutcome?: ActionOutcome }
 export interface ReplayFrame { state: WorldState; events: GameEvent[] }
@@ -80,7 +85,8 @@ export type EffectDefinition =
   | { kind: 'civilization'; field: 'influence' | 'legitimacy'; amount: number }
   | { kind: 'route'; field: 'damage'; amount: number };
 export interface TechnologyDefinition { id: string; name: string; requiredFeatures: readonly string[]; era: number; cost: number; requires: string[]; capability: string }
-export interface BuildingDefinition { id: string; name: string; requiredFeatures: readonly string[]; minEra: number; cost: Partial<Resources>; requires: string[]; effects: EffectDefinition[]; production: Partial<Resources>; operatingInputs?: Partial<Resources>; description: string }
+export type BuildingCapability = 'coastal-departure';
+export interface BuildingDefinition { capabilities?: readonly BuildingCapability[]; siteRequirement?: 'coastal'; id: string; name: string; requiredFeatures: readonly string[]; minEra: number; cost: Partial<Resources>; requires: string[]; effects: EffectDefinition[]; production: Partial<Resources>; operatingInputs?: Partial<Resources>; description: string }
 
 export interface FeatureDefinition { id: string; name: string; description: string }
 export interface ReleaseDefinition { id: string; gameVersion: string; featureIds: readonly string[] }

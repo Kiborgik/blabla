@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-live.16",
+    "date": "2026-10-16",
+    "title": "Research advances, new shores become reachable",
+    "changes": [
+      "The server prepares productive research: each economy beat invests actual town science output rather than instantly draining old reserves. Progress, remaining work and past output are shown separately. Existing discoveries and stored science are preserved.",
+      "After the compatible world update, Navigation and a timed coastal Boat yard enable exact coastal founding with a retained sea path, conserved settlers and one construction payment. The tree explains the required research and departure town.",
+      "Resident support gives paid town recipes a shared local capacity. Current support and historical paid/output or blocked results remain separate in town inspection.",
+      "Website publication does not itself apply gameplay capabilities. The existing world and completed history are retained; the illustrative preview and labeled legal local fixtures remain distinct from actual model play."
+    ]
+  },
+  {
     "version": "0.1.0-live.15",
     "date": "2026-10-16",
     "title": "See who chose what",

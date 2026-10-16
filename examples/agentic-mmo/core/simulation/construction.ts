@@ -32,6 +32,7 @@ export function installBuilding(state: WorldState, city: City, definition: Build
     cause: 'Known technology and a paid material investment enabled this construction',
     effects: [
       ...effects,
+      ...(definition.capabilities ?? []).map(capability => `Completed capability ${capability}`),
       ...RESOURCE_IDS.filter(resource => (definition.operatingInputs?.[resource] ?? 0) > 0).map(resource => `Operating input ${resource} ${definition.operatingInputs?.[resource]} per funded beat`),
       ...RESOURCE_IDS.filter(resource => (definition.production[resource] ?? 0) > 0).map(resource => `Seasonal ${resource} +${definition.production[resource]}${paidRecipe(definition) ? ' when the complete operating recipe is funded' : ''}`),
     ],

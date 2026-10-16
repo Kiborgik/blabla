@@ -1249,3 +1249,11 @@ dialog h2 {
   #events-dialog .dialog-top { top: -16px; }
   #events-dialog h2 { margin-top: 12px; font-size: 26px; }
 }
+
+.settlement-support { display: flex; gap: 7px; align-items: center; font-weight: 700; font-size: 14px; line-height: 1.5; }
+.town-receipt { margin: 8px 0; border-block: 1px solid var(--border); font-size: 13px; line-height: 1.6; }
+.town-receipt summary { min-height: 44px; padding: 11px 0; cursor: pointer; font-weight: 600; }
+.town-receipt p { margin: 8px 0; }
+.coastal-path-facts { overflow-wrap: anywhere; }
+.coastal-source { min-height: 44px; padding: 8px 12px; margin-bottom: 8px; }
+.resident-allocation { font-weight: 700; }

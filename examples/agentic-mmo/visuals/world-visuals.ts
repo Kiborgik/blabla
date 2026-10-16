@@ -44,7 +44,10 @@ export function populationFootprint(population: number): number {
 
 export function settlementVisual(city: SettlementFacts, detail: DetailLevel): SettlementVisual {
   const budget = DETAIL_BUDGETS[detail];
-  const houses = Math.min(budget.houses, Math.max(1, POPULATION_STEPS.filter((threshold) => city.population >= threshold).length));
+  const appearances = buildingAppearances(city.buildings, detail);
+  const conditionParts = damageParts(city.damage);
+  const houseBudget = Math.floor((budget.parts - appearances.reduce((count, appearance) => count + appearance.corePartIds.length, 0) - conditionParts.length) / 2);
+  const houses = Math.min(budget.houses, houseBudget, Math.max(1, POPULATION_STEPS.filter((threshold) => city.population >= threshold).length));
   const parts: VisualPart[] = [];
   const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale'], rotation = 0): void => {
     parts.push({ id, shape, material, position, scale, rotation });
@@ -57,9 +60,7 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
     add(`home-${index}-wall`, 'box', 'plaster', [x, height / 2, z], [.4 * density, height, .36 * density]);
     add(`home-${index}-roof`, 'gable', index === 0 ? 'identity' : 'roof', [x, height + .12, z], [.46 * density, .24, .42 * density], index % 2 ? Math.PI / 2 : 0);
   }
-  const appearances = buildingAppearances(city.buildings, detail);
   const buildings = appearances.map(({ icon, label }) => ({ icon, label, value: 1 }));
-  const conditionParts = damageParts(city.damage);
   parts.push(...allocateBuildingParts(appearances, budget.parts - parts.length - conditionParts.length));
   const conditions: VisualBadge[] = [];
   if (city.wellbeing < 40) conditions.push({ icon: 'wellbeing', label: 'Wellbeing', value: city.wellbeing });

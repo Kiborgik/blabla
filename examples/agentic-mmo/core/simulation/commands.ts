@@ -1,4 +1,5 @@
-import { BUILDINGS, CONSTRUCTION_RULES, DIRECTOR_EVENTS, ECONOMY_RULES, RESOURCE_IDS } from '../content.ts';
+import { executeCoastalFounding, foundSettlement } from './coastal.ts';
+import { BUILDINGS, CONSTRUCTION_RULES, DIRECTOR_EVENTS, ECONOMY_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS } from '../content.ts';
 import { DIRECTOR_SEAT, type GameAction, type GameEvent, type Resources, type WorldState } from '../types.ts';
 import { hasFeatures } from './history.ts';
 import { installBuilding, requiredConstructionWork } from './construction.ts';
@@ -94,8 +95,9 @@ export function executeAction(
         actor: seat,
         target: seat,
         tileId: location,
-        cause:
-          'The civilization committed its accumulated and future science to a released technology',
+        cause: hasFeatures(state, [RESEARCH_INVESTMENT_RULES.featureId])
+          ? 'The civilization committed science produced by its settlements each strategic beat to a released technology'
+          : 'The civilization committed its accumulated and future science to a released technology',
         effects: [`Research target ${action.technology}`],
         importance: 2,
       });
@@ -144,27 +146,15 @@ export function executeAction(
       });
       return;
     }
+    case 'settle-coast':
+      executeCoastalFounding(state, seat, action.sourceCityId, action.tileId, events);
+      return;
     case 'settle': {
       const tile = state.tiles.find((candidate) => candidate.id === action.tileId);
       if (!tile) throw new RangeError('Settlement site is missing');
       const conserved = hasFeatures(state, ['conserved-founding']);
       const source = conserved ? cities.find((candidate) => candidate.id === action.sourceCityId) : firstCity;
-      if (conserved && (!source || source.population < ECONOMY_RULES.settle.population + ECONOMY_RULES.settle.minimumSourcePopulation))
-        throw new RangeError('Founding requires an owned source with enough people to preserve its minimum population');
-      if (conserved && source) source.population -= ECONOMY_RULES.settle.population;
-      transferCost(civilization.resources, ECONOMY_RULES.settle.cost);
-      tile.owner = seat;
-      const city = {
-        id: `city-${seat}-${state.revision}`,
-        name: `${civilization.name} ${cities.length + 1}`,
-        civId: seat,
-        tileId: tile.id,
-        ...ECONOMY_RULES.initialCity,
-        population: ECONOMY_RULES.settle.population,
-        focus: source?.focus ?? 'growth',
-        buildings: [],
-      };
-      state.cities.push(city);
+      const city = foundSettlement(state, seat, tile, source, conserved);
       emitEvent(state, events, {
         type: 'settlement-founded',
         title: `${city.name} is founded`,

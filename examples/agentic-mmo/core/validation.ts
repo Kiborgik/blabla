@@ -13,6 +13,7 @@ import {
 } from './content.ts';
 import { parseUtcTimestamp } from './simulation/clock.ts';
 import { isLandTransportQuote, landTransportTopologyBlock } from './simulation/transport.ts';
+import { coastalTopologyBlock, isCoastalFoundingQuote } from './simulation/coastal.ts';
 import { isPersistedActionPlan } from './planning.ts';
 import {
   CIV_COUNT,
@@ -20,6 +21,7 @@ import {
   GAME_VERSION,
   SCHEMA_VERSION,
   type City,
+  type CoastalFoundingReceipt,
   type Civilization,
   type GameEvent,
   type EventKind,
@@ -144,10 +146,19 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
   return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
-function operationResult(value: unknown, round: number): boolean {
-  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages'])
+function residentAllocation(value: unknown): value is { available: number; required: number; allocated: number } {
+  return record(value) && exactKeys(value, ['ruleVersion', 'openingPopulation', 'communityReserve', 'required', 'available', 'allocated'])
+    && value.ruleVersion === 1 && integer(value.openingPopulation, 1) && integer(value.communityReserve)
+    && integer(value.required, 1) && integer(value.available) && integer(value.allocated)
+    && value.available <= Math.max(0, value.openingPopulation - value.communityReserve);
+}
+
+function operationResult(value: unknown, round: number, features: string[]): boolean {
+  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages', ...(Object.hasOwn(value, 'residents') ? ['residents'] : [])])
     || !integer(value.round, 0, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
     || !Array.isArray(value.shortages)) return false;
+  if (Object.hasOwn(value, 'residents') && (!features.includes('resident-capacity') || !residentAllocation(value.residents))) return false;
+  const residents = residentAllocation(value.residents) ? value.residents : null;
   const resources: string[] = [];
   for (const shortage of value.shortages) {
     if (!record(shortage) || !exactKeys(shortage, ['resource', 'required', 'available'])
@@ -157,9 +168,12 @@ function operationResult(value: unknown, round: number): boolean {
     resources.push(shortage.resource);
   }
   if (!unique(resources)) return false;
-  if (value.status === 'operated') return resources.length === 0;
+  if (value.status === 'operated') return resources.length === 0
+    && (residents === null || residents.allocated === residents.required && residents.available >= residents.required);
   return Object.keys(value.paid).length === 0 && Object.keys(value.produced).length === 0
-    && (value.status === 'paused' ? resources.length === 0 : value.status === 'blocked' && resources.length > 0);
+    && (residents === null || residents.allocated === 0)
+    && (value.status === 'paused' ? resources.length === 0 : value.status === 'blocked'
+      && (resources.length > 0 || residents !== null && residents.available < residents.required));
 }
 
 function buildingOperations(value: City, round: number, features: string[]): boolean {
@@ -170,7 +184,7 @@ function buildingOperations(value: City, round: number, features: string[]): boo
   if (!features.includes('building-operations') || !record(operations) || !exactKeys(operations, paid)) return false;
   return Object.values(operations).every((operation) => record(operation)
     && exactKeys(operation, ['enabled', 'lastResult']) && typeof operation.enabled === 'boolean'
-    && (operation.lastResult === null || operationResult(operation.lastResult, round)));
+    && (operation.lastResult === null || operationResult(operation.lastResult, round, features)));
 }
 
 function orderRevision(value: unknown, revision: number): number | null {
@@ -184,6 +198,37 @@ function completionRevision(value: unknown, revision: number): number | null {
   const [head, tail] = value.split(':');
   const result = Number(head);
   return integer(result, 1, revision) && integer(Number(tail)) ? result : null;
+}
+
+function coastalReceipt(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER, maxTiles = Number.MAX_SAFE_INTEGER): value is CoastalFoundingReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'sourceCityId', 'sourceTileId', 'destinationTileId', 'pathTileIds', 'population', 'paid', 'foundedRound', 'eventId'])
+    || value.ruleVersion !== 1 || !boundedText(value.sourceCityId) || !integer(value.sourceTileId) || !integer(value.destinationTileId)
+    || !integer(value.population, 1) || !resourceAmounts(value.paid) || !integer(value.foundedRound, 0, round)
+    || completionRevision(value.eventId, revision) === null || !Array.isArray(value.pathTileIds)) return false;
+  const quote = { mode: 'coast', ruleVersion: 1, tileIds: value.pathTileIds, edges: value.pathTileIds.length - 1 };
+  return isCoastalFoundingQuote(quote, maxTiles) && quote.tileIds[0] === value.sourceTileId && quote.tileIds.at(-1) === value.destinationTileId;
+}
+
+function sameCoastalReceipt(left: CoastalFoundingReceipt, right: CoastalFoundingReceipt): boolean {
+  return left.ruleVersion === right.ruleVersion && left.sourceCityId === right.sourceCityId && left.sourceTileId === right.sourceTileId
+    && left.destinationTileId === right.destinationTileId && left.population === right.population && left.foundedRound === right.foundedRound && left.eventId === right.eventId
+    && left.pathTileIds.length === right.pathTileIds.length && left.pathTileIds.every((id, index) => id === right.pathTileIds[index])
+    && Object.keys(left.paid).length === Object.keys(right.paid).length && RESOURCE_IDS.every(resource => Object.hasOwn(left.paid, resource) === Object.hasOwn(right.paid, resource) && left.paid[resource] === right.paid[resource]);
+}
+
+function coastalRecords(cities: City[], events: GameEvent[], tiles: HexTile[], features: string[], round: number, revision: number): boolean {
+  const receipts: CoastalFoundingReceipt[] = [];
+  const valid = (value: unknown): value is CoastalFoundingReceipt => features.includes('coastal-founding') && coastalReceipt(value, revision, round, tiles.length)
+    && coastalTopologyBlock({ tiles }, { mode: 'coast', ruleVersion: 1, tileIds: value.pathTileIds, edges: value.pathTileIds.length - 1 }, value.sourceTileId, value.destinationTileId) === null;
+  for (const settlement of cities) {
+    if (!Object.hasOwn(settlement, 'coastalFounding')) continue;
+    const receipt = settlement.coastalFounding;
+    if (!valid(receipt) || receipt.destinationTileId !== settlement.tileId) return false;
+    const event = events.find(item => item.id === receipt.eventId);
+    if (event && (!event.coastalFounding || !sameCoastalReceipt(receipt, event.coastalFounding))) return false;
+    receipts.push(receipt);
+  }
+  return unique(receipts.map(receipt => receipt.eventId)) && events.every(event => !Object.hasOwn(event, 'coastalFounding') || valid(event.coastalFounding));
 }
 
 function construction(value: unknown, settlement: City, round: number, revision: number, ids: string[]): boolean {
@@ -430,7 +475,7 @@ function treaty(value: unknown): value is Treaty {
   );
 }
 
-function event(value: unknown): value is GameEvent {
+export function isGameEvent(value: unknown): value is GameEvent {
   return (
     record(value) &&
     ['id', 'type', 'title', 'cause'].every((field) => text(value[field])) &&
@@ -442,6 +487,10 @@ function event(value: unknown): value is GameEvent {
     strings(value.effects) &&
     value.effects.length > 0 &&
     finite(value.importance) &&
+    (value.type !== 'coastal-founded' || Object.hasOwn(value, 'coastalFounding')) &&
+    (!Object.hasOwn(value, 'coastalFounding') || (coastalReceipt(value.coastalFounding) && value.type === 'coastal-founded'
+      && value.coastalFounding.eventId === value.id && value.coastalFounding.foundedRound === value.round && value.coastalFounding.destinationTileId === value.tileId
+      && integer(value.actor, 0, CIV_COUNT - 1) && value.target === value.actor)) &&
     (!Object.hasOwn(value, 'publicProjectResult') || (publicProjectResult(value.publicProjectResult) && record(value.publicProjectResult) && value.type === `public-project-${String(value.publicProjectResult.outcome)}`))
   );
 }
@@ -557,7 +606,7 @@ export function isWorldState(
     !value.treaties.every(treaty) ||
     !unique(value.treaties.map((item) => item.id)) ||
     !Array.isArray(value.events) ||
-    !value.events.every(event) ||
+    !value.events.every(isGameEvent) ||
     !unique(value.events.map((item) => item.id))
   )
     return false;
@@ -579,6 +628,7 @@ export function isWorldState(
     !unique(cities.map((item) => item.tileId)) ||
     !cities.every((item) => buildingOperations(item, round, features)) ||
     !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
+    !coastalRecords(cities, value.events, tiles, features, round, value.revision) ||
     !value.civilizations.every((item) =>
       cities.some((settlement) => settlement.civId === item.id),
     ) ||

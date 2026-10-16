@@ -1,4 +1,4 @@
-import { FEATURES } from '../content.ts';
+import { FEATURES, RESEARCH_INVESTMENT_RULES } from '../content.ts';
 import { RELEASES } from '../release.ts';
 import {
   DIRECTOR_SEAT,
@@ -11,7 +11,7 @@ import {
 import { parseUtcTimestamp } from './clock.ts';
 import { commitEvents, emitEvent } from './events.ts';
 import { hasFeatures } from './history.ts';
-import { createIndependentTurns } from './turns.ts';
+import { createIndependentTurns, strategyTimingError } from './turns.ts';
 
 function rejected(state: WorldState, error: string): TransitionResult {
   return { ok: false, state, events: [], error };
@@ -148,6 +148,10 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
     (command.timestamp === undefined || parseUtcTimestamp(command.timestamp) === null)
   )
     return rejected(state, 'Independent release activation requires an explicit UTC epoch');
+  if (['resident-capacity', RESEARCH_INVESTMENT_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
+    const timingError = strategyTimingError(state, command.timestamp);
+    if (timingError) return rejected(state, timingError);
+  }
   const next = structuredClone(state);
   const events: GameEvent[] = [];
   next.revision += 1;

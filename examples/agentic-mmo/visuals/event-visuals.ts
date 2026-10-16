@@ -98,7 +98,7 @@ export function eventVisual(event: GameEvent): VisualEvent | null {
   if (event.type === 'building-operation') {
     const buildingId = /\/([a-z-]+) at strategic round \d+$/.exec(event.detail)?.[1];
     const icon = (buildingId ? buildingIdentity(buildingId)?.icon : null) ?? 'infrastructure';
-    const label = event.title.endsWith(' blocked') ? 'Building needs supplies' : event.title.endsWith(' paused') ? 'Building paused' : made ? 'Building made supplies' : 'No output recorded';
+    const label = event.title.endsWith(' blocked') ? 'Building could not operate' : event.title.endsWith(' paused') ? 'Building paused' : made ? 'Building made supplies' : 'No output recorded';
     mark = { label, icon, cue: made ? 'work' : 'status' };
   }
   if (!mark) return null;

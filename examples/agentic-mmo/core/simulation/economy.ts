@@ -1,4 +1,4 @@
-import { ECONOMY_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
+import { ECONOMY_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
 import type { City, GameEvent, Resources, WorldState } from '../types.ts';
 import { siteProduction } from './sites.ts';
 import { emitEvent } from './events.ts';
@@ -112,11 +112,12 @@ function supplyCity(state: WorldState, city: City, events: GameEvent[]): boolean
   return false;
 }
 
-function resolveResearch(state: WorldState, civilizationId: number, events: GameEvent[]): void {
+function resolveResearch(state: WorldState, civilizationId: number, producedScience: number, events: GameEvent[]): void {
   const civilization = civilizationById(state, civilizationId);
   const technology = TECHNOLOGIES.find((candidate) => candidate.id === civilization.researchTarget);
   if (!technology) return;
   const invested = Math.min(
+    hasFeatures(state, [RESEARCH_INVESTMENT_RULES.featureId]) ? producedScience : Infinity,
     civilization.resources.science,
     Math.max(0, technology.cost - civilization.researchProgress),
   );
@@ -145,6 +146,7 @@ function resolveResearch(state: WorldState, civilizationId: number, events: Game
 
 export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   const openingWork = openingConstructionWork(state);
+  const researchBudgets = new Map<number, number>();
   allocateOperations(state);
   for (const civilization of state.civilizations) {
     let culture = 0;
@@ -160,6 +162,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
       food += production.food;
       if (supplyCity(state, city, events)) suppliedCities += 1;
     }
+    researchBudgets.set(civilization.id, quantize(science));
     civilization.influence = quantize(clamp(civilization.influence + culture, 0));
     if (suppliedCities === cities.length)
       civilization.legitimacy = quantize(clamp(civilization.legitimacy + culture / 20, 0, 100));
@@ -187,6 +190,6 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   }
   resolveTrade(state, events);
   resolvePublicProjects(state, events);
-  for (const civilization of state.civilizations) resolveResearch(state, civilization.id, events);
+  for (const civilization of state.civilizations) resolveResearch(state, civilization.id, researchBudgets.get(civilization.id) ?? 0, events);
   resolveConstruction(state, openingWork, events);
 }

@@ -1,8 +1,9 @@
 import type { CapabilityCatalogue, CapabilityProjection, CapabilityBlocker } from '../core/capabilities.ts';
 import { RESOURCE_IDS } from '../core/content.ts';
-import type { DecisionBlocker, DecisionObligation, Resources } from '../core/types.ts';
+import type { DecisionBlocker, DecisionObligation, GameEvent, Resources } from '../core/types.ts';
 import { resourceGuide } from './viewer-appearance.ts';
 import { visualIcon } from './world-cues.ts';
+import { researchProgressPresentation } from './research-progress.ts';
 
 export interface CapabilityTreeInput {
   runId: string;
@@ -10,6 +11,7 @@ export interface CapabilityTreeInput {
   towns: Array<{ id: string; name: string }>;
   catalogue: CapabilityCatalogue;
   projection: CapabilityProjection;
+  researchEvents?: readonly GameEvent[];
 }
 
 export interface CapabilityTreeNode {
@@ -25,6 +27,7 @@ export interface CapabilityTreeNode {
   description: string;
   support: string | null;
   research: string | null;
+  researchExplanation: string | null;
   construction: string | null;
   facts: Array<{ label: string; value: string }>;
 }
@@ -53,6 +56,7 @@ function blockerText(blocker: CapabilityBlocker, input: CapabilityTreeInput): st
     case 'city-selection': return 'Choose a town to inspect building requirements';
     case 'missing-city': return `Town unavailable: ${town(blocker.cityId)}`;
     case 'foreign-city': return `${town(blocker.cityId)} belongs to another civilization`;
+    case 'coastal-site': return 'Needs a coastal town';
     case 'missing-site': return `The site for ${town(blocker.cityId)} is unavailable`;
     case 'legacy-target': return `This world's building choice targets ${town(blocker.cityId)}`;
     case 'active-commitment': return `Finish the active commitment: ${capabilityName(input, blocker.targetId)}`;
@@ -94,13 +98,20 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
     const id = `${item.kind}:${item.definition.id}`;
     const row = rows.get(id);
     const definition = item.definition;
+    const research = 'capability' in definition ? researchProgressPresentation({
+      unlockedFeatures: input.projection.unlockedFeatures, civilizationId: input.projection.civilizationId,
+      project: row?.research ? { name: definition.name, ...row.research } : null,
+    }) : null;
     const facts: CapabilityTreeNode['facts'] = 'capability' in definition
       ? [{ label: 'Research work', value: `${number(definition.cost)} Science` }]
       : [
         { label: 'Build once', value: amounts(definition.cost) },
-        { label: 'Uses each operating season', value: amounts(definition.operatingInputs ?? {}) },
-        { label: 'Base production before productivity', value: amounts(definition.production) },
+        ...(definition.capabilities?.includes('coastal-departure') ? [{ label: 'Enables', value: 'Coastal departure with Navigation; no operating output' }, { label: 'Site', value: 'A coastal town' }] : [
+          { label: 'Uses each operating season', value: amounts(definition.operatingInputs ?? {}) },
+          { label: 'Base production before productivity', value: amounts(definition.production) },
+        ]),
       ];
+    if (research?.remaining) facts.push({ label: 'Remaining research work', value: research.remaining });
     if (row?.operation) facts.push({ label: 'Operating now', value: row.operation.enabled ? 'On' : 'Paused' });
     if (row?.construction) facts.push(
       { label: 'Construction work', value: `${number(row.construction.workDone)} / ${number(row.construction.workRequired)}` },
@@ -116,6 +127,7 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
       description: 'capability' in definition ? definition.capability : definition.description,
       support: row?.status !== 'planned' ? null : row.support === 'registered-release' ? 'Included in another release' : 'Catalogue only',
       research: row?.research ? `Researching · ${number(row.research.progress)} / ${number(row.research.cost)} science` : null,
+      researchExplanation: research?.explanation ?? null,
       construction: row?.construction ? `Under construction · ${number(row.construction.workDone)} / ${number(row.construction.workRequired)} work` : null,
       facts,
     };
@@ -227,8 +239,8 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
       facts.append(entry);
     }
     details.append(facts);
-    if (node.kind === 'technology') details.append(text('p', 'Science is invested as research progresses. It is not a selection price.', 'capability-note'));
-    else details.append(text('p', 'Production here is catalogue capacity. Actual paid inputs and output are recorded in the town details.', 'capability-note'));
+    if (node.researchExplanation) details.append(text('p', node.researchExplanation, 'capability-note'));
+    else if (node.facts.some(fact => fact.label === 'Base production before productivity')) details.append(text('p', 'Production here is catalogue capacity. Actual paid inputs and output are recorded in the town details.', 'capability-note'));
     details.append(relations(node, nodes, 'leadsTo'));
     article.append(details, relations(node, nodes, 'requires'));
     return article;
@@ -249,7 +261,25 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
       card.append(heading, text('strong', labels[lane.status], 'capability-decision-status'));
       if (lane.targetId) card.append(text('p', capabilityName(input, lane.targetId)));
       if (lane.progress) card.append(text('p', `${lane.kind === 'construction' ? 'Construction work' : 'Research work'} · ${number(lane.progress.done)} / ${number(lane.progress.required)}`));
-      if (lane.kind === 'construction' && lane.targetId) card.append(text('p', 'The building is not finished yet. Output starts in a later season after completion.', 'capability-note'));
+      if (lane.kind === 'research') {
+        const research = researchProgressPresentation({
+          unlockedFeatures: projection.unlockedFeatures, civilizationId: projection.civilizationId,
+          project: lane.targetId && lane.progress ? { name: capabilityName(input, lane.targetId), progress: lane.progress.done, cost: lane.progress.required } : null,
+          ...(input.researchEvents ? { events: input.researchEvents } : {}),
+        });
+        if (research.remaining) card.append(text('strong', research.remaining));
+        const explanation = text('details', '', 'capability-decision-reasons');
+        explanation.append(control(text('summary', 'How research advances'), 'research-explanation'), text('p', research.explanation, 'capability-note'));
+        if (research.lastOutput) explanation.append(text('p', research.lastOutput.label, 'capability-note'), text('p', research.outputExplanation, 'capability-note'));
+        card.append(explanation);
+      }
+      if (lane.kind === 'construction' && lane.targetId) {
+        const definition = input.catalogue.buildings.find(building => building.id === lane.targetId);
+        const explanation = definition?.capabilities?.includes('coastal-departure')
+          ? 'The building is not finished yet. Its capability becomes usable after completion.'
+          : 'The building is not finished yet. Output starts in a later season after completion.';
+        card.append(text('p', explanation, 'capability-note'));
+      }
       for (const id of lane.availableIds) card.append(button(capabilityName(input, id), `decision:${lane.kind}:${lane.cityId ?? 'shared'}:${id}`, () => focusNode(`${lane.kind === 'research' ? 'technology' : 'building'}:${id}`)));
       if (lane.blockers.length) {
         const reasons = text('details', '', 'capability-decision-reasons');

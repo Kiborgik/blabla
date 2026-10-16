@@ -1,3 +1,4 @@
+import { availableCoastalActions, foundingSiteEligible, foundingSourceEligible } from './coastal.ts';
 import {
   ACTION_FEATURES,
   BUILDINGS,
@@ -148,19 +149,13 @@ export function availableActions(
     const ownedTiles = state.tiles.filter((tile) => tile.owner === seat);
     for (const tile of state.tiles) {
       if (
-        tile.owner !== null ||
-        tile.terrain === 'ocean' ||
-        tile.terrain === 'mountain' ||
-        !ownedTiles.some((owned) => hexDistance(owned, tile) <= 2) ||
-        state.cities.some((city) => {
-          const site = state.tiles.find((candidate) => candidate.id === city.tileId);
-          return site !== undefined && hexDistance(site, tile) < 2;
-        })
+        !foundingSiteEligible(state, tile) ||
+        !ownedTiles.some((owned) => hexDistance(owned, tile) <= 2)
       )
         continue;
       if (hasFeatures(state, ['conserved-founding'])) {
         for (const source of cities) {
-          if (source.population < ECONOMY_RULES.settle.population + ECONOMY_RULES.settle.minimumSourcePopulation) continue;
+          if (!foundingSourceEligible(source)) continue;
           choices.push({
             action: { type: 'settle', tileId: tile.id, sourceCityId: source.id },
             label: `Found settlement at ${tile.q}, ${tile.r} from ${source.name}`,
@@ -176,6 +171,7 @@ export function availableActions(
       }
     }
   }
+  choices.push(...availableCoastalActions(state, seat));
   choices.push(...availableTradeActions(state, seat, tradePresentation), ...availablePublicProjectActions(state, seat));
   if (actionFeatureAvailable(state, 'repair-city') && canAfford(civilization.resources, ECONOMY_RULES.repair.cost)) {
     for (const city of cities.filter((candidate) => candidate.damage > 0)) {
@@ -224,6 +220,7 @@ export function sameAction(left: GameAction, right: unknown): boolean {
       return 'project' in right && left.project === right.project && left.cityId === ('cityId' in right ? right.cityId : undefined);
     case 'set-building-operation':
       return 'cityId' in right && 'buildingId' in right && 'enabled' in right && left.cityId === right.cityId && left.buildingId === right.buildingId && left.enabled === right.enabled;
+    case 'settle-coast':
     case 'settle':
       return 'tileId' in right && left.tileId === right.tileId && left.sourceCityId === ('sourceCityId' in right ? right.sourceCityId : undefined);
     case 'trade':

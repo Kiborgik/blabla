@@ -1,6 +1,6 @@
 import { CIV_COUNT } from './types.ts';
 import type {
-  BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
+  BuildingCapability, BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
   EraDefinition, FeatureDefinition, Focus, GameAction, HistoricalMilestone, Resource,
   Resources, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe,
 } from './types.ts';
@@ -17,9 +17,19 @@ export const CIVILIZATIONS: CivilizationDefinition[] = [
   { name: 'Vesper', adjective: 'Vesperian', color: '#cea2ed', capital: 'Lumen', focus: 'culture', objective: 'Give people a shared story worth joining.' },
 ];
 
+export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, perPaidRecipe: 3 } as const;
+
 export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4 } } as const;
 
+export const BUILDING_CAPABILITY_ACTIONS: Record<BuildingCapability, readonly GameAction['type'][]> = { 'coastal-departure': ['settle-coast'] };
+export const RESEARCH_INVESTMENT_RULES = { ruleVersion: 1, featureId: 'productive-research', budget: 'current-city-science-output' } as const;
+
+export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
+
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'coastal-founding', name: 'New shores', description: 'Navigation and a completed coastal Boat yard let existing residents found a new coastal town along a recorded ocean path.' },
+  { id: 'productive-research', name: 'Productive research', description: 'Research advances from actual science made each season; old reserves do not accelerate the current project.' },
+  { id: 'resident-capacity', name: 'People support local work', description: 'Each town uses its opening residents and complete supplies together for paid operations, so conserved founding changes later local support.' },
   { id: 'recurring-decisions', name: 'Choose the next commitment', description: 'Research and each town retain real commitments and expose required next choices after completion without stopping other civilizations.' },
   { id: 'settlement-turns', name: 'Five civilizations awaken', description: 'Five civilization actors and one World Director inhabit a shared, revisioned world.' },
   { id: 'settlement-production', name: 'Working settlements', description: 'Food, materials, city focus and buildings sustain actual populations.' },
@@ -58,6 +68,7 @@ export const FEATURES: FeatureDefinition[] = [
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
   focus: ['settlement-production'], research: ['settlement-research'], build: ['settlement-production'],
   'set-building-operation': ['building-operations'],
+  'settle-coast': ['settlement-expansion', 'conserved-founding', 'coastal-founding', 'navigation'],
   settle: ['settlement-expansion'], trade: ['trade-routes'], federate: ['federations'],
   'propose-trade': ['trade-routes'], 'respond-trade': ['trade-routes'], 'withdraw-trade': ['trade-routes'], 'stop-trade': ['trade-routes'],
   'propose-public-project': ['public-projects'], 'respond-public-project': ['public-projects'], 'cancel-public-project': ['public-projects'],
@@ -71,7 +82,7 @@ export const TECHNOLOGIES: TechnologyDefinition[] = [
   { id: 'kiln-firing', name: 'Kiln firing', requiredFeatures: ['settlement-crafts'], era: 0, cost: 16, requires: ['agriculture'], capability: 'Kilns use energy to supply more building materials.' },
   { id: 'civic-institutions', name: 'Civic institutions', requiredFeatures: ['statecraft'], era: 1, cost: 24, requires: ['agriculture'], capability: 'Public institutions connect learning, belonging and durable cooperation.' },
   { id: 'fuel-management', name: 'Fuel management', requiredFeatures: ['statecraft', 'settlement-crafts'], era: 1, cost: 28, requires: ['civic-institutions', 'kiln-firing'], capability: 'Fuel yards use materials to supply energy for production, trade and repairs.' },
-  { id: 'navigation', name: 'Navigation', requiredFeatures: ['navigation'], era: 2, cost: 42, requires: ['civic-institutions'], capability: 'Navigation extends the reach of trade and cultural contact.' },
+  { id: 'navigation', name: 'Navigation', requiredFeatures: ['navigation'], era: 2, cost: 42, requires: ['civic-institutions'], capability: 'A completed coastal Boat yard can send existing residents to a new shore beyond the ordinary frontier.' },
   { id: 'industrialization', name: 'Industrialization', requiredFeatures: ['industrialization'], era: 3, cost: 66, requires: ['navigation'], capability: 'Energy and mechanization change production, transport and urban life.' },
   { id: 'computing', name: 'Planetary computing', requiredFeatures: ['planetary-networks'], era: 4, cost: 100, requires: ['industrialization'], capability: 'Information networks connect markets and political projects across the planet.' },
   { id: 'spaceflight', name: 'Interplanetary logistics', requiredFeatures: ['interplanetary-logistics'], era: 5, cost: 144, requires: ['computing'], capability: 'Launch infrastructure and life-support supply make off-world settlements possible.' },
@@ -93,6 +104,7 @@ export const ERAS: EraDefinition[] = ERA_PRESENTATION.map(era => {
 });
 
 export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'boat-yard', name: 'Boat yard', requiredFeatures: ['coastal-founding'], minEra: 0, cost: { materials: 14, credits: 10 }, requires: ['water-management'], effects: [], production: {}, capabilities: ['coastal-departure'], siteRequirement: 'coastal', description: 'Prepare boats at an ocean-adjacent town. With Navigation, transfer existing residents to a new coastal settlement.' },
   { id: 'farm', name: 'Terraced fields', requiredFeatures: ['settlement-production'], minEra: 0, cost: { materials: 8, credits: 4 }, requires: ['agriculture'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }, { kind: 'city', field: 'wellbeing', amount: 4 }], production: { food: 4 }, description: 'Reliable harvests sustain people and leave a surplus for future growth.' },
   { id: 'workshop', name: 'Artisan quarter', requiredFeatures: ['settlement-production'], minEra: 0, cost: { materials: 12, credits: 8 }, requires: ['agriculture'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }], production: { materials: 3, energy: 1 }, description: 'Specialized work supplies the materials other projects need.' },
   { id: 'irrigation', name: 'Irrigation works', requiredFeatures: ['settlement-crafts', 'building-operations'], minEra: 0, cost: { materials: 12, credits: 8 }, requires: ['water-management'], effects: [], operatingInputs: { materials: 1 }, production: { food: 5 }, description: 'Use one material each economy beat to supply food. Operation can be paused.' },
@@ -160,7 +172,7 @@ export const HISTORICAL_MILESTONES: HistoricalMilestone[] = [
   { id: 'beyond-the-hearth', name: 'Beyond the first hearths', requiredFeatures: ['settlement-expansion'], requiresMilestones: ['first-harvest'], conditions: [{ kind: 'city-count', minimum: 8 }, { kind: 'total-population', minimum: 40 }], year: -8000, era: 0, explanation: 'The expansion feature has become lived history: new communities now support a larger population.' },
   { id: 'roads-between-peoples', name: 'Roads between peoples', requiredFeatures: ['trade-routes'], requiresMilestones: ['first-harvest'], conditions: [{ kind: 'active-routes', minimum: 2 }], year: -6000, era: 0, explanation: 'Working exchanges now connect independent civilizations. Trade is a world fact, not just a newly installed feature.' },
   { id: 'rise-of-states', name: 'The rise of states', requiredFeatures: ['statecraft'], requiresMilestones: ['roads-between-peoples'], conditions: [{ kind: 'technology', technology: 'civic-institutions', civilizations: 2 }, { kind: 'active-routes', minimum: 3 }], year: -3000, era: 1, explanation: 'Civic discoveries and functioning exchanges have made organized states possible. Public institutions can now be built.' },
-  { id: 'connected-world', name: 'A connected world', requiredFeatures: ['navigation'], requiresMilestones: ['rise-of-states'], conditions: [{ kind: 'technology', technology: 'navigation', civilizations: 1 }, { kind: 'active-routes', minimum: 3 }], year: -500, era: 2, explanation: 'The released navigation system and an expanding exchange network have connected the world.' },
+  { id: 'connected-world', name: 'A connected world', requiredFeatures: ['navigation'], requiresMilestones: ['rise-of-states'], conditions: [{ kind: 'technology', technology: 'navigation', civilizations: 1 }, { kind: 'active-routes', minimum: 3 }, { kind: 'recorded-event-count', eventType: 'coastal-founded', minimum: 1 }], year: -500, era: 2, explanation: 'Navigation has founded an actual coastal settlement while a working exchange network connects peoples.' },
   { id: 'industrial-world', name: 'The industrial transformation', requiredFeatures: ['industrialization'], requiresMilestones: ['connected-world'], conditions: [{ kind: 'technology', technology: 'industrialization', civilizations: 1 }, { kind: 'building-count', building: 'workshop', minimum: 5 }], year: 1750, era: 3, explanation: 'Industrial capability is now supported by an actual productive foundation.' },
   { id: 'planetary-world', name: 'A planetary civilization', requiredFeatures: ['planetary-networks'], requiresMilestones: ['industrial-world'], conditions: [{ kind: 'technology', technology: 'computing', civilizations: 1 }, { kind: 'active-routes', minimum: 5 }], year: 2000, era: 4, explanation: 'Information systems and functioning global exchanges have made planetary interdependence real.' },
   { id: 'beyond-earth', name: 'The interplanetary threshold', requiredFeatures: ['interplanetary-logistics'], requiresMilestones: ['planetary-world'], conditions: [{ kind: 'technology', technology: 'spaceflight', civilizations: 1 }, { kind: 'active-routes', minimum: 5 }], year: 2150, era: 5, explanation: 'Interplanetary knowledge can now draw on Earth’s connected economy. Launch infrastructure and a viable colony remain separate achievements.' },
@@ -182,12 +194,13 @@ export interface ContentCatalog {
   publicProjectRecipes: PublicProjectRecipe[];
   publicProjectRules: typeof PUBLIC_PROJECT_RULES;
   siteOutputs: typeof SETTLEMENT_SITE_OUTPUTS;
+  residentCapacityRules: typeof RESIDENT_CAPACITY_RULES;
 }
 
 export const CONTENT: ContentCatalog = {
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
   buildings: BUILDINGS, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
-  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES,
+  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES,
   tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES, landTransportRules: LAND_TRANSPORT_RULES, publicProjectRecipes: PUBLIC_PROJECT_RECIPES, publicProjectRules: PUBLIC_PROJECT_RULES, siteOutputs: SETTLEMENT_SITE_OUTPUTS,
 };
 
@@ -197,6 +210,7 @@ function positive(value: number): boolean {
 
 export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   const errors: string[] = [];
+  if (catalog.residentCapacityRules.ruleVersion !== 1 || !Number.isSafeInteger(catalog.residentCapacityRules.communityReserve) || catalog.residentCapacityRules.communityReserve < 0 || !Number.isSafeInteger(catalog.residentCapacityRules.perPaidRecipe) || catalog.residentCapacityRules.perPaidRecipe < 1) errors.push('resident capacity: invalid version or support requirement');
   const unique = (label: string, values: string[]) => {
     if (new Set(values).size !== values.length) errors.push(`${label}: duplicate identifier`);
     if (values.some(value => value.trim().length === 0)) errors.push(`${label}: empty identifier`);
@@ -304,7 +318,12 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     resources(`${building.id} production`, building.production);
     resources(`${building.id} operating inputs`, building.operatingInputs ?? {});
     if (Object.values(building.operatingInputs ?? {}).some(positive) && !building.requiredFeatures.includes('building-operations')) errors.push(`building ${building.id}: operating inputs require the building-operations feature`);
-    if (building.effects.length === 0 && !Object.values(building.production).some(positive)) errors.push(`building ${building.id}: no production or world effect`);
+    const capabilities = building.capabilities ?? [];
+    for (const capability of capabilities) if (!Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability)) errors.push(`building ${building.id}: unknown capability ${capability}`);
+    if (new Set(capabilities).size !== capabilities.length) errors.push(`building ${building.id}: duplicate capabilities`);
+    if (building.siteRequirement !== undefined && building.siteRequirement !== 'coastal') errors.push(`building ${building.id}: unknown site requirement`);
+    if (capabilities.includes('coastal-departure') && (building.siteRequirement !== 'coastal' || !building.requiredFeatures.includes('coastal-founding'))) errors.push(`building ${building.id}: coastal departure requires coastal site and feature`);
+    if (building.effects.length === 0 && !Object.values(building.production).some(positive) && !capabilities.some(capability => Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability))) errors.push(`building ${building.id}: no production or world effect`);
     effects(building.id, building.effects);
     for (const required of building.requires) {
       const technology = technologies.get(required);

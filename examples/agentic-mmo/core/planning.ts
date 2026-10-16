@@ -1,3 +1,4 @@
+import { coastalSourceBlock } from './simulation/coastal.ts';
 import { publicProjectActionFailure } from './simulation/public-projects.ts';
 import { paidRecipe } from './simulation/operations.ts';
 import {
@@ -65,6 +66,8 @@ export function isGameAction(value: unknown): value is GameAction {
       return fields(value, ['type', 'cityId']) && text(value.cityId, 128);
     case 'set-building-operation':
       return fields(value, ['type', 'cityId', 'buildingId', 'enabled']) && text(value.cityId, 128) && text(value.buildingId, 128) && typeof value.enabled === 'boolean';
+    case 'settle-coast':
+      return fields(value, ['type', 'tileId', 'sourceCityId']) && integer(value.tileId) && text(value.sourceCityId, 128);
     case 'settle':
       return integer(value.tileId) && (fields(value, ['type', 'tileId']) || (fields(value, ['type', 'tileId', 'sourceCityId']) && text(value.sourceCityId, 128)));
     case 'trade':
@@ -99,13 +102,13 @@ function planItem(value: unknown): value is ActionPlanItem {
   return record(value) && fields(value, ['action', 'reason']) && isGameAction(value.action) && text(value.reason, 280);
 }
 
-function planItems(value: unknown): value is ActionPlanItem[] {
+export function isActionPlanItems(value: unknown): value is ActionPlanItem[] {
   return Array.isArray(value) && value.length <= TURN_RULES.maximumPlanItems && Array.from(value).every(planItem);
 }
 
 export function validateAttachedPlan(state: WorldState, command: PlanningCommand, value: unknown): PlanValidation {
   if (value === undefined || (Array.isArray(value) && value.length === 0)) return { ok: true, plan: [] };
-  if (!planItems(value))
+  if (!isActionPlanItems(value))
     return { ok: false, code: 'invalid_plan', error: 'A plan must contain at most two exact actions, each with a nonblank reason of at most 280 characters' };
   if (!hasFeatures(state, ['bounded-plans']))
     return { ok: false, code: 'plan_not_released', error: 'This world has not explicitly released bounded-plans' };
@@ -122,7 +125,7 @@ export function completeAttachedPlan(plan: ActionPlanItem[], observedRevision: n
   if (!plan.length) return null;
   if (!integer(observedRevision) || !integer(committedRevision) || observedRevision >= committedRevision)
     throw new RangeError('Plan revisions must identify an observation before the accepted revision');
-  if (!planItems(plan))
+  if (!isActionPlanItems(plan))
     throw new RangeError('Only a validated bounded plan can be completed');
   return {
     observedRevision,
@@ -186,6 +189,7 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
         return invalidated(`Owned constructed recipe ${action.cityId}/${action.buildingId} is missing`);
       return operation.enabled === action.enabled ? invalidated(`Recipe ${action.buildingId} is already ${action.enabled ? 'enabled' : 'paused'}`) : null;
     }
+    case 'settle-coast':
     case 'settle': {
       if (hasFeatures(state, ['conserved-founding']) && !cities.some((city) => city.id === action.sourceCityId))
         return invalidated('Founding requires an explicit existing owned source settlement; review and choose a source');
@@ -242,6 +246,7 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
 }
 
 function unavailableReason(state: WorldState, seat: number, action: GameAction): string {
+  if (action.type === 'settle-coast') { const block = coastalSourceBlock(state, seat, action.sourceCityId); if (block) return block; }
   const decisionBlock = decisionActionBlock(state, seat, action);
   if (decisionBlock) return decisionBlock;
   if (action.type === 'propose-public-project' || action.type === 'respond-public-project' || action.type === 'cancel-public-project') return publicProjectActionFailure(state, seat, action) ?? 'Review the current charter and admission';
@@ -271,7 +276,7 @@ function unavailableReason(state: WorldState, seat: number, action: GameAction):
       cost = recipe.terms.constructionCost;
     }
   } else if ((action.type === 'repair' || action.type === 'repair-city')) cost = ECONOMY_RULES.repair.cost;
-  else if (action.type === 'settle') {
+  else if (action.type === 'settle' || action.type === 'settle-coast') {
     cost = ECONOMY_RULES.settle.cost;
     if (hasFeatures(state, ['conserved-founding'])) {
       const source = citiesOf(state, seat).find((city) => city.id === action.sourceCityId);

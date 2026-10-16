@@ -15,9 +15,9 @@ await test('complete tree retains every canonical node and both incoming fuel pr
   const input = fixture();
   const before = structuredClone(input);
   const nodes = capabilityTreeNodes(input);
-  assert.equal(nodes.length, 17);
-  assert.equal(new Set(nodes.map(node => node.id)).size, 17);
-  assert.equal(nodes.reduce((count, node) => count + node.requires.length, 0), 17);
+  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length);
+  assert.equal(new Set(nodes.map(node => node.id)).size, nodes.length);
+  assert.equal(nodes.reduce((count, node) => count + node.requires.length, 0), input.catalogue.edges.length);
   const fuel = nodes.find(node => node.id === 'technology:fuel-management');
   assert.ok(fuel);
   assert.deepEqual(fuel.requires.toSorted(), ['technology:civic-institutions', 'technology:kiln-firing']);
@@ -39,7 +39,7 @@ await test('presentation preserves canonical statuses, current research and unav
   assert.equal(nodes.find(node => node.id === farm.nodeId)?.status, 'done');
   assert.equal(nodes.find(node => node.id === 'building:kiln')?.status, null);
   assert.equal(nodes.find(node => node.id === 'building:kiln')?.label, 'Facts unavailable');
-  assert.equal(nodes.length, 17);
+  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length);
 });
 
 await test('planned source support and exact construction blockers use distinct familiar facts', () => {
@@ -55,7 +55,7 @@ await test('planned source support and exact construction blockers use distinct 
   assert.equal(building.label, 'Locked');
   assert.ok(building.blockers.some(text => /Cities and States.*The First Hearths/.test(text)));
   assert.ok(building.blockers.some(text => /Materials.*16.*4/.test(text)));
-  assert.equal(nodes.find(node => node.id === 'technology:navigation')?.support, 'Catalogue only');
+  assert.equal(nodes.find(node => node.id === 'technology:navigation')?.support, 'Included in another release');
   assert.equal(nodes.find(node => node.id === 'technology:water-management')?.support, 'Included in another release');
 });
 
@@ -140,7 +140,7 @@ await test('native sheet exposes all node disclosures, exact town choice and mul
   assert.ok(sheet);
   sheet.open(input);
   assert.equal(record.open, true);
-  assert.equal(record.all().filter(node => node.dataset['nodeId']).length, 17);
+  assert.equal(record.all().filter(node => node.dataset['nodeId']).length, input.catalogue.technologies.length + input.catalogue.buildings.length);
   assert.match(record.content(), /Options now/);
   assert.match(record.content(), /Aster.*Dawnwell/);
   assert.equal(record.control('town').tag, 'select');
@@ -311,5 +311,51 @@ await test('spectator timing explains a due season in simple English without hid
   assert.match(record.content(), /next world season is waiting to be recorded/);
   assert.doesNotMatch(record.content(), /strategy_catchup_required/);
   assert.match(record.content(), /Available entries and ongoing projects/);
+  sheet.destroy();
+}));
+
+await test('capability-only construction never promises later production in its active lane', () => withDom((dialog, record) => {
+  const input = fixture();
+  input.projection.decisions = { research: { kind: 'research', cityId: null, status: 'required', targetId: null, progress: null, availableIds: [], blockers: [] }, construction: [{ kind: 'construction', cityId: 'city-0', status: 'active', targetId: 'boat-yard', progress: { done: 0, required: 6 }, availableIds: [], blockers: [] }] };
+  const sheet = createCapabilityTreeSheet(dialog, () => undefined);
+  sheet.open(input);
+  assert.match(record.content(), /The building is not finished yet. Its capability becomes usable after completion/);
+  assert.doesNotMatch(record.content(), /Output starts in a later season/);
+  sheet.destroy();
+}));
+
+await test('productive commitment shows exact remaining work and captured historical output without a timer', () => withDom((dialog, record) => {
+  const input = committedFixture();
+  input.projection.unlockedFeatures.push('productive-research');
+  assert.ok(input.projection.decisions);
+  input.projection.decisions.research = { kind: 'research', cityId: null, status: 'active', targetId: 'civic-institutions', progress: { done: 5.54, required: 24 }, availableIds: [], blockers: [] };
+  const civic = input.projection.technologies.find(row => row.nodeId === 'technology:civic-institutions');
+  assert.ok(civic);
+  civic.status = 'available'; civic.research = { progress: 5.54, cost: 24 };
+  input.researchEvents = [{ id: '32:4', round: 12, actor: 0, target: 0, tileId: 14, type: 'settlement-production', title: '', detail: '', cause: '', effects: ['Produced 2.78 science'], importance: 1 }];
+  const sheet = createCapabilityTreeSheet(dialog, () => undefined);
+  sheet.open(input);
+  assert.match(record.content(), /18.46 Science remaining/);
+  assert.match(record.content(), /Stored reserves do not speed it up/);
+  assert.match(record.content(), /Last recorded city output: 2.78 Science · Round 12/);
+  assert.match(record.content(), /past production, not the amount invested/);
+  assert.equal(record.control('research-explanation').parent?.tag, 'details');
+  assert.equal(record.control('research-explanation').parent?.open, false);
+  assert.doesNotMatch(record.content(), /ETA|turns remaining|beats remaining|seconds remaining/);
+  const newer = structuredClone(input); newer.projection.revision += 1;
+  assert.ok(newer.projection.decisions?.research.progress);
+  newer.projection.decisions.research.progress.done = 8.34;
+  sheet.observe(newer);
+  assert.match(record.content(), /18.46 Science remaining/);
+  sheet.refresh();
+  assert.match(record.content(), /15.66 Science remaining/);
+  sheet.destroy();
+}));
+
+await test('legacy tree keeps its investment wording without the new production rule', () => withDom((dialog, record) => {
+  const sheet = createCapabilityTreeSheet(dialog, () => undefined);
+  sheet.open(committedFixture());
+  assert.match(record.content(), /Science is invested as research progresses. It is not a selection price./);
+  assert.doesNotMatch(record.content(), /Stored reserves do not speed it up/);
   sheet.destroy();
 }));

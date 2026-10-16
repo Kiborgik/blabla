@@ -60,6 +60,14 @@ const APPEARANCES: Record<string, { icon: VisualIcon; label: string; corePartIds
       ...(detail === 'close' ? [part('monument-bench-left', 'box', 'timber', [.53, .21, 1.25], [.09, .12, .3]), part('monument-bench-right', 'box', 'timber', [.97, .21, 1.25], [.09, .12, .3]), part('monument-cap', 'box', 'grain', [.75, .56, 1.25], [.15, .07, .15])] : []),
     ],
   },
+  'boat-yard': {
+    icon: 'boat-yard', label: 'Boat yard', corePartIds: ['boat-yard-slipway', 'boat-yard-roof'], parts: (detail) => [
+      part('boat-yard-slipway', 'box', 'timber', [1.22, .08, -.32], [.62, .16, .76]),
+      part('boat-yard-roof', 'gable', 'plaster', [1.22, .46, -.47], [.68, .28, .4]),
+      ...(detail === 'far' ? [] : [part('boat-yard-post-left', 'box', 'timber', [.99, .22, -.47], [.07, .44, .07]), part('boat-yard-post-right', 'box', 'timber', [1.45, .22, -.47], [.07, .44, .07])]),
+      ...(detail === 'close' ? [part('boat-yard-rail-left', 'box', 'grain', [1.02, .18, -.08], [.06, .04, .42]), part('boat-yard-rail-right', 'box', 'grain', [1.42, .18, -.08], [.06, .04, .42])] : []),
+    ],
+  },
   'fuel-yard': {
     icon: 'fuel-yard', label: 'Fuel yard', corePartIds: ['fuel-yard-stack'], parts: (detail) => [
       part('fuel-yard-stack', 'box', 'timber', [-1.25, .18, -.28], [.45, .36, .43]),

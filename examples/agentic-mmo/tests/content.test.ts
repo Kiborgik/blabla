@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  ACTION_FEATURES, BUILDINGS, CIVILIZATIONS, CONTENT, DIRECTOR_CLOCK_RULES, SETTLEMENT_SITE_OUTPUTS, ECONOMY_RULES,
+  ACTION_FEATURES, BUILDINGS, BUILDING_CAPABILITY_ACTIONS, COASTAL_FOUNDING_RULES, RESEARCH_INVESTMENT_RULES, CIVILIZATIONS, CONTENT, DIRECTOR_CLOCK_RULES, SETTLEMENT_SITE_OUTPUTS, ECONOMY_RULES,
   DIRECTOR_EVENTS, ERAS, HISTORICAL_MILESTONES, TECHNOLOGIES, TRADE_RECIPES, TRADE_RULES, LAND_TRANSPORT_RULES, PUBLIC_PROJECT_RECIPES, PUBLIC_PROJECT_RULES, VICTORY_RULES, validateContent,
 } from '../core/content.ts';
 import { CIV_COUNT } from '../core/types.ts';
@@ -49,9 +49,9 @@ await test('research prerequisites cannot form a cycle or require an undiscovere
   assert.ok(validateContent(cycle).some(error => error.includes('future')));
 });
 
-await test('construction uses valid discovery gates and real production or world effects', () => {
+await test('construction uses valid gates and real production, world effects or consumed capabilities', () => {
   assert.ok(BUILDINGS.some(building => Object.keys(building.production).length > 0));
-  assert.ok(BUILDINGS.every(building => building.effects.length > 0 || Object.values(building.production).some(amount => amount > 0)));
+  assert.ok(BUILDINGS.every(building => building.effects.length > 0 || Object.values(building.production).some(amount => amount > 0) || (building.capabilities ?? []).some(capability => BUILDING_CAPABILITY_ACTIONS[capability]?.length > 0)));
   const launchpad = BUILDINGS.find(building => building.id === VICTORY_RULES.mars.requiredBuilding);
   assert.ok(launchpad);
   assert.ok(launchpad.requires.includes(VICTORY_RULES.mars.requiredTechnology));
@@ -227,7 +227,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -237,7 +237,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -305,4 +305,46 @@ await test('land transport is versioned shared data behind a compatible explicit
   Reflect.deleteProperty(missingTerrain.landTransportRules.passable, 'ocean');
   assert.ok(validateContent(missingTerrain).some(error => error.includes('passability')));
   assert.deepEqual(validateContent(), []);
+});
+
+await test('coastal yards grant only a validated consumed capability behind an explicit compatible release', () => {
+  const yard = required(BUILDINGS.find(building => building.id === 'boat-yard'));
+  assert.deepEqual(yard.requires, ['water-management']);
+  assert.equal(yard.minEra, 0);
+  assert.equal(yard.siteRequirement, 'coastal');
+  assert.deepEqual(yard.capabilities, ['coastal-departure']);
+  assert.deepEqual(yard.production, {});
+  assert.deepEqual(yard.effects, []);
+  assert.deepEqual(yard.cost, { materials: 14, credits: 10 });
+  assert.deepEqual(BUILDING_CAPABILITY_ACTIONS['coastal-departure'], ['settle-coast']);
+  assert.equal(COASTAL_FOUNDING_RULES.requiredTechnology, 'navigation');
+  const release = required(RELEASES.find(candidate => candidate.id === 'settlement-coastal-1'));
+  const prior = required(RELEASES.find(candidate => candidate.id === 'settlement-residents-1'));
+  assert.deepEqual(release.compatibleFrom, [prior.id]);
+  assert.deepEqual(release.featureIds, [...prior.featureIds, 'navigation', 'coastal-founding']);
+  assert.ok(!prior.featureIds.includes('coastal-founding'));
+  const connected = required(HISTORICAL_MILESTONES.find(milestone => milestone.id === 'connected-world'));
+  assert.ok(connected.conditions.some(condition => condition.kind === 'recorded-event-count' && condition.eventType === 'coastal-founded' && condition.minimum === 1));
+  for (const [field, value, error] of [
+    ['capabilities', ['unknown-capability'], 'unknown capability'],
+    ['capabilities', [], 'no production or world effect'],
+    ['capabilities', ['coastal-departure', 'coastal-departure'], 'duplicate capabilities'],
+    ['siteRequirement', undefined, 'coastal departure requires'],
+    ['siteRequirement', 'mountain', 'unknown site requirement'],
+    ['requiredFeatures', [], 'coastal departure requires'],
+  ] as const) {
+    const invalid = structuredClone(CONTENT);
+    Reflect.set(required(invalid.buildings.find(building => building.id === 'boat-yard')), field, value);
+    assert.ok(validateContent(invalid).some(message => message.includes(error)), error);
+  }
+});
+
+await test('productive research is a prospective release with a canonical output budget', () => {
+  const prior = required(RELEASES.find(release => release.id === 'settlement-coastal-1'));
+  const current = required(RELEASES.find(release => release.id === 'settlement-research-rate-1'));
+  assert.equal(RESEARCH_INVESTMENT_RULES.ruleVersion, 1);
+  assert.equal(RESEARCH_INVESTMENT_RULES.budget, 'current-city-science-output');
+  assert.ok(!prior.featureIds.includes(RESEARCH_INVESTMENT_RULES.featureId));
+  assert.ok(current.featureIds.includes(RESEARCH_INVESTMENT_RULES.featureId));
+  assert.deepEqual(current.featureIds.filter(feature => !prior.featureIds.includes(feature)), ['productive-research']);
 });

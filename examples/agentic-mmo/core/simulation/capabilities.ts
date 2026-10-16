@@ -1,3 +1,4 @@
+import { isCoastalSite } from './coastal.ts';
 import { ACTION_FEATURES, RESOURCE_IDS } from '../content.ts';
 import type { BuildingDefinition, TechnologyDefinition, WorldState } from '../types.ts';
 import { hasFeatures } from './history.ts';
@@ -9,6 +10,7 @@ export type CapabilityBlocker =
   | { kind: 'civilization'; civilizationId: number }
   | { kind: 'era'; required: number; available: number }
   | { kind: 'resource'; resource: typeof RESOURCE_IDS[number]; required: number; available: number }
+  | { kind: 'coastal-site'; cityId: string }
   | { kind: 'city-selection' }
   | { kind: 'missing-city'; cityId: string }
   | { kind: 'foreign-city'; cityId: string; owner: number }
@@ -58,6 +60,7 @@ export function buildingEligibility(state: WorldState, civilizationId: number, b
   else if (city.civId !== civilizationId) blockers.push({ kind: 'foreign-city', cityId: city.id, owner: city.civId });
   else if (specialized && !state.tiles.some(tile => tile.id === city.tileId)) blockers.push({ kind: 'missing-site', cityId: city.id });
   else if (!specialized && cityId !== undefined && !city.buildings.includes(building.id) && first && first.id !== city.id) blockers.push({ kind: 'legacy-target', cityId: first.id });
+  if (city?.civId === civilizationId && building.siteRequirement === 'coastal' && !isCoastalSite(state, city.tileId)) blockers.push({ kind: 'coastal-site', cityId: city.id });
   if (hasFeatures(state, ['recurring-decisions']) && city?.construction?.active)
     blockers.push({ kind: 'active-commitment', targetId: city.construction.active.buildingId });
   return {

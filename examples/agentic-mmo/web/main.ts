@@ -4,7 +4,8 @@ import { eventLogEntries, latestStoryEvent, renderEventLog } from './event-log.t
 import { routeInspectionCity } from '../visuals/route-visuals.ts';
 import { renderRouteCard, renderRouteList, retainedRoutePathInspection, routeInspectionIdentity } from './route-inspection.ts';
 import { cityKey, resolveCitySelection, retainedReceiptBuilding } from './city-selection.ts';
-import { renderSettlementInspection } from './settlement-inspection.ts';
+import { renderSettlementInspection, residentSupportForWorld } from './settlement-inspection.ts';
+import { researchProgressPresentation } from './research-progress.ts';
 import releaseData from '../public/version.json';
 import changelog from '../public/changelog.json';
 import { RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
@@ -128,6 +129,7 @@ function currentCapabilityInput(): CapabilityTreeInput | null {
     runId: snapshot.identity, civilizationName: civilization.name,
     towns: snapshot.state.cities.filter(city => city.civId === civilization.id).map(city => ({ id: city.id, name: city.name })),
     catalogue,
+    researchEvents: snapshot.state.events.filter(event => event.type === 'settlement-production' && event.actor === civilization.id).slice(-1),
     projection: projectCapabilities(snapshot.state, civilization.id, preferences.selectedCity, observedAt),
   };
 }
@@ -171,8 +173,14 @@ function renderInspection(): void {
   const state = mode === 'sample' ? null : snapshot?.state;
   const actual = state?.civilizations.find((entry) => entry.id === civ.id);
   const cities = state?.cities.filter((city) => city.civId === civ.id) ?? [];
+  const residentSupport = residentSupportForWorld(state ?? null, cities);
+  const technology = TECHNOLOGIES.find(candidate => candidate.id === actual?.researchTarget);
+  const research = actual && state ? researchProgressPresentation({
+    unlockedFeatures: state.unlockedFeatures, civilizationId: actual.id, events: state.events,
+    project: technology ? { name: technology.name, cost: technology.cost, progress: actual.researchProgress } : null,
+  }) : null;
   panel.style.setProperty('--civ-color', civ.color);
-  const fingerprint = JSON.stringify([civ, actual, cities, preferences.selectedCity, displayed.routes, routeListPage, mode]);
+  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, preferences.selectedCity, displayed.routes, routeListPage, mode]);
   if (fingerprint === inspectionFingerprint) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
   const previousScroll = sameCity ? panel.scrollTop : 0;
@@ -184,19 +192,49 @@ function renderInspection(): void {
   const focusedCity = document.activeElement instanceof HTMLElement ? document.activeElement.dataset['citySelect'] : undefined;
   const focusedSummary = document.activeElement instanceof HTMLElement && document.activeElement.matches('.operation-receipt > summary')
     ? document.activeElement.closest<HTMLElement>('.building-card')?.dataset['building'] : undefined;
+  const expandedTown = new Set([...panel.querySelectorAll<HTMLDetailsElement>('[data-town-disclosure]')].filter(node => sameCity && node.open).map(node => node.dataset['townDisclosure']));
+  const focusedTown = sameCity && document.activeElement instanceof HTMLElement && document.activeElement.matches('.town-receipt > summary')
+    ? document.activeElement.parentElement?.dataset['townDisclosure'] : undefined;
   const focusedReceipt = retainedReceiptBuilding(inspectedCity, preferences.selectedCity, focusedSummary);
   inspectionFingerprint = fingerprint;
   inspectedCivilization = civ.id;
   inspectedCity = preferences.selectedCity;
-  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION IN FOCUS</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'live' ? 'COMMITTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${escapeText(civ.symbol)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(cities.find(city => city.id === preferences.selectedCity)?.name ?? civ.character)}</p></div></div><p class="ambition">${escapeText(civ.ambition)}</p>${actual ? `<dl class="resources">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="Explain ${resourceGuide(resource).label}">${resourceGuide(resource).label}</button></dt><dd>${actual.resources[resource].toLocaleString('en-US', { maximumFractionDigits: 1 })}</dd></div>`).join('')}</dl><p class="research-detail"><strong>Research:</strong> ${escapeText(TECHNOLOGIES.find((technology) => technology.id === actual.researchTarget)?.name ?? 'No active project')} · ${actual.researchProgress} progress</p><button class="capability-open" data-open-capabilities type="button" aria-haspopup="dialog">Research &amp; buildings <span>Full tree · Options now</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
+  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION IN FOCUS</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'live' ? 'COMMITTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${escapeText(civ.symbol)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(cities.find(city => city.id === preferences.selectedCity)?.name ?? civ.character)}</p></div></div><p class="ambition">${escapeText(civ.ambition)}</p>${actual ? `<dl class="resources">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="Explain ${resourceGuide(resource).label}">${resourceGuide(resource).label}</button></dt><dd>${actual.resources[resource].toLocaleString('en-US', { maximumFractionDigits: 1 })}</dd></div>`).join('')}</dl><section class="research-detail" aria-label="Research progress"></section><button class="capability-open" data-open-capabilities type="button" aria-haspopup="dialog">Research &amp; buildings <span>Full tree · Options now</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
   const capabilityOpener = panel.querySelector('[data-open-capabilities]');
   if (capabilityOpener) panel.insertBefore(capabilityOpener, panel.querySelector('.ambition'));
   for (const resource of RESOURCE_IDS) {
     const entry = panel.querySelector<HTMLButtonElement>(`[data-resource="${resource}"]`);
     entry?.prepend(visualIcon(resource));
   }
+  const researchSection = panel.querySelector<HTMLElement>('.research-detail');
+  if (research && researchSection) {
+    const heading = document.createElement('strong');
+    heading.textContent = research.heading;
+    heading.prepend(visualIcon('science'));
+    researchSection.append(heading);
+    if (research.progress) {
+      const progress = document.createElement('p');
+      progress.textContent = `${research.progress} · ${research.remaining ?? ''}`;
+      researchSection.append(progress);
+    }
+    const details = document.createElement('details');
+    details.className = 'town-receipt'; details.dataset['townDisclosure'] = 'research';
+    const summary = document.createElement('summary'); summary.textContent = 'How research advances';
+    const explanation = document.createElement('p'); explanation.textContent = research.explanation;
+    details.append(summary, explanation);
+    if (research.lastOutput) {
+      const output = document.createElement('p'); output.textContent = research.lastOutput.label;
+      const qualifier = document.createElement('p'); qualifier.textContent = research.outputExplanation;
+      details.append(output, qualifier);
+    }
+    researchSection.append(details);
+  }
   const settlement = panel.querySelector<HTMLElement>('.city-details');
-  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity);
+  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport);
+  for (const disclosure of panel.querySelectorAll<HTMLDetailsElement>('[data-town-disclosure]')) {
+    disclosure.open = expandedTown.has(disclosure.dataset['townDisclosure']);
+    if (disclosure.dataset['townDisclosure'] === focusedTown) disclosure.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true });
+  }
   for (const card of panel.querySelectorAll<HTMLElement>('.building-card')) {
     const receipt = card.querySelector<HTMLDetailsElement>('details');
     if (receipt && expandedBuildings.has(card.dataset['building'])) receipt.open = true;
