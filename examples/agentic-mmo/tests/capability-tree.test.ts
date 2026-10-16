@@ -59,7 +59,7 @@ await test('complete tree retains every canonical node and both incoming fuel pr
   const input = fixture();
   const before = structuredClone(input);
   const nodes = capabilityTreeNodes(input);
-  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length);
+  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length + input.catalogue.wonders.length);
   assert.equal(new Set(nodes.map(node => node.id)).size, nodes.length);
   assert.equal(nodes.reduce((count, node) => count + node.requires.length, 0), input.catalogue.edges.length);
   const fuel = nodes.find(node => node.id === 'technology:fuel-management');
@@ -83,7 +83,7 @@ await test('presentation preserves canonical statuses, current research and unav
   assert.equal(nodes.find(node => node.id === farm.nodeId)?.status, 'done');
   assert.equal(nodes.find(node => node.id === 'building:kiln')?.status, null);
   assert.equal(nodes.find(node => node.id === 'building:kiln')?.label, 'Facts unavailable');
-  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length);
+  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length + input.catalogue.wonders.length);
 });
 
 await test('planned source support and exact construction blockers use distinct familiar facts', () => {
@@ -177,22 +177,24 @@ function withDom(run: (dialog: HTMLDialogElement, record: ElementRecord) => void
   }
 }
 
-await test('native sheet exposes all node disclosures, exact town choice and multi-parent navigation', () => withDom((dialog, record) => {
+await test('native sheet exposes compact nodes, one selected detail, exact town choice and multi-parent navigation', () => withDom((dialog, record) => {
   const choices: string[] = [];
   const input = fixture(); input.towns.push({ id: 'frontier', name: 'Far Hearth' });
   const sheet = createCapabilityTreeSheet(dialog, id => choices.push(id));
   assert.ok(sheet);
   sheet.open(input);
   assert.equal(record.open, true);
-  assert.equal(record.all().filter(node => node.dataset['nodeId']).length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length);
+  assert.equal(record.all().filter(node => node.dataset['nodeId']).length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length + input.catalogue.wonders.length);
   assert.match(record.content(), /Options now/);
   assert.match(record.content(), /Aster.*Dawnwell/);
   assert.equal(record.control('town').tag, 'select');
   record.control('town').value = 'frontier'; record.control('town').dispatch('change');
   assert.deepEqual(choices, ['frontier']);
+  record.control('node:technology:fuel-management').dispatch('click');
   record.control('requires:technology:fuel-management:technology:kiln-firing').dispatch('click');
   assert.equal(dom.activeElement, record.control('node:technology:kiln-firing'));
-  assert.equal(record.control('node:technology:kiln-firing').parent?.open, true);
+  assert.equal(record.control('node:technology:kiln-firing').attributes.get('aria-pressed'), 'true');
+  assert.equal(record.all().filter(node => node.className === 'capability-selected-detail').length, 1);
   assert.ok(record.all().filter(node => node.tag === 'button').every(node => node.type === 'button'));
   sheet.destroy();
 }));
@@ -203,7 +205,7 @@ await test('new observations preserve captured content and focus until an explic
   assert.ok(sheet);
   sheet.open(input);
   const summary = record.control('node:technology:agriculture');
-  assert.ok(summary.parent); summary.parent.open = true; summary.focus();
+  summary.dispatch('click'); summary.focus();
   record.scrollTop = 320;
   sheet.observe(structuredClone(input));
   assert.equal(record.control('node:technology:agriculture'), summary);
@@ -215,7 +217,7 @@ await test('new observations preserve captured content and focus until an explic
   assert.equal(record.control('refresh').hidden, false);
   sheet.refresh();
   assert.match(record.content(), /Revision 11/);
-  assert.equal(record.control('node:technology:agriculture').parent?.open, true);
+  assert.equal(record.control('node:technology:agriculture').attributes.get('aria-pressed'), 'true');
   assert.equal(dom.activeElement, record.control('node:technology:agriculture'));
   assert.equal(record.scrollTop, 320);
   assert.equal(dom.activeElement?.focusedWithoutScroll, true);
@@ -232,6 +234,7 @@ await test('stale updates cannot roll back the captured run and explicit town co
   const changed = structuredClone(input); changed.projection.cityId = 'missing-town';
   changed.projection.buildings.forEach(row => { row.status = 'locked'; row.blockers = [{ kind: 'missing-city', cityId: 'missing-town' }]; });
   sheet.observe(changed);
+  record.control('node:building:farm').dispatch('click');
   assert.match(record.content(), /Town unavailable: missing-town/);
   assert.match(record.content(), /Buildings: missing-town/);
   const otherRun = fixture(); otherRun.runId = 'fixture-b'; otherRun.projection.revision = 1;
@@ -354,7 +357,7 @@ await test('spectator timing explains a due season in simple English without hid
   sheet.open(input);
   assert.match(record.content(), /next world season is waiting to be recorded/);
   assert.doesNotMatch(record.content(), /strategy_catchup_required/);
-  assert.match(record.content(), /Available entries and ongoing projects/);
+  assert.match(record.content(), /Options now.*available or underway/);
   sheet.destroy();
 }));
 
@@ -416,9 +419,9 @@ await test('namespaced Mine commitments and retained completions navigate to the
   assert.match(record.content(), /Exact worked site · Tile 58/);
   assert.match(record.content(), /local support in a later season/);
   assert.doesNotMatch(record.content(), /building:improvement:mine/);
-  record.control('decision:construction:city-0:improvement:mine').dispatch('click');
+  record.control('finder').value = 'improvement:mine'; record.control('finder').dispatch('change');
   assert.equal(dom.activeElement, record.control('node:improvement:mine'));
-  assert.equal(record.control('node:improvement:mine').parent?.open, true);
+  assert.equal(record.control('node:improvement:mine').attributes.get('aria-pressed'), 'true');
   sheet.destroy();
 }));
 
@@ -433,4 +436,14 @@ await test('tree return resolves the current opener and reveals its narrow paren
   resolved = current;
   restore();
   assert.deepEqual(events, ['reveal', 'focus']);
+});
+
+await test('a finishing wonder contender never implies a winner and canonical winner blockers render', () => {
+  const input = fixture(); const row = input.projection.wonders?.[0]; assert.ok(row);
+  row.facts.contenders = [{ kind: 'wonder', ruleVersion: 1, id: 'race', wonderId: 'great-library', cityId: 'city-0', civId: 0, tileId: 40, startedRound: 1, paid: { materials: 50 }, workRequired: 24, workDone: 24 }];
+  row.blockers = [{ kind: 'wonder-site', cityId: 'city-0' }, { kind: 'wonder-contender', wonderId: 'great-library', cityId: 'city-0' }, { kind: 'wonder-completed', wonderId: 'great-library', civilizationId: 1 }];
+  const node = capabilityTreeNodes(input).find(item => item.kind === 'wonder'); assert.ok(node);
+  assert.ok(node.facts.some(fact => fact.value.includes('No winner recorded')));
+  assert.ok(node.blockers.some(blocker => blocker.includes('recorded world winner: civilization 1')));
+  assert.ok(node.facts.some(fact => fact.value.includes('24 / 24 work')));
 });

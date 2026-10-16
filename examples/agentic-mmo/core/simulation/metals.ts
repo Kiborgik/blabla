@@ -13,7 +13,7 @@ function placementRank(seed: number, tileId: number): number {
 }
 
 export function createStrategicDeposits(state: WorldState): StrategicDepositLayer {
-  const occupied = new Set(state.cities.flatMap(city => [city.tileId, ...Object.values(city.districtSites ?? {}), ...(city.construction?.active?.tileId === undefined || ('kind' in city.construction.active && city.construction.active.improvementId === 'mine') ? [] : [city.construction.active.tileId])]));
+  const occupied = new Set(state.cities.flatMap(city => [city.tileId, ...Object.values(city.districtSites ?? {}), ...(city.construction?.active?.tileId === undefined || ('kind' in city.construction.active && city.construction.active.kind === 'improvement' && city.construction.active.improvementId === 'mine') ? [] : [city.construction.active.tileId])]));
   const candidates = state.tiles.filter(tile => isHillSite(tile) && tile.resource === null && !occupied.has(tile.id))
     .toSorted((left, right) => placementRank(state.seed, left.id) - placementRank(state.seed, right.id) || left.id - right.id);
   const selected: HexTile[] = [];

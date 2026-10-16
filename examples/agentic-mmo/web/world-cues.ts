@@ -1,3 +1,4 @@
+import { numberPresentation } from './number-format.ts';
 import { projectRouteCues } from '../visuals/route-cues.ts';
 import { routeLabelPlacement } from '../visuals/route-visuals.ts';
 import { createEventCueTracker, eventVisual } from '../visuals/event-visuals.ts';
@@ -22,8 +23,7 @@ export function visualIcon(icon: VisualIcon): SVGSVGElement {
 }
 
 export function deltaNumber(delta: VisualDelta): string {
-  const value = delta.value.toLocaleString('en-US', { maximumFractionDigits: 2 });
-  return `${(delta.kind === 'delta' || delta.kind === 'rate') && delta.value > 0 ? '+' : ''}${value}${delta.kind === 'rate' ? ' / season' : ''}`;
+  return numberPresentation(delta.value, delta.kind === 'rate' ? 'rate' : delta.kind === 'delta' ? 'change' : 'stock').short;
 }
 
 export function renderDeltas(host: HTMLElement, deltas: readonly VisualDelta[]): void {
@@ -31,6 +31,7 @@ export function renderDeltas(host: HTMLElement, deltas: readonly VisualDelta[]):
   for (const delta of deltas) {
     const item = document.createElement('span');
     item.className = `visual-delta ${delta.tone}`;
+    item.setAttribute('aria-label', `${delta.label}: ${numberPresentation(delta.value, delta.kind === 'rate' ? 'rate' : delta.kind === 'delta' ? 'change' : 'stock').exact} ${delta.qualifier}`);
     item.title = `${delta.subject ? `${delta.subject}: ` : ''}${delta.label} ${deltaNumber(delta)} ${delta.qualifier}`;
     const value = document.createElement('strong');
     value.textContent = deltaNumber(delta);

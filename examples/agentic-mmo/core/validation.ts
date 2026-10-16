@@ -13,12 +13,14 @@ import {
   TECHNOLOGIES,
   TRADE_RULES,
   TURN_RULES,
+  WONDERS,
 } from './content.ts';
 import { parseUtcTimestamp } from './simulation/clock.ts';
 import { isLandTransportQuote, landTransportTopologyBlock } from './simulation/transport.ts';
 import { coastalTopologyBlock, isCoastalFoundingQuote } from './simulation/coastal.ts';
 import { hexDistance } from './simulation/geography.ts';
 import { isPersistedActionPlan } from './planning.ts';
+import { RELEASES } from './release.ts';
 import {
   CIV_COUNT,
   DIRECTOR_SEAT,
@@ -43,6 +45,9 @@ import {
   type TradeAgreement,
   type TradeOffer,
   type TradeTerms,
+  type WonderCompletion,
+  type WonderLossReceipt,
+  type ResearchBoostReceipt,
   type WorldState,
 } from './types.ts';
 
@@ -324,8 +329,159 @@ function coastalRecords(cities: City[], events: GameEvent[], tiles: HexTile[], f
   return unique(receipts.map(receipt => receipt.eventId)) && events.every(event => !Object.hasOwn(event, 'coastalFounding') || valid(event.coastalFounding));
 }
 
+function quantized(value: number): number { return Math.round(value * 100) / 100; }
+
+function wonderCompletion(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is WonderCompletion {
+  if (!record(value) || !exactKeys(value, ['kind', 'ruleVersion', 'wonderId', 'orderId', 'civId', 'cityId', 'tileId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId'])
+    || value.kind !== 'wonder' || value.ruleVersion !== 1 || !WONDERS.some(definition => definition.id === value.wonderId)
+    || !boundedText(value.cityId) || !integer(value.civId, 0, CIV_COUNT - 1) || !integer(value.tileId)
+    || !integer(value.startedRound, 0, round) || !integer(value.completedRound, value.startedRound + 1, round)
+    || !resourceAmounts(value.paid) || !finite(value.workRequired, Number.MIN_VALUE)) return false;
+  const started = orderRevision(value.orderId, revision); const completed = completionRevision(value.eventId, revision);
+  return started !== null && completed !== null && completed > started;
+}
+
+function wonderLoss(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is WonderLossReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'wonderId', 'orderId', 'civId', 'cityId', 'tileId', 'startedRound', 'paid', 'workRequired', 'workDone', 'refund', 'resolvedRound', 'winnerOrderId', 'eventId'])
+    || value.ruleVersion !== 1 || !WONDERS.some(definition => definition.id === value.wonderId)
+    || !boundedText(value.cityId) || !integer(value.civId, 0, CIV_COUNT - 1) || !integer(value.tileId)
+    || !integer(value.startedRound, 0, round) || !integer(value.resolvedRound, value.startedRound + 1, round)
+    || !resourceAmounts(value.paid) || !finite(value.workRequired, Number.MIN_VALUE) || !finite(value.workDone, 0, value.workRequired)
+    || !record(value.refund) || !exactKeys(value.refund, ['materials']) || value.refund.materials !== quantized((value.paid.materials ?? 0) * 0.5)) return false;
+  const started = orderRevision(value.orderId, revision); const winner = orderRevision(value.winnerOrderId, revision); const ended = completionRevision(value.eventId, revision);
+  return started !== null && winner !== null && ended !== null && started < ended && winner < ended && value.orderId !== value.winnerOrderId;
+}
+
+function researchBoost(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is ResearchBoostReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'wonderId', 'wonderCompletionEventId', 'civId', 'technologyId', 'basisReleaseId', 'percent', 'costBasis', 'nominalAmount', 'progressBefore', 'amount', 'progressAfter', 'unusedAmount', 'round', 'eventId', 'researchCompletionEventId'])
+    || value.ruleVersion !== 1 || !WONDERS.some(definition => definition.id === value.wonderId) || !integer(value.civId, 0, CIV_COUNT - 1)
+    || !TECHNOLOGIES.some(technology => technology.id === value.technologyId)
+    || !RELEASES.some(release => release.id === value.basisReleaseId && release.featureIds.includes('unique-wonders'))
+    || value.percent !== 20 || !finite(value.costBasis, Number.MIN_VALUE) || !finite(value.progressBefore) || value.progressBefore >= value.costBasis
+    || !finite(value.nominalAmount, Number.MIN_VALUE) || value.nominalAmount !== quantized(value.costBasis * 0.2)
+    || !finite(value.amount, Number.MIN_VALUE) || value.amount !== quantized(Math.min(value.nominalAmount, value.costBasis - value.progressBefore))
+    || !finite(value.progressAfter, 0, value.costBasis) || value.progressAfter !== quantized(value.progressBefore + value.amount)
+    || !finite(value.unusedAmount) || value.unusedAmount !== quantized(value.nominalAmount - value.amount) || !integer(value.round, 0, round)) return false;
+  const won = completionRevision(value.wonderCompletionEventId, revision); const used = completionRevision(value.eventId, revision);
+  if (won === null || used === null || used <= won) return false;
+  if (value.progressAfter < value.costBasis) return value.researchCompletionEventId === null;
+  return completionRevision(value.researchCompletionEventId, revision) === used && typeof value.researchCompletionEventId === 'string'
+    && Number(value.researchCompletionEventId.split(':')[1]) > Number(String(value.eventId).split(':')[1]);
+}
+
+function sameWonderFact(first: unknown, second: unknown): boolean {
+  if (!record(first) || !record(second)) return false;
+  return exactKeys(second, Object.keys(first)) && Object.entries(first).every(([key, value]) => record(value)
+    ? record(second[key]) && sameWonderFact(value, second[key]) : value === second[key]);
+}
+
+function wonderEvent(value: Record<string, unknown>): boolean {
+  for (const [type, field] of [['wonder-completed', 'wonderCompletion'], ['wonder-lost', 'wonderLoss'], ['research-boost', 'researchBoost']])
+    if (value.type === type && !Object.hasOwn(value, field ?? '')) return false;
+  if (Object.hasOwn(value, 'wonderCompletion')) {
+    const fact = value.wonderCompletion;
+    if (!wonderCompletion(fact) || value.type !== 'wonder-completed' || fact.eventId !== value.id || fact.completedRound !== value.round
+      || fact.tileId !== value.tileId || fact.civId !== value.actor || value.target !== value.actor || value.detail !== fact.orderId) return false;
+  }
+  if (Object.hasOwn(value, 'wonderLoss')) {
+    const fact = value.wonderLoss;
+    if (!wonderLoss(fact) || value.type !== 'wonder-lost' || fact.eventId !== value.id || fact.resolvedRound !== value.round
+      || fact.tileId !== value.tileId || fact.civId !== value.actor || value.detail !== fact.orderId) return false;
+  }
+  if (Object.hasOwn(value, 'researchBoost')) {
+    const fact = value.researchBoost;
+    if (!researchBoost(fact) || value.type !== 'research-boost' || fact.eventId !== value.id || fact.round !== value.round
+      || fact.civId !== value.actor || value.target !== value.actor || value.detail !== fact.technologyId) return false;
+  }
+  return true;
+}
+
+function wonderRecords(hasRegistry: boolean, registry: unknown, cities: City[], civilizations: Civilization[], tiles: HexTile[], events: GameEvent[], features: string[], revision: number, round: number): boolean {
+  if (hasRegistry !== features.includes('unique-wonders')) return false;
+  if (!hasRegistry) return !events.some(event => event.wonderCompletion || event.wonderLoss || event.researchBoost);
+  if (!record(registry) || Object.keys(registry).some(id => !WONDERS.some(definition => definition.id === id))) return false;
+  const occupied = new Set(cities.map(settlement => settlement.tileId)); const orders = new Set<string>(); const identities = new Set<string>();
+  const activeContenders: string[] = [];
+  for (const settlement of cities) {
+    for (const site of Object.values(settlement.districtSites ?? {})) occupied.add(site);
+    for (const installed of Object.values(settlement.improvements ?? {})) { occupied.add(installed.tileId); orders.add(installed.completion.orderId); identities.add(installed.completion.eventId); }
+    const active = settlement.construction?.active; const last = settlement.construction?.lastCompleted;
+    if (active) {
+      orders.add(active.id); if (active.tileId !== undefined) occupied.add(active.tileId);
+      if ('kind' in active && active.kind === 'wonder') {
+        if (Object.hasOwn(registry, active.wonderId)) return false;
+        activeContenders.push(`${settlement.civId}:${active.wonderId}`);
+      }
+    }
+    if (last && !('kind' in last && last.kind === 'wonder')) { orders.add(last.orderId); identities.add(last.eventId); }
+  }
+  if (!unique(activeContenders)) return false;
+  const completed = new Map<string, WonderCompletion>();
+  const facts = new Map<string, WonderCompletion | WonderLossReceipt | ResearchBoostReceipt>();
+  const retain = (fact: WonderCompletion | WonderLossReceipt | ResearchBoostReceipt): boolean => {
+    if (identities.has(fact.eventId)) return false; identities.add(fact.eventId); facts.set(fact.eventId, fact);
+    if ('orderId' in fact) { if (orders.has(fact.orderId)) return false; orders.add(fact.orderId); }
+    return true;
+  };
+  for (const [id, value] of Object.entries(registry)) {
+    if (!record(value) || !exactKeys(value, ['ruleVersion', 'completion', 'losses', 'boostLimit', 'boostPercent', 'boosts'])
+      || value.ruleVersion !== 1 || value.boostLimit !== 2 || value.boostPercent !== 20 || !wonderCompletion(value.completion, revision, round)
+      || value.completion.wonderId !== id || !Array.isArray(value.losses) || value.losses.length >= CIV_COUNT || !Array.isArray(value.boosts) || value.boosts.length > 2) return false;
+    const won = value.completion; const settlement = cities.find(town => town.id === won.cityId && town.civId === won.civId);
+    if (!settlement || !tiles.some(site => site.id === won.tileId) || occupied.has(won.tileId) || !retain(won)) return false;
+    occupied.add(won.tileId); completed.set(id, won);
+    const last = settlement.construction?.lastCompleted;
+    if (last?.orderId === won.orderId && !sameWonderFact(last, won)) return false;
+    const contenders = new Set([won.civId]); const sites = new Set([won.tileId]);
+    for (const loss of value.losses as unknown[]) {
+      if (!wonderLoss(loss, revision, round) || loss.wonderId !== id || loss.winnerOrderId !== won.orderId || loss.resolvedRound !== won.completedRound
+        || completionRevision(loss.eventId, revision) !== completionRevision(won.eventId, revision) || contenders.has(loss.civId) || sites.has(loss.tileId)
+        || !cities.some(town => town.id === loss.cityId && town.civId === loss.civId) || !tiles.some(site => site.id === loss.tileId) || !retain(loss)) return false;
+      contenders.add(loss.civId); sites.add(loss.tileId);
+    }
+    let previous = completionRevision(won.eventId, revision) ?? 0; const technologies = new Set<string>();
+    for (const boost of value.boosts as unknown[]) {
+      if (!researchBoost(boost, revision, round) || boost.wonderId !== id || boost.wonderCompletionEventId !== won.eventId || boost.civId !== won.civId
+        || boost.round < won.completedRound || (completionRevision(boost.eventId, revision) ?? 0) <= previous || technologies.has(boost.technologyId) || !retain(boost)) return false;
+      previous = completionRevision(boost.eventId, revision) ?? 0; technologies.add(boost.technologyId);
+      if (boost.researchCompletionEventId !== null) {
+        if (identities.has(boost.researchCompletionEventId) || !civilizations.find(civ => civ.id === boost.civId)?.technologies.includes(boost.technologyId)) return false;
+        identities.add(boost.researchCompletionEventId);
+        const latest = civilizations.find(civ => civ.id === boost.civId)?.lastResearchCompletion;
+        if (latest?.eventId === boost.researchCompletionEventId && (latest.technologyId !== boost.technologyId || latest.completedRound !== boost.round)) return false;
+        const event = events.find(candidate => candidate.id === boost.researchCompletionEventId);
+        if (event && (event.type !== 'research-completed' || event.actor !== boost.civId || event.target !== boost.civId || event.round !== boost.round
+          || !event.effects.includes(`Technology ${boost.technologyId} unlocked`))) return false;
+      }
+    }
+  }
+  for (const settlement of cities) {
+    const last = settlement.construction?.lastCompleted;
+    if (last && 'kind' in last && last.kind === 'wonder') {
+      const value = completed.get(last.wonderId);
+      if (!value || !sameWonderFact(value, last)) return false;
+    }
+  }
+  for (const fact of facts.values()) {
+    const event = events.find(candidate => candidate.id === fact.eventId);
+    if (event) {
+      const copy = event.wonderCompletion ?? event.wonderLoss ?? event.researchBoost;
+      if (!copy || !sameWonderFact(copy, fact)) return false;
+    }
+  }
+  return events.every(event => {
+    const fact = event.wonderCompletion ?? event.wonderLoss ?? event.researchBoost;
+    if (!fact) return true;
+    const saved = facts.get(event.id); if (!saved || !sameWonderFact(saved, fact)) return false;
+    const won = completed.get(fact.wonderId); if (!won) return false;
+    return event.wonderLoss ? event.target === won.civId : event.researchBoost ? event.tileId === won.tileId : true;
+  });
+}
+
 function constructionIdentity(value: Record<string, unknown>, settlement: City, features: string[], completed: boolean): boolean {
   if (value.cityId !== settlement.id) return false;
+  if (value.kind === 'wonder') return features.includes('unique-wonders') && integer(value.tileId)
+    && WONDERS.some(definition => definition.id === value.wonderId);
   if (value.kind === 'improvement') return features.includes(IMPROVEMENT_RULES.featureId) && integer(value.tileId)
     && IMPROVEMENTS.some(definition => definition.id === value.improvementId);
   return !Object.hasOwn(value, 'kind') && typeof value.buildingId === 'string'
@@ -335,10 +491,12 @@ function constructionIdentity(value: Record<string, unknown>, settlement: City, 
 }
 
 function constructionKeys(value: Record<string, unknown>): string[] {
-  return value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : [])];
+  return value.kind === 'wonder' ? ['kind', 'wonderId', 'tileId'] : value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : [])];
 }
 
 function constructionCompletion(value: unknown, settlement: City, features: string[], round: number, revision: number): value is ConstructionCompletion {
+  if (record(value) && value.kind === 'wonder') return features.includes('unique-wonders') && wonderCompletion(value, revision, round)
+    && value.cityId === settlement.id && value.civId === settlement.civId;
   if (!record(value) || !exactKeys(value, ['orderId', 'cityId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId', ...constructionKeys(value)])
     || !constructionIdentity(value, settlement, features, true)) return false;
   const started = orderRevision(value.orderId, revision);
@@ -416,22 +574,22 @@ function improvementRecords(cities: City[], tiles: HexTile[], events: GameEvent[
           || !integer(value.tileId) || key !== String(value.tileId) || !reserve(value.tileId)
           || !IMPROVEMENTS.some(definition => definition.id === value.improvementId)
           || !constructionCompletion(value.completion, settlement, features, round, revision)
-          || !('kind' in value.completion) || value.completion.improvementId !== value.improvementId || value.completion.tileId !== value.tileId
+          || !('kind' in value.completion) || value.completion.kind !== 'improvement' || value.completion.improvementId !== value.improvementId || value.completion.tileId !== value.tileId
           || !record(value.operation) || !exactKeys(value.operation, ['enabled', 'lastResult']) || typeof value.operation.enabled !== 'boolean'
           || value.operation.lastResult !== null && !improvementResult(value.operation.lastResult, value.completion.completedRound, round, features)) return false;
         const completion = value.completion;
         const event = events.find(item => item.id === completion.eventId);
         if (event && (event.type !== 'improvement-completed' || event.round !== completion.completedRound || event.tileId !== completion.tileId
           || event.actor !== settlement.civId || event.target !== settlement.civId || event.detail !== `${settlement.id}/${completion.tileId}/${completion.improvementId}`)) return false;
-        if (last && 'kind' in last && last.orderId === completion.orderId) {
+        if (last && 'kind' in last && last.kind === 'improvement' && last.orderId === completion.orderId) {
           if (!sameImprovementCompletion(last, completion)) return false;
         } else { orderIds.push(completion.orderId); eventIds.push(completion.eventId); }
       }
     }
-    if (last && 'kind' in last) {
+    if (last && 'kind' in last && last.kind === 'improvement') {
       const installed = record(mapping) ? mapping[String(last.tileId)] : null;
       if (!record(installed) || !constructionCompletion(installed.completion, settlement, features, round, revision)
-        || !('kind' in installed.completion) || !sameImprovementCompletion(last, installed.completion)) return false;
+        || !('kind' in installed.completion) || installed.completion.kind !== 'improvement' || !sameImprovementCompletion(last, installed.completion)) return false;
     }
   }
   return unique(orderIds) && unique(eventIds);
@@ -710,7 +868,7 @@ export function isGameEvent(value: unknown): value is GameEvent {
     (value.tileId === null || integer(value.tileId)) &&
     strings(value.effects) &&
     value.effects.length > 0 &&
-    finite(value.importance) &&
+    finite(value.importance) && wonderEvent(value) &&
     (value.type !== 'coastal-founded' || Object.hasOwn(value, 'coastalFounding')) &&
     (!Object.hasOwn(value, 'coastalFounding') || (coastalReceipt(value.coastalFounding) && value.type === 'coastal-founded'
       && value.coastalFounding.eventId === value.id && value.coastalFounding.foundedRound === value.round && value.coastalFounding.destinationTileId === value.tileId
@@ -861,6 +1019,7 @@ export function isWorldState(
     !improvementRecords(cities, tiles, value.events, features, round, value.revision) ||
     !metalRecords(Object.hasOwn(value, 'strategicDeposits'), value.strategicDeposits, value.civilizations, cities, tiles, value.events, value.routes, features, value.seed) ||
     !coastalRecords(cities, value.events, tiles, features, round, value.revision) ||
+    !wonderRecords(Object.hasOwn(value, 'wonders'), value.wonders, cities, value.civilizations, tiles, value.events, features, value.revision, round) ||
     !value.civilizations.every((item) =>
       cities.some((settlement) => settlement.civId === item.id),
     ) ||

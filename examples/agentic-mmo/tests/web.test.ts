@@ -512,7 +512,7 @@ await test('damage labels retain readable screen metrics and real repair cues an
   assert.ok(city && tile && tile.id !== undefined);
   const repaired = eventVisual({ id: 'repair', round: 9, type: 'city-repaired', title: 'City repaired', detail: 'Exact town', actor: 0, target: 0, tileId: tile.id, cause: 'Paid recovery', effects: ['City damage 10 → 0', 'Paid 5 materials', 'Paid 2 energy'], importance: 3 });
   assert.ok(repaired?.deltas[0]);
-  assert.equal(deltaNumber(repaired.deltas[0]), '-10');
+  assert.equal(deltaNumber(repaired.deltas[0]), '−10');
   assert.equal(eventAnchor(world, repaired)?.key, `tile:${tile.id}`);
   for (const scale of [6, 12, 24, 48]) {
     const metrics = cityScreenMetrics(scale);
@@ -578,7 +578,7 @@ await test('Events remains a primary navigation control and returns focus to its
 
 await test('small spectator layout keeps named dock and all story facts reachable without vertical clipping', () => {
   const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
-  const responsive = css.slice(css.lastIndexOf('@media (max-width: 1000px)'));
+  const responsive = css.slice(css.indexOf('@media (max-width: 1000px)', css.indexOf('.events-nav:focus-visible')));
   assert.match(responsive, /\.civilization-row\s*\{[^}]*flex-direction: column/);
   assert.match(responsive, /\.civilization-row strong\s*\{[^}]*white-space: nowrap/);
   assert.match(responsive, /\.chronicle \.story-deltas\s*\{[^}]*flex-wrap: nowrap[^}]*overflow-x: auto/);

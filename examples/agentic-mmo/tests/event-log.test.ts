@@ -147,6 +147,10 @@ void test('only the exact retained delivery exposes separate sent cargo transpor
 });
 
 class ElementRecord {
+  value = ''; disabled = false;
+  focus(): void { return; }
+  listeners = new Map<string, () => void>();
+  addEventListener(name: string, listener: () => void): void { this.listeners.set(name, listener); }
   tag: string; textContent = ''; className = ''; dataset: Record<string, string> = {};
   children: ElementRecord[] = []; attributes = new Map<string, string>();
   constructor(tag: string) { this.tag = tag; }
@@ -174,12 +178,13 @@ void test('first glance names the action and keeps raw causes IDs and routine re
     const root = nodes[0]; assert.ok(root);
     const visible = firstGlance(root);
     assert.match(visible, /Pelagos began Fuel management/);
-    assert.match(visible, /Routine seasons & calendar · 1 record/);
+    assert.match(visible, /Routine seasons & calendar/);
     assert.doesNotMatch(visible, /Opaque engine|fuel-management|Event 8:0|Made 7.8/);
+    const filter = nodes.find(node => node.tag === 'select' && node.attributes.get('aria-label') === 'Show'); assert.ok(filter); filter.value = 'routine'; filter.listeners.get('change')?.();
     assert.match(root.content(), /Used  2 Energy|Used 2 Energy/);
     assert.match(root.content(), /Made  7.8 Materials|Made 7.8 Materials/);
     assert.ok(nodes.some(node => node.tag === 'summary' && node.textContent === 'Details'));
-    assert.ok(nodes.some(node => node.className === 'event-log-season-group' && !node.attributes.has('open')));
+    assert.ok(nodes.some(node => node.className === 'event-log-page')); 
   } finally { if (old) Object.defineProperty(globalThis, 'document', old); else Reflect.deleteProperty(globalThis, 'document'); }
 });
 void test('DOM uses safe text native disclosure and semantic icons without history animation', () => {

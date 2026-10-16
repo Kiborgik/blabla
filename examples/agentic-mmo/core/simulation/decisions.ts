@@ -1,5 +1,6 @@
+import { wonderEligibility } from './wonders.ts';
 import { constructionTarget } from './improvements.ts';
-import { BUILDINGS, IMPROVEMENTS, TECHNOLOGIES } from '../content.ts';
+import { BUILDINGS, IMPROVEMENTS, TECHNOLOGIES, WONDERS } from '../content.ts';
 import { DIRECTOR_SEAT, type DecisionObligation, type DecisionObligations, type GameAction, type WorldState } from '../types.ts';
 import { buildingEligibility, improvementEligibility, researchEligibility } from './capabilities.ts';
 import { constructionWork } from './construction.ts';
@@ -45,6 +46,13 @@ export function decisionObligations(state: WorldState, civilizationId: number): 
         if (!eligibility.blockers.length) lane.availableIds.push(capabilityId);
         else lane.blockers.push(...eligibility.blockers.map(reason => ({ capabilityId, reason })));
       }
+      if (hasFeatures(state, ['unique-wonders'])) for (const definition of WONDERS) {
+        const eligibility = wonderEligibility(state, civilizationId, definition, city.id);
+        if (eligibility.completed) continue;
+        const capabilityId = `wonder:${definition.id}`;
+        if (!eligibility.blockers.length) lane.availableIds.push(capabilityId);
+        else lane.blockers.push(...eligibility.blockers.map(reason => ({ capabilityId, reason })));
+      }
       if (lane.availableIds.length) lane.status = 'required';
       else lane.blockers.push({ capabilityId: null, reason: { kind: 'no-available-choice' } });
     }
@@ -58,7 +66,7 @@ export function decisionActionBlock(state: WorldState, seat: number, action: Gam
   const civilization = civilizationById(state, seat);
   if (action.type === 'research' && civilization.researchTarget)
     return `Active research ${civilization.researchTarget} must finish before another research commitment`;
-  if (action.type === 'build' || action.type === 'improve') {
+  if (action.type === 'build' || action.type === 'improve' || action.type === 'build-wonder') {
     const city = state.cities.find(candidate => candidate.civId === seat && candidate.id === action.cityId);
     if (city?.construction?.active) return `Active construction ${constructionTarget(city.construction.active)} in ${city.id} must finish before another commitment`;
   }

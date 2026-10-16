@@ -1,3 +1,4 @@
+import { exactNumber } from './number-format.ts';
 import { RESOURCE_IDS } from '../core/content.ts';
 import type { Resources, StrategicResources } from '../core/types.ts';
 import { routeTitle, routeVisual, ROUTE_LIMIT } from '../visuals/route-visuals.ts';
@@ -30,7 +31,7 @@ export function routePage(routes: readonly RouteView[], page: number): { rows: R
 export function routeAmounts(label: string, values: Partial<Resources>, strategic?: StrategicResources): Array<{ resource: keyof Resources | 'iron'; label: string; amount: number }> {
   const ordinary = RESOURCE_IDS.flatMap((resource) => {
     const amount = values[resource] ?? 0;
-    return amount > 0 ? [{ resource, label: `${label}: ${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${resourceGuide(resource).label}`, amount }] : [];
+    return amount > 0 ? [{ resource, label: `${label}: ${exactNumber(amount)} ${resourceGuide(resource).label}`, amount }] : [];
   });
   return [...ordinary, ...((strategic?.iron ?? 0) > 0 ? [{ resource: 'iron' as const, label: `${label}: ${strategic?.iron} Iron`, amount: strategic?.iron ?? 0 }] : [])];
 }
@@ -41,7 +42,7 @@ function amounts(label: string, values: Partial<Resources>, strategic?: Strategi
   const entries = routeAmounts(label, values, strategic);
   if (!entries.length) row.append(document.createTextNode('None'));
   for (const entry of entries) {
-    const item = text('span', `${entry.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${entry.resource === 'iron' ? 'Iron' : resourceGuide(entry.resource).label}`);
+    const item = text('span', `${exactNumber(entry.amount)} ${entry.resource === 'iron' ? 'Iron' : resourceGuide(entry.resource).label}`);
     item.prepend(visualIcon(entry.resource === 'iron' ? 'materials' : entry.resource));
     row.append(item);
   }

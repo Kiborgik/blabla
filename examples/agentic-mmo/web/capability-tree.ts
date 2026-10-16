@@ -1,3 +1,4 @@
+import { exactNumber } from './number-format.ts';
 import { extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
 import { constructionTarget } from '../core/simulation/improvements.ts';
 import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
@@ -27,7 +28,7 @@ export interface CapabilityTreeInput {
 export interface CapabilityTreeNode {
   id: string;
   name: string;
-  kind: 'technology' | 'building' | 'improvement';
+  kind: 'technology' | 'building' | 'improvement' | 'wonder';
   level: number;
   status: 'done' | 'available' | 'locked' | 'planned' | null;
   label: string;
@@ -44,15 +45,15 @@ export interface CapabilityTreeNode {
 
 const STATUS_LABELS = { done: 'Done', available: 'Available', locked: 'Locked', planned: 'Planned' };
 
-function number(value: number): string { return value.toLocaleString('en-US', { maximumFractionDigits: 2 }); }
+function number(value: number): string { return exactNumber(value); }
 
 function amounts(values: Partial<Resources>): string {
   return RESOURCE_IDS.flatMap(resource => values[resource] === undefined ? [] : [`${number(values[resource])} ${resourceGuide(resource).label}`]).join(' · ') || 'None';
 }
 
 function capabilityName(input: CapabilityTreeInput, id: string): string {
-  const key = id.startsWith('improvement:') ? id.slice('improvement:'.length) : id;
-  return [...input.catalogue.technologies, ...input.catalogue.buildings, ...input.catalogue.improvements].find(item => item.id === key)?.name ?? id;
+  const key = id.includes(':') ? id.slice(id.indexOf(':') + 1) : id;
+  return [...input.catalogue.technologies, ...input.catalogue.buildings, ...input.catalogue.improvements, ...input.catalogue.wonders].find(item => item.id === key)?.name ?? id;
 }
 
 function blockerText(blocker: CapabilityBlocker, input: CapabilityTreeInput): string {
@@ -67,6 +68,9 @@ function blockerText(blocker: CapabilityBlocker, input: CapabilityTreeInput): st
     case 'city-selection': return 'Choose a town to inspect building requirements';
     case 'missing-city': return `Town unavailable: ${town(blocker.cityId)}`;
     case 'foreign-city': return `${town(blocker.cityId)} belongs to another civilization`;
+    case 'wonder-site': return `${town(blocker.cityId)} needs an available wonder site`;
+    case 'wonder-contender': return `This civilization already has a contender for ${capabilityName(input, blocker.wonderId)}`;
+    case 'wonder-completed': return `${capabilityName(input, blocker.wonderId)} has a recorded world winner: civilization ${blocker.civilizationId}`;
     case 'coastal-site': return 'Needs a coastal town';
     case 'building': return `Build ${capabilityName(input, blocker.buildingId)} in ${town(blocker.cityId)}`;
     case 'improvement-site': return `${town(blocker.cityId)} needs an available site for ${capabilityName(input, `improvement:${blocker.improvementId}`)}`;
@@ -92,11 +96,12 @@ function timingText(reason: string): string {
 }
 
 export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeNode[] {
-  const rows = new Map([...input.projection.technologies, ...input.projection.buildings, ...(input.projection.improvements ?? [])].map(row => [row.nodeId, row]));
+  const rows = new Map([...input.projection.technologies, ...input.projection.buildings, ...(input.projection.improvements ?? []), ...(input.projection.wonders ?? [])].map(row => [row.nodeId, row]));
   const descriptors = [
     ...input.catalogue.technologies.map(definition => ({ kind: 'technology' as const, definition })),
     ...input.catalogue.buildings.map(definition => ({ kind: 'building' as const, definition })),
     ...input.catalogue.improvements.map(definition => ({ kind: 'improvement' as const, definition })),
+    ...input.catalogue.wonders.map(definition => ({ kind: 'wonder' as const, definition })),
   ];
   const ids = new Set(descriptors.map(item => `${item.kind}:${item.definition.id}`));
   const levels = new Map<string, number>();
@@ -120,7 +125,11 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
     }) : null;
     const facts: CapabilityTreeNode['facts'] = 'capability' in definition
       ? [{ label: 'Research work', value: `${number(definition.cost)} Science` }]
-      : 'siteRange' in definition ? [
+      : 'siteRange' in definition && !('residentsRequired' in definition) ? [
+        { label: 'Build once', value: amounts(definition.cost) },
+        { label: 'Construction work', value: `${number(definition.requiredWork)} work` },
+        { label: 'Base after completion', value: `${amounts(definition.production)} on later productive seasons` },
+      ] : 'siteRange' in definition ? [
         { label: 'Build once', value: amounts(definition.cost) },
         { label: 'Construction work', value: `${number(definition.requiredWork)} work` },
         { label: 'Local support each season', value: `${definition.residentsRequired} resident assigned; people stay in the town` },
@@ -132,6 +141,21 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
           { label: definition.district?.adjacency?.improvement ? 'Building base before nearby Mines' : definition.district ? 'Building base before nearby terrain' : 'Base production before productivity', value: amounts(definition.production) },
         ]),
       ];
+    const wonder = input.projection.wonders?.find(entry => entry.nodeId === id);
+    if (wonder) {
+      for (const site of wonder.availableSites) facts.push({ label: `Available site ${site.tileId}`, value: amounts(site.baseProduction) });
+      for (const contender of wonder.facts.contenders) facts.push({ label: `Contender · ${contender.cityId} · Tile ${contender.tileId}`, value: `${number(contender.workDone)} / ${number(contender.workRequired)} work · Paid ${amounts(contender.paid)} · Order ${contender.id}` });
+      const completed = wonder.facts.completed;
+      if (completed) {
+        const winner = completed.completion;
+        facts.push({ label: 'Recorded world winner', value: `${winner.cityId} · Tile ${winner.tileId} · Round ${winner.completedRound} · Event ${winner.eventId}` });
+        for (const loss of completed.losses) facts.push({ label: `Other contender · ${loss.cityId}`, value: `Work ${number(loss.workDone)} / ${number(loss.workRequired)} · Refunded ${amounts(loss.refund)} · Event ${loss.eventId}` });
+        facts.push({ label: 'Unused research boosts', value: number(wonder.facts.boost.remaining) });
+        for (const boost of completed.boosts) facts.push({ label: `Applied boost · ${capabilityName(input, boost.technologyId)}`, value: `${number(boost.progressBefore)} → ${number(boost.progressAfter)} research work · Added ${number(boost.amount)} · Unused ${number(boost.unusedAmount)} · Event ${boost.eventId}` });
+        if (wonder.facts.boost.quote) facts.push({ label: 'Current eligible boost', value: `${capabilityName(input, wonder.facts.boost.quote.technologyId)} · ${number(wonder.facts.boost.quote.amount)} work if chosen; not yet applied` });
+        if (wonder.facts.boost.blocker) facts.push({ label: 'Current boost requirement', value: wonder.facts.boost.blocker });
+      } else facts.push({ label: 'World completion', value: 'No winner recorded. Finishing work does not alone establish a winner.' });
+    }
     const worked = input.projection.improvements?.find(entry => entry.nodeId === id);
     if (worked) {
       for (const site of worked.availableSites) facts.push({ label: `Available site ${site.tileId}`, value: `${amounts(site.baseProduction)} base before town productivity` });
@@ -196,6 +220,21 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
 }
 
 
+export function capabilityGraphLayout(nodes: readonly CapabilityTreeNode[]): { width: number; height: number; nodes: Array<{ id: string; x: number; y: number; width: number; height: number }>; edges: Array<{ from: string; to: string; path: string }> } {
+  const counts = new Map<number, number>();
+  const positions = nodes.map(node => {
+    const row = counts.get(node.level) ?? 0; counts.set(node.level, row + 1);
+    return { id: node.id, x: 20 + node.level * 220, y: 20 + row * 98, width: 174, height: 74 };
+  });
+  const edges = nodes.flatMap(node => node.requires.flatMap(parent => {
+    const from = positions.find(item => item.id === parent); const to = positions.find(item => item.id === node.id);
+    if (!from || !to) return [];
+    const start = from.x + from.width; const middle = (start + to.x) / 2;
+    return [{ from: parent, to: node.id, path: `M ${start} ${from.y + 37} H ${middle} V ${to.y + 37} H ${to.x}` }];
+  }));
+  return { width: Math.max(220, ...positions.map(node => node.x + node.width + 20)), height: Math.max(110, ...positions.map(node => node.y + node.height + 20)), nodes: positions, edges };
+}
+
 function text<K extends keyof HTMLElementTagNameMap>(tag: K, value: string, className = ''): HTMLElementTagNameMap[K] {
   const element = document.createElement(tag);
   element.textContent = value;
@@ -254,12 +293,12 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
   dialog.addEventListener('close', closed);
 
   const focusNode = (id: string): void => {
-    const details = disclosures.get(id);
-    if (!details) return;
-    details.open = true;
-    for (const [key, value] of disclosures) value.dataset['selected'] = String(key === id);
-    controls.get(`node:${id}`)?.focus({ preventScroll: true });
-    details.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    if (!currentNodes.some(node => node.id === id)) return;
+    selectedNodeId = id;
+    renderSelected();
+    const node = controls.get(`node:${id}`);
+    node?.focus({ preventScroll: true });
+    node?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
   };
   const relations = (node: CapabilityTreeNode, nodes: readonly CapabilityTreeNode[], kind: 'requires' | 'leadsTo'): HTMLElement => {
     const line = text('div', '', 'capability-links');
@@ -274,39 +313,24 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
     if (kind === 'requires' && node.requires.length > 1) line.append(text('span', 'All are required', 'capability-note'));
     return line;
   };
-  const renderNode = (node: CapabilityTreeNode, nodes: readonly CapabilityTreeNode[], expanded: Set<string>): HTMLElement => {
-    const article = text('article', '', 'capability-node');
-    article.dataset['nodeId'] = node.id;
-    article.dataset['kind'] = node.kind;
-    article.dataset['status'] = node.status ?? 'unknown';
-    const details = text('details', '', 'capability-detail');
-    details.open = expanded.has(node.id);
-    disclosures.set(node.id, details);
-    const summary = control(text('summary', ''), `node:${node.id}`);
-    const heading = text('span', node.name, 'capability-name');
-    heading.prepend(visualIcon(node.kind === 'technology' ? 'science' : node.kind === 'improvement' ? 'materials' : 'infrastructure'));
-    summary.append(heading, text('span', node.kind === 'technology' ? 'Research' : node.kind === 'improvement' ? 'Worked site' : 'Building', 'capability-kind'), nodeStatus(node));
-    if (node.research) summary.append(text('span', node.research, 'capability-research'));
-    if (node.construction) summary.append(text('span', node.construction, 'capability-research'));
-    if (node.status === 'planned') summary.append(text('span', 'Waiting for a world update', 'capability-note'));
-    else if (node.blockers[0]) summary.append(text('span', node.blockers[0], 'capability-note'));
-    details.append(summary, text('p', node.description));
-    if (node.support) details.append(text('p', node.support, 'capability-support'));
-    for (const blocker of node.blockers) details.append(text('p', blocker, 'capability-blocker'));
+  let selectedNodeId: string | null = null;
+  let currentNodes: CapabilityTreeNode[] = [];
+  let detailHost: HTMLElement | null = null;
+  const renderSelected = (): void => {
+    const node = currentNodes.find(item => item.id === selectedNodeId);
+    if (!node || !detailHost) return;
+    for (const item of currentNodes) controls.get(`node:${item.id}`)?.setAttribute('aria-pressed', String(item.id === node.id));
+    const heading = text('h3', node.name); heading.tabIndex = -1;
+    detailHost.replaceChildren(heading, nodeStatus(node), text('p', node.description));
+    if (node.research || node.construction) detailHost.append(text('strong', node.research ?? node.construction ?? ''));
+    if (node.support) detailHost.append(text('p', node.support, 'capability-support'));
+    for (const blocker of node.blockers) detailHost.append(text('p', blocker, 'capability-blocker'));
+    detailHost.append(relations(node, currentNodes, 'requires'), relations(node, currentNodes, 'leadsTo'));
     const facts = text('dl', '', 'capability-facts');
-    for (const fact of node.facts) {
-      const entry = text('div', '');
-      entry.append(text('dt', fact.label), text('dd', fact.value));
-      facts.append(entry);
-    }
-    details.append(facts);
-    if (node.researchExplanation) details.append(text('p', node.researchExplanation, 'capability-note'));
-    else if (node.facts.some(fact => fact.label === 'Building base before nearby Mines')) details.append(text('p', 'Completed nearby Mines change this site’s base production, including paused Mines. Actual output is recorded on later seasons after completion and depends on town productivity.', 'capability-note'));
-    else if (node.facts.some(fact => fact.label === 'Building base before nearby terrain')) details.append(text('p', 'Nearby terrain changes a site’s base production. Actual output also depends on town productivity and is recorded after completion on later seasons.', 'capability-note'));
-    else if (node.facts.some(fact => fact.label === 'Base production before productivity')) details.append(text('p', 'Production here is catalogue capacity. Actual paid inputs and output are recorded in the town details.', 'capability-note'));
-    details.append(relations(node, nodes, 'leadsTo'));
-    article.append(details, relations(node, nodes, 'requires'));
-    return article;
+    for (const fact of node.facts) { const row = text('div', ''); row.append(text('dt', fact.label), text('dd', fact.value)); facts.append(row); }
+    detailHost.append(facts);
+    if (node.researchExplanation) detailHost.append(text('p', node.researchExplanation, 'capability-note'));
+    detailHost.append(button('Back to selected node', 'back-to-node', () => focusNode(node.id)));
   };
 
   const decisionCards = (input: CapabilityTreeInput): HTMLElement[] => {
@@ -345,7 +369,7 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
           : 'The building is not finished yet. Output starts in a later season after completion.';
         card.append(text('p', explanation, 'capability-note'));
       }
-      for (const id of lane.availableIds) card.append(button(capabilityName(input, id), `decision:${lane.kind}:${lane.cityId ?? 'shared'}:${id}`, () => focusNode(id.startsWith('improvement:') ? id : `${lane.kind === 'research' ? 'technology' : 'building'}:${id}`)));
+      if (lane.availableIds.length) card.append(text('p', `${lane.availableIds.length} options in the tree`, 'capability-note')); 
       if (lane.blockers.length) {
         const reasons = text('details', '', 'capability-decision-reasons');
         reasons.append(control(text('summary', lane.status === 'blocked' ? 'Why this is blocked' : 'Other requirements'), `decision-reasons:${lane.kind}:${lane.cityId ?? 'shared'}`));
@@ -360,7 +384,7 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
     const construction = projection.decisions.construction.find(lane => lane.cityId === projection.cityId);
     if (city && construction) section.append(laneCard(construction, `${city.name} · ${construction.status === 'required' ? 'Choose construction' : 'Construction'}`));
     else section.append(text('p', 'Current construction facts are unavailable for this town', 'capability-note'));
-    const completed = text('div', '', 'capability-completions');
+    const completed = text('details', '', 'capability-completions'); completed.append(text('summary', 'Last completed projects'));
     if (projection.lastResearchCompletion) {
       const last = projection.lastResearchCompletion;
       completed.append(text('p', `Last research completed: ${capabilityName(input, last.technologyId)} · Round ${last.completedRound} · Event ${last.eventId}`));
@@ -385,6 +409,8 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
     const input = captured;
     const projection = input.projection;
     const nodes = capabilityTreeNodes(input);
+    currentNodes = nodes;
+    if (!nodes.some(node => node.id === selectedNodeId)) selectedNodeId = nodes.find(node => node.research || node.construction)?.id ?? nodes.find(node => node.status === 'available')?.id ?? nodes[0]?.id ?? null;
     const top = text('div', '', 'capability-sheet-top');
     const title = control(text('h2', 'Research & buildings'), 'heading');
     title.id = titleId; title.tabIndex = -1;
@@ -408,21 +434,34 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
     refreshButton.className = 'capability-refresh'; refreshButton.hidden = true;
     const notice = text('div', '', 'capability-live-note');
     notice.setAttribute('role', 'status'); notice.append(refreshButton);
-    const options = text('section', '', 'capability-options');
-    options.setAttribute('aria-label', 'Options now');
-    options.append(text('h3', 'Options now'), text('p', 'Available entries and ongoing projects. Agents make their own choices.', 'capability-note'));
-    const available = nodes.filter(node => node.status === 'available');
-    for (const node of available) options.append(button(`${node.name}${node.research ? ' · Researching' : node.construction ? ' · Under construction' : ''}`, `option:${node.id}`, () => focusNode(node.id)));
-    if (!available.length) options.append(text('p', 'No available entry in this captured view. Open a card to see its requirements.'));
-    if (projection.admission.reason) options.append(text('p', `Action timing: ${timingText(projection.admission.reason)}`, 'capability-note'));
-    const legend = text('p', 'Done · Available · Locked · Planned. Open any card for amounts and all requirements. Links show required discoveries, not a schedule.', 'capability-note');
-    const graph = text('div', '', 'capability-graph');
-    graph.setAttribute('aria-label', 'Connected research and building catalogue');
-    for (const value of new Set(nodes.map(node => node.level))) {
-      const group = text('div', '', 'capability-level'); group.dataset['level'] = String(value);
-      for (const node of nodes.filter(candidate => candidate.level === value)) group.append(renderNode(node, nodes, expanded));
-      graph.append(group);
+    const options = text('div', '', 'capability-options');
+    const finderLabel = text('label', 'Find in tree');
+    const finder = control(text('select', ''), 'finder'); finder.setAttribute('aria-label', 'Find research, building or worked site');
+    for (const node of nodes.toSorted((a, b) => a.name.localeCompare(b.name))) {
+      const option = text('option', `${node.name} · ${node.research ? 'Researching' : node.construction ? 'Building' : node.label}`); option.value = node.id; finder.append(option);
     }
+    finder.value = selectedNodeId ?? ''; finder.addEventListener('change', () => focusNode(finder.value)); finderLabel.append(finder); options.append(finderLabel);
+    const available = nodes.filter(node => node.status === 'available');
+    options.append(text('span', `Options now · ${available.length} available or underway`, 'capability-note'));
+    const legend = text('p', 'Lines show prerequisites · Scroll to explore every branch', 'capability-note capability-graph-hint');
+    const layout = capabilityGraphLayout(nodes);
+    const workspace = text('div', '', 'capability-workspace');
+    const viewport = text('div', '', 'capability-viewport'); viewport.tabIndex = 0; viewport.setAttribute('aria-label', 'Branching tree. Scroll to explore all branches');
+    const graph = text('div', '', 'capability-graph'); graph.setAttribute('style', `width:${layout.width}px;height:${layout.height}px`);
+    const connections = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); connections.setAttribute('width', String(layout.width)); connections.setAttribute('height', String(layout.height)); connections.setAttribute('aria-hidden', 'true'); connections.setAttribute('class', 'capability-connections');
+    for (const edge of layout.edges) { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', edge.path); path.setAttribute('data-from', edge.from); path.setAttribute('data-to', edge.to); connections.append(path); }
+    graph.append(connections);
+    for (const position of layout.nodes) {
+      const node = nodes.find(item => item.id === position.id); if (!node) continue;
+      const item = button('', `node:${node.id}`, () => { selectedNodeId = node.id; finder.value = node.id; renderSelected(); });
+      item.className = 'capability-node'; item.dataset['nodeId'] = node.id; item.dataset['status'] = node.status ?? 'unknown'; item.dataset['kind'] = node.kind;
+      item.setAttribute('style', `left:${position.x}px;top:${position.y}px;width:${position.width}px;height:${position.height}px`);
+      const name = text('span', node.name, 'capability-name'); name.prepend(visualIcon(node.kind === 'technology' ? 'science' : node.kind === 'improvement' ? 'materials' : 'infrastructure'));
+      item.append(name, text('span', node.research ? 'Researching' : node.construction ? 'Under construction' : node.label, 'capability-node-state')); graph.append(item);
+    }
+    viewport.append(graph);
+    detailHost = text('section', '', 'capability-selected-detail'); detailHost.setAttribute('aria-label', 'Selected capability details');
+    workspace.append(viewport, detailHost); renderSelected();
     const milestones = text('details', '', 'capability-milestones');
     milestones.open = expanded.has('milestones'); disclosures.set('milestones', milestones);
     milestones.append(control(text('summary', 'Why do buildings need a later era?'), 'milestones'), text('p', 'Eras follow world achievements. Learning one discovery or passing a calendar year does not alone reach an era.'));
@@ -434,7 +473,13 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
       if (definition.requiresMilestones.length) card.append(text('p', `Earlier achievements: ${definition.requiresMilestones.map(id => input.catalogue.milestones.find(item => item.id === id)?.name ?? id).join(' · ')}`));
       milestones.append(card);
     }
-    dialog.replaceChildren(top, context, stamp, townLabel, notice, ...decisionCards(input), options, legend, graph, milestones);
+    const overview = text('details', '', 'capability-overview'); overview.append(text('summary', 'Current projects & completed work'), ...decisionCards(input));
+    const record = text('details', '', 'capability-record'); record.append(text('summary', `Captured revision ${projection.revision}`), stamp);
+    if (projection.admission.reason) record.append(text('p', `Action timing: ${timingText(projection.admission.reason)}`, 'capability-note'));
+    const toolbar = text('div', '', 'capability-toolbar'); toolbar.append(townLabel, options);
+    dialog.replaceChildren(top, context, notice, toolbar, legend, workspace, overview, milestones, record);
+    const selectedPosition = layout.nodes.find(node => node.id === selectedNodeId);
+    if (selectedPosition) { viewport.scrollLeft = Math.max(0, selectedPosition.x - 20); viewport.scrollTop = Math.max(0, selectedPosition.y - 20); }
     dialog.scrollTop = scroll;
     if (key) (controls.get(key === 'refresh' ? 'heading' : key) ?? controls.get('heading'))?.focus({ preventScroll: true });
   };

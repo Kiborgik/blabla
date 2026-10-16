@@ -1,3 +1,4 @@
+import { observedWonders } from './simulation/wonders.ts';
 import type { TradePresentation } from './simulation/trade.ts';
 import { observedRecipes, observedResidentCapacity } from './simulation/operations.ts';
 import { observedStrategicResources } from './simulation/metals.ts';
@@ -172,6 +173,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
     ...(hasFeatures(state, ['resident-capacity']) ? { residentCapacity: observedResidentCapacity(director ? state.cities : citiesOf(state, seat)) } : {}),
     civilization,
     ...observedStrategicResources(state, seat),
+    ...(hasFeatures(state, ['unique-wonders']) ? { wonders: observedWonders(state, seat) } : {}),
     cities: director ? state.cities : citiesOf(state, seat),
     rivals: state.civilizations
       .filter((candidate) => candidate.id !== seat)

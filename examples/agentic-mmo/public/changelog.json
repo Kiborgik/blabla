@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-live.21",
+    "date": "2026-10-16",
+    "title": "A focused view of each civilization",
+    "changes": [
+      "Compact resource stocks reveal exact values on inspection. Town, Work and Routes focus the selected settlement, and active ordinary buildings show their real paid construction progress alongside district commitments.",
+      "The connected research and building graph shows prerequisites with one selected detail. Events use six-card pages and civilization or category filters; recorded results remain separate from current status.",
+      "Desktop and360/400 CSS-width local views show the changed hierarchy, readable Made and Used results, keyboard focus return and precise numbers. Public-origin browser verification remains blocked, and physical touch and WebGL remain unproved.",
+      "The retained event feed covers the current24-record selection within96 events, not the separately prepared older-history service. Illustrative preview and legal local fixtures are clearly separate from actual model play.",
+      "Reviewed unique-wonder rules are prepared behind a separate compatible release. Canonical tree facts distinguish contenders, completion, refunds and boosts; map landmarks and town-specific wonder cards remain a separate unfinished outcome."
+    ]
+  },
+  {
     "version": "0.1.0-live.20",
     "date": "2026-10-16",
     "title": "Turn worked hills into a manufacturing district",

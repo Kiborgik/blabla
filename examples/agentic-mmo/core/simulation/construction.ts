@@ -1,3 +1,4 @@
+import { isWonderOrder, resolveWonderConstruction } from './wonders.ts';
 import { installImprovement, isImprovementOrder } from './improvements.ts';
 import { buildingBaseProduction, describeDistrictProduction } from './districts.ts';
 import { BUILDINGS, CONSTRUCTION_RULES, RESOURCE_IDS } from '../content.ts';
@@ -60,7 +61,7 @@ export function resolveConstruction(state: WorldState, opening: ReadonlyMap<stri
     const construction = city.construction;
     const order = construction?.active;
     const work = opening.get(city.id);
-    if (!construction || !order || work === undefined || state.round <= order.startedRound) continue;
+    if (!construction || !order || isWonderOrder(order) || work === undefined || state.round <= order.startedRound) continue;
     order.workDone = Math.min(order.workRequired, Math.round((order.workDone + work) * 100) / 100);
     if (order.workDone < order.workRequired) continue;
     if (isImprovementOrder(order)) {
@@ -79,4 +80,5 @@ export function resolveConstruction(state: WorldState, opening: ReadonlyMap<stri
     };
     construction.active = null;
   }
+  resolveWonderConstruction(state, opening, events);
 }

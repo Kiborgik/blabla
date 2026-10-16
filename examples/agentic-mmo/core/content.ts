@@ -2,7 +2,7 @@ import { CIV_COUNT } from './types.ts';
 import type {
   BuildingCapability, BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
   EraDefinition, FeatureDefinition, Focus, GameAction, HistoricalMilestone, Resource,
-  Resources, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe, ImprovementDefinition,
+  Resources, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe, ImprovementDefinition, WonderDefinition,
 } from './types.ts';
 
 export const RESOURCE_IDS: readonly Resource[] = ['food', 'materials', 'energy', 'credits', 'science', 'culture'];
@@ -21,6 +21,12 @@ export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, pe
 
 export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
 
+export const WONDER_RULES = { ruleVersion: 1, featureId: 'unique-wonders', loserMaterialRefundPercent: 50, boostLimit: 2, boostPercent: 20, boostMaximumEra: 1 } as const;
+
+export const WONDERS: WonderDefinition[] = [
+  { id: 'great-library', name: 'Great library', description: 'Compete for one great archive. The first completed contender provides science and two optional boosts to distinct active early discoveries; other contenders recover half their paid materials.', requiredFeatures: ['unique-wonders', 'recurring-decisions'], requires: ['writing'], minEra: 1, cost: { materials: 50, credits: 25 }, requiredWork: 24, siteRange: 3, production: { science: 4 } },
+];
+
 export const BUILDING_CAPABILITY_ACTIONS: Record<BuildingCapability, readonly GameAction['type'][]> = { 'coastal-departure': ['settle-coast'] };
 export const RESEARCH_INVESTMENT_RULES = { ruleVersion: 1, featureId: 'productive-research', budget: 'current-city-science-output' } as const;
 
@@ -36,6 +42,7 @@ export const METAL_RULES = { ruleVersion: 1, featureId: 'finite-metals', resourc
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'unique-wonders', name: 'World wonders', description: 'Exact towns compete to complete a unique landmark; real winners, losses, refunds and chosen research boosts remain in history.' },
   { id: 'manufacturing', name: 'Connected local manufacturing', description: 'Iron working and Apprenticeship connect real worked Mine sites to Industrial zones and resident-supported Guild workshops.' },
   { id: 'finite-metals', name: 'Finite useful deposits', description: 'Bronze working reveals finite iron on existing hills; staffed Mines extract it for consensual exchange.' },
   { id: 'learning-commerce', name: 'Connected learning and commerce', description: 'Currency, Mathematics, Education and Banking connect useful local institutions and paid operations.' },
@@ -82,6 +89,8 @@ export const FEATURES: FeatureDefinition[] = [
 ];
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  'build-wonder': ['unique-wonders', 'recurring-decisions'],
+  'apply-research-boost': ['unique-wonders', 'settlement-research'],
   improve: ['worked-land', 'mining', 'recurring-decisions', 'resident-capacity'],
   'set-improvement-operation': ['worked-land', 'resident-capacity'],
   focus: ['settlement-production'], research: ['settlement-research'], build: ['settlement-production'],
@@ -225,6 +234,8 @@ export interface ContentCatalog {
   eras: EraDefinition[];
   buildings: BuildingDefinition[];
   improvements: ImprovementDefinition[];
+  wonders: WonderDefinition[];
+  wonderRules: typeof WONDER_RULES;
   improvementRules: typeof IMPROVEMENT_RULES;
   events: DirectorEventDefinition[];
   milestones: HistoricalMilestone[];
@@ -242,6 +253,7 @@ export interface ContentCatalog {
 
 export const CONTENT: ContentCatalog = {
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
+  wonders: WONDERS, wonderRules: WONDER_RULES,
   buildings: BUILDINGS, improvements: IMPROVEMENTS, improvementRules: IMPROVEMENT_RULES, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
   actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES, metalRules: METAL_RULES,
   tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES, landTransportRules: LAND_TRANSPORT_RULES, publicProjectRecipes: PUBLIC_PROJECT_RECIPES, publicProjectRules: PUBLIC_PROJECT_RULES, siteOutputs: SETTLEMENT_SITE_OUTPUTS,
@@ -278,7 +290,7 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   const metal = catalog.metalRules;
   if (metal.ruleVersion !== 1 || !features.has(metal.featureId) || metal.resource !== 'iron' || !catalog.technologies.some(technology => technology.id === metal.revealTechnology)) errors.push('metals: invalid feature, resource or reveal technology');
   if (![metal.capacityPerCity, metal.extractionPerBeat, metal.initialReserve, metal.placement.maximumDeposits, metal.placement.frontierMinimumDistance, metal.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('metals: invalid positive integer quantity');
-  if (metal.placement.id !== 'iron-placement-1' || metal.placement.hillOnly !== true || metal.placement.seedMultiplier !== 0x9e3779b1 || metal.placement.mixMultipliers[0] !== 0x7feb352d || metal.placement.mixMultipliers[1] !== 0x846ca68b) errors.push('metals: invalid versioned placement');
+  if (metal.placement.id !== 'iron-placement-1' || !metal.placement.hillOnly || metal.placement.seedMultiplier !== 0x9e3779b1 || metal.placement.mixMultipliers[0] !== 0x7feb352d || metal.placement.mixMultipliers[1] !== 0x846ca68b) errors.push('metals: invalid versioned placement');
   unique('trade recipes', catalog.tradeRecipes.map(recipe => recipe.id));
   for (const [name, value] of Object.entries(catalog.tradeRules)) {
     if (!Number.isSafeInteger(value) || value < 1) errors.push(`trade rules: invalid ${name}`);
@@ -299,6 +311,24 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   }
   const technologies = new Map(catalog.technologies.map(technology => [technology.id, technology]));
   const buildings = new Map(catalog.buildings.map(building => [building.id, building]));
+  const wonderRules = catalog.wonderRules;
+  if (wonderRules.ruleVersion !== 1 || !features.has(wonderRules.featureId) || wonderRules.loserMaterialRefundPercent !== 50 || wonderRules.boostLimit !== 2 || wonderRules.boostPercent !== 20 || wonderRules.boostMaximumEra !== 1) errors.push('wonders: invalid versioned resolution or boost rules');
+  unique('wonders', catalog.wonders.map(wonder => wonder.id));
+  for (const wonder of catalog.wonders) {
+    const label = `wonder ${wonder.id}`;
+    requireFeatures(label, wonder.requiredFeatures);
+    if (!wonder.requiredFeatures.includes(wonderRules.featureId) || !wonder.requiredFeatures.includes('recurring-decisions')) errors.push(`${label}: missing contest or construction gate`);
+    if (!eraValid(wonder.minEra) || !Number.isSafeInteger(wonder.requiredWork) || wonder.requiredWork < 1 || !Number.isSafeInteger(wonder.siteRange) || wonder.siteRange < 1) errors.push(`${label}: invalid work, era or site range`);
+    resources(`${label} cost`, wonder.cost);
+    resources(`${label} production`, wonder.production);
+    if (!Object.values(wonder.cost).some(positive) || !Object.values(wonder.production).some(positive)) errors.push(`${label}: requires meaningful construction cost and production`);
+    if (new Set(wonder.requires).size !== wonder.requires.length) errors.push(`${label}: duplicate prerequisites`);
+    for (const required of wonder.requires) {
+      const technology = technologies.get(required);
+      if (!technology) errors.push(`${label}: missing prerequisite ${required}`);
+      else if (technology.era > wonder.minEra) errors.push(`${label}: future prerequisite ${required}`);
+    }
+  }
   const improvementRules = catalog.improvementRules;
   if (improvementRules.ruleVersion !== 1 || !features.has(improvementRules.featureId) || improvementRules.allocationPriority !== 'paid-buildings-then-numeric-tile' || !Number.isFinite(improvementRules.hillElevation.minimum) || !Number.isFinite(improvementRules.hillElevation.maximum) || improvementRules.hillElevation.minimum < 0 || improvementRules.hillElevation.maximum > 100 || improvementRules.hillElevation.minimum > improvementRules.hillElevation.maximum) errors.push('improvements: invalid site or allocation rules');
   unique('improvements', catalog.improvements.map(improvement => improvement.id));

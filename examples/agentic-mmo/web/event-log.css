@@ -76,3 +76,26 @@
   #event-list .event-log-delta > b { font-size: 16px; }
   #event-list .event-log-routine-list { padding-inline: 5px; }
 }
+#events-dialog { width: min(880px, calc(100% - 24px)); }
+#event-list .event-log-controls { display: flex; gap: 12px; padding: 0; border: 0; }
+.event-log-controls label { flex: 1; display: grid; gap: 4px; font-size: 12px; font-weight: 650; }
+.event-log-controls select, .event-log-pager button { min-height: 44px; max-width: 100%; padding: 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
+#event-list .event-log-pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 0; border: 0; }
+#event-list .event-log-page-status { font-size: 12px; margin: 0; }
+#event-list .event-log-page-wrapper { padding: 0; border: 0; }
+#event-list .event-log-page { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+#event-list .event-log-page .event-log-entry { margin: 0; padding: 12px; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-content: start; }
+#event-list .event-log-page .event-log-content h3 { font-size: 17px; }
+#event-list .event-log-page .event-log-marker { width: 26px; height: 28px; }
+#event-list .event-log-window { border: 0; font-size: 12px; color: var(--muted); padding: 12px 0; }
+#event-list button:focus-visible, #event-list select:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+#event-list button:disabled { opacity: .5; }
+@media (max-width: 600px) {
+  #event-list .event-log-page { grid-template-columns: minmax(0, 1fr); }
+  #event-list .event-log-controls { gap: 8px; }
+  .event-log-controls label { min-width: 0; }
+  .event-log-controls select { width: 100%; }
+  #event-list .event-log-page-status { max-width: 115px; text-align: center; }
+}
+#events-refresh { min-height: 44px; padding: 10px 14px; width: 100%; border: 1px solid var(--gold); border-radius: 6px; background: var(--selection); color: var(--ink); font: inherit; }
+.event-log-page-status:focus { outline: 2px solid var(--gold); outline-offset: 3px; }

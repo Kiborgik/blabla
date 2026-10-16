@@ -1,3 +1,4 @@
+import { exactNumber } from './number-format.ts';
 import { extractionFacts } from '../visuals/strategic-resource-visuals.ts';
 import type { GameEvent, Resources } from '../core/types.ts';
 import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
@@ -98,7 +99,7 @@ function namedStory(event: GameEvent, options: EventLogOptions): { title: string
 
 function amounts(vector: Partial<Resources>): string {
   return RESOURCE_IDS.filter(resource => (vector[resource] ?? 0) > 0)
-    .map(resource => `${vector[resource]} ${METRIC_LABELS[resource]}`).join(', ') || 'None';
+    .map(resource => `${exactNumber(vector[resource] ?? 0)} ${METRIC_LABELS[resource]}`).join(', ') || 'None';
 }
 
 export function eventLogEntries(events: readonly GameEvent[], options: EventLogOptions): EventLogEntry[] {
@@ -159,6 +160,7 @@ function deltaChip(delta: VisualDelta): HTMLElement {
   const chip = text('span', '', `event-log-delta ${delta.tone}`);
   const prefix = delta.kind === 'production' ? 'Made' : delta.kind === 'payment' ? 'Used' : delta.kind === 'rate' ? 'Base' : delta.icon === 'cargo' ? 'Exchanged' : '';
   const label = `${delta.label}${delta.icon === 'damage' && delta.kind === 'delta' ? ' points' : ''}`;
+  chip.setAttribute('aria-label', `${prefix} ${exactNumber(delta.value)} ${label}${delta.kind === 'rate' ? ' per season' : ''}`);
   chip.append(visualIcon(delta.icon), text('span', prefix, 'event-log-verb'), text('b', deltaNumber(delta)), text('span', label));
   if (delta.subject) chip.append(text('small', delta.subject));
   return chip;
@@ -199,23 +201,46 @@ function appendEventRow(parent: HTMLElement, row: EventLogEntry): void {
   content.append(details); item.append(marker, content); parent.append(item);
 }
 
+export interface EventLogFilter { actor: string; family: string; page: number }
+export function eventLogPage(rows: readonly EventLogEntry[], filter: EventLogFilter): { rows: EventLogEntry[]; page: number; pages: number; total: number } {
+  const matches = rows.filter(row => (!filter.actor || row.participants.some(person => person.name === filter.actor))
+    && (filter.family === 'all' || filter.family === 'important' && !row.routine || filter.family === 'routine' && row.routine || row.family === filter.family));
+  const pages = Math.max(1, Math.ceil(matches.length / 6));
+  const page = Math.min(pages - 1, Math.max(0, Number.isFinite(filter.page) ? Math.floor(filter.page) : 0));
+  return { rows: matches.slice(page * 6, page * 6 + 6), page, pages, total: matches.length };
+}
+
 export function renderEventLog(host: HTMLElement, events: readonly GameEvent[], options: EventLogOptions): void {
   host.className = 'semantic-event-log';
-  host.setAttribute('aria-label', 'Recorded decisions and changes; routine seasons grouped below');
+  host.setAttribute('aria-label', 'Recorded decisions and changes');
   host.replaceChildren();
   const rows = eventLogEntries(events, options);
   if (!rows.length) { host.append(text('li', 'No recorded events in this view.', 'event-log-empty')); return; }
-  const important = rows.filter(row => !row.routine);
-  const routine = rows.filter(row => row.routine);
-
-  for (const row of important) appendEventRow(host, row);
-  if (routine.length) {
-    const wrapper = text('li', '', 'event-log-routine');
-    const group = text('details', '', 'event-log-season-group');
-    if (!important.length) group.setAttribute('open', '');
-    group.append(text('summary', `Routine seasons & calendar · ${routine.length} ${routine.length === 1 ? 'record' : 'records'}`));
-    const list = text('ol', '', 'event-log-routine-list');
-    for (const row of routine) appendEventRow(list, row);
-    group.append(list); wrapper.append(group); host.append(wrapper);
-  }
+  const filter: EventLogFilter = { actor: '', family: rows.some(row => !row.routine) ? 'important' : 'routine', page: 0 };
+  const controls = text('li', '', 'event-log-controls');
+  const list = text('ol', '', 'event-log-page');
+  const wrapper = text('li', '', 'event-log-page-wrapper'); wrapper.append(list);
+  const status = text('p', '', 'event-log-page-status'); status.setAttribute('role', 'status'); status.tabIndex = -1;
+  const pager = text('li', '', 'event-log-pager');
+  const button = (label: string, action: () => void): HTMLButtonElement => { const node = text('button', label); node.type = 'button'; node.addEventListener('click', action); return node; };
+  const previous = button('← Newer', () => { filter.page -= 1; render(); status.focus({ preventScroll: true }); });
+  const next = button('Older →', () => { filter.page += 1; render(); status.focus({ preventScroll: true }); });
+  const render = (): void => {
+    const page = eventLogPage(rows, filter); filter.page = page.page;
+    list.replaceChildren();
+    for (const row of page.rows) appendEventRow(list, row);
+    if (!page.total) list.append(text('li', 'No matching events in this captured window.', 'event-log-empty'));
+    status.textContent = `${page.total ? page.page * 6 + 1 : 0}–${Math.min((page.page + 1) * 6, page.total)} of ${page.total} · Page ${page.page + 1} / ${page.pages}`;
+    previous.disabled = page.page === 0; next.disabled = page.page + 1 >= page.pages;
+  };
+  const select = (label: string, values: Array<[string, string]>, choose: (value: string) => void, value: string): void => {
+    const field = text('label', label); const input = text('select', ''); input.setAttribute('aria-label', label);
+    for (const [key, name] of values) { const option = text('option', name); option.value = key; input.append(option); }
+    input.value = value; input.addEventListener('change', () => { choose(input.value); filter.page = 0; render(); }); field.append(input); controls.append(field);
+  };
+  select('Civilization', [['', 'All civilizations'], ...[...new Set(rows.flatMap(row => row.participants.map(person => person.name)))].toSorted().map(name => [name, name] as [string, string])], value => { filter.actor = value; }, filter.actor);
+  select('Show', [['important', 'Key events'], ['all', 'All records'], ['research', 'Research'], ['building', 'Towns & building'], ['trade', 'Trade'], ['disruption', 'Disasters'], ['routine', 'Routine seasons & calendar']], value => { filter.family = value; }, filter.family);
+  pager.append(previous, status, next);
+  const note = text('li', `${rows.length} selected records from the latest ${Math.min(events.length, 96)} retained events. Filters apply to this captured window.`, 'event-log-window');
+  host.append(controls, pager, wrapper, note); render();
 }

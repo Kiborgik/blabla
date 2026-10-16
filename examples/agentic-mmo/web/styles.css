@@ -1271,3 +1271,68 @@ dialog h2 {
 .district-label { pointer-events: none; }
 
 .site-base-bonus { position: absolute; top: 33px; left: 50%; transform: translateX(-50%); white-space: nowrap; color: #fff3c6; background: #173a3c; padding: 0 2px; font: 11px Arial, sans-serif; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.inspection .resource-rail { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; padding: 8px 0; margin: 8px 0; border-block: 1px solid var(--border); }
+.resource-rail > div { min-width: 0; padding: 0; border: 0; background: none; }
+.resource-rail dt { margin: 0; }
+.resource-rail .resource-help { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 44px; width: 100%; min-height: 68px; padding: 3px 1px; border: 0; background: none; }
+.resource-rail .resource-help svg { width: 18px; height: 18px; }
+.resource-amount { font-size: 15px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.resource-name { font-size: 9px; }
+.inspection-sections { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+.inspection-sections button { min-height: 44px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.inspection-sections button[aria-pressed='true'] { background: var(--selection); box-shadow: inset 0 -3px var(--gold); font-weight: 700; }
+.inspection [hidden] { display: none !important; }
+.inspection { overflow-anchor: none; }
+.inspection .ambition { font-size: 12px; margin: 8px 0; }
+.inspection .ambition summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.inspection .ambition p { margin: 0 0 8px; }
+.inspection .capability-open { margin: 12px 0; min-height: 44px; }
+.town-work > label { display: grid; gap: 8px; font-size: 12px; color: var(--muted); }
+.work-picker { width: 100%; min-height: 44px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); font: 14px inherit; }
+.work-detail .building-card { margin-top: 12px; }
+.inspection button:focus-visible, .inspection select:focus-visible, .inspection summary:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+@media (max-width: 1000px) {
+  .inspection .resource-rail { margin: 4px 0; padding: 4px 0; }
+  .resource-rail .resource-help { min-height: 58px; }
+  .resource-name { font-size: 8px; }
+  .resource-amount { font-size: 14px; }
+  .inspection-sections { margin: 8px 0; }
+  .inspection .inspection-top { font-size: 9px; }
+  .inspection .inspection-title { margin: 8px 0; }
+  .connection-actions:has(button:not([hidden])) { display: flex; position: absolute; top: auto; bottom: 76px; left: 10px; z-index: 8; }
+}
+.town-picker-label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.town-picker { min-height: 44px; flex: 1; min-width: 0; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; padding: 6px; font: inherit; }
+.town-overview .town-heading { display: none; }
+.town-overview .settlement-facts { margin: 8px 0; }
+@media (max-width: 1000px) {
+  .live-observatory .inspection-top { display: none; }
+  .live-observatory .inspection-title { margin: 0 0 6px; min-height: 44px; }
+  .live-observatory .inspection-title h2 { font-size: 20px; }
+  .live-observatory .inspection-title .focus-symbol { font-size: 30px; }
+  .live-observatory .inspection-title p { margin-top: 2px; }
+  .resource-rail .resource-help { min-height: 50px; gap: 2px; }
+  .resource-name { font-size: 9px; }
+  .inspection-sections { margin: 6px 0; }
+}
+.resource-rail .resource-name { font-size: 11px; }
+@media (min-width: 1001px) { .live-observatory .inspection { width: 340px; } }
+.town-work > label { gap: 0; }
+.work-preview { margin-top: 8px; padding: 9px 10px; border: 1px solid var(--border); border-left: 3px solid var(--gold); border-radius: 6px; background: var(--surface); }
+.work-preview > strong { font-size: 14px; }
+.work-record-round { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; }
+.work-key-results { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 5px; }
+.work-key-results .operation-amounts { margin: 0; font-size: 13px; }
+.work-key-results .operation-amounts span { font-size: 13px; }
+.work-full-record > summary { min-height: 44px; }
+.work-full-record .building-card { margin-top: 0; }
+@media (max-width: 1000px) {
+  .work-preview { padding: 7px 8px; margin-top: 6px; }
+  .work-preview .visual-icon { width: 15px; height: 15px; }
+  .town-work .work-picker { padding: 6px 8px; }
+}
+
+@media (max-width: 1000px) {
+  .live-observatory .inspection[data-inspection-view='work'] { max-height: min(66svh, calc(100% - 116px)); }
+}

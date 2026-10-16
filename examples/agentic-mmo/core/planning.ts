@@ -1,4 +1,5 @@
-import { improvementSiteBlock, isImprovementOrder } from './simulation/improvements.ts';
+import { researchBoostFacts, wonderSiteBlock } from './simulation/wonders.ts';
+import { improvementSiteBlock } from './simulation/improvements.ts';
 import { districtSiteBlock } from './simulation/districts.ts';
 import { coastalSourceBlock } from './simulation/coastal.ts';
 import { publicProjectActionFailure } from './simulation/public-projects.ts';
@@ -7,6 +8,7 @@ import {
   ACTION_FEATURES,
   BUILDINGS,
   IMPROVEMENTS,
+  WONDERS,
   DIRECTOR_EVENTS,
   ECONOMY_RULES,
   FOCUS_IDS,
@@ -63,6 +65,10 @@ export function isGameAction(value: unknown): value is GameAction {
       return FOCUS_IDS.some((focus) => focus === value.focus) && (fields(value, ['type', 'focus']) || (fields(value, ['type', 'focus', 'cityId']) && text(value.cityId, 128)));
     case 'research':
       return fields(value, ['type', 'technology']) && text(value.technology, 128);
+    case 'build-wonder':
+      return fields(value, ['type', 'wonderId', 'cityId', 'tileId']) && text(value.wonderId, 128) && text(value.cityId, 128) && integer(value.tileId);
+    case 'apply-research-boost':
+      return fields(value, ['type', 'wonderId', 'technology']) && text(value.wonderId, 128) && text(value.technology, 128);
     case 'build':
       return text(value.project, 128) && (fields(value, ['type', 'project']) || (fields(value, ['type', 'project', 'cityId']) && text(value.cityId, 128)) || (fields(value, ['type', 'project', 'cityId', 'tileId']) && text(value.cityId, 128) && integer(value.tileId)));
     case 'improve':
@@ -173,6 +179,20 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
       if (civilization?.technologies.includes(action.technology)) return invalidated(`Technology ${action.technology} is already known`);
       if (civilization?.researchTarget === action.technology) return invalidated(`Research ${action.technology} is already underway`);
       return null;
+    case 'build-wonder': {
+      const city = cities.find(candidate => candidate.id === action.cityId);
+      const definition = WONDERS.find(candidate => candidate.id === action.wonderId);
+      if (!city || !definition) return invalidated('The exact owned town or wonder definition is missing');
+      if (state.wonders?.[action.wonderId]) return invalidated('The globally unique wonder is already completed');
+      const block = wonderSiteBlock(state, city, definition, action.tileId);
+      return block ? invalidated(block) : null;
+    }
+    case 'apply-research-boost': {
+      const completed = state.wonders?.[action.wonderId];
+      if (!completed || completed.completion.civId !== seat) return invalidated('The exact wonder award is not owned');
+      if (completed.boosts.length >= completed.boostLimit || completed.boosts.some(boost => boost.technologyId === action.technology) || civilization?.technologies.includes(action.technology)) return invalidated('This exact boost is exhausted or already achieved');
+      return null;
+    }
     case 'build':
       if (action.tileId !== undefined) {
         const city = cities.find(candidate => candidate.id === action.cityId);
@@ -182,7 +202,7 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
           if (block) return invalidated(block);
         }
       }
-      if (hasFeatures(state, ['recurring-decisions']) && cities.some(city => { const active = city.construction?.active; return city.id === action.cityId && active && !isImprovementOrder(active) && active.buildingId === action.project; })) return invalidated(`Construction ${action.project} is already underway in ${action.cityId}`);
+      if (hasFeatures(state, ['recurring-decisions']) && cities.some(city => { const active = city.construction?.active; return city.id === action.cityId && active && !('kind' in active) && active.buildingId === action.project; })) return invalidated(`Construction ${action.project} is already underway in ${action.cityId}`);
       if (!BUILDINGS.some((building) => building.id === action.project)) return invalidated(`Building ${action.project} no longer exists`);
       if (specialized) return cities.find((city) => city.id === action.cityId)?.buildings.includes(action.project) ? invalidated(`City ${action.cityId} already has ${action.project}`) : null;
       if (!cities.length) return invalidated('No settlement remains for this construction');
@@ -273,6 +293,10 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
 }
 
 function unavailableReason(state: WorldState, seat: number, action: GameAction): string {
+  if (action.type === 'apply-research-boost') {
+    const facts = researchBoostFacts(state, seat, action.wonderId);
+    return facts.blocker ?? (facts.quote?.technologyId !== action.technology ? 'The exact named discovery is not the current eligible active target' : 'Review current boost admission');
+  }
   if (action.type === 'settle-coast') { const block = coastalSourceBlock(state, seat, action.sourceCityId); if (block) return block; }
   const decisionBlock = decisionActionBlock(state, seat, action);
   if (decisionBlock) return decisionBlock;
@@ -282,7 +306,10 @@ function unavailableReason(state: WorldState, seat: number, action: GameAction):
   let requires: readonly string[] = [];
   let cost: Partial<Resources> = {};
   let minEra = 0;
-  if (action.type === 'build') {
+  if (action.type === 'build-wonder') {
+    const definition = WONDERS.find(candidate => candidate.id === action.wonderId);
+    if (definition) { requiredFeatures.push(...definition.requiredFeatures); requires = definition.requires; cost = definition.cost; minEra = definition.minEra; }
+  } else if (action.type === 'build') {
     const building = BUILDINGS.find((candidate) => candidate.id === action.project);
     if (building) {
       requiredFeatures.push(...building.requiredFeatures);

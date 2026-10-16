@@ -1,3 +1,5 @@
+import { wonderBaseProduction } from './wonders.ts';
+import { completeResearch } from './research.ts';
 import { emitImprovements, orderedImprovements } from './improvements.ts';
 import { buildingBaseProduction } from './districts.ts';
 import { ECONOMY_RULES, IMPROVEMENTS, IMPROVEMENT_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
@@ -30,7 +32,7 @@ function produceCity(
   const free = buildings.filter((building) => !paidRecipe(building));
   const paid = buildings.filter(paidRecipe);
   const improvements = hasFeatures(state, [IMPROVEMENT_RULES.featureId]) ? orderedImprovements(city).filter(improvement => improvement.operation.lastResult?.status === 'operated') : [];
-  const freeOutputs = free.map(building => buildingBaseProduction(state, city, building));
+  const freeOutputs = [...free.map(building => buildingBaseProduction(state, city, building)), wonderBaseProduction(state, city)];
   for (const resource of RESOURCE_IDS) {
     const terrain = siteOutputs[resource] ?? 0;
     let raw = (ECONOMY_RULES.baseProduction[resource] ?? 0) + (focus[resource] ?? 0)
@@ -137,24 +139,7 @@ function resolveResearch(state: WorldState, civilizationId: number, producedScie
   civilization.resources.science = quantize(civilization.resources.science - invested);
   civilization.researchProgress = quantize(civilization.researchProgress + invested);
   if (civilization.researchProgress < technology.cost) return;
-  civilization.technologies.push(technology.id);
-  civilization.researchTarget = '';
-  civilization.researchProgress = 0;
-  const completed = emitEvent(state, events, {
-    type: 'research-completed',
-    title: `${civilization.name} discovers ${technology.name}`,
-    detail: technology.capability,
-    actor: civilizationId,
-    target: civilizationId,
-    tileId: citiesOf(state, civilizationId)[0]?.tileId ?? null,
-    cause: `Working settlements supplied ${technology.cost} science to the research program`,
-    effects: [
-      `Technology ${technology.id} unlocked`,
-      'Capability stages require released milestones; the world clock is independent',
-    ],
-    importance: 4,
-  });
-  if (hasFeatures(state, ['recurring-decisions'])) civilization.lastResearchCompletion = { technologyId: technology.id, completedRound: state.round, eventId: completed.id };
+  completeResearch(state, civilizationId, technology, events);
 }
 
 export function resolveEconomy(state: WorldState, events: GameEvent[]): void {

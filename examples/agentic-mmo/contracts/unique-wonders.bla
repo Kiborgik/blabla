@@ -1,0 +1,49 @@
+state old_state_preserved: bool
+state eligible_contender: bool
+state contender_started: bool
+state exact_owned_site_and_lane: bool
+state paid_once: bool
+state completion_candidates: bool
+state unique_winner: bool
+state deterministic_tie: bool
+state losers_resolved_once: bool
+state half_recorded_materials_refunded: bool
+state no_credit_refund: bool
+state later_output_once: bool
+state eligible_active_boost: bool
+state boost_applied: bool
+state exact_recorded_arithmetic: bool
+state no_stock_debit: bool
+state distinct_target_and_charge: bool
+state completion_at_most_once: bool
+state refused: bool
+state zero_effects: bool
+
+action adopt_unique_wonders()
+action start_exact_contender()
+action resolve_first_completion()
+action operate_completed_wonder()
+action apply_exact_research_boost()
+action refuse_invalid_wonder_action()
+
+when adopt_unique_wonders {
+    expect "wonder-adoption-preserves-existing-world": after.old_state_preserved
+}
+when start_exact_contender {
+    expect "eligible-exact-contender-starts": not before.eligible_contender or after.contender_started
+    expect "contender-reserves-one-paid-exact-town-lane": not after.contender_started or (after.exact_owned_site_and_lane and after.paid_once)
+}
+when resolve_first_completion {
+    expect "completion-awards-one-deterministic-winner": not before.completion_candidates or (after.unique_winner and after.deterministic_tie)
+    expect "losing-orders-refund-recorded-materials-once": not before.completion_candidates or (after.losers_resolved_once and after.half_recorded_materials_refunded and after.no_credit_refund)
+}
+when operate_completed_wonder {
+    expect "wonder-production-follows-completion-once": after.later_output_once
+}
+when apply_exact_research_boost {
+    expect "eligible-active-discovery-receives-boost": not before.eligible_active_boost or after.boost_applied
+    expect "boost-retains-exact-benefit-and-single-completion": not after.boost_applied or (after.exact_recorded_arithmetic and after.no_stock_debit and after.distinct_target_and_charge and after.completion_at_most_once)
+}
+when refuse_invalid_wonder_action {
+    expect "invalid-wonder-action-has-no-effects": not after.refused or after.zero_effects
+}

@@ -1,9 +1,10 @@
+import { availableWonderSites, isWonderOrder, observedWonders, wonderEligibility } from './simulation/wonders.ts';
 import { availableImprovementSites, isImprovementOrder, orderedImprovements } from './simulation/improvements.ts';
 import { availableDistrictSites, buildingBaseProduction, districtCapacity, districtCount, districtAdjacencyFacts, type DistrictAdjacencyFacts } from './simulation/districts.ts';
-import { BUILDINGS, IMPROVEMENTS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
+import { BUILDINGS, IMPROVEMENTS, WONDERS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
 import { RELEASES } from './release.ts';
 import type { ActionPlan } from './planning.ts';
-import type { ActionOption, CityImprovement, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, Resources, WorldState } from './types.ts';
+import type { ActionOption, CityImprovement, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, Resources, WonderObservation, WorldState } from './types.ts';
 import { buildingEligibility, improvementEligibility, researchEligibility, type CapabilityBlocker, type CapabilityEligibility } from './simulation/capabilities.ts';
 import { admissionError, turnAdmission } from './simulation/turns.ts';
 import { hasFeatures, milestoneEligible } from './simulation/history.ts';
@@ -31,6 +32,11 @@ export interface ImprovementCapabilityRow extends CapabilityRow {
   installed: Array<CityImprovement & { cityId: string }>;
 }
 
+export interface WonderCapabilityRow extends CapabilityRow {
+  availableSites: Array<{ tileId: number; baseProduction: Partial<Resources> }>;
+  facts: WonderObservation;
+}
+
 export interface CapabilityChoiceContext {
   revision: number;
   observedAt: string;
@@ -51,6 +57,7 @@ export interface CapabilityProjection {
   technologies: CapabilityRow[];
   buildings: CapabilityRow[];
   improvements?: ImprovementCapabilityRow[];
+  wonders?: WonderCapabilityRow[];
   legalActions: ActionOption[];
   recordedIntent: ActionPlan | null;
   decisions?: DecisionObligations;
@@ -64,7 +71,9 @@ export function capabilityCatalogue() {
     technologies: TECHNOLOGIES,
     buildings: BUILDINGS,
     improvements: IMPROVEMENTS,
+    wonders: WONDERS,
     edges: [
+      ...WONDERS.flatMap(wonder => wonder.requires.map(id => ({ from: `technology:${id}`, to: `wonder:${wonder.id}` }))),
       ...IMPROVEMENTS.flatMap(improvement => improvement.requires.map(id => ({ from: `technology:${id}`, to: `improvement:${improvement.id}` }))),
       ...TECHNOLOGIES.flatMap(technology => technology.requires.map(id => ({ from: `technology:${id}`, to: `technology:${technology.id}` }))),
       ...BUILDINGS.flatMap(building => (building.requiresBuildings ?? []).map(id => ({ from: `building:${id}`, to: `building:${building.id}` }))),
@@ -106,7 +115,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     const choiceRefs = eligibility.completed || eligibility.blockers.length ? [] : legalActions.flatMap((option, index) => option.action.type === 'build' && option.action.project === building.id && (option.action.cityId === undefined || option.action.cityId === cityId) ? [index] : []);
     const operation = city?.buildingOperations?.[building.id];
     const active = city?.construction?.active;
-    const construction = active && !isImprovementOrder(active) && active.buildingId === building.id ? active : null;
+    const construction = active && !('kind' in active) && active.buildingId === building.id ? active : null;
     const districtSiteId = city?.districtSites?.[building.id] ?? construction?.tileId;
     const improvementAdjacency = building.district?.adjacency?.improvement !== undefined && hasFeatures(state, building.requiredFeatures);
     return { ...row(`building:${building.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), ...(operation ? { operation } : {}), ...(city && building.district ? { district: { capacity: districtCapacity(city), used: districtCount(city), siteId: districtSiteId ?? null, ...(improvementAdjacency ? { siteAdjacency: districtSiteId === undefined ? null : districtAdjacencyFacts(state, building, districtSiteId) } : {}), siteBaseProduction: districtSiteId === undefined ? null : buildingBaseProduction(state, city, building, districtSiteId), availableSites: eligibility.completed || eligibility.blockers.length ? [] : availableDistrictSites(state, city, building).map(tileId => ({ tileId, baseProduction: buildingBaseProduction(state, city, building, tileId), ...(improvementAdjacency ? { adjacency: districtAdjacencyFacts(state, building, tileId) } : {}) })) } } : {}) };
@@ -121,6 +130,16 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
       installed: city ? orderedImprovements(city).filter(improvement => improvement.improvementId === definition.id).map(improvement => ({ ...improvement, cityId: city.id })) : [],
     };
   });
+  const wonderFacts = observedWonders(state, civilizationId);
+  const wonders: WonderCapabilityRow[] = WONDERS.map((definition, index) => {
+    const eligibility = wonderEligibility(state, civilizationId, definition, cityId);
+    const active = city?.construction?.active;
+    const construction = active && isWonderOrder(active) && active.wonderId === definition.id ? active : null;
+    const facts = wonderFacts[index];
+    if (!facts) throw new RangeError('Wonder catalogue and facts must agree');
+    const choiceRefs = legalActions.flatMap((option, choiceIndex) => (option.action.type === 'build-wonder' && option.action.wonderId === definition.id && option.action.cityId === cityId) || (option.action.type === 'apply-research-boost' && option.action.wonderId === definition.id) ? [choiceIndex] : []);
+    return { ...row(`wonder:${definition.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), availableSites: city && !eligibility.blockers.length ? availableWonderSites(state, city, definition).map(tileId => ({ tileId, baseProduction: { ...definition.production } })) : [], facts };
+  });
   return structuredClone({
     choiceReferenceState: choices ? 'provided' : 'not-provided',
     revision: state.revision,
@@ -133,6 +152,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     technologies,
     buildings,
     improvements,
+    wonders,
     ...(hasFeatures(state, ['finite-metals']) ? { strategic: observedStrategicResources(state, civilizationId) } : {}),
     legalActions,
     recordedIntent: state.actionPlans?.[civilizationId] ?? null,

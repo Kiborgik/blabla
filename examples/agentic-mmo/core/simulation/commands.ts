@@ -1,3 +1,4 @@
+import { executeWonderAction } from './wonders.ts';
 import { executeImprovementAction } from './improvements.ts';
 import { executeCoastalFounding, foundSettlement } from './coastal.ts';
 import { BUILDINGS, CONSTRUCTION_RULES, DIRECTOR_EVENTS, ECONOMY_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS } from '../content.ts';
@@ -133,6 +134,10 @@ export function executeAction(
       } else installBuilding(state, city, definition, events);
       return;
     }
+    case 'build-wonder':
+    case 'apply-research-boost':
+      executeWonderAction(state, seat, action, events);
+      return;
     case 'improve':
     case 'set-improvement-operation':
       executeImprovementAction(state, seat, action, events);

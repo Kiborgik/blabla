@@ -1,3 +1,4 @@
+import { exactNumber, numberPresentation } from './number-format.ts';
 import { observedStrategicResources } from '../core/simulation/metals.ts';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
 import { createCapabilityTreeSheet, restoreCapabilityOpener, type CapabilityTreeInput } from './capability-tree.ts';
@@ -71,10 +72,10 @@ app.innerHTML = `
   </main>
   <footer class="footer"><span class="footer-status">A shared world. An open future.</span><div class="release-links"><button id="world-info-open" type="button" aria-label="About this world and viewer version">v${currentRelease.version}</button><button id="changelog-open" type="button">Changelog</button><a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">Built with <strong>BlaBla</strong></a></div></footer>
   <dialog id="history-dialog" aria-labelledby="history-title"><div class="dialog-top"><span class="eyebrow">THE WORLD KEEPS GROWING</span><button class="dialog-close" type="button" aria-label="Close update history">×</button></div><h2 id="history-title">What changed</h2><div class="release-history">${changelog.map((entry, index) => `<details class="release-entry" ${index === 0 ? 'open' : ''}><summary><span class="release-version">v${escapeText(entry.version)}</span> <strong>${escapeText(entry.title)}</strong></summary><time datetime="${escapeText(entry.date)}">${escapeText(entry.date)}</time><ul>${entry.changes.map((change) => `<li>${escapeText(change)}</li>`).join('')}</ul></details>`).join('')}</div></dialog>
-  <dialog id="about-dialog" aria-labelledby="about-title"><div class="dialog-top"><span class="eyebrow">A WORLD THAT KEEPS GROWING</span><button class="dialog-close" type="button" aria-label="Close world information">×</button></div><h2 id="about-title">The world, without us.</h2><p class="dialog-intro">Five AI civilizations. A sixth AI World Director. Humans watch the story unfold.</p><div class="about-body"><p>Small settlements are the beginning. New features will bring trade, culture, politics, industry and, eventually, life beyond Earth.</p><h3>Many ways forward</h3><p>The horizon includes scientific, cultural, economic, political and military success. Their systems arrive through future expansions; they are not all available today.</p><p>Fast choices shape slower projects and lasting commitments. The calendar has its own regular rhythm, with deliberate turning points as the world grows.</p><p>Viewer version ${currentRelease.version}. A connected view shows committed server state. It does not claim the agents are acting continuously. Sample mode is clearly labeled and never changes the shared world.</p><p>Development is organized with <a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">BlaBla</a>.</p></div></dialog>
-  <dialog id="events-dialog" aria-labelledby="events-title"><div class="dialog-top"><span class="eyebrow">THE WORLD STORY</span><button class="dialog-close" type="button" aria-label="Close recent events">×</button></div><h2 id="events-title">What changed</h2><p class="dialog-intro">Decisions and changes first. Routine seasons are grouped below.</p><ol id="event-list"></ol></dialog>
+  <dialog id="about-dialog" aria-labelledby="about-title"><div class="dialog-top"><span class="eyebrow">A WORLD THAT KEEPS GROWING</span><button class="dialog-close" type="button" aria-label="Close world information">×</button></div><h2 id="about-title">The world, without us.</h2><p class="dialog-intro">Five AI civilizations. A sixth AI World Director. Humans watch the story unfold.</p><div class="about-body"><p>Settlements grow through research, construction, production and consenting trade. The applied world release determines which branches are available; inspect the tree for current requirements.</p><h3>Many ways forward</h3><p>The horizon includes scientific, cultural, economic, political and military success. Their systems arrive through future expansions; they are not all available today.</p><p>Fast choices shape slower projects and lasting commitments. The calendar has its own regular rhythm, with deliberate turning points as the world grows.</p><p>Viewer version ${currentRelease.version}. A connected view shows committed server state. It does not claim the agents are acting continuously. Sample mode is clearly labeled and never changes the shared world.</p><p>Development is organized with <a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">BlaBla</a>.</p></div></dialog>
+  <dialog id="events-dialog" aria-labelledby="events-title"><div class="dialog-top"><span class="eyebrow">THE WORLD STORY</span><button class="dialog-close" type="button" aria-label="Close recent events">×</button></div><h2 id="events-title">What changed</h2><p class="dialog-intro">Key events first. Filter by civilization or kind, then open a record for details.</p><button id="events-refresh" type="button" hidden>New events available · Refresh</button><ol id="event-list"></ol></dialog>
   <dialog id="capability-dialog"></dialog>
-  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-top"><span class="eyebrow">YOUR VIEW</span><button class="dialog-close" type="button" aria-label="Close viewer settings">×</button></div><h2 id="settings-title">Viewer settings</h2><p class="dialog-intro">Changes only how you see the world.</p><div class="viewer-options"><label for="viewer-theme">Theme</label><select id="viewer-theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select><p>System follows your device theme.</p><label for="viewer-effects">Effects</label><select id="viewer-effects" aria-describedby="effects-explanation system-motion-note"><option value="calm">Calm</option><option value="rich">Rich</option><option value="cinematic">Cinematic</option></select><p id="effects-explanation"></p><p id="system-motion-note" role="status" hidden>Your device requests reduced motion. Calm is active.</p></div><fieldset class="settings-layers"><legend>Map layers</legend><button data-layer="borders" type="button" aria-pressed="${preferences.borders}">Borders</button><button data-layer="routes" type="button" aria-pressed="${preferences.routes}">Routes</button></fieldset><p class="settings-note">Saved on this browser. No change to agent choices or world speed.</p></dialog>
+  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-top"><span class="eyebrow">YOUR VIEW</span><button class="dialog-close" type="button" aria-label="Close viewer settings">×</button></div><h2 id="settings-title">Viewer settings</h2><p class="dialog-intro">Changes only how you see the world.</p><div class="viewer-options"><label for="viewer-theme">Theme</label><select id="viewer-theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select><p>System follows your device theme.</p><label for="viewer-effects">Effects</label><select id="viewer-effects" aria-describedby="effects-explanation system-motion-note"><option value="calm">Calm</option><option value="rich">Rich</option><option value="cinematic">Cinematic</option></select><p id="effects-explanation"></p><p id="system-motion-note" role="status" hidden>Your device requests reduced motion. Calm is active.</p></div><fieldset class="settings-layers"><legend>Map layers</legend><button data-layer="borders" type="button" aria-pressed="${preferences.borders}">Borders</button><button data-layer="routes" type="button" aria-pressed="${preferences.routes}">Routes</button></fieldset><p class="settings-note">Preferences are kept on this browser when storage is available. No change to agent choices or world speed.</p></dialog>
   <dialog id="resource-dialog" aria-labelledby="resource-title"><div class="dialog-top"><span class="eyebrow">RESOURCE GUIDE</span><button class="dialog-close" type="button" aria-label="Close resource guide">×</button></div><h2 id="resource-title">Resources</h2><p id="resource-explanation" class="dialog-intro">Select a resource in city details to learn more.</p><p class="resource-reading">The city panel shows the amount stored by the civilization. <strong>Made</strong> is production before food use and other costs. <strong>+</strong> and <strong>−</strong> show recorded gains and losses. <strong>Base / season</strong> is production capacity, not goods already made.</p></dialog>
   <div id="update-notice" class="update-notice panel" hidden><p id="update-status" role="status"></p><button id="update-action" type="button" hidden>Update view</button></div>
 `;
@@ -91,6 +92,7 @@ let routeListPage = 0;
 let mapFingerprint = '';
 let civilizationFingerprint = '';
 let eventHistoryCaptured = false;
+let eventHistoryRevision = -1;
 let webgl = true;
 let snapshot: LiveSnapshot | null = null;
 let displayed: AtlasWorld = { tiles: [], cities: [], routes: [] };
@@ -185,6 +187,9 @@ function renderInspection(): void {
   if (fingerprint === inspectionFingerprint) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
   const previousScroll = sameCity ? panel.scrollTop : 0;
+  const selectedSection = sameCity ? panel.dataset['inspectionView'] ?? 'overview' : 'overview';
+  const selectedWork = sameCity ? panel.querySelector<HTMLElement>('.city-details')?.dataset['selectedWork'] ?? '' : '';
+  const focusedInspection = sameCity && document.activeElement instanceof HTMLElement ? document.activeElement.dataset['inspectionFocus'] : undefined;
   const expandedBuildings = new Set([...panel.querySelectorAll<HTMLElement>('.building-card')].filter((card) => sameCity && card.querySelector<HTMLDetailsElement>('details')?.open).map((card) => card.dataset['building']));
   const focusedRoute = document.activeElement instanceof HTMLElement ? document.activeElement.dataset['routeFocus'] : undefined;
   const closeFocused = panel.querySelector('.sheet-close') === document.activeElement;
@@ -200,9 +205,20 @@ function renderInspection(): void {
   inspectionFingerprint = fingerprint;
   inspectedCivilization = civ.id;
   inspectedCity = preferences.selectedCity;
-  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION IN FOCUS</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'live' ? 'COMMITTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${escapeText(civ.symbol)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(cities.find(city => city.id === preferences.selectedCity)?.name ?? civ.character)}</p></div></div><p class="ambition">${escapeText(civ.ambition)}</p>${actual ? `<dl class="resources">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="Explain ${resourceGuide(resource).label}">${resourceGuide(resource).label}</button></dt><dd>${actual.resources[resource].toLocaleString('en-US', { maximumFractionDigits: 1 })}</dd></div>`).join('')}</dl><section class="research-detail" aria-label="Research progress"></section><button class="capability-open" data-open-capabilities type="button" aria-haspopup="dialog">Research &amp; buildings <span>Full tree · Options now</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
+  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION IN FOCUS</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'live' ? 'COMMITTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${escapeText(civ.symbol)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(cities.find(city => city.id === preferences.selectedCity)?.name ?? civ.character)}</p></div></div><details class="ambition" data-inspection-section="overview"><summary>Civilization aim</summary><p>${escapeText(civ.ambition)}</p></details>${actual ? `<dl class="resources resource-rail" data-inspection-section="overview" aria-label="Civilization stored resources">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="${resourceGuide(resource).label}: ${exactNumber(actual.resources[resource])} stored. Inspect exact value and meaning."><span class="resource-amount">${numberPresentation(actual.resources[resource]).short}</span><span class="resource-name">${resourceGuide(resource).label}</span></button></dt><dd class="sr-only">${exactNumber(actual.resources[resource])} stored</dd></div>`).join('')}</dl><section class="research-detail" data-inspection-section="overview" aria-label="Research progress"></section><button class="capability-open" data-inspection-section="overview" data-open-capabilities type="button" aria-haspopup="dialog">Research &amp; buildings <span>Full tree · Options now</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
   const capabilityOpener = panel.querySelector('[data-open-capabilities]');
-  if (capabilityOpener) panel.insertBefore(capabilityOpener, panel.querySelector('.ambition'));
+  if (capabilityOpener) panel.insertBefore(capabilityOpener, panel.querySelector('.city-details'));
+  const navigation = document.createElement('div'); navigation.className = 'inspection-sections'; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', 'Town inspection sections');
+  const chooseSection = (name: string): void => {
+    panel.dataset['inspectionView'] = name;
+    for (const section of panel.querySelectorAll<HTMLElement>('[data-inspection-section]')) section.hidden = section.dataset['inspectionSection'] !== name;
+    for (const button of navigation.querySelectorAll<HTMLButtonElement>('button')) button.setAttribute('aria-pressed', String(button.dataset['inspectionFocus'] === name));
+    if (narrowLayout.matches) frameInspection();
+  };
+  for (const [name, label] of [['overview', 'Town'], ['work', 'Work'], ['routes', 'Routes']]) {
+    if (!name || !label) continue; const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset['inspectionFocus'] = name; button.addEventListener('click', () => { chooseSection(name); panel.scrollTop = 0; }); navigation.append(button);
+  }
+  panel.insertBefore(navigation, panel.querySelector('.research-detail') ?? panel.querySelector('.ambition')); 
   for (const resource of RESOURCE_IDS) {
     const entry = panel.querySelector<HTMLButtonElement>(`[data-resource="${resource}"]`);
     entry?.prepend(visualIcon(resource));
@@ -232,7 +248,10 @@ function renderInspection(): void {
   }
   if (snapshot && actual) renderStrategicInspection(panel, observedStrategicResources(snapshot.state, actual.id));
   const settlement = panel.querySelector<HTMLElement>('.city-details');
-  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport);
+  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork);
+  const overview = settlement?.querySelector<HTMLElement>('.town-overview');
+  if (overview) panel.insertBefore(overview, panel.querySelector('.research-detail'));
+  const aim = panel.querySelector('.ambition'); if (aim) panel.append(aim);
   for (const disclosure of panel.querySelectorAll<HTMLDetailsElement>('[data-town-disclosure]')) {
     disclosure.open = expandedTown.has(disclosure.dataset['townDisclosure']);
     if (disclosure.dataset['townDisclosure'] === focusedTown) disclosure.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true });
@@ -242,7 +261,11 @@ function renderInspection(): void {
     if (receipt && expandedBuildings.has(card.dataset['building'])) receipt.open = true;
     if (card.dataset['building'] === focusedReceipt) receipt?.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true });
   }
-  renderRouteList(panel, displayed.routes, selectedRoute, routeListPage, selectRoute, selectRoutePage);
+  const routes = document.createElement('section'); routes.dataset['inspectionSection'] = 'routes';
+  renderRouteList(routes, displayed.routes.filter(candidate => candidate.from === preferences.selectedCity || candidate.to === preferences.selectedCity), selectedRoute, routeListPage, selectRoute, selectRoutePage);
+  if (!routes.childElementCount) routes.textContent = 'No recorded routes for this town.';
+  panel.append(routes); chooseSection(selectedSection);
+  if (focusedInspection) [...panel.querySelectorAll<HTMLElement>('[data-inspection-focus]')].find(node => node.dataset['inspectionFocus'] === focusedInspection)?.focus({ preventScroll: true });
   if (focusedRoute) [...panel.querySelectorAll<HTMLElement>('[data-route-focus]')].find((node) => node.dataset['routeFocus'] === focusedRoute)?.focus({ preventScroll: true });
   panel.scrollTop = previousScroll;
   if (focusedCity) [...panel.querySelectorAll<HTMLButtonElement>('[data-city-select]')].find((button) => button.dataset['citySelect'] === focusedCity)?.focus({ preventScroll: true });
@@ -401,6 +424,7 @@ function renderConnection(): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>('.map-tools button, .layer-controls button')) button.disabled = atlas === null;
   renderInspection();
   if (dialogs.get('events')?.open && !eventHistoryCaptured) renderEventHistory();
+  if (dialogs.get('events')?.open && snapshot) element('#events-refresh').hidden = snapshot.state.revision <= eventHistoryRevision;
 }
 
 function quietCues(): void {
@@ -494,8 +518,10 @@ for (const [name, selector] of [['changelog', '#history-dialog'], ['about', '#ab
 function renderEventHistory(): void {
   const events = snapshot?.state.events;
   eventHistoryCaptured = events !== undefined;
+  eventHistoryRevision = snapshot?.state.revision ?? -1;
+  element('#events-refresh').hidden = true;
   element('#events-dialog .dialog-intro').textContent = snapshot
-    ? `Revision ${snapshot.state.revision} · Reopen to refresh. Routine seasons below.`
+    ? `Revision ${snapshot.state.revision} · Captured view. New records appear after Refresh.`
     : 'Waiting for committed world history.';
   if (events && snapshot) renderEventLog(element('#event-list'), events, {
     civilizations: snapshot.state.civilizations, receipts: observedRouteResults,
@@ -541,7 +567,8 @@ element('.inspection').addEventListener('click', (event) => {
   helpResource = known;
   const guide = resourceGuide(known);
   element('#resource-title').replaceChildren(visualIcon(known), document.createTextNode(guide.label));
-  element('#resource-explanation').textContent = guide.explanation;
+  const value = snapshot?.state.civilizations.find(civ => civ.id === preferences.selected)?.resources[known];
+  element('#resource-explanation').textContent = `${value === undefined ? '' : `${exactNumber(value)} ${guide.label} stored. `}${guide.explanation}`;
   window.location.hash = 'resource';
 });
 window.addEventListener('keydown', (event) => {
@@ -551,6 +578,7 @@ element('#world-info-open').addEventListener('click', () => { window.location.ha
 element('#changelog-open').addEventListener('click', () => { window.location.hash = 'changelog'; });
 for (const button of document.querySelectorAll<HTMLButtonElement>('.about-button')) button.addEventListener('click', () => { window.location.hash = 'about'; });
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-open-events]')) button.addEventListener('click', () => { eventHistoryOpener = button; window.location.hash = 'events'; });
+element('#events-refresh').addEventListener('click', () => { renderEventHistory(); const heading = element('#events-dialog h2'); heading.tabIndex = -1; heading.focus({ preventScroll: true }); });
 element('#settings-open').addEventListener('click', () => { window.location.hash = 'settings'; });
 for (const dialog of dialogs.values()) {
   dialog.querySelector('button')?.addEventListener('click', closeDialog);

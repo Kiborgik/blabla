@@ -17,6 +17,9 @@ export type CapabilityBlocker =
   | { kind: 'district-site'; cityId: string }
   | { kind: 'improvement-site'; cityId: string; improvementId: string }
   | { kind: 'district-capacity'; cityId: string; required: number; available: number }
+  | { kind: 'wonder-site'; cityId: string }
+  | { kind: 'wonder-contender'; wonderId: string; cityId: string }
+  | { kind: 'wonder-completed'; wonderId: string; civilizationId: number }
   | { kind: 'city-selection' }
   | { kind: 'missing-city'; cityId: string }
   | { kind: 'foreign-city'; cityId: string; owner: number }

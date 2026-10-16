@@ -255,7 +255,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -265,7 +265,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -441,4 +441,34 @@ await test('connected metal and learning branch has useful compatible declaratio
   const release = required(RELEASES.find(item => item.id === 'settlement-metal-learning-1'));
   assert.deepEqual(release.compatibleFrom, ['settlement-mining-1']);
   assert.deepEqual(validateContent(), []);
+});
+
+await test('unique wonders declare a compatible paid contest and bounded boost benefit', () => {
+  const wonder = required(CONTENT.wonders.find(item => item.id === 'great-library'));
+  assert.deepEqual(wonder.requires, ['writing']);
+  assert.equal(wonder.minEra, 1);
+  assert.deepEqual(wonder.cost, { materials: 50, credits: 25 });
+  assert.equal(wonder.requiredWork, 24);
+  assert.deepEqual(wonder.production, { science: 4 });
+  assert.deepEqual(CONTENT.wonderRules, { ruleVersion: 1, featureId: 'unique-wonders', loserMaterialRefundPercent: 50, boostLimit: 2, boostPercent: 20, boostMaximumEra: 1 });
+  assert.deepEqual(required(RELEASES.find(item => item.id === 'settlement-wonders-1')).compatibleFrom, ['settlement-manufacturing-1']);
+  assert.deepEqual(validateContent(), []);
+});
+
+await test('wonder declarations reject invalid gates work prerequisites and benefit rules', () => {
+  for (const mutate of [
+    (catalog: typeof CONTENT) => { required(catalog.wonders[0]).requiredWork = 0; },
+    (catalog: typeof CONTENT) => { required(catalog.wonders[0]).siteRange = -1; },
+    (catalog: typeof CONTENT) => { required(catalog.wonders[0]).requires = ['unknown']; },
+    (catalog: typeof CONTENT) => { required(catalog.wonders[0]).requires = ['spaceflight']; },
+    (catalog: typeof CONTENT) => { required(catalog.wonders[0]).requiredFeatures = ['recurring-decisions']; },
+    (catalog: typeof CONTENT) => { required(catalog.wonders[0]).cost = {}; },
+    (catalog: typeof CONTENT) => { required(catalog.wonders[0]).production = {}; },
+    (catalog: typeof CONTENT) => { Reflect.set(catalog.wonderRules, 'boostLimit', 3); },
+    (catalog: typeof CONTENT) => { Reflect.set(catalog.wonderRules, 'loserMaterialRefundPercent', 100); },
+  ]) {
+    const invalid = structuredClone(CONTENT);
+    mutate(invalid);
+    assert.ok(validateContent(invalid).some(error => error.includes('wonder')));
+  }
 });

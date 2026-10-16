@@ -1,3 +1,4 @@
+import { exactNumber, numberElement } from './number-format.ts';
 import { extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
 import type { observedStrategicResources } from '../core/simulation/metals.ts';
 import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
@@ -24,7 +25,7 @@ function amountLine(label: string, amounts: ResourceAmount[]): HTMLElement {
   line.append(text('strong', `${label}: `));
   if (!amounts.length) line.append(document.createTextNode('None'));
   for (const entry of amounts) {
-    const item = text('span', `${entry.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${entry.label}`);
+    const item = text('span', `${exactNumber(entry.amount)} ${entry.label}`);
     item.prepend(visualIcon(entry.resource));
     line.append(item);
   }
@@ -43,29 +44,22 @@ function townDisclosure(key: string, label: string): HTMLDetailsElement {
   return details;
 }
 
-export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation): void {
+export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = ''): void {
   host.replaceChildren();
   const city = cities.find((entry) => entry.id === selectedId) ?? cities[0];
   if (!city) return;
+  let townPicker: HTMLElement | null = null;
   if (cities.length > 1) {
-    const picker = document.createElement('div');
-    picker.className = 'city-picker';
-    picker.setAttribute('role', 'group');
-    picker.setAttribute('aria-label', 'Choose a settlement');
-    for (const entry of cities) {
-      const button = text('button', entry.name);
-      button.type = 'button';
-      button.dataset['citySelect'] = entry.id;
-      button.setAttribute('aria-pressed', String(entry.id === city.id));
-      button.addEventListener('click', () => onSelect(entry.id));
-      picker.append(button);
-    }
-    host.append(picker);
+    const label = text('label', 'Town', 'town-picker-label');
+    const picker = text('select', '', 'town-picker'); picker.setAttribute('aria-label', 'Choose a settlement'); picker.dataset['inspectionFocus'] = 'town-picker';
+    for (const entry of cities) { const option = text('option', entry.name); option.value = entry.id; picker.append(option); }
+    picker.value = city.id; picker.addEventListener('change', () => onSelect(picker.value)); label.append(picker); townPicker = label;
   }
-  const heading = text('h3', city.name);
+  const heading = text('h3', city.name, 'town-heading');
   const people = text('p', `${city.population} people · ${city.wellbeing}% wellbeing`, 'settlement-facts');
   people.prepend(visualIcon('population'));
   host.append(heading, people, text('p', `Focus: ${city.focus} · ${city.damage}% damage`, 'settlement-facts'));
+  if (townPicker) host.append(townPicker);
   const capacity = support?.cities.find(entry => entry.cityId === city.id);
   if (support && capacity) {
     const line = text('p', `Local work capacity: ${capacity.capacity} residents`, 'settlement-support');
@@ -100,18 +94,22 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     damage.append(value, text('p', 'Damage lowers production. A repair changes future seasons; it does not make supplies immediately.'));
     host.append(damage);
   }
+  const overview = text('div', '', 'town-overview');
+  overview.dataset['inspectionSection'] = 'overview';
+  overview.append(...Array.from(host.children)); host.append(overview);
   const activeDistrict = city.construction?.active;
   if (activeDistrict && 'buildingId' in activeDistrict) {
     const definition = BUILDINGS.find(item => item.id === activeDistrict.buildingId);
     const parent = definition?.district ? definition : BUILDINGS.find(item => item.district && definition?.requiresBuildings?.includes(item.id));
-    if (definition && parent) {
-      const site = text('section', '', 'building-card');
-      const tileId = definition.district ? activeDistrict.tileId : city.districtSites?.[parent.id];
-      site.append(text('h4', `${definition.name} · Under construction`),
-        text('p', `${definition.district ? 'Reserved site' : `At this town’s ${parent.name}`}: ${tileId === undefined ? 'Unavailable' : `Tile ${tileId}`}`, 'building-current'),
-        text('p', `${activeDistrict.workDone} / ${activeDistrict.workRequired} work · Not built yet`, 'building-summary'));
-      host.append(site);
+    const site = text('section', '', 'building-card');
+    site.append(text('h4', `${definition?.name ?? activeDistrict.buildingId} · Under construction`));
+    if (parent) {
+      const tileId = definition?.district ? activeDistrict.tileId : city.districtSites?.[parent.id];
+      site.append(text('p', `${definition?.district ? 'Reserved site' : `At this town’s ${parent.name}`}: ${tileId === undefined ? 'Unavailable' : `Tile ${tileId}`}`, 'building-current'));
     }
+    site.append(text('p', `${exactNumber(activeDistrict.workDone)} / ${exactNumber(activeDistrict.workRequired)} work · Not built yet`, 'building-summary'),
+      amountLine('Paid once for this order', RESOURCE_IDS.flatMap(resource => { const amount = activeDistrict.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
+    host.append(site);
   }
   if (activeDistrict && 'kind' in activeDistrict && activeDistrict.kind === 'improvement') {
     const definition = IMPROVEMENTS.find(item => item.id === activeDistrict.improvementId);
@@ -152,7 +150,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     } else card.append(text('p', 'No operating result has been recorded yet. Output requires a later season with local support.', 'building-summary'));
     host.append(card);
   }
-  if (!city.buildings.length) host.append(text('p', 'No buildings yet', 'settlement-facts'));
+  if (!city.buildings.length && !Object.keys(city.improvements ?? {}).length && !activeDistrict) host.append(text('p', 'No buildings yet', 'settlement-facts'));
   for (const id of city.buildings) {
     const definition = BUILDINGS.find((entry) => entry.id === id);
     const appearance = buildingAppearance(id, 'far');
@@ -198,14 +196,54 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     }
     host.append(card);
   }
+  const cards = [...host.children].filter((node): node is HTMLElement => node instanceof HTMLElement && node !== overview);
+  const work = text('section', '', 'town-work'); work.dataset['inspectionSection'] = 'work';
+  const label = text('label', ''); label.append(text('span', 'Inspect work & buildings', 'sr-only'));
+  const picker = text('select', '', 'work-picker'); picker.setAttribute('aria-label', 'Inspect work or building'); picker.dataset['inspectionFocus'] = 'work-picker';
+  const detail = text('div', '', 'work-detail');
+  for (const [index, card] of cards.entries()) {
+    const key = card.dataset['building'] ?? card.dataset['improvementTile'] ?? `active:${index}`;
+    card.dataset['workId'] = key;
+    const option = text('option', card.querySelector('h4')?.textContent ?? 'No buildings yet'); option.value = key; picker.append(option);
+  }
+  picker.value = cards.some(card => card.dataset['workId'] === retainedWork) ? retainedWork : cards[0]?.dataset['workId'] ?? '';
+  const choose = (): void => {
+    const selected = cards.find(card => card.dataset['workId'] === picker.value);
+    host.dataset['selectedWork'] = picker.value;
+    if (!selected) { detail.replaceChildren(text('p', 'No built or active work in this town.')); return; }
+    const preview = text('div', '', 'work-preview');
+    const key = selected.dataset['workId'];
+    const worked = Object.values(city.improvements ?? {}).find(site => String(site.tileId) === key);
+    const operation = key ? city.buildingOperations?.[key] : undefined;
+    if (key?.startsWith('active:') && activeDistrict) {
+      preview.append(text('strong', 'Under construction'), text('p', `${exactNumber(activeDistrict.workDone)} / ${exactNumber(activeDistrict.workRequired)} work · Not built yet`));
+    } else {
+      preview.append(text('strong', operation || worked ? `Built · ${(operation ?? worked?.operation)?.enabled ? 'On' : 'Paused'} now` : 'Built'));
+      const last = operation?.lastResult ?? worked?.operation.lastResult;
+      if (last) {
+        preview.append(text('span', `Last recorded season · ${last.round}`, 'work-record-round'));
+        const results = text('div', '', 'work-key-results');
+        results.append(amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
+          amountLine('Used', RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
+        preview.append(results);
+        if (last.status !== 'operated') preview.append(text('span', last.status === 'paused' ? 'Paused in that season' : 'Could not operate in that season', 'work-record-round'));
+      } else preview.append(text('span', operation || worked ? 'No operating result recorded yet' : 'Production records are separate from construction.', 'work-record-round'));
+    }
+    const full = townDisclosure(`work:${key ?? ''}`, 'Site & full record'); full.className += ' work-full-record'; full.append(selected);
+    detail.replaceChildren(preview, full);
+  };
+  picker.addEventListener('change', choose); label.append(picker); work.append(label, detail);
+  for (const card of cards) card.remove();
+  host.append(work); choose();
 }
 
 export function renderStrategicInspection(host: HTMLElement, facts: ReturnType<typeof observedStrategicResources>): void {
   if (facts.strategicCapacity === undefined) return;
-  const section = text('section', '', 'strategic-stock');
+  const section = text('section', '', 'strategic-stock'); section.dataset['inspectionSection'] = 'overview';
   section.setAttribute('aria-label', 'Civilization iron');
   const heading = text('h3', 'Iron'); heading.prepend(visualIcon('materials'));
-  section.append(heading, text('p', `${facts.strategicResources?.iron ?? 0} stored / ${facts.strategicCapacity} capacity`, 'strategic-stock-value'),
+  const value = text('p', '', 'strategic-stock-value'); value.append(numberElement(facts.strategicResources?.iron ?? 0), text('span', ` stored / ${exactNumber(facts.strategicCapacity)} capacity`));
+  section.append(heading, value,
     text('p', 'Civilization stock. Finite deposits and ordinary materials are separate.', 'building-summary'));
   const deposits = townDisclosure('revealed-deposits', `Known iron sites · ${facts.revealedDeposits?.length ?? 0}`);
   if (!facts.revealedDeposits?.length) deposits.append(text('p', 'No deposits are revealed to this civilization.'));

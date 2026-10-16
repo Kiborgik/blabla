@@ -1,3 +1,4 @@
+import { availableWonderActions } from './wonders.ts';
 import { availableImprovementSites, orderedImprovements } from './improvements.ts';
 import { availableDistrictSites, describeDistrictProduction } from './districts.ts';
 import { availableCoastalActions, foundingSiteEligible, foundingSourceEligible } from './coastal.ts';
@@ -70,6 +71,7 @@ export function availableActions(
   const civilization = state.civilizations.find((candidate) => candidate.id === seat);
   if (!civilization) return [];
   const cities = citiesOf(state, seat);
+  choices.push(...availableWonderActions(state, seat));
   const specialized = hasFeatures(state, ['city-specialization']);
   if (actionFeatureAvailable(state, 'focus')) {
     if (specialized) {
@@ -247,6 +249,10 @@ export function sameAction(left: GameAction, right: unknown): boolean {
       return 'focus' in right && left.focus === right.focus && left.cityId === ('cityId' in right ? right.cityId : undefined);
     case 'research':
       return 'technology' in right && left.technology === right.technology;
+    case 'build-wonder':
+      return 'wonderId' in right && 'cityId' in right && 'tileId' in right && left.wonderId === right.wonderId && left.cityId === right.cityId && left.tileId === right.tileId;
+    case 'apply-research-boost':
+      return 'wonderId' in right && 'technology' in right && left.wonderId === right.wonderId && left.technology === right.technology;
     case 'build':
       return 'project' in right && left.project === right.project && left.cityId === ('cityId' in right ? right.cityId : undefined) && left.tileId === ('tileId' in right ? right.tileId : undefined);
     case 'improve':

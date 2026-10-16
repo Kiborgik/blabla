@@ -141,3 +141,48 @@ dialog.capability-sheet {
 .capability-decision-reasons { margin-top: 8px; }
 .capability-decision-reasons > summary { cursor: pointer; display: flex; align-items: center; }
 .capability-completions { border-top: 1px solid var(--border, #707b62); margin-top: 14px; padding-top: 8px; overflow-wrap: anywhere; }
+.capability-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+.capability-viewport { overflow: auto; max-height: 420px; min-height: 280px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overscroll-behavior: contain; }
+.capability-graph { position: relative; display: block; margin: 0; }
+.capability-connections { position: absolute; inset: 0; pointer-events: none; fill: none; stroke: var(--muted); stroke-width: 2; opacity: .6; }
+.capability-graph .capability-node { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 9px 10px; background: var(--panel); border: 1px solid var(--border); overflow: visible; }
+.capability-graph .capability-name { font-size: 13px; gap: 7px; line-height: 1.2; }
+.capability-graph .capability-name svg { width: 18px; height: 18px; }
+.capability-node-state { font-size: 11px; color: var(--muted); }
+.capability-graph .capability-node[aria-pressed='true'] { box-shadow: 0 0 0 3px var(--gold); background: var(--selection); }
+.capability-graph .capability-node[data-status='done'] { border-left: 5px solid var(--positive); }
+.capability-graph .capability-node[data-status='available'] { border-left: 5px solid var(--gold); }
+.capability-selected-detail { padding: 15px; border: 1px solid var(--border); border-top: 4px solid var(--gold); border-radius: 8px; max-height: 420px; overflow: auto; background: var(--surface); }
+.capability-selected-detail h3 { font: 23px Georgia, serif; margin-bottom: 8px; }
+.capability-selected-detail .capability-links { margin: 14px 0; }
+.capability-selected-detail .capability-links button { font-size: 12px; padding: 6px 8px; }
+.capability-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 0; background: none; }
+.capability-options label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.capability-options select { max-width: 290px; }
+.capability-overview, .capability-record { margin: 10px 0; border-bottom: 1px solid var(--border); }
+.capability-overview > summary, .capability-record > summary, .capability-completions > summary { padding: 10px 0; cursor: pointer; }
+.capability-town { margin: 8px 0; }
+.capability-context { margin: 12px 0 6px; }
+.capability-sheet .capability-note { line-height: 1.4; }
+@media (max-width: 650px) {
+  dialog.capability-sheet { width: calc(100vw - 16px); padding: 0 12px 16px; max-height: calc(100dvh - 16px); }
+  .capability-workspace { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .capability-viewport { min-height: 220px; max-height: 250px; }
+  .capability-selected-detail { max-height: none; }
+  .capability-options label, .capability-options select { width: 100%; max-width: 100%; }
+  .capability-sheet h2 { font-size: 22px; }
+  .capability-context { font-size: 13px; }
+}
+.capability-toolbar { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 14px; align-items: start; margin: 12px 0 0; }
+.capability-toolbar .capability-town, .capability-toolbar .capability-options { margin: 0; display: block; font-size: 12px; }
+.capability-toolbar label { display: grid; gap: 4px; }
+.capability-toolbar select { min-width: 0; width: 100%; max-width: 100%; }
+.capability-toolbar .capability-options > .capability-note { display: block; margin-top: 4px; font-size: 11px; }
+.capability-graph-hint { margin: 6px 0 !important; font-size: 11px; }
+@media (max-width: 650px) {
+  .capability-toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; margin-top: 10px; }
+  .capability-toolbar .capability-town { display: grid; gap: 4px; }
+  .capability-toolbar select { font-size: 12px; padding: 6px; }
+  .capability-toolbar .capability-options > .capability-note { font-size: 10px; }
+  .capability-sheet-top { padding-block: 10px; }
+}
