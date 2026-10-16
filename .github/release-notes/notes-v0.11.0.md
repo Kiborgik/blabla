@@ -15,12 +15,11 @@ Small coding models drift from the goal and say "done" too early. BlaBla catches
 ## Changed
 
 - A task assigned to role `orchestrator` needs no `task confirm` for its own amendments; other roles are unchanged
-
 - README, project rules, workflow, language, structure, project, expert and adapter docs are rewritten short, in plain English, with tables where people read them
 - The native host schema is replaced by a short wire-contract section in `adapters/native/README.md`; the Rust types are the schema
 - Test ownership moved into `CONTRIBUTING.md`
 - The text printed after every `task` command is shorter
-- Tests run faster: BlaBla's own `finish` runs 4,096 actions instead of 16,384 (every obligation is covered by action 2,318), debug builds use `opt-level = 1`, the gate runs Rust tests in parallel through `cargo-nextest`, experiment-only tests are gone, and Windows CI runs tests in parallel
+- Tests run faster: BlaBla's own `finish` runs 4,096 actions instead of 16,384 (every obligation is covered by about action 2,300), debug builds use `opt-level = 1`, the gate runs every Rust test in parallel through `cargo-nextest` on Linux and Windows, and experiment-only tests are gone
 - Project memory states the drift and overconfidence problem; its prose is shorter and its existing identities are unchanged
 - Systems own whole directories in project memory, so new files are never unowned
 - New goals: `goal::short-plain-docs` and one per fix, each expecting the rule that checks it
@@ -33,8 +32,8 @@ Small coding models drift from the goal and say "done" too early. BlaBla catches
 - `task reconcile-withdrawal` accepts a successor whose write scope covers the path, and a reconciliation stands once recorded instead of coming back after later edits
 - Without a declared `role::orchestrator`, an optional `--model` on an amendment is recorded instead of refused, and `task open` says which verbs will need the role
 
-A review made before 0.11 on a target with findings goes stale once; accept, check and challenge it again. Windows CI failed the self-hosting `finish` once and passed it on the next run; the cause is not known yet.
+A review made before 0.11 on a target with findings goes stale once; accept, check and challenge it again.
 
 No contract syntax or exit code changed; task JSON gains optional `lenses`, `falsify` and `falsifications` fields. History files are unchanged.
 
-See the [full changelog](https://github.com/Kiborgik/blabla/blob/v0.11.0/CHANGELOG.md#0110-2026-10-11).
+See the [full changelog](https://github.com/Kiborgik/blabla/blob/v0.11.0/CHANGELOG.md#0110-2026-10-16).

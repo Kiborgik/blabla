@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.11.0 (2026-10-11)
+## 0.11.0 (2026-10-16)
 
 `task falsify` catches a task whose tests pass without the change they claim to prove, by running the check against the code as it was before the task. The docs are shorter and plainer around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. Two dogfooding rounds, run with small worker models and independent reviewers through BlaBla's own task workflow, fixed the frictions they hit. No contract syntax or exit code changed; task JSON gains optional fields.
 
@@ -33,7 +33,7 @@
 - Role `worker` permits Haiku 5.5 and role `reviewer` Sonnet 5.5, with their host model ids as aliases
 - `guide change` and the agent workflow say to author rules for work not started yet as draft contracts, because an active RED rule blocks every task close
 - New active goals: `goal::short-plain-docs` and one goal per fix above, each expecting the rule that checks it
-- BlaBla's own canonical profile is 8 cases × 512 actions instead of 32 × 512. Every obligation is covered by action 2,318, so `finish` runs 4,096 actions instead of 16,384
+- BlaBla's own canonical profile is 8 cases × 512 actions instead of 32 × 512. Every obligation is covered by about action 2,300, so `finish` runs 4,096 actions instead of 16,384
 - Debug and test builds use `opt-level = 1`, which halves the CPU-bound verifier tests
 - The product gate runs the Rust tests through `cargo-nextest`, every test binary at once; contributors install it with `cargo install cargo-nextest --locked`
 - The product gate drops the expert experiment tests and the C example persistence test, and CI drops the historical experiment tests and runs Windows tests in parallel. The expert adapter tests keep one working-adapter check and every check that forged or hostile input is refused; the language adapters are covered by the example `finish` runs and the acceptance tests
@@ -50,10 +50,6 @@
 - An optional `--model` on `task check`, `task scope` or `task statement` is recorded unchecked when process memory declares no `role::orchestrator`, instead of being refused; resolving, answering, confirming, attributing, removing a deliverable, withdrawing and reconciling still need the role, and `task open` reports up front whether it is declared (`orchestrator_declared` in `--json`)
 - A BLOCKED task's route names its unresolved findings instead of telling the worker to resume at once; a review not yet accepted is no longer shown as STALE
 - `task close` and `task withdraw` keep the exit of the recorded change when only removing falsify leftovers fails, and print what was left
-
-### Known issues
-
-- Windows CI failed the self-hosting `finish` step once (exit 3) and passed it on the next run; the cause is not known yet
 
 ## 0.10.0 (2026-10-06)
 

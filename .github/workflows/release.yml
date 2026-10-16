@@ -20,13 +20,11 @@ jobs:
             platform: windows-x64
             binary: blabla.exe
             archive: zip
-            test_threads: 1
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             platform: linux-x64
             binary: blabla
             archive: tar.gz
-            test_threads: 4
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
@@ -40,10 +38,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - uses: taiki-e/install-action@nextest
       - name: Product gate
         run: python experiments/gate.py --tag release --out ci-artifacts/gate
-        env:
-          RUST_TEST_THREADS: ${{ matrix.test_threads }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package (zip)
         if: matrix.archive == 'zip'
