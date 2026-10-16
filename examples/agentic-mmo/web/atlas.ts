@@ -5,6 +5,7 @@ import { routePathPoints, routePathOmission } from '../visuals/route-paths.ts';
 import type { SettlementFacts } from '../visuals/world-visuals.ts';
 import { hexPosition } from '../visuals/landscape.ts';
 import type { ImprovementView } from '../visuals/improvement-visuals.ts';
+import type { DepositView } from '../visuals/strategic-resource-visuals.ts';
 import type { DistrictView } from '../visuals/district-visuals.ts';
 export { hexPosition } from '../visuals/landscape.ts';
 
@@ -42,6 +43,7 @@ export interface AtlasWorld {
   routes: RouteView[];
   districts?: DistrictView[];
   improvements?: ImprovementView[];
+  deposits?: DepositView[];
   illustrative?: boolean;
 }
 

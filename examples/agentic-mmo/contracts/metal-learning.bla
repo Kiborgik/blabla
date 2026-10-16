@@ -1,0 +1,57 @@
+state prior_state_preserved: bool
+state migration_recorded_once: bool
+state eligible_owned_hills: bool
+state geography_ownership_rng_preserved: bool
+state release_enabled: bool
+state technology_completed: bool
+state deposit_revealed: bool
+state eligible_staffed_mine: bool
+state reserve_and_space_positive: bool
+state extracted: bool
+state credited_equals_depleted: bool
+state old_materials_preserved: bool
+state same_allocated_resident: bool
+state no_uncredited_depletion: bool
+state eligible_due_funded_exchange: bool
+state exchange_completed: bool
+state both_complete_vectors_atomic: bool
+state invalid_or_unfunded_or_full: bool
+state zero_payment: bool
+state old_terms_preserved: bool
+state released_eligible_commitment: bool
+state commitment_started: bool
+state exact_local_dependency: bool
+state paid_once: bool
+state completed_later: bool
+state current_science_only: bool
+state useful_later_output: bool
+state no_automatic_successor: bool
+
+action apply_metal_learning_release()
+action reveal_completed_technology()
+action operate_finite_mine()
+action resolve_mixed_exchange()
+action start_connected_commitment()
+action complete_connected_commitment()
+
+when apply_metal_learning_release {
+    expect "metal-migration-is-explicit-stable-and-compatible": after.prior_state_preserved and after.migration_recorded_once and after.eligible_owned_hills and after.geography_ownership_rng_preserved
+}
+when reveal_completed_technology {
+    expect "released-bronze-completion-reveals-retained-deposits": not (before.release_enabled and before.technology_completed) or after.deposit_revealed
+}
+when operate_finite_mine {
+    expect "eligible-staffed-finite-mine-extracts-useful-stock": not (before.eligible_staffed_mine and before.reserve_and_space_positive) or after.extracted
+    expect "extraction-conserves-finite-stock-with-one-existing-worker": after.credited_equals_depleted and after.same_allocated_resident and after.old_materials_preserved and after.no_uncredited_depletion
+}
+when resolve_mixed_exchange {
+    expect "eligible-funded-due-mixed-exchange-completes": not before.eligible_due_funded_exchange or after.exchange_completed
+    expect "mixed-exchange-collects-both-complete-vectors-or-neither": after.both_complete_vectors_atomic and (not before.invalid_or_unfunded_or_full or after.zero_payment) and after.old_terms_preserved
+}
+when start_connected_commitment {
+    expect "released-eligible-connected-choice-can-start": not before.released_eligible_commitment or after.commitment_started
+    expect "connected-town-commitment-retains-exact-dependency-and-payment": not after.commitment_started or (after.exact_local_dependency and after.paid_once)
+}
+when complete_connected_commitment {
+    expect "learning-and-commerce-have-real-later-consequences": after.completed_later and after.current_science_only and after.useful_later_output and after.no_automatic_successor
+}

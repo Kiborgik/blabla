@@ -1,5 +1,5 @@
 import { RESOURCE_IDS } from '../core/content.ts';
-import type { Resources } from '../core/types.ts';
+import type { Resources, StrategicResources } from '../core/types.ts';
 import { routeTitle, routeVisual, ROUTE_LIMIT } from '../visuals/route-visuals.ts';
 import type { RouteView } from '../visuals/route-visuals.ts';
 import { hasRouteQuote, routePathOmission, routeTilePage } from '../visuals/route-paths.ts';
@@ -27,21 +27,22 @@ export function routePage(routes: readonly RouteView[], page: number): { rows: R
   return { rows: routes.toSorted((a, b) => a.id.localeCompare(b.id)).slice(current * ROUTE_LIMIT, (current + 1) * ROUTE_LIMIT), page: current, pages };
 }
 
-export function routeAmounts(label: string, values: Partial<Resources>): Array<{ resource: keyof Resources; label: string; amount: number }> {
-  return RESOURCE_IDS.flatMap((resource) => {
+export function routeAmounts(label: string, values: Partial<Resources>, strategic?: StrategicResources): Array<{ resource: keyof Resources | 'iron'; label: string; amount: number }> {
+  const ordinary = RESOURCE_IDS.flatMap((resource) => {
     const amount = values[resource] ?? 0;
     return amount > 0 ? [{ resource, label: `${label}: ${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${resourceGuide(resource).label}`, amount }] : [];
   });
+  return [...ordinary, ...((strategic?.iron ?? 0) > 0 ? [{ resource: 'iron' as const, label: `${label}: ${strategic?.iron} Iron`, amount: strategic?.iron ?? 0 }] : [])];
 }
 
-function amounts(label: string, values: Partial<Resources>): HTMLElement {
+function amounts(label: string, values: Partial<Resources>, strategic?: StrategicResources): HTMLElement {
   const row = text('p', '', 'route-amounts');
   row.append(text('strong', `${label}: `));
-  const entries = routeAmounts(label, values);
+  const entries = routeAmounts(label, values, strategic);
   if (!entries.length) row.append(document.createTextNode('None'));
   for (const entry of entries) {
-    const item = text('span', `${entry.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${resourceGuide(entry.resource).label}`);
-    item.prepend(visualIcon(entry.resource));
+    const item = text('span', `${entry.amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${entry.resource === 'iron' ? 'Iron' : resourceGuide(entry.resource).label}`);
+    item.prepend(visualIcon(entry.resource === 'iron' ? 'materials' : entry.resource));
     row.append(item);
   }
   return row;
@@ -110,11 +111,11 @@ export function renderRouteCard(host: HTMLElement, route: RouteView, onTown: (id
     card.append(text('h3', 'Stored schedule'), text('p', `Exchange interval: ${terms.cadenceRounds} rounds`));
     if (quoted) card.append(text('p', 'Cargo is exchanged on a due successful round. There is no shipment in progress between rounds.', 'inspection-note'));
     card.append(text('h3', 'Agreed terms'), text('p', 'Amounts for each successful delivery. These are not new gains.', 'inspection-note'));
-    for (const [town, cargo, upkeep, commerce] of [
-      [route.fromTown?.name ?? route.from, terms.proposerCargo, terms.proposerUpkeep, terms.proposerYield],
-      [route.toTown?.name ?? route.to, terms.recipientCargo, terms.recipientUpkeep, terms.recipientYield],
+    for (const [town, cargo, upkeep, commerce, strategic] of [
+      [route.fromTown?.name ?? route.from, terms.proposerCargo, terms.proposerUpkeep, terms.proposerYield, terms.strategicCargo?.proposer],
+      [route.toTown?.name ?? route.to, terms.recipientCargo, terms.recipientUpkeep, terms.recipientYield, terms.strategicCargo?.recipient],
     ] as const) {
-      card.append(text('h4', town), amounts('Sends', cargo), amounts('Transport cost', upkeep), amounts('Commerce received', commerce));
+      card.append(text('h4', town), amounts('Sends', cargo, strategic), amounts('Transport cost', upkeep), amounts('Commerce received', commerce));
     }
     card.append(text('p', `Agreement ${route.agreement?.offerId}`, 'inspection-note'));
   }

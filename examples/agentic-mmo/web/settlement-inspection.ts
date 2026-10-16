@@ -1,3 +1,5 @@
+import { extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
+import type { observedStrategicResources } from '../core/simulation/metals.ts';
 import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
 import { damageCondition } from '../visuals/damage-visuals.ts';
 import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS } from '../core/content.ts';
@@ -99,13 +101,17 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     host.append(damage);
   }
   const activeDistrict = city.construction?.active;
-  if (activeDistrict && 'buildingId' in activeDistrict && (activeDistrict.buildingId === 'campus' || activeDistrict.buildingId === 'library')) {
-    const site = text('section', '', 'building-card');
-    const tileId = activeDistrict.buildingId === 'campus' ? activeDistrict.tileId : city.districtSites?.['campus'];
-    site.append(text('h4', `${activeDistrict.buildingId === 'campus' ? 'Campus' : 'Library'} · Under construction`),
-      text('p', `${activeDistrict.buildingId === 'campus' ? 'Reserved site' : 'At this town’s Campus'}: ${tileId === undefined ? 'Unavailable' : `Tile ${tileId}`}`, 'building-current'),
-      text('p', `${activeDistrict.workDone} / ${activeDistrict.workRequired} work · Not built yet`, 'building-summary'));
-    host.append(site);
+  if (activeDistrict && 'buildingId' in activeDistrict) {
+    const definition = BUILDINGS.find(item => item.id === activeDistrict.buildingId);
+    const parent = definition?.district ? definition : BUILDINGS.find(item => item.district && definition?.requiresBuildings?.includes(item.id));
+    if (definition && parent) {
+      const site = text('section', '', 'building-card');
+      const tileId = definition.district ? activeDistrict.tileId : city.districtSites?.[parent.id];
+      site.append(text('h4', `${definition.name} · Under construction`),
+        text('p', `${definition.district ? 'Reserved site' : `At this town’s ${parent.name}`}: ${tileId === undefined ? 'Unavailable' : `Tile ${tileId}`}`, 'building-current'),
+        text('p', `${activeDistrict.workDone} / ${activeDistrict.workRequired} work · Not built yet`, 'building-summary'));
+      host.append(site);
+    }
   }
   if (activeDistrict && 'kind' in activeDistrict && activeDistrict.kind === 'improvement') {
     const definition = IMPROVEMENTS.find(item => item.id === activeDistrict.improvementId);
@@ -141,6 +147,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
         text('p', 'This allocation belongs to that recorded season. Current population and pause choices may have changed.'),
         amountLine('Paid that season', RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
         amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
+      if (last.extraction) for (const fact of extractionFacts(last.extraction)) receipt.append(text('p', fact, 'extraction-fact'));
       card.append(receipt);
     } else card.append(text('p', 'No operating result has been recorded yet. Output requires a later season with local support.', 'building-summary'));
     host.append(card);
@@ -155,9 +162,10 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     const name = text('h4', definition?.name ?? id);
     name.prepend(visualIcon(appearance?.icon ?? 'infrastructure'));
     card.append(name);
-    if (id === 'campus' || id === 'library') {
-      const siteId = city.districtSites?.['campus'];
-      card.append(text('p', siteId === undefined ? 'Exact Campus site unavailable' : `${id === 'library' ? 'At this town’s Campus' : 'Exact district site'} · Tile ${siteId}`, 'building-summary'));
+    const parent = definition?.district ? definition : BUILDINGS.find(item => item.district && definition?.requiresBuildings?.includes(item.id));
+    if (parent) {
+      const siteId = city.districtSites?.[parent.id];
+      card.append(text('p', siteId === undefined ? `Exact ${parent.name} site unavailable` : `${parent.id === id ? 'Exact district site' : `At this town’s ${parent.name}`} · Tile ${siteId}`, 'building-summary'));
     }
     if (!definition?.operatingInputs) {
       card.append(text('p', 'Built', 'building-current'));
@@ -190,4 +198,17 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     }
     host.append(card);
   }
+}
+
+export function renderStrategicInspection(host: HTMLElement, facts: ReturnType<typeof observedStrategicResources>): void {
+  if (facts.strategicCapacity === undefined) return;
+  const section = text('section', '', 'strategic-stock');
+  section.setAttribute('aria-label', 'Civilization iron');
+  const heading = text('h3', 'Iron'); heading.prepend(visualIcon('materials'));
+  section.append(heading, text('p', `${facts.strategicResources?.iron ?? 0} stored / ${facts.strategicCapacity} capacity`, 'strategic-stock-value'),
+    text('p', 'Civilization stock. Finite deposits and ordinary materials are separate.', 'building-summary'));
+  const deposits = townDisclosure('revealed-deposits', `Known iron sites · ${facts.revealedDeposits?.length ?? 0}`);
+  if (!facts.revealedDeposits?.length) deposits.append(text('p', 'No deposits are revealed to this civilization.'));
+  for (const deposit of facts.revealedDeposits ?? []) deposits.append(text('p', depositLabel(deposit)));
+  section.append(deposits); host.append(section);
 }

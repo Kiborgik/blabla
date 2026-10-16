@@ -1,0 +1,33 @@
+state coast_eligible: bool
+state coast_accepted: bool
+state coast_population_conserved: bool
+state coast_paid_once: bool
+state coast_exact_source: bool
+state coast_path_valid: bool
+state coast_refusal_unchanged: bool
+state coast_previous_land_access_preserved: bool
+state coast_new_reach: bool
+state coast_target_outside_frontier: bool
+state coast_receipt_exact: bool
+state coast_quote_informative: bool
+state coast_replay_preserved: bool
+
+action coastal_fixture(kind: int)
+action found_coastal_settlement()
+action inspect_coastal_choices()
+action replay_coastal_history()
+
+when found_coastal_settlement {
+    expect "eligible-coastal-founding-succeeds": not before.coast_eligible or after.coast_accepted
+    expect "founding-conserves-people-and-pays-once": not after.coast_accepted or (after.coast_population_conserved and after.coast_paid_once)
+    expect "exact-prepared-source-and-ocean-path": not after.coast_accepted or (after.coast_exact_source and after.coast_path_valid)
+    expect "refused-coastal-founding-has-no-effects": after.coast_accepted or after.coast_refusal_unchanged
+    expect "new-reach-preserves-existing-land-access": after.coast_previous_land_access_preserved and (not (after.coast_accepted and before.coast_target_outside_frontier) or after.coast_new_reach)
+    expect "committed-founding-retains-exact-facts": not after.coast_accepted or after.coast_receipt_exact
+}
+when inspect_coastal_choices {
+    expect "choices-show-exact-source-path-and-conserved-cost": after.coast_quote_informative
+}
+when replay_coastal_history {
+    expect "old-and-new-histories-remain-readable": after.coast_replay_preserved
+}

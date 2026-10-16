@@ -39,6 +39,7 @@ export function buildingBaseProduction(state: WorldState, city: City, building: 
   const site = state.tiles.find(tile => tile.id === tileId);
   if (!site) return {};
   const rule = building.district.adjacency;
+  if (!rule) return result;
   const count = state.tiles.filter(tile => tile.terrain === rule.terrain && hexDistance(site, tile) === 1).length;
   result[rule.resource] = (result[rule.resource] ?? 0) + Math.min(rule.maximum, count * rule.amount);
   return result;

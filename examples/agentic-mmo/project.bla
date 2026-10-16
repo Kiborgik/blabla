@@ -39,3 +39,12 @@ verify behavior {
   shrink_budget 128
 }
 ignore from ".gitignore"
+
+draft behavior "contracts/coastal-founding.bla"
+
+draft behavior "contracts/research-investment.bla"
+draft behavior "contracts/district-learning.bla"
+draft behavior "contracts/worked-land.bla"
+
+draft behavior "contracts/metal-learning.bla"
+

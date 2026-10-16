@@ -1,3 +1,4 @@
+import { depositParts } from '../visuals/strategic-resource-visuals.ts';
 import * as THREE from 'three';
 import type { AtlasWorld } from './atlas.ts';
 import { hexPosition } from './atlas.ts';
@@ -84,6 +85,16 @@ export function createImprovementMeshes(world: AtlasWorld, material: (color: str
     const origin = hexPosition(site.q, site.r);
     return improvementParts(site, detail).map(part => ({
       color: part.material === 'identity' ? site.color : VISUAL_PALETTE[part.material],
+      part: { ...part, position: [origin.x + part.position[0], site.height + part.position[1], origin.z + part.position[2]] },
+    }));
+  }), material);
+}
+
+export function createDepositMeshes(world: AtlasWorld, material: (color: string) => THREE.Material): ReturnType<typeof createPartMeshes> {
+  return createPartMeshes(detail => (world.deposits ?? []).flatMap(site => {
+    const origin = hexPosition(site.q, site.r);
+    return depositParts(site, detail).map(part => ({
+      color: part.material === 'identity' ? VISUAL_PALETTE.metal : VISUAL_PALETTE[part.material],
       part: { ...part, position: [origin.x + part.position[0], site.height + part.position[1], origin.z + part.position[2]] },
     }));
   }), material);

@@ -19,7 +19,7 @@ export const CIVILIZATIONS: CivilizationDefinition[] = [
 
 export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, perPaidRecipe: 3 } as const;
 
-export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4, campus: 8, library: 8 } } as const;
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14 } } as const;
 
 export const BUILDING_CAPABILITY_ACTIONS: Record<BuildingCapability, readonly GameAction['type'][]> = { 'coastal-departure': ['settle-coast'] };
 export const RESEARCH_INVESTMENT_RULES = { ruleVersion: 1, featureId: 'productive-research', budget: 'current-city-science-output' } as const;
@@ -27,9 +27,15 @@ export const RESEARCH_INVESTMENT_RULES = { ruleVersion: 1, featureId: 'productiv
 export const DISTRICT_RULES = { ruleVersion: 1, featureId: 'district-planning', baseCapacity: 1, populationPerDistrict: 4 } as const;
 export const IMPROVEMENT_RULES = { ruleVersion: 1, featureId: 'worked-land', hillElevation: { minimum: 70, maximum: 88 }, allocationPriority: 'paid-buildings-then-numeric-tile' } as const;
 
+export const CONNECTED_RESEARCH_PACING = { ruleVersion: 1, featureId: 'learning-commerce', multiplier: 3, baseCosts: { 'bronze-working': 36, currency: 42, mathematics: 44, education: 72, banking: 120 } } as const;
+
+export const METAL_RULES = { ruleVersion: 1, featureId: 'finite-metals', resource: 'iron', revealTechnology: 'bronze-working', capacityPerCity: 40, extractionPerBeat: 2, initialReserve: 240, placement: { id: 'iron-placement-1', maximumDeposits: 8, frontierMinimumDistance: 2, ownedSiteRange: 3, seedMultiplier: 0x9e3779b1, mixMultipliers: [0x7feb352d, 0x846ca68b], hillOnly: true } } as const;
+
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'finite-metals', name: 'Finite useful deposits', description: 'Bronze working reveals finite iron on existing hills; staffed Mines extract it for consensual exchange.' },
+  { id: 'learning-commerce', name: 'Connected learning and commerce', description: 'Currency, Mathematics, Education and Banking connect useful local institutions and paid operations.' },
   { id: 'worked-land', name: 'People work the land', description: 'Commit an exact owned site to a timed improvement, then assign local residents to its actual output.' },
   { id: 'mining', name: 'Work useful hills', description: 'Mining opens resident-supported material production on existing hill sites. Finite strategic deposits remain a later capability.' },
   { id: 'district-planning', name: 'Choose a district site', description: 'A town commits its existing construction lane to an exact owned site; nearby terrain changes its later output.' },
@@ -86,6 +92,11 @@ export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
+  { id: 'bronze-working', name: 'Bronze working', requiredFeatures: ['finite-metals'], era: 1, cost: 108, requires: ['mining'], capability: 'Reveal finite iron at existing hills and extract it with a staffed Mine for useful exchange.' },
+  { id: 'currency', name: 'Currency', requiredFeatures: ['learning-commerce'], era: 1, cost: 126, requires: ['writing'], capability: 'Build a Commercial hub and Market, and propose iron for food when finite metal exchange is released.' },
+  { id: 'mathematics', name: 'Mathematics', requiredFeatures: ['learning-commerce'], era: 1, cost: 132, requires: ['writing', 'currency'], capability: 'Prepare Education and its useful local University.' },
+  { id: 'education', name: 'Education', requiredFeatures: ['learning-commerce'], era: 1, cost: 216, requires: ['mathematics', 'writing'], capability: 'Support a University in a completed local Campus for productive science.' },
+  { id: 'banking', name: 'Banking', requiredFeatures: ['learning-commerce'], era: 2, cost: 360, requires: ['currency', 'education'], capability: 'Support a Bank in a local Commercial hub for credits. Loans remain planned.' },
   { id: 'mining', name: 'Mining', requiredFeatures: ['mining', 'worked-land'], era: 0, cost: 20, requires: ['kiln-firing'], capability: 'Commit useful owned hills to Mines, then assign local residents to make building materials.' },
   { id: 'writing', name: 'Writing', requiredFeatures: ['writing', 'district-planning'], era: 0, cost: 24, requires: ['agriculture'], capability: 'Choose an exact owned Campus site, then support its Library with credits for more productive research.' },
   { id: 'agriculture', name: 'Cultivation', requiredFeatures: ['settlement-research'], era: 0, cost: 10, requires: [], capability: 'Cultivation supports farms, workshops and more reliable settlements.' },
@@ -119,6 +130,10 @@ export const IMPROVEMENTS: ImprovementDefinition[] = [
 ];
 
 export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'commercial-hub', name: 'Commercial hub', requiredFeatures: ['district-planning', 'learning-commerce'], minEra: 1, cost: { materials: 20, credits: 10 }, requires: ['currency'], effects: [], production: { credits: 2 }, district: { range: 3 }, description: 'Reserve an exact owned site for local commerce. River and Harbor adjacency await those actual systems.' },
+  { id: 'market', name: 'Market', requiredFeatures: ['learning-commerce', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 18, credits: 10 }, requires: ['currency'], requiresBuildings: ['commercial-hub'], effects: [], operatingInputs: { credits: 1 }, production: { credits: 4 }, description: 'Use credits and three local residents to operate this town’s Market. Extra trade capacity and great-person effects remain planned.' },
+  { id: 'university', name: 'University', requiredFeatures: ['learning-commerce', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 28, credits: 14 }, requires: ['education'], requiresBuildings: ['campus'], effects: [], operatingInputs: { credits: 2 }, production: { science: 5 }, description: 'Use credits and three local residents to support advanced local learning. Specialists and knowledge-point effects remain planned.' },
+  { id: 'bank', name: 'Bank', requiredFeatures: ['learning-commerce', 'building-operations', 'resident-capacity'], minEra: 2, cost: { materials: 30, credits: 18 }, requires: ['banking'], requiresBuildings: ['commercial-hub'], effects: [], operatingInputs: { credits: 1 }, production: { credits: 7 }, description: 'Use credits and three local residents to operate this town’s Bank. Loan agreements remain planned.' },
   { id: 'campus', name: 'Campus', requiredFeatures: ['district-planning', 'writing'], minEra: 0, cost: { materials: 16, credits: 8 }, requires: ['writing'], effects: [], production: { science: 1 }, district: { range: 3, adjacency: { terrain: 'mountain', resource: 'science', amount: 1, maximum: 3 } }, description: 'Commit an owned site near this town to learning. Nearby mountains add up to 3 base science; output begins after completion.' },
   { id: 'library', name: 'Library', requiredFeatures: ['district-planning', 'writing', 'building-operations'], minEra: 0, cost: { materials: 16, credits: 8 }, requires: ['writing'], requiresBuildings: ['campus'], effects: [], production: { science: 3 }, operatingInputs: { credits: 1 }, description: 'Support the Library in this town’s completed Campus with credits and residents to produce science. Specialist and great-person effects remain planned.' },
   { id: 'boat-yard', name: 'Boat yard', requiredFeatures: ['coastal-founding'], minEra: 0, cost: { materials: 14, credits: 10 }, requires: ['water-management'], effects: [], production: {}, capabilities: ['coastal-departure'], siteRequirement: 'coastal', description: 'Prepare boats at an ocean-adjacent town. With Navigation, transfer existing residents to a new coastal settlement.' },
@@ -169,6 +184,7 @@ export const LAND_TRANSPORT_RULES = { ruleVersion: 1 as const, edgesPerBeat: 2, 
 export const TRADE_RULES = { offerExpiryRounds: 8, maxPendingPerPair: 1, maxActivePerPair: 1 };
 
 export const TRADE_RECIPES: TradeRecipe[] = [
+  { id: 'iron-for-food', version: 1, name: 'Iron for food', description: 'Exchange extracted iron for a partner’s food. Both sides fund transport before any cargo or commerce changes.', requiredFeatures: ['trade-routes', 'finite-metals', 'learning-commerce'], requiredTechnology: 'currency', terms: { recipeId: 'iron-for-food', recipeVersion: 1, constructionCost: { materials: 6, credits: 8 }, proposerCargo: {}, recipientCargo: { food: 5 }, strategicCargo: { proposer: { iron: 2 }, recipient: {} }, proposerUpkeep: { energy: 1 }, recipientUpkeep: { energy: 1 }, proposerYield: { credits: 2 }, recipientYield: { credits: 2 }, cadenceRounds: 4, damageDisableAt: 50 } },
   { id: 'harvest-for-materials', version: 1, name: 'Harvest for materials', description: 'A food surplus supports a partner while materials return to build the next settlement project.', requiredFeatures: ['trade-routes'], terms: { recipeId: 'harvest-for-materials', recipeVersion: 1, constructionCost: { materials: 6, credits: 8 }, proposerCargo: { food: 4 }, recipientCargo: { materials: 3 }, proposerUpkeep: { energy: 1 }, recipientUpkeep: { energy: 1 }, proposerYield: { credits: 2 }, recipientYield: { credits: 2 }, cadenceRounds: 4, damageDisableAt: 50 } },
   { id: 'energy-for-materials', version: 1, name: 'Energy for materials', description: 'Send energy for a partner’s later work and receive materials. Each partner also pays transport energy before receiving cargo.', requiredFeatures: ['trade-routes', 'operating-resource-exchange'], terms: { recipeId: 'energy-for-materials', recipeVersion: 1, constructionCost: { materials: 6, credits: 8 }, proposerCargo: { energy: 4 }, recipientCargo: { materials: 3 }, proposerUpkeep: { energy: 1 }, recipientUpkeep: { energy: 1 }, proposerYield: { credits: 2 }, recipientYield: { credits: 2 }, cadenceRounds: 4, damageDisableAt: 50 } },
 ];
@@ -214,12 +230,13 @@ export interface ContentCatalog {
   publicProjectRules: typeof PUBLIC_PROJECT_RULES;
   siteOutputs: typeof SETTLEMENT_SITE_OUTPUTS;
   residentCapacityRules: typeof RESIDENT_CAPACITY_RULES;
+  metalRules: typeof METAL_RULES;
 }
 
 export const CONTENT: ContentCatalog = {
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
   buildings: BUILDINGS, improvements: IMPROVEMENTS, improvementRules: IMPROVEMENT_RULES, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
-  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES,
+  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES, metalRules: METAL_RULES,
   tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES, landTransportRules: LAND_TRANSPORT_RULES, publicProjectRecipes: PUBLIC_PROJECT_RECIPES, publicProjectRules: PUBLIC_PROJECT_RULES, siteOutputs: SETTLEMENT_SITE_OUTPUTS,
 };
 
@@ -251,6 +268,10 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   };
   if (catalog.landTransportRules.ruleVersion !== 1 || !Number.isSafeInteger(catalog.landTransportRules.edgesPerBeat) || catalog.landTransportRules.edgesPerBeat < 1) errors.push('land transport: invalid version or pace');
   if (Object.keys(catalog.landTransportRules.passable).length !== 6 || ['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].some(terrain => typeof Reflect.get(catalog.landTransportRules.passable, terrain) !== 'boolean')) errors.push('land transport: invalid terrain passability');
+  const metal = catalog.metalRules;
+  if (metal.ruleVersion !== 1 || !features.has(metal.featureId) || metal.resource !== 'iron' || !catalog.technologies.some(technology => technology.id === metal.revealTechnology)) errors.push('metals: invalid feature, resource or reveal technology');
+  if (![metal.capacityPerCity, metal.extractionPerBeat, metal.initialReserve, metal.placement.maximumDeposits, metal.placement.frontierMinimumDistance, metal.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('metals: invalid positive integer quantity');
+  if (metal.placement.id !== 'iron-placement-1' || metal.placement.hillOnly !== true || metal.placement.seedMultiplier !== 0x9e3779b1 || metal.placement.mixMultipliers[0] !== 0x7feb352d || metal.placement.mixMultipliers[1] !== 0x846ca68b) errors.push('metals: invalid versioned placement');
   unique('trade recipes', catalog.tradeRecipes.map(recipe => recipe.id));
   for (const [name, value] of Object.entries(catalog.tradeRules)) {
     if (!Number.isSafeInteger(value) || value < 1) errors.push(`trade rules: invalid ${name}`);
@@ -262,7 +283,12 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     if (!Number.isSafeInteger(recipe.version) || recipe.version < 1 || terms.recipeId !== recipe.id || terms.recipeVersion !== recipe.version) errors.push(`${label}: inconsistent recipe identity`);
     if (!Number.isSafeInteger(terms.cadenceRounds) || terms.cadenceRounds < 1 || !positive(terms.damageDisableAt) || terms.damageDisableAt > 100) errors.push(`${label}: invalid strategic cadence or damage threshold`);
     for (const [name, values] of Object.entries({ constructionCost: terms.constructionCost, proposerCargo: terms.proposerCargo, recipientCargo: terms.recipientCargo, proposerUpkeep: terms.proposerUpkeep, recipientUpkeep: terms.recipientUpkeep, proposerYield: terms.proposerYield, recipientYield: terms.recipientYield })) resources(`${label} ${name}`, values);
-    if (![terms.proposerCargo, terms.recipientCargo].every(cargo => Object.values(cargo).some(positive))) errors.push(`${label}: both partners require meaningful cargo`);
+    if (recipe.requiredTechnology !== undefined && !catalog.technologies.some(technology => technology.id === recipe.requiredTechnology)) errors.push(`${label}: unknown proposer technology`);
+    if (terms.strategicCargo && !recipe.requiredFeatures.includes('finite-metals')) errors.push(`${label}: strategic cargo requires finite-metals`);
+    for (const cargo of [terms.strategicCargo?.proposer, terms.strategicCargo?.recipient]) {
+      if (cargo && Object.entries(cargo).some(([resource, amount]) => resource !== 'iron' || !Number.isSafeInteger(amount) || amount < 0)) errors.push(`${label}: invalid strategic cargo`);
+    }
+    if (![[terms.proposerCargo, terms.strategicCargo?.proposer], [terms.recipientCargo, terms.strategicCargo?.recipient]].every(vectors => vectors.some(cargo => Object.values(cargo ?? {}).some(positive)))) errors.push(`${label}: both partners require meaningful cargo`);
   }
   const technologies = new Map(catalog.technologies.map(technology => [technology.id, technology]));
   const buildings = new Map(catalog.buildings.map(building => [building.id, building]));
@@ -363,9 +389,9 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
       const { range, adjacency } = building.district;
       if (!building.requiredFeatures.includes('district-planning')) errors.push(`building ${building.id}: district requires district-planning feature`);
       if (!Number.isSafeInteger(range) || range < 1) errors.push(`building ${building.id}: invalid district range`);
-      if (!['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].includes(adjacency.terrain)) errors.push(`building ${building.id}: invalid district terrain`);
-      if (!RESOURCE_IDS.includes(adjacency.resource)) errors.push(`building ${building.id}: invalid district resource`);
-      if (!positive(adjacency.amount) || !Number.isFinite(adjacency.maximum) || adjacency.maximum < 0) errors.push(`building ${building.id}: invalid district adjacency`);
+      if (adjacency && !['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].includes(adjacency.terrain)) errors.push(`building ${building.id}: invalid district terrain`);
+      if (adjacency && !RESOURCE_IDS.includes(adjacency.resource)) errors.push(`building ${building.id}: invalid district resource`);
+      if (adjacency && (!positive(adjacency.amount) || !Number.isFinite(adjacency.maximum) || adjacency.maximum < 0)) errors.push(`building ${building.id}: invalid district adjacency`);
     }
     const requiredBuildings = building.requiresBuildings ?? [];
     if (new Set(requiredBuildings).size !== requiredBuildings.length) errors.push(`building ${building.id}: duplicate building prerequisite`);

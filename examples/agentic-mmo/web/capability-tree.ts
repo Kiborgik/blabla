@@ -1,3 +1,4 @@
+import { extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
 import { constructionTarget } from '../core/simulation/improvements.ts';
 import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
 import type { CapabilityCatalogue, CapabilityProjection, CapabilityBlocker } from '../core/capabilities.ts';
@@ -141,6 +142,14 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
         facts.push({ label: `Site ${site.tileId} last record`, value: last
           ? `Round ${last.round} · ${improvementLastLabel(last)} · Assigned ${last.residents.allocated} of ${last.residents.required} resident · Available then ${last.residents.available} · Made ${amounts(last.produced)}`
           : 'No operating record yet' });
+        if (last?.extraction) facts.push({ label: `Site ${site.tileId} extraction record`, value: extractionFacts(last.extraction).join(' · ') });
+      }
+    }
+    if (id === 'technology:bronze-working' || id === 'improvement:mine') {
+      const strategic = input.projection.strategic;
+      if (strategic?.strategicCapacity !== undefined) {
+        facts.push({ label: 'Civilization iron stock', value: `${strategic.strategicResources?.iron ?? 0} stored / ${strategic.strategicCapacity} capacity` });
+        for (const deposit of strategic.revealedDeposits ?? []) facts.push({ label: 'Revealed deposit', value: depositLabel(deposit) });
       }
     }
     if (research?.remaining) facts.push({ label: 'Remaining research work', value: research.remaining });
@@ -157,10 +166,14 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
       { label: 'Already paid for this order', value: amounts(row.construction.paid) },
       { label: 'Order started', value: `Round ${row.construction.startedRound} · ${row.construction.id}` },
     );
-    if ('requiresBuildings' in definition && definition.requiresBuildings?.includes('campus')) {
-      const campus = rows.get('building:campus')?.district;
-      facts.push({ label: 'Belongs to', value: campus?.siteId === null || campus?.siteId === undefined ? 'This town’s completed Campus' : `This town’s Campus · Tile ${campus.siteId}` });
+    if ('requiresBuildings' in definition) {
+      const parent = input.catalogue.buildings.find(building => building.district && definition.requiresBuildings?.includes(building.id));
+      if (parent) {
+        const district = rows.get(`building:${parent.id}`)?.district;
+        facts.push({ label: 'Belongs to', value: district?.siteId === null || district?.siteId === undefined ? `This town’s completed ${parent.name}` : `This town’s ${parent.name} · Tile ${district.siteId}` });
+      }
     }
+
     return {
       id, name: definition.name, kind: item.kind, level: level(id),
       status: row?.status ?? null, label: row ? STATUS_LABELS[row.status] : 'Facts unavailable',

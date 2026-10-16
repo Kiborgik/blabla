@@ -12,6 +12,9 @@ export interface DistrictView {
   height: number;
   color: string;
   status: 'building' | 'built';
+  buildingId?: string;
+  name?: string;
+  attachments?: Array<{ buildingId: string; name: string; status: 'building' | 'built' }>;
   library: 'absent' | 'building' | 'built';
   construction: ConstructionOrder | null;
   baseProduction: Partial<Resources>;
@@ -32,9 +35,11 @@ export function districtCaptionPlacement(anchor: { x: number; y: number }, occup
 }
 
 export function districtLabel(district: DistrictView): string {
-  return district.status === 'building' ? 'Campus · Building'
-    : district.library === 'built' ? 'Campus + Library'
-      : district.library === 'building' ? 'Campus · Library building' : 'Campus';
+  const name = district.name ?? 'Campus';
+  if (district.status === 'building') return `${name} · Building`;
+  const attachments = (district.attachments ?? []).filter(item => item.buildingId !== 'library');
+  if (district.library !== 'absent') attachments.unshift({ buildingId: 'library', name: 'Library', status: district.library });
+  return name + attachments.map(item => item.status === 'built' ? ` + ${item.name}` : ` · ${item.name} building`).join('');
 }
 
 export function districtParts(district: DistrictView, detail: DetailLevel): VisualPart[] {
@@ -49,6 +54,23 @@ export function districtParts(district: DistrictView, detail: DetailLevel): Visu
     add('foundation-back', 'box', 'timber', [0, .16, -.55], [1.1, .2, .12]);
     if (detail !== 'far') for (const x of [-.55, .55]) add(`frame-${x}`, 'box', 'timber', [x, .42, -.48], [.09, .72, .09]);
     if (detail === 'close') add('supplies', 'box', 'stone', [0, .2, .25], [.48, .22, .35]);
+  } else if (district.buildingId === 'commercial-hub') {
+    add('commerce-court', 'box', 'grain', [0, .12, 0], [1.3, .06, 1.1]);
+    for (const x of [-.48, .48]) {
+      add(`stall-${x}`, 'box', 'timber', [x, .25, -.3], [.38, .3, .5]);
+      add(`awning-${x}`, 'gable', 'roof', [x, .5, -.3], [.52, .18, .62]);
+    }
+    for (const annex of district.attachments ?? []) {
+      if (annex.status === 'building') add(`${annex.buildingId}-foundation`, 'box', 'timber', [0, .14, .4], [1.1, .12, .4]);
+      else if (annex.buildingId === 'market') {
+        add('market-counter', 'box', 'timber', [-.32, .25, .42], [.57, .28, .38]);
+        add('market-awning', 'gable', 'grain', [-.32, .53, .42], [.7, .2, .5]);
+      } else if (annex.buildingId === 'bank') {
+        add('bank-vault', 'box', 'plaster', [.36, .38, .4], [.52, .55, .5]);
+        add('bank-roof', 'gable', 'metal', [.36, .76, .4], [.64, .23, .6]);
+      }
+    }
+    if (detail !== 'far') add('commerce-sign', 'box', 'metal', [0, .3, -.4], [.18, .35, .08]);
   } else {
     for (const x of [-.43, .43]) {
       add(`hall-wall-${x}`, 'box', 'stone', [x, .25, -.23], [.48, .4, .66]);
@@ -59,6 +81,12 @@ export function districtParts(district: DistrictView, detail: DetailLevel): Visu
       add('library-wall', 'box', 'plaster', [0, .28, .43], [.95, .34, .36]);
       add('library-roof', 'gable', 'metal', [0, .56, .43], [1.06, .25, .46]);
     } else if (district.library === 'building') add('library-foundation', 'box', 'timber', [0, .14, .44], [1, .12, .39]);
+    const university = district.attachments?.find(item => item.buildingId === 'university');
+    if (university?.status === 'building') add('university-foundation', 'box', 'timber', [0, .14, -.58], [.75, .12, .35]);
+    else if (university) {
+      add('university-tower', 'box', 'plaster', [0, .5, -.5], [.46, .78, .46]);
+      add('university-roof', 'cone', 'metal', [0, 1.02, -.5], [.62, .32, .62]);
+    }
     if (detail !== 'far') {
       for (const x of [-.43, .43]) add(`door-${x}`, 'box', 'timber', [x, .23, .11], [.13, .27, .04]);
       if (district.library === 'built') add('library-book', 'gable', 'grain', [0, .37, .63], [.24, .1, .04]);

@@ -1,10 +1,11 @@
+import { observedStrategicResources } from '../core/simulation/metals.ts';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
 import { createCapabilityTreeSheet, restoreCapabilityOpener, type CapabilityTreeInput } from './capability-tree.ts';
 import { eventLogEntries, latestStoryEvent, renderEventLog } from './event-log.ts';
 import { routeInspectionCity } from '../visuals/route-visuals.ts';
 import { renderRouteCard, renderRouteList, retainedRoutePathInspection, routeInspectionIdentity } from './route-inspection.ts';
 import { cityKey, resolveCitySelection, retainedReceiptBuilding } from './city-selection.ts';
-import { renderSettlementInspection, residentSupportForWorld } from './settlement-inspection.ts';
+import { renderSettlementInspection, residentSupportForWorld, renderStrategicInspection } from './settlement-inspection.ts';
 import { researchProgressPresentation } from './research-progress.ts';
 import releaseData from '../public/version.json';
 import changelog from '../public/changelog.json';
@@ -229,6 +230,7 @@ function renderInspection(): void {
     }
     researchSection.append(details);
   }
+  if (snapshot && actual) renderStrategicInspection(panel, observedStrategicResources(snapshot.state, actual.id));
   const settlement = panel.querySelector<HTMLElement>('.city-details');
   if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport);
   for (const disclosure of panel.querySelectorAll<HTMLDetailsElement>('[data-town-disclosure]')) {

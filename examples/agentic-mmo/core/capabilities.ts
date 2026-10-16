@@ -9,6 +9,7 @@ import { admissionError, turnAdmission } from './simulation/turns.ts';
 import { hasFeatures, milestoneEligible } from './simulation/history.ts';
 import { decisionObligations } from './simulation/decisions.ts';
 import { parseUtcTimestamp } from './simulation/time.ts';
+import { observedStrategicResources } from './simulation/metals.ts';
 
 export type { CapabilityBlocker } from './simulation/capabilities.ts';
 export type CapabilityCatalogue = ReturnType<typeof capabilityCatalogue>;
@@ -38,6 +39,7 @@ export interface CapabilityChoiceContext {
 }
 
 export interface CapabilityProjection {
+  strategic?: ReturnType<typeof observedStrategicResources>;
   choiceReferenceState: 'not-provided' | 'provided';
   revision: number;
   observedAt: string;
@@ -130,6 +132,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     technologies,
     buildings,
     improvements,
+    ...(hasFeatures(state, ['finite-metals']) ? { strategic: observedStrategicResources(state, civilizationId) } : {}),
     legalActions,
     recordedIntent: state.actionPlans?.[civilizationId] ?? null,
     ...(hasFeatures(state, ['recurring-decisions']) ? {

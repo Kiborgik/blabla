@@ -40,8 +40,13 @@ function deliveryCue(event: GameEvent, routes: ReadonlyMap<string, RouteView>): 
   const route = routes.get(event.detail);
   const agreement = route?.agreement;
   const aggregate = aggregateCargo(event);
-  const total = agreement ? RESOURCE_IDS.reduce((sum, resource) => sum + (agreement.terms.proposerCargo[resource] ?? 0) + (agreement.terms.recipientCargo[resource] ?? 0), 0) : null;
-  const matched = route && !route.illustrative && agreement && aggregate !== null && aggregate === total
+  const strategic = agreement?.terms.strategicCargo;
+  const shipment = event.strategicShipment;
+  const strategicMatched = !strategic ? !shipment : shipment && shipment.routeId === route?.id && shipment.offerId === agreement?.offerId
+    && shipment.proposer === route?.owner && shipment.recipient === route?.partner
+    && (shipment.proposerSent.iron ?? 0) === (strategic.proposer.iron ?? 0) && (shipment.recipientSent.iron ?? 0) === (strategic.recipient.iron ?? 0);
+  const total = agreement ? RESOURCE_IDS.reduce((sum, resource) => sum + (agreement.terms.proposerCargo[resource] ?? 0) + (agreement.terms.recipientCargo[resource] ?? 0), (strategic?.proposer.iron ?? 0) + (strategic?.recipient.iron ?? 0)) : null;
+  const matched = route && !route.illustrative && agreement && aggregate !== null && aggregate === total && strategicMatched
     && event.actor === route.owner && event.target === route.partner && agreement.acceptedRound <= event.round
     && agreement.deliveryCount > 0 && agreement.lastDeliveryRound !== null && agreement.lastDeliveryRound >= event.round
     && (agreement.closedRound === null || agreement.closedRound >= event.round)

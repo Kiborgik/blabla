@@ -255,7 +255,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -265,7 +265,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -393,7 +393,7 @@ await test('district metadata and local building dependencies are validated befo
   ] as const) {
     const invalid = structuredClone(CONTENT);
     const district = required(required(invalid.buildings.find(building => building.id === 'campus')).district);
-    Reflect.set(field === 'range' ? district : district.adjacency, field, value);
+    Reflect.set(field === 'range' ? district : required(district.adjacency), field, value);
     assert.ok(validateContent(invalid).some(message => message.includes(error)), error);
   }
   const unknown = structuredClone(CONTENT);
@@ -408,5 +408,37 @@ await test('district metadata and local building dependencies are validated befo
   const ungated = structuredClone(CONTENT);
   required(ungated.buildings.find(building => building.id === 'campus')).requiredFeatures = ['writing'];
   assert.ok(validateContent(ungated).some(message => message.includes('district-planning feature')));
+  assert.deepEqual(validateContent(), []);
+});
+
+await test('connected metal and learning branch has useful compatible declarations', () => {
+  for (const [id, cost, requires] of [
+    ['bronze-working', 36, ['mining']], ['currency', 42, ['writing']],
+    ['mathematics', 44, ['writing', 'currency']], ['education', 72, ['mathematics', 'writing']],
+    ['banking', 120, ['currency', 'education']],
+  ] as const) {
+    const technology = required(TECHNOLOGIES.find(item => item.id === id));
+    assert.equal(technology.cost, cost * 3);
+    assert.deepEqual(technology.requires, requires);
+  }
+  const hub = required(BUILDINGS.find(item => item.id === 'commercial-hub'));
+  assert.deepEqual(hub.district, { range: 3 });
+  assert.deepEqual(hub.production, { credits: 2 });
+  for (const [id, building, inputs, output] of [
+    ['market', 'commercial-hub', { credits: 1 }, { credits: 4 }],
+    ['university', 'campus', { credits: 2 }, { science: 5 }],
+    ['bank', 'commercial-hub', { credits: 1 }, { credits: 7 }],
+  ] as const) {
+    const definition = required(BUILDINGS.find(item => item.id === id));
+    assert.deepEqual(definition.requiresBuildings, [building]);
+    assert.deepEqual(definition.operatingInputs, inputs);
+    assert.deepEqual(definition.production, output);
+  }
+  const recipe = required(TRADE_RECIPES.find(item => item.id === 'iron-for-food'));
+  assert.equal(Reflect.get(recipe, 'requiredTechnology'), 'currency');
+  assert.deepEqual(Reflect.get(recipe.terms, 'strategicCargo'), { proposer: { iron: 2 }, recipient: {} });
+  assert.deepEqual(recipe.terms.recipientCargo, { food: 5 });
+  const release = required(RELEASES.find(item => item.id === 'settlement-metal-learning-1'));
+  assert.deepEqual(release.compatibleFrom, ['settlement-mining-1']);
   assert.deepEqual(validateContent(), []);
 });

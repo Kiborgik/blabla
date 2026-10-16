@@ -358,3 +358,11 @@ await test('recorded tile disclosure pages complete immutable order through stab
     else Reflect.deleteProperty(globalThis, 'document');
   }
 });
+
+await test('route terms show ordinary and strategic cargo separately without changing upkeep', () => {
+  assert.deepEqual(routeAmounts('Sends', { food: 5 }, { iron: 2 }), [
+    { resource: 'food', label: 'Sends: 5 Food', amount: 5 },
+    { resource: 'iron', label: 'Sends: 2 Iron', amount: 2 },
+  ]);
+  assert.deepEqual(routeAmounts('Transport cost', { energy: 1 }), [{ resource: 'energy', label: 'Transport cost: 1 Energy', amount: 1 }]);
+});

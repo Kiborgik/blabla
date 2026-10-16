@@ -261,3 +261,29 @@ void test('returning from history baselines the latest live view before admittin
   const same = projectRouteCues(historical.cursor, { ...observation(), revision: 10 });
   assert.equal(projectRouteCues(same.cursor, observation()).cues.length, 1);
 });
+
+void test('finite Iron and ordinary Food bind one immutable seven-cargo delivery and reject mismatched receipts', async () => {
+  const value = route(); assert.ok(value.agreement);
+  value.agreement.terms.proposerCargo = {}; value.agreement.terms.recipientCargo = { food: 5 };
+  value.agreement.terms.strategicCargo = { proposer: { iron: 2 }, recipient: {} };
+  const event = delivery();
+  event.strategicShipment = { ruleVersion: 1, routeId: value.id, offerId: value.agreement.offerId, proposer: value.owner, recipient: value.partner, proposerSent: { iron: 2 }, recipientSent: {} };
+  const bound = projectRouteCues(previous, observation([event], [value])).cues[0];
+  assert.ok(bound?.kind === 'delivery'); assert.equal(bound.factSource, 'bound-agreement');
+  assert.deepEqual(bound.exchange?.recipient.cargo, { food: 5 });
+  assert.deepEqual(bound.exchange?.proposer.paidUpkeep, { energy: 1 });
+  const { eventLogEntries } = await import('../web/event-log.ts');
+  const row = eventLogEntries([event], { civilizations: [{ id: 0, name: 'Aster', color: '#abcd12' }, { id: 1, name: 'Pelagos', color: '#123abc' }], receipts: [bound] })[0];
+  assert.equal(row?.exchanges[0]?.cargo, '2 Iron'); assert.equal(row?.exchanges[1]?.cargo, '5 Food');
+  assert.equal(row?.exchanges[0]?.upkeep, '1 Energy'); assert.equal(row?.exchanges[0]?.commerce, '2 Credits');
+  for (const change of [
+    (copy: GameEvent) => { if (copy.strategicShipment) copy.strategicShipment.proposerSent.iron = 3; },
+    (copy: GameEvent) => { if (copy.strategicShipment) copy.strategicShipment.offerId = 'other'; },
+    (copy: GameEvent) => { if (copy.strategicShipment) copy.strategicShipment.recipient = 4; },
+    (copy: GameEvent) => { copy.effects = ['5 cargo exchanged atomically']; },
+  ]) {
+    const copy = structuredClone(event); change(copy);
+    const cue = projectRouteCues(previous, observation([copy], [value])).cues[0];
+    assert.ok(cue?.kind === 'delivery'); assert.equal(cue.factSource, 'event-aggregate'); assert.equal(cue.exchange, null);
+  }
+});

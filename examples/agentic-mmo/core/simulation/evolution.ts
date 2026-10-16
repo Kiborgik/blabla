@@ -1,4 +1,5 @@
-import { DISTRICT_RULES, IMPROVEMENT_RULES, FEATURES, RESEARCH_INVESTMENT_RULES } from '../content.ts';
+import { DISTRICT_RULES, IMPROVEMENT_RULES, FEATURES, METAL_RULES, RESEARCH_INVESTMENT_RULES } from '../content.ts';
+import { createStrategicDeposits } from './metals.ts';
 import { RELEASES } from '../release.ts';
 import {
   DIRECTOR_SEAT,
@@ -148,7 +149,7 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
     (command.timestamp === undefined || parseUtcTimestamp(command.timestamp) === null)
   )
     return rejected(state, 'Independent release activation requires an explicit UTC epoch');
-  if (['resident-capacity', RESEARCH_INVESTMENT_RULES.featureId, DISTRICT_RULES.featureId, IMPROVEMENT_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
+  if (['resident-capacity', RESEARCH_INVESTMENT_RULES.featureId, DISTRICT_RULES.featureId, IMPROVEMENT_RULES.featureId, METAL_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
     const timingError = strategyTimingError(state, command.timestamp);
     if (timingError) return rejected(state, timingError);
   }
@@ -157,6 +158,10 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
   next.revision += 1;
   next.releaseId = target.id;
   next.unlockedFeatures = [...target.featureIds];
+  if (target.featureIds.includes(METAL_RULES.featureId) && !source.featureIds.includes(METAL_RULES.featureId)) {
+    next.strategicDeposits = createStrategicDeposits(next);
+    for (const civilization of next.civilizations) civilization.strategicResources = {};
+  }
   if (startsIndependent && command.timestamp !== undefined)
     next.independentTurns = createIndependentTurns(command.timestamp);
   if (target.featureIds.includes('bounded-plans') && !source.featureIds.includes('bounded-plans'))

@@ -10,6 +10,7 @@ import { resolvePublicProjects } from './public-projects.ts';
 import { resolveTrade } from './trade.ts';
 import { openingConstructionWork, resolveConstruction } from './construction.ts';
 import { hasFeatures } from './history.ts';
+import { extractCityMetals } from './metals.ts';
 
 function quantize(value: number): number {
   return Math.round(value * 100) / 100;
@@ -160,6 +161,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   const openingWork = openingConstructionWork(state);
   const researchBudgets = new Map<number, number>();
   allocateOperations(state);
+  for (const city of state.cities.toSorted((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)) extractCityMetals(state, city);
   for (const civilization of state.civilizations) {
     let culture = 0;
     let science = 0;

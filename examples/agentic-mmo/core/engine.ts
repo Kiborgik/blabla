@@ -1,5 +1,6 @@
 import type { TradePresentation } from './simulation/trade.ts';
 import { observedRecipes, observedResidentCapacity } from './simulation/operations.ts';
+import { observedStrategicResources } from './simulation/metals.ts';
 import { CIVILIZATIONS, ECONOMY_RULES, validateContent } from './content.ts';
 import { CURRENT_RELEASE } from './release.ts';
 import { completeAttachedPlan, observeActionPlan, validateAttachedPlan } from './planning.ts';
@@ -170,6 +171,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
     ...(hasFeatures(state, ['building-operations']) ? { buildingRecipes: observedRecipes(director ? state.cities : citiesOf(state, seat)) } : {}),
     ...(hasFeatures(state, ['resident-capacity']) ? { residentCapacity: observedResidentCapacity(director ? state.cities : citiesOf(state, seat)) } : {}),
     civilization,
+    ...observedStrategicResources(state, seat),
     cities: director ? state.cities : citiesOf(state, seat),
     rivals: state.civilizations
       .filter((candidate) => candidate.id !== seat)

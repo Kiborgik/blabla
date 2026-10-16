@@ -1,5 +1,6 @@
+import { extractionFacts } from '../visuals/strategic-resource-visuals.ts';
 import type { GameEvent, Resources } from '../core/types.ts';
-import { BUILDINGS, RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
+import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
 import { eventVisual, type VisualDelta } from '../visuals/event-visuals.ts';
 import type { VisualIcon } from '../visuals/visual-language.ts';
 import { METRIC_LABELS } from '../visuals/visual-language.ts';
@@ -23,6 +24,7 @@ const GROUPS: ReadonlyArray<{ prefix: string; category: string; family: string; 
   { prefix: 'trade', category: 'Trade result', family: 'trade', icon: 'cargo' },
   { prefix: 'public-project', category: 'Shared project', family: 'trade', icon: 'influence' },
   { prefix: 'building', category: 'Building result', family: 'building', icon: 'infrastructure' },
+  { prefix: 'improvement', category: 'Worked land', family: 'building', icon: 'materials' },
   { prefix: 'construction', category: 'Construction', family: 'building', icon: 'infrastructure' },
   { prefix: 'settlement-production', category: 'Production', family: 'production', icon: 'food' },
   { prefix: 'settlement', category: 'Settlement', family: 'building', icon: 'infrastructure' },
@@ -55,7 +57,7 @@ function retainedReceipt(event: GameEvent, receipts: readonly RouteResultCue[]):
 function routineEvent(event: GameEvent): boolean {
   return event.type === 'settlement-production' || event.type === 'strategy-beat'
     || event.type.startsWith('clock-')
-    || event.type === 'building-operation' && !event.title.endsWith(' blocked');
+    || (event.type === 'building-operation' || event.type === 'improvement-operation') && !event.title.endsWith(' blocked');
 }
 
 export function latestStoryEvent(events: readonly GameEvent[]): GameEvent | undefined {
@@ -74,10 +76,11 @@ function namedStory(event: GameEvent, options: EventLogOptions): { title: string
   if (event.type === 'research-completed') return { title: event.title.replace(' discovers ', ' discovered '), category: 'Discovery', summary: 'Research completed.' };
   if (event.type === 'building-completed') return { title: event.title.replace(' builds ', ' completed '), category: 'Built', summary: 'Built. Production is recorded separately.' };
   if (event.type === 'construction-started') return { title: event.title.replace(' starts ', ' started building '), category: 'Building', summary: 'Construction started. The building is not finished yet.' };
-  if (event.type === 'building-operation') {
+  if (event.type === 'building-operation' || event.type === 'improvement-operation') {
     const match = /^(.*): (.+) (operated|paused|blocked)$/.exec(event.title);
-    const made = eventVisual(event)?.deltas.some(delta => delta.kind === 'production' && delta.value > 0);
-    if (match) return { title: `${match[1]} · ${match[2]}`, category: match[3] === 'paused' ? 'Paused' : match[3] === 'blocked' ? 'Needs support' : made ? 'Made supplies' : 'No output',
+    const made = eventVisual(event.type === 'improvement-operation' ? { ...event, type: 'building-operation' } : event)?.deltas.some(delta => delta.kind === 'production' && delta.value > 0);
+    const name = IMPROVEMENTS.find(item => item.id === match?.[2])?.name ?? match?.[2];
+    if (match) return { title: `${match[1]} · ${name}`, category: match[3] === 'paused' ? 'Paused' : match[3] === 'blocked' ? 'Needs support' : made ? 'Made supplies' : 'No output',
       summary: match[3] === 'paused' ? 'No inputs used or goods made this season.' : match[3] === 'blocked' ? 'This recipe could not run. See Details for the recorded shortage.' : made ? 'Made before other costs. Used inputs are separate.' : 'No goods made in this recorded season.' };
   }
   if (event.type === 'building-operation-changed') {
@@ -108,7 +111,7 @@ export function eventLogEntries(events: readonly GameEvent[], options: EventLogO
   }
   return window.filter(event => selected.has(event.id)).toReversed().map(event => {
     const story = namedStory(event, options);
-    const visual = eventVisual(event);
+    const visual = eventVisual(event.type === 'improvement-operation' ? { ...event, type: 'building-operation' } : event);
     const group = GROUPS.find(candidate => event.type === candidate.prefix || event.type.startsWith(`${candidate.prefix}-`));
     const cue = retainedReceipt(event, options.receipts ?? []);
     const receipt = cue ? routeResultPresentation(cue) : null;
@@ -117,7 +120,21 @@ export function eventLogEntries(events: readonly GameEvent[], options: EventLogO
       from: participant(side.civilization, options).name, to: participant(other.civilization, options).name,
       cargo: amounts(side.cargo), upkeep: amounts(side.paidUpkeep), commerce: amounts(side.creditedCommerce),
     }] : []) : [];
+    const shipmentReceipt = event.strategicShipment;
+    if (exchange && shipmentReceipt && cue?.kind === 'delivery' && cue.agreementOfferId === shipmentReceipt.offerId && cue.routeId === shipmentReceipt.routeId) {
+      for (const [index, cargo] of [shipmentReceipt.proposerSent, shipmentReceipt.recipientSent].entries()) {
+        const row = exchanges[index];
+        if (row && (cargo.iron ?? 0) > 0) row.cargo = [row.cargo === 'None' ? '' : row.cargo, `${cargo.iron} Iron`].filter(Boolean).join(', ');
+      }
+    }
     const deltas = (receipt?.deltas ?? visual?.deltas ?? []).map(delta => ({ ...delta, subject: delta.subject?.startsWith('Route route-') ? 'Trade route' : delta.subject }));
+    if (event.strategicExtraction?.status === 'extracted') deltas.push({ icon: 'materials', label: 'Iron', value: event.strategicExtraction.quantity, kind: 'production', tone: 'positive', qualifier: 'finite extraction', subject: `Tile ${event.strategicExtraction.tileId}` });
+    const extraction = event.strategicExtraction ? extractionFacts(event.strategicExtraction) : [];
+    const shipment = event.strategicShipment;
+    const transfers = !exchange && shipment && event.type === 'trade-delivered' && shipment.routeId === event.detail ? [
+      (shipment.proposerSent.iron ?? 0) > 0 ? `${participant(shipment.proposer, options).name} sent ${shipment.proposerSent.iron} Iron to ${participant(shipment.recipient, options).name}.` : '',
+      (shipment.recipientSent.iron ?? 0) > 0 ? `${participant(shipment.recipient, options).name} sent ${shipment.recipientSent.iron} Iron to ${participant(shipment.proposer, options).name}.` : '',
+    ].filter(Boolean) : [];
     const qualifiers = [
       ...(deltas.some(delta => delta.kind === 'production') ? ['Produced · Before costs'] : []),
       ...(deltas.some(delta => delta.kind === 'payment') ? ['Paid inputs'] : []),
@@ -129,8 +146,8 @@ export function eventLogEntries(events: readonly GameEvent[], options: EventLogO
       icon: receipt?.icon ?? visual?.icon ?? group?.icon ?? 'discovery',
       participants: [participant(event.actor, options), ...(event.target !== null && event.target !== event.actor ? [participant(event.target, options)] : [])],
       cause: event.cause, detail: event.detail, effects: [...event.effects], deltas: structuredClone(deltas), qualifiers,
-      receiptDetails: receipt?.details ?? [],
-      summary: story.summary, routine: routineEvent(event),
+      receiptDetails: [...(receipt?.details ?? []), ...extraction],
+      summary: [story.summary, ...transfers, ...extraction.slice(0, 2)].filter(Boolean).join(' '), routine: routineEvent(event),
       exchanges,
     };
   });

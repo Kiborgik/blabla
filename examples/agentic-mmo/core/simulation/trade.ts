@@ -1,4 +1,4 @@
-import { ACTION_FEATURES, RESOURCE_IDS, TRADE_RECIPES, TRADE_RULES } from '../content.ts';
+import { ACTION_FEATURES, METAL_RULES, RESOURCE_IDS, TRADE_RECIPES, TRADE_RULES } from '../content.ts';
 import type {
   ActionOption,
   City,
@@ -16,6 +16,7 @@ import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
 import { createLandTransportPlanner, describeLandTransport, landTransportBlock, landTransportCadence } from './transport.ts';
 import { canAfford, citiesOf, civilizationById, transferCost } from './world.ts';
+import { strategicCapacity } from './metals.ts';
 
 export type TradePresentation = 'full' | 'compact-trade-v1';
 
@@ -78,6 +79,12 @@ function compactProposalReason(state: WorldState, from: City | undefined, to: Ci
   return `${exact ? '' : `First-city endpoints ${from?.id ?? 'missing'} to ${to?.id ?? 'missing'}; `}${compactDistance(state, from, to)}; town and current recipe facts in tradeFacts`;
 }
 
+function strategicTermsDescription(terms: TradeTerms): string {
+  if (!terms.strategicCargo) return '';
+  const vector = (ordinary: Partial<Resources>, strategic: typeof terms.strategicCargo.proposer): string => [...RESOURCE_IDS.filter(resource => (ordinary[resource] ?? 0) > 0).map(resource => `${ordinary[resource]} ${resource}`), ...Object.entries(strategic).filter(([, amount]) => amount > 0).map(([resource, amount]) => `${amount} ${resource}`)].join(', ') || 'none';
+  return ` Proposer cargo ${vector(terms.proposerCargo, terms.strategicCargo.proposer)}; recipient cargo ${vector(terms.recipientCargo, terms.strategicCargo.recipient)}. Both complete cargo and upkeep vectors and receiving strategic capacity must fit at the due beat; no partial exchange.`;
+}
+
 export function availableTradeActions(state: WorldState, seat: number, presentation: TradePresentation = 'full'): ActionOption[] {
   const choices: ActionOption[] = [];
   const civilization = civilizationById(state, seat);
@@ -99,6 +106,7 @@ export function availableTradeActions(state: WorldState, seat: number, presentat
       for (const recipe of TRADE_RECIPES) {
         if (
           !hasFeatures(state, recipe.requiredFeatures) ||
+          (recipe.requiredTechnology !== undefined && !civilization.technologies.includes(recipe.requiredTechnology)) ||
           !canAfford(civilization.resources, recipe.terms.constructionCost)
         )
           continue;
@@ -113,7 +121,7 @@ export function availableTradeActions(state: WorldState, seat: number, presentat
               label: `Offer ${recipe.id}: ${from.name} to ${to.name}`,
               reason: presentation === 'compact-trade-v1'
                 ? tradeQuote ? compactLandReason(tradeQuote, 'current recipe facts in tradeFacts') : compactProposalReason(state, from, to, true)
-                : `Request consent to these exact towns and recurring terms; no recipient stock is spent by a proposal. ${transport ? `${describeLandTransport(transport, landTransportCadence(recipe.terms.cadenceRounds, transport))}. ` : ''}${describeTradeEndpoints(state, from, to)}`,
+                : `Request consent to these exact towns and recurring terms; no recipient stock is spent by a proposal. ${transport ? `${describeLandTransport(transport, landTransportCadence(recipe.terms.cadenceRounds, transport))}. ` : ''}${describeTradeEndpoints(state, from, to)}${strategicTermsDescription(recipe.terms)}`,
             });
           }
         } else choices.push({
@@ -149,7 +157,7 @@ export function availableTradeActions(state: WorldState, seat: number, presentat
           label: `Accept ${offer.id}`,
           reason: presentation === 'compact-trade-v1'
             ? tradeQuote ? compactLandReason(tradeQuote, `snapshotted ${offer.id} terms in tradeOffers`) : `Consent to ${offer.id} and its snapshotted tradeOffers terms every ${offer.terms.cadenceRounds} rounds; first shipment is on a later strategic beat. ${compactDistance(state, from, to)}; town facts in tradeFacts`
-            : `Consent to deliveries every ${offer.terms.cadenceRounds} rounds; ${offer.terms.transport ? describeLandTransport(offer.terms.transport, offer.terms.cadenceRounds) : 'first shipment is on a later strategic beat'}${hasFeatures(state, ['exact-trade-endpoints']) && from && to ? `. ${describeTradeEndpoints(state, from, to)}` : ''}`,
+            : `Consent to deliveries every ${offer.terms.cadenceRounds} rounds; ${offer.terms.transport ? describeLandTransport(offer.terms.transport, offer.terms.cadenceRounds) : 'first shipment is on a later strategic beat'}${hasFeatures(state, ['exact-trade-endpoints']) && from && to ? `. ${describeTradeEndpoints(state, from, to)}` : ''}${strategicTermsDescription(offer.terms)}`,
         });
       }
     }
@@ -352,6 +360,20 @@ function shipmentBlock(
     if (missing.length)
       return { by: id, reason: `Combined cargo and upkeep shortage: ${missing.join(', ')}` };
   }
+  if (terms.strategicCargo) {
+    const resource = METAL_RULES.resource;
+    for (const [id, sent, received] of [
+      [route.owner, terms.strategicCargo.proposer, terms.strategicCargo.recipient],
+      [route.partner, terms.strategicCargo.recipient, terms.strategicCargo.proposer],
+    ] as const) {
+      const stock = civilizationById(state, id).strategicResources?.[resource] ?? 0;
+      const outgoing = sent[resource] ?? 0;
+      const incoming = received[resource] ?? 0;
+      if (stock < outgoing) return { by: id, reason: `Strategic cargo shortage: ${resource} ${stock}/${outgoing}` };
+      const capacity = strategicCapacity(state, id);
+      if (incoming > 0 && stock - outgoing + incoming > capacity) return { by: id, reason: `Strategic storage full: ${resource} incoming ${incoming}, stock after outgoing ${stock - outgoing}, capacity ${capacity}` };
+    }
+  }
   return null;
 }
 
@@ -413,15 +435,27 @@ export function resolveTrade(state: WorldState, events: GameEvent[]): void {
     transferCost(owner.resources, terms.recipientCargo, 1);
     transferCost(owner.resources, terms.proposerYield, 1);
     transferCost(partner.resources, terms.recipientYield, 1);
+    if (terms.strategicCargo) {
+      const resource = METAL_RULES.resource;
+      const proposerSent = terms.strategicCargo.proposer[resource] ?? 0;
+      const recipientSent = terms.strategicCargo.recipient[resource] ?? 0;
+      owner.strategicResources ??= {};
+      partner.strategicResources ??= {};
+      if (proposerSent > 0 || recipientSent > 0) {
+        owner.strategicResources[resource] = (owner.strategicResources[resource] ?? 0) - proposerSent + recipientSent;
+        partner.strategicResources[resource] = (partner.strategicResources[resource] ?? 0) - recipientSent + proposerSent;
+      }
+    }
     route.volume = RESOURCE_IDS.reduce(
       (total, resource) =>
         total + (terms.proposerCargo[resource] ?? 0) + (terms.recipientCargo[resource] ?? 0),
-      0,
+      (terms.strategicCargo?.proposer[METAL_RULES.resource] ?? 0) + (terms.strategicCargo?.recipient[METAL_RULES.resource] ?? 0),
     );
     agreement.lastDeliveryRound = state.round;
     agreement.deliveryCount += 1;
     emitEvent(state, events, {
       type: 'trade-delivered',
+      ...(terms.strategicCargo ? { strategicShipment: { ruleVersion: METAL_RULES.ruleVersion, routeId: route.id, offerId: agreement.offerId, proposer: route.owner, recipient: route.partner, proposerSent: structuredClone(terms.strategicCargo.proposer), recipientSent: structuredClone(terms.strategicCargo.recipient) } } : {}),
       title: `${owner.name} and ${partner.name} exchange agreed cargo`,
       detail: route.id,
       actor: route.owner,

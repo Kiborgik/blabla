@@ -112,9 +112,10 @@ export function emitImprovements(state: WorldState, city: City, events: GameEven
     if (!result) continue;
     emitEvent(state, events, {
       type: 'improvement-operation', title: `${city.name}: ${improvement.improvementId} ${result.status}`, detail: `${city.id}/${improvement.tileId}/${improvement.improvementId} at strategic round ${result.round}`,
+      ...(result.extraction ? { strategicExtraction: structuredClone(result.extraction) } : {}),
       actor: city.civId, target: city.civId, tileId: improvement.tileId,
       cause: result.blockedReason ?? (result.status === 'paused' ? 'The civilization paused this exact site' : 'Remaining opening residents were assigned after paid buildings, in numeric site order'),
-      effects: [`Residents: required ${result.residents.required}, opening capacity remaining ${result.residents.available}, allocated ${result.residents.allocated}; population is not consumed`, ...RESOURCE_IDS.filter(resource => (result.produced[resource] ?? 0) > 0).map(resource => `Produced ${result.produced[resource]} ${resource}`), ...(RESOURCE_IDS.every(resource => !(result.produced[resource] ?? 0)) ? ['No output produced'] : [])], importance: result.status === 'blocked' ? 2 : 1,
+      effects: [`Residents: required ${result.residents.required}, opening capacity remaining ${result.residents.available}, allocated ${result.residents.allocated}; population is not consumed`, ...RESOURCE_IDS.filter(resource => (result.produced[resource] ?? 0) > 0).map(resource => `Produced ${result.produced[resource]} ${resource}`), ...(RESOURCE_IDS.every(resource => !(result.produced[resource] ?? 0)) ? ['No output produced'] : []), ...(result.extraction ? [`Finite ${result.extraction.resource}: ${result.extraction.status}; credited ${result.extraction.quantity}, reserve ${result.extraction.reserveBefore} → ${result.extraction.reserveAfter}`] : [])], importance: result.status === 'blocked' ? 2 : 1,
     });
   }
 }

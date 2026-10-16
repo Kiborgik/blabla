@@ -1261,3 +1261,11 @@ dialog h2 {
 .flat-district:focus-visible { outline: none; }
 .flat-district:focus-visible .district-hit { stroke: #fff3b6; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .district-label { min-width: 44px; min-height: 44px; font-size: 12px; }
+
+.site-map-mark { position: absolute; width: 44px; height: 44px; min-width: 44px; padding: 10px; transform: translate(-50%, -50%); background: transparent; border: 0; z-index: 2; pointer-events: auto; }
+.site-map-mark svg { width: 24px; height: 24px; padding: 3px; border-radius: 50%; border: 2px solid var(--civ-color); background: #173a3c; fill: none; stroke: #fff3c6; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.site-map-mark[data-status="building"] svg { border-style: dashed; }
+.site-map-leader { position: absolute; height: 1px; transform-origin: left center; pointer-events: none; }
+.deposit-map-mark { position: absolute; width: 14px; height: 14px; transform: translate(-50%, -100%); pointer-events: none; border-radius: 50%; background: #edf1e6; color: #293c43; border: 1px solid currentColor; }
+.deposit-map-mark svg { fill: none; stroke: currentColor; stroke-width: 2; }
+.district-label { pointer-events: none; }
