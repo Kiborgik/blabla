@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-preview.2",
+    "date": "2026-10-16",
+    "title": "A public window on the world",
+    "changes": [
+      "Public atlas preview checkpoint: civilization inspection, full update history, dismissal, browser Back and refresh have been checked on the published site.",
+      "Responsive preview layouts retain civilization inspection without horizontal overflow at narrow and phone-width CSS viewports.",
+      "Compatible viewer preferences include Borders and Routes visibility, camera position, zoom, decorative motion and the civilization in focus.",
+      "Browsers without WebGL 2 retain a useful text and inspection view. The growing world roadmap continues toward connected civilizations and Mars; this release does not add live gameplay."
+    ]
+  },
+  {
     "version": "0.1.0-preview.1",
     "date": "2026-10-16",
     "title": "The first atlas",
@@ -7,7 +18,7 @@
       "Original Three.js atlas preview with five illustrative civilizations, procedural terrain, capital cities and trade routes.",
       "Spectator-only camera, touch navigation and civilization inspection. This preview does not run live agents or gameplay.",
       "Accessible update history, deployment version checks and compatible viewer preference restoration.",
-      "The planned campaign spans early history to Mars, with five AI civilizations and a sixth AI World Director."
+      "The world roadmap connects early history to Mars, with five AI civilizations and a sixth AI World Director."
     ]
   }
 ]
