@@ -1,5 +1,6 @@
+import { emitImprovements, orderedImprovements } from './improvements.ts';
 import { buildingBaseProduction } from './districts.ts';
-import { ECONOMY_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
+import { ECONOMY_RULES, IMPROVEMENTS, IMPROVEMENT_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
 import type { City, GameEvent, Resources, WorldState } from '../types.ts';
 import { siteProduction } from './sites.ts';
 import { emitEvent } from './events.ts';
@@ -27,6 +28,7 @@ function produceCity(
   const buildings = productiveBuildings(state, city);
   const free = buildings.filter((building) => !paidRecipe(building));
   const paid = buildings.filter(paidRecipe);
+  const improvements = hasFeatures(state, [IMPROVEMENT_RULES.featureId]) ? orderedImprovements(city).filter(improvement => improvement.operation.lastResult?.status === 'operated') : [];
   const freeOutputs = free.map(building => buildingBaseProduction(state, city, building));
   for (const resource of RESOURCE_IDS) {
     const terrain = siteOutputs[resource] ?? 0;
@@ -39,6 +41,14 @@ function produceCity(
       const result = city.buildingOperations?.[building.id]?.lastResult;
       const contribution = quantize(next - amount);
       if (result?.status === 'operated' && contribution > 0) result.produced[resource] = contribution;
+      amount = next;
+    }
+    for (const improvement of improvements) {
+      const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
+      raw += definition?.production[resource] ?? 0;
+      const next = quantize(raw * productivity);
+      const contribution = quantize(next - amount);
+      if (improvement.operation.lastResult && contribution > 0) improvement.operation.lastResult.produced[resource] = contribution;
       amount = next;
     }
     civilization.resources[resource] = quantize(
@@ -159,6 +169,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
     for (const city of cities) {
       const production = produceCity(state, city);
       emitOperations(state, city, events);
+      emitImprovements(state, city, events);
       culture += production.culture;
       science += production.science;
       food += production.food;

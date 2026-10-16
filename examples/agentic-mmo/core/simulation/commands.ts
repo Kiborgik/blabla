@@ -1,3 +1,4 @@
+import { executeImprovementAction } from './improvements.ts';
 import { executeCoastalFounding, foundSettlement } from './coastal.ts';
 import { BUILDINGS, CONSTRUCTION_RULES, DIRECTOR_EVENTS, ECONOMY_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS } from '../content.ts';
 import { DIRECTOR_SEAT, type GameAction, type GameEvent, type Resources, type WorldState } from '../types.ts';
@@ -132,6 +133,10 @@ export function executeAction(
       } else installBuilding(state, city, definition, events);
       return;
     }
+    case 'improve':
+    case 'set-improvement-operation':
+      executeImprovementAction(state, seat, action, events);
+      return;
     case 'set-building-operation': {
       const city = cities.find((candidate) => candidate.id === action.cityId);
       const operation = city?.buildingOperations?.[action.buildingId];

@@ -1,5 +1,7 @@
 import {
   BUILDINGS,
+  IMPROVEMENTS,
+  IMPROVEMENT_RULES,
   ERAS,
   DIRECTOR_EVENTS,
   FEATURES,
@@ -23,6 +25,8 @@ import {
   GAME_VERSION,
   SCHEMA_VERSION,
   type City,
+  type ConstructionCompletion,
+  type ImprovementConstructionCompletion,
   type CoastalFoundingReceipt,
   type Civilization,
   type GameEvent,
@@ -233,15 +237,37 @@ function coastalRecords(cities: City[], events: GameEvent[], tiles: HexTile[], f
   return unique(receipts.map(receipt => receipt.eventId)) && events.every(event => !Object.hasOwn(event, 'coastalFounding') || valid(event.coastalFounding));
 }
 
-function construction(value: unknown, settlement: City, round: number, revision: number, ids: string[]): boolean {
+function constructionIdentity(value: Record<string, unknown>, settlement: City, features: string[], completed: boolean): boolean {
+  if (value.cityId !== settlement.id) return false;
+  if (value.kind === 'improvement') return features.includes(IMPROVEMENT_RULES.featureId) && integer(value.tileId)
+    && IMPROVEMENTS.some(definition => definition.id === value.improvementId);
+  return !Object.hasOwn(value, 'kind') && typeof value.buildingId === 'string'
+    && BUILDINGS.some(building => building.id === value.buildingId)
+    && settlement.buildings.includes(value.buildingId) === completed
+    && (!Object.hasOwn(value, 'tileId') || integer(value.tileId));
+}
+
+function constructionKeys(value: Record<string, unknown>): string[] {
+  return value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : [])];
+}
+
+function constructionCompletion(value: unknown, settlement: City, features: string[], round: number, revision: number): value is ConstructionCompletion {
+  if (!record(value) || !exactKeys(value, ['orderId', 'cityId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId', ...constructionKeys(value)])
+    || !constructionIdentity(value, settlement, features, true)) return false;
+  const started = orderRevision(value.orderId, revision);
+  const ended = completionRevision(value.eventId, revision);
+  return started !== null && ended !== null && ended > started
+    && integer(value.startedRound, 0, round) && integer(value.completedRound, value.startedRound + 1, round)
+    && resourceAmounts(value.paid) && finite(value.workRequired, Number.MIN_VALUE);
+}
+
+function construction(value: unknown, settlement: City, features: string[], round: number, revision: number, ids: string[]): boolean {
   if (!record(value) || !exactKeys(value, ['active', 'lastCompleted'])) return false;
   const active = value.active;
   if (active !== null) {
-    if (!record(active) || !exactKeys(active, ['id', 'cityId', 'buildingId', 'ruleVersion', 'startedRound', 'paid', 'workRequired', 'workDone', ...(Object.hasOwn(active, 'tileId') ? ['tileId'] : [])])
-      || Object.hasOwn(active, 'tileId') && !integer(active.tileId)
+    if (!record(active) || !exactKeys(active, ['id', 'cityId', 'ruleVersion', 'startedRound', 'paid', 'workRequired', 'workDone', ...constructionKeys(active)])
+      || !constructionIdentity(active, settlement, features, false)
       || orderRevision(active.id, revision) === null || typeof active.id !== 'string'
-      || active.cityId !== settlement.id || !BUILDINGS.some(building => building.id === active.buildingId)
-      || typeof active.buildingId !== 'string' || settlement.buildings.includes(active.buildingId)
       || active.ruleVersion !== 1 || !integer(active.startedRound, 0, round)
       || !resourceAmounts(active.paid) || !finite(active.workRequired, Number.MIN_VALUE)
       || !finite(active.workDone) || active.workDone >= active.workRequired) return false;
@@ -249,27 +275,85 @@ function construction(value: unknown, settlement: City, round: number, revision:
   }
   const completed = value.lastCompleted;
   if (completed !== null) {
-    if (!record(completed) || !exactKeys(completed, ['orderId', 'cityId', 'buildingId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId', ...(Object.hasOwn(completed, 'tileId') ? ['tileId'] : [])])
-      || Object.hasOwn(completed, 'tileId') && !integer(completed.tileId)) return false;
-    const startedRevision = orderRevision(completed.orderId, revision);
-    const endedRevision = completionRevision(completed.eventId, revision);
-    if (startedRevision === null || endedRevision === null || endedRevision <= startedRevision
-      || typeof completed.orderId !== 'string' || completed.cityId !== settlement.id
-      || typeof completed.buildingId !== 'string' || !settlement.buildings.includes(completed.buildingId)
-      || !integer(completed.startedRound, 0, round) || !integer(completed.completedRound, completed.startedRound + 1, round)
-      || !resourceAmounts(completed.paid) || !finite(completed.workRequired, Number.MIN_VALUE)) return false;
+    if (!constructionCompletion(completed, settlement, features, round, revision)) return false;
     if (record(active) && (!integer(active.startedRound, completed.completedRound, round)
-      || (orderRevision(active.id, revision) ?? 0) <= endedRevision)) return false;
+      || (orderRevision(active.id, revision) ?? 0) <= (completionRevision(completed.eventId, revision) ?? 0))) return false;
     ids.push(completed.orderId);
   }
   return true;
+}
+
+function sameImprovementCompletion(left: ImprovementConstructionCompletion, right: ImprovementConstructionCompletion): boolean {
+  return left.orderId === right.orderId && left.cityId === right.cityId && left.improvementId === right.improvementId
+    && left.tileId === right.tileId && left.startedRound === right.startedRound && left.completedRound === right.completedRound
+    && left.workRequired === right.workRequired && left.eventId === right.eventId
+    && Object.keys(left.paid).length === Object.keys(right.paid).length
+    && RESOURCE_IDS.every(resource => Object.hasOwn(left.paid, resource) === Object.hasOwn(right.paid, resource) && left.paid[resource] === right.paid[resource]);
+}
+
+function improvementResult(value: unknown, completedRound: number, round: number): boolean {
+  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'residents', 'blockedReason'])
+    || !integer(value.round, completedRound + 1, round) || !resourceAmounts(value.paid) || Object.keys(value.paid).length !== 0
+    || !resourceAmounts(value.produced) || !residentAllocation(value.residents)) return false;
+  const residents = value.residents;
+  if (value.status === 'operated') return value.blockedReason === null && residents.allocated === residents.required && residents.available >= residents.required;
+  if (residents.allocated !== 0 || Object.keys(value.produced).length !== 0) return false;
+  return value.status === 'paused' ? value.blockedReason === null : value.status === 'blocked'
+    && (value.blockedReason === 'site-ineligible' || value.blockedReason === 'resident-shortage' && residents.available < residents.required);
+}
+
+function improvementRecords(cities: City[], tiles: HexTile[], events: GameEvent[], features: string[], round: number, revision: number): boolean {
+  const occupied = new Set(cities.map(settlement => settlement.tileId));
+  for (const settlement of cities) {
+    for (const tileId of Object.values(settlement.districtSites ?? {})) occupied.add(tileId);
+    const active = settlement.construction?.active;
+    if (active && !('kind' in active) && active.tileId !== undefined) occupied.add(active.tileId);
+  }
+  const reserve = (tileId: number): boolean => {
+    if (!tiles.some(site => site.id === tileId) || occupied.has(tileId)) return false;
+    occupied.add(tileId); return true;
+  };
+  const orderIds: string[] = [];
+  const eventIds: string[] = [];
+  for (const settlement of cities) {
+    const active = settlement.construction?.active;
+    const last = settlement.construction?.lastCompleted;
+    if (active) { orderIds.push(active.id); if ('kind' in active && !reserve(active.tileId)) return false; }
+    if (last) { orderIds.push(last.orderId); eventIds.push(last.eventId); }
+    const mapping: unknown = settlement.improvements;
+    if (Object.hasOwn(settlement, 'improvements')) {
+      if (!features.includes(IMPROVEMENT_RULES.featureId) || !record(mapping)) return false;
+      for (const [key, value] of Object.entries(mapping)) {
+        if (!/^(0|[1-9]\d*)$/.test(key) || !record(value) || !exactKeys(value, ['improvementId', 'tileId', 'completion', 'operation'])
+          || !integer(value.tileId) || key !== String(value.tileId) || !reserve(value.tileId)
+          || !IMPROVEMENTS.some(definition => definition.id === value.improvementId)
+          || !constructionCompletion(value.completion, settlement, features, round, revision)
+          || !('kind' in value.completion) || value.completion.improvementId !== value.improvementId || value.completion.tileId !== value.tileId
+          || !record(value.operation) || !exactKeys(value.operation, ['enabled', 'lastResult']) || typeof value.operation.enabled !== 'boolean'
+          || value.operation.lastResult !== null && !improvementResult(value.operation.lastResult, value.completion.completedRound, round)) return false;
+        const completion = value.completion;
+        const event = events.find(item => item.id === completion.eventId);
+        if (event && (event.type !== 'improvement-completed' || event.round !== completion.completedRound || event.tileId !== completion.tileId
+          || event.actor !== settlement.civId || event.target !== settlement.civId || event.detail !== `${settlement.id}/${completion.tileId}/${completion.improvementId}`)) return false;
+        if (last && 'kind' in last && last.orderId === completion.orderId) {
+          if (!sameImprovementCompletion(last, completion)) return false;
+        } else { orderIds.push(completion.orderId); eventIds.push(completion.eventId); }
+      }
+    }
+    if (last && 'kind' in last) {
+      const installed = record(mapping) ? mapping[String(last.tileId)] : null;
+      if (!record(installed) || !constructionCompletion(installed.completion, settlement, features, round, revision)
+        || !('kind' in installed.completion) || !sameImprovementCompletion(last, installed.completion)) return false;
+    }
+  }
+  return unique(orderIds) && unique(eventIds);
 }
 
 function recurringRecords(cities: City[], civilizations: Civilization[], features: string[], round: number, revision: number): boolean {
   const enabled = features.includes('recurring-decisions');
   const orderIds: string[] = [];
   for (const settlement of cities) {
-    if (Object.hasOwn(settlement, 'construction') && (!enabled || !construction(settlement.construction, settlement, round, revision, orderIds))) return false;
+    if (Object.hasOwn(settlement, 'construction') && (!enabled || !construction(settlement.construction, settlement, features, round, revision, orderIds))) return false;
   }
   for (const actor of civilizations) {
     if (!Object.hasOwn(actor, 'lastResearchCompletion')) continue;
@@ -305,17 +389,17 @@ function districtRecords(cities: City[], tiles: HexTile[], events: GameEvent[], 
     } else if (installed.length > 0) return false;
     const active = settlement.construction?.active;
     const completed = settlement.construction?.lastCompleted;
-    const commitments = [...settlement.buildings, ...(active ? [active.buildingId] : [])];
+    const commitments = [...settlement.buildings, ...(active && !('kind' in active) ? [active.buildingId] : [])];
     if (commitments.some(id => BUILDINGS.find(building => building.id === id)?.requiresBuildings?.some(required => !settlement.buildings.includes(required)))) return false;
     for (const entry of [active, completed]) {
-      if (!entry) continue;
+      if (!entry || 'kind' in entry) continue;
       const district = BUILDINGS.find(building => building.id === entry.buildingId)?.district;
       if (Boolean(district) !== Object.hasOwn(entry, 'tileId')) return false;
       if (!district) continue;
       if (entry === active) {
         if (!reserve(settlement, entry.buildingId, entry.tileId)) return false;
       } else {
-        if (!record(mapping) || mapping[entry.buildingId] !== entry.tileId || !completed) return false;
+        if (!record(mapping) || mapping[entry.buildingId] !== entry.tileId || !completed || 'kind' in completed) return false;
         const event = events.find(value => value.id === completed.eventId);
         if (event && (event.type !== 'building-completed' || event.round !== completed.completedRound || event.tileId !== completed.tileId
           || event.actor !== settlement.civId || event.target !== settlement.civId)) return false;
@@ -677,6 +761,7 @@ export function isWorldState(
     !cities.every((item) => buildingOperations(item, round, features)) ||
     !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
     !districtRecords(cities, tiles, value.events, features) ||
+    !improvementRecords(cities, tiles, value.events, features, round, value.revision) ||
     !coastalRecords(cities, value.events, tiles, features, round, value.revision) ||
     !value.civilizations.every((item) =>
       cities.some((settlement) => settlement.civId === item.id),

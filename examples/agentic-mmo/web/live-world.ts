@@ -1,6 +1,7 @@
 import { projectRoutePath, mapTileHeight } from '../visuals/route-paths.ts';
-import { BUILDINGS, ERAS } from '../core/content.ts';
+import { BUILDINGS, ERAS, IMPROVEMENTS } from '../core/content.ts';
 import { buildingBaseProduction } from '../core/simulation/districts.ts';
+import type { ImprovementView } from '../visuals/improvement-visuals.ts';
 import type { DistrictView } from '../visuals/district-visuals.ts';
 import type { GameEvent, WorldState } from '../core/types.ts';
 import { eventVisual } from '../visuals/world-visuals.ts';
@@ -68,7 +69,8 @@ export function projectWorld(state: WorldState): AtlasWorld {
   const cityById = new Map(cities.map((city) => [city.cityId, city]));
   const campus = BUILDINGS.find(building => building.id === 'campus');
   const districts = state.cities.flatMap((city): DistrictView[] => {
-    const active = city.construction?.active;
+    const order = city.construction?.active;
+    const active = order && 'buildingId' in order ? order : null;
     const built = city.buildings.includes('campus');
     const tileId = built ? city.districtSites?.['campus'] : active?.buildingId === 'campus' ? active.tileId : undefined;
     const tile = tileId === undefined ? undefined : tiles.get(tileId);
@@ -79,6 +81,27 @@ export function projectWorld(state: WorldState): AtlasWorld {
       status: built ? 'built' : 'building', library: built && city.buildings.includes('library') ? 'built' : built && active?.buildingId === 'library' ? 'building' : 'absent',
       construction: active && (active.buildingId === 'campus' || active.buildingId === 'library') ? structuredClone(active) : null,
       baseProduction: buildingBaseProduction(state, city, campus, tile.id) }];
+  }).toSorted((a, b) => a.tileId - b.tileId || a.id.localeCompare(b.id));
+  const improvements = state.cities.flatMap((city): ImprovementView[] => {
+    const town = cityById.get(city.id);
+    if (!town) return [];
+    const installed = Object.values(city.improvements ?? {});
+    const order = city.construction?.active;
+    const active = order && 'kind' in order && order.kind === 'improvement' ? order : null;
+    const records = [
+      ...installed.map(item => ({ improvementId: item.improvementId, tileId: item.tileId, instance: item.completion.orderId, construction: null, completion: item.completion, operation: item.operation })),
+      ...(active ? [{ improvementId: active.improvementId, tileId: active.tileId, instance: active.id, construction: active, completion: null, operation: null }] : []),
+    ];
+    return records.flatMap((record): ImprovementView[] => {
+      const tile = tiles.get(record.tileId);
+      const definition = IMPROVEMENTS.find(item => item.id === record.improvementId);
+      if (!tile || !definition || tile.terrain === 'ocean') return [];
+      return [{ id: `improvement:${city.id}:${record.tileId}:${record.instance}`, cityId: city.id, townName: city.name, civId: city.civId,
+        improvementId: record.improvementId, name: definition.name, tileId: tile.id, q: tile.q - centerQ, r: tile.r - centerR,
+        height: mapTileHeight(tile.elevation), color: town.color, status: record.construction ? 'building' : 'built',
+        construction: structuredClone(record.construction), completion: structuredClone(record.completion), operation: structuredClone(record.operation),
+        baseProduction: structuredClone(definition.production), residentsRequired: definition.residentsRequired }];
+    });
   }).toSorted((a, b) => a.tileId - b.tileId || a.id.localeCompare(b.id));
   const town = (id: string) => {
     const city = cityById.get(id);
@@ -91,6 +114,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
     illustrative: false,
     cities,
     districts,
+    improvements,
     tiles: state.tiles.flatMap((tile) => tile.terrain === 'ocean' ? [] : [{
       id: tile.id, q: tile.q - centerQ, r: tile.r - centerR, owner: tile.owner,
       terrain: tile.terrain, height: mapTileHeight(tile.elevation),

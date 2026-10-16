@@ -15,6 +15,7 @@ import type { DetailLevel } from '../visuals/world-visuals.ts';
 import { flatSceneFaces, mapOverlayBounds } from './settlement-parts.ts';
 import { createWorldCues } from './world-cues.ts';
 import { mapLabelVisibility } from './map-labels.ts';
+import { improvementLabel, improvementParts } from '../visuals/improvement-visuals.ts';
 import { districtCaptionPlacement, districtLabel, districtParts } from '../visuals/district-visuals.ts';
 
 export function cityScreenMetrics(pixelsPerUnit: number): { targetRadius: number; markerRadius: number; markerFont: number; labelFont: number; labelY: number } {
@@ -55,6 +56,10 @@ export function createFlatAtlasRenderer(
   let routeLabel: { element: SVGGElement; x: number; z: number; id: string } | null = null;
   const cities = node('g', {});
   const districts = node('g', { class: 'flat-districts' });
+  const sites = [
+    ...(world.districts ?? []).map(site => ({ ...site, kind: 'district', caption: 'Campus', label: districtLabel(site), parts: (level: DetailLevel) => districtParts(site, level) })),
+    ...(world.improvements ?? []).map(site => ({ ...site, kind: 'improvement', caption: site.name, label: improvementLabel(site), parts: (level: DetailLevel) => improvementParts(site, level) })),
+  ];
   const districtNodes: Array<{ element: SVGGElement; parts: SVGGElement; hit: SVGCircleElement; label: SVGTextElement; leader: SVGLineElement; index: number; placed: boolean }> = [];
   const settlements: Array<{ element: SVGGElement; index: number }> = [];
   let detail: DetailLevel | undefined;
@@ -117,15 +122,15 @@ export function createFlatAtlasRenderer(
     }
   };
   drawRoutes();
-  for (const [index, district] of (world.districts ?? []).entries()) {
+  for (const [index, district] of sites.entries()) {
     const point = hexPosition(district.q, district.r);
-    const group = node('g', { class: 'flat-district', 'data-district-id': district.id, 'data-tile-id': String(district.tileId), 'data-status': district.status,
-      transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${districtLabel(district)} of ${district.townName}, tile ${district.tileId}` });
+    const group = node('g', { class: `flat-district flat-${district.kind}`, 'data-district-id': district.id, 'data-tile-id': String(district.tileId), 'data-status': district.status,
+      transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${district.label} of ${district.townName}, tile ${district.tileId}` });
     const parts = node('g', { 'pointer-events': 'none' });
     const hit = node('circle', { class: 'district-hit', fill: 'transparent', r: '1' });
     const label = node('text', { 'text-anchor': 'middle', fill: '#fff5d8', 'font-family': 'Arial, sans-serif', stroke: '#173a3c', 'stroke-width': '.09', 'paint-order': 'stroke', 'pointer-events': 'none' });
     const leader = node('line', { x1: '0', y1: '0', stroke: district.color, 'stroke-width': '1', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
-    label.textContent = 'Campus';
+    label.textContent = district.caption;
     group.append(leader, parts, hit, label);
     group.addEventListener('click', () => onSelect(district.cityId));
     group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(district.cityId); } });
@@ -171,10 +176,10 @@ export function createFlatAtlasRenderer(
     if (nextDetail !== detail) {
       detail = nextDetail;
       svg.dataset['detail'] = detail;
-      paintParts(terrain, projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? [])], detail).parts, VISUAL_PALETTE.stone);
+      paintParts(terrain, projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? []), ...(world.improvements ?? [])], detail).parts, VISUAL_PALETTE.stone);
       for (const entry of districtNodes) {
-        const district = world.districts?.[entry.index];
-        if (district) paintParts(entry.parts, districtParts(district, detail), district.color);
+        const district = sites[entry.index];
+        if (district) paintParts(entry.parts, district.parts(detail), district.color);
       }
       for (const entry of settlements) {
         const city = world.cities[entry.index];
@@ -205,13 +210,13 @@ export function createFlatAtlasRenderer(
     const targetBottom = Math.max(metrics.targetRadius * pixelsPerUnit, metrics.labelY * pixelsPerUnit + 6);
     const townTargets = labelPositions.map((label) => ({ x: label.x, y: label.y - metrics.labelY * pixelsPerUnit - targetTop, width: Math.max(label.width, metrics.targetRadius * pixelsPerUnit * 2), height: targetTop + targetBottom }));
     for (const entry of districtNodes) {
-      const district = world.districts?.[entry.index];
+      const district = sites[entry.index];
       if (!district) continue;
       const point = hexPosition(district.q, district.r);
       entry.hit.setAttribute('r', String(Math.max(.9, 22 / pixelsPerUnit)));
       entry.label.setAttribute('font-size', String(12 / pixelsPerUnit));
       const anchor = { x: (point.x - box.x) * pixelsPerUnit, y: (point.z - box.y) * pixelsPerUnit };
-      const placement = districtCaptionPlacement(anchor, [...townTargets, ...mapOverlayBounds(container)], container.clientWidth, container.clientHeight, 46);
+      const placement = districtCaptionPlacement(anchor, [...townTargets, ...mapOverlayBounds(container)], container.clientWidth, container.clientHeight, Math.max(44, district.caption.length * 7));
       entry.placed = placement !== null;
       if (placement) {
         entry.label.setAttribute('x', String((placement.x - anchor.x) / pixelsPerUnit));
@@ -227,7 +232,7 @@ export function createFlatAtlasRenderer(
       routeLabel.element.setAttribute('transform', `translate(${box.x + placedRouteLabel.x / pixelsPerUnit} ${box.y + (placedRouteLabel.y + 22) / pixelsPerUnit}) scale(${1 / pixelsPerUnit})`);
       labelPositions.unshift({ id: routeLabel.id, ...placedRouteLabel });
     }
-    const selectedDistricts = new Set((world.districts ?? []).filter(district => district.cityId === selected).map(district => district.id));
+    const selectedDistricts = new Set(sites.filter(district => district.cityId === selected).map(district => district.id));
     const prioritized = labelPositions.toSorted((a, b) => Number(selectedDistricts.has(b.id)) - Number(selectedDistricts.has(a.id)));
     const shown = mapLabelVisibility(prioritized, selected, nextDetail, container.clientWidth, container.clientHeight);
     const visibilityById = new Map(prioritized.map((label, index) => [label.id, shown[index]]));

@@ -1,5 +1,6 @@
+import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
 import { damageCondition } from '../visuals/damage-visuals.ts';
-import { BUILDINGS, RESOURCE_IDS } from '../core/content.ts';
+import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS } from '../core/content.ts';
 import { hasFeatures } from '../core/simulation/history.ts';
 import { observedResidentCapacity } from '../core/simulation/operations.ts';
 import type { City, WorldState, ResidentCapacityObservation } from '../core/types.ts';
@@ -98,13 +99,51 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     host.append(damage);
   }
   const activeDistrict = city.construction?.active;
-  if (activeDistrict && (activeDistrict.buildingId === 'campus' || activeDistrict.buildingId === 'library')) {
+  if (activeDistrict && 'buildingId' in activeDistrict && (activeDistrict.buildingId === 'campus' || activeDistrict.buildingId === 'library')) {
     const site = text('section', '', 'building-card');
     const tileId = activeDistrict.buildingId === 'campus' ? activeDistrict.tileId : city.districtSites?.['campus'];
     site.append(text('h4', `${activeDistrict.buildingId === 'campus' ? 'Campus' : 'Library'} · Under construction`),
       text('p', `${activeDistrict.buildingId === 'campus' ? 'Reserved site' : 'At this town’s Campus'}: ${tileId === undefined ? 'Unavailable' : `Tile ${tileId}`}`, 'building-current'),
       text('p', `${activeDistrict.workDone} / ${activeDistrict.workRequired} work · Not built yet`, 'building-summary'));
     host.append(site);
+  }
+  if (activeDistrict && 'kind' in activeDistrict && activeDistrict.kind === 'improvement') {
+    const definition = IMPROVEMENTS.find(item => item.id === activeDistrict.improvementId);
+    const card = text('section', '', 'building-card worked-site-card');
+    const siteHeading = text('h4', `${definition?.name ?? activeDistrict.improvementId} · Under construction`);
+    siteHeading.prepend(visualIcon('materials'));
+    card.append(siteHeading, text('p', `Reserved site · Tile ${activeDistrict.tileId}`, 'building-current'),
+      text('p', `${activeDistrict.workDone} / ${activeDistrict.workRequired} work · Not built yet`, 'building-summary'),
+      amountLine('Paid once for this order', RESOURCE_IDS.flatMap(resource => { const amount = activeDistrict.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
+      text('p', 'No operating output until after completion and a later staffed season.', 'building-summary'));
+    host.append(card);
+  }
+  for (const site of Object.values(city.improvements ?? {}).toSorted((a, b) => a.tileId - b.tileId)) {
+    const definition = IMPROVEMENTS.find(item => item.id === site.improvementId);
+    const card = text('section', '', 'building-card worked-site-card');
+    card.dataset['improvementTile'] = String(site.tileId);
+    const siteHeading = text('h4', `${definition?.name ?? site.improvementId} · Tile ${site.tileId}`);
+    siteHeading.prepend(visualIcon('materials'));
+    card.append(siteHeading, text('p', `Built · ${site.operation.enabled ? 'On' : 'Paused'} now`, 'building-current'));
+    if (definition) card.append(text('p', `Needs ${definition.residentsRequired} local resident each operating season. People stay in this town.`, 'building-summary'),
+      amountLine('Base before town productivity', RESOURCE_IDS.flatMap(resource => { const amount = definition.production[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
+    const built = townDisclosure(`improvement:${site.tileId}:built`, `Completed · Round ${site.completion.completedRound}`);
+    built.append(amountLine('Paid once', RESOURCE_IDS.flatMap(resource => { const amount = site.completion.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
+      text('p', `Work ${site.completion.workRequired} · Event ${site.completion.eventId}`, 'settlement-facts'));
+    card.append(built);
+    const last = site.operation.lastResult;
+    if (last) {
+      const receipt = townDisclosure(`improvement:${site.tileId}:operation`, `Last record · Round ${last.round} · ${improvementLastLabel(last)}`);
+      const residents = last.residents;
+      receipt.append(text('p', `Assigned: ${residents.allocated} resident`, 'resident-allocation'),
+        text('p', `Needed: ${residents.required} · Available then: ${residents.available}`),
+        text('p', `Population at start: ${residents.openingPopulation} · Community reserve: ${residents.communityReserve}`),
+        text('p', 'This allocation belongs to that recorded season. Current population and pause choices may have changed.'),
+        amountLine('Paid that season', RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
+        amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
+      card.append(receipt);
+    } else card.append(text('p', 'No operating result has been recorded yet. Output requires a later season with local support.', 'building-summary'));
+    host.append(card);
   }
   if (!city.buildings.length) host.append(text('p', 'No buildings yet', 'settlement-facts'));
   for (const id of city.buildings) {

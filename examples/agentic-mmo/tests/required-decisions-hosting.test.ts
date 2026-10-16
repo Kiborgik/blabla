@@ -8,7 +8,7 @@ import { BUILDINGS, RESOURCE_IDS } from '../core/content.ts';
 import { WorldRepository, type D1Database, type D1Result, type D1Statement, type SqlValue } from '../server/repository.ts';
 import { createWorker } from '../server/worker.ts';
 import { applyCommand, applyRelease, catchUpStrategy, createWorld, observe } from '../core/engine.ts';
-import type { ConstructionOrder, GameAction, WorldState } from '../core/types.ts';
+import type { BuildingConstructionOrder, GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 
 const epoch = '2026-10-16T00:00:00.000Z';
@@ -46,9 +46,9 @@ function city(state: WorldState, index = 0) { const result = state.cities[index]
 function civilization(state: WorldState, index = 0) { const result = state.civilizations[index]; assert.ok(result); return result; }
 function construction(state: WorldState, index = 0) { const result = city(state, index).construction; assert.ok(result); return result; }
 
-function active(state: WorldState): ConstructionOrder {
+function active(state: WorldState): BuildingConstructionOrder {
   const order = state.cities[0]?.construction?.active;
-  assert.ok(order);
+  assert.ok(order && !('kind' in order));
   return order;
 }
 
@@ -468,7 +468,7 @@ await test('one bounded last completion survives recent-feed eviction and a late
     await item.beat(30);
     const finished = await item.state();
     const last = city(finished).construction?.lastCompleted;
-    assert.ok(last);
+    assert.ok(last && !('kind' in last));
     assert.equal(last.buildingId, 'workshop');
     assert.notEqual(last.orderId, completed.orderId);
     assert.equal(city(finished).construction?.active, null);

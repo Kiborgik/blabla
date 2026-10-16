@@ -1,5 +1,5 @@
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
-import { createCapabilityTreeSheet, type CapabilityTreeInput } from './capability-tree.ts';
+import { createCapabilityTreeSheet, restoreCapabilityOpener, type CapabilityTreeInput } from './capability-tree.ts';
 import { eventLogEntries, latestStoryEvent, renderEventLog } from './event-log.ts';
 import { routeInspectionCity } from '../visuals/route-visuals.ts';
 import { renderRouteCard, renderRouteList, retainedRoutePathInspection, routeInspectionIdentity } from './route-inspection.ts';
@@ -118,7 +118,7 @@ const capabilityTree = createCapabilityTreeSheet(capabilityDialog, (id) => {
   const input = currentCapabilityInput();
   if (input) capabilityTree.observe(input);
 }, () => {
-  element('.inspection').querySelector<HTMLButtonElement>('[data-open-capabilities]')?.focus({ preventScroll: true });
+  restoreCapabilityOpener(() => element('.inspection').hidden ? null : element('.inspection').querySelector<HTMLButtonElement>('[data-open-capabilities]'), () => setInspectionOpen(true));
 });
 
 function currentCapabilityInput(): CapabilityTreeInput | null {

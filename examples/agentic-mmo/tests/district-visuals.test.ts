@@ -60,7 +60,8 @@ await test('a Library order preserves the completed Campus while the Library is 
   assert.ok(district);
   assert.equal(district.status, 'built');
   assert.equal(district.library, 'building');
-  assert.equal(district.construction?.buildingId, 'library');
+  assert.ok(district.construction && 'buildingId' in district.construction);
+  assert.equal(district.construction.buildingId, 'library');
 });
 
 await test('old worlds and missing retained sites do not invent districts at a town center', () => {
@@ -129,4 +130,14 @@ await test('district captions avoid town markers and decline placement when the 
   assert.ok(placed);
   assert.ok(Math.abs(placed.x - town.x) >= (placed.width + town.width) / 2 + 6 || placed.y >= town.y + town.height + 6 || placed.y + 22 <= town.y);
   assert.equal(districtCaptionPlacement({ x: 130, y: 130 }, [{ x: 180, y: 0, width: 360, height: 507 }], 360, 507, 110), null);
+});
+
+await test('worked-site captions use the narrow gap between a header and town without obscuring either', () => {
+  const placed = districtCaptionPlacement({ x: 75, y: 205 }, [
+    { x: 110, y: 61, width: 200, height: 67 },
+    { x: 88, y: 178, width: 80, height: 70 },
+    { x: 180, y: 260, width: 360, height: 247 },
+  ], 360, 507, 44);
+  assert.ok(placed);
+  assert.equal(placed.y, 145);
 });

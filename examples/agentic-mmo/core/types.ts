@@ -18,8 +18,14 @@ export interface ResidentAllocationResult { ruleVersion: 1; openingPopulation: n
 export interface ResidentCapacityObservation { ruleVersion: 1; communityReserve: number; perPaidRecipe: number; cities: Array<{ cityId: string; capacity: number }> }
 export interface BuildingOperationResult { residents?: ResidentAllocationResult; round: number; status: 'operated' | 'blocked' | 'paused'; paid: Partial<Resources>; produced: Partial<Resources>; shortages: Array<{ resource: Resource; required: number; available: number }> }
 export interface BuildingOperation { enabled: boolean; lastResult: BuildingOperationResult | null }
-export interface ConstructionOrder { tileId?: number; id: string; cityId: string; buildingId: string; ruleVersion: 1; startedRound: number; paid: Partial<Resources>; workRequired: number; workDone: number }
-export interface ConstructionCompletion { tileId?: number; orderId: string; cityId: string; buildingId: string; startedRound: number; completedRound: number; paid: Partial<Resources>; workRequired: number; eventId: string }
+export interface BuildingConstructionOrder { tileId?: number; id: string; cityId: string; buildingId: string; ruleVersion: 1; startedRound: number; paid: Partial<Resources>; workRequired: number; workDone: number }
+export interface ImprovementConstructionOrder { kind: 'improvement'; id: string; cityId: string; improvementId: string; tileId: number; ruleVersion: 1; startedRound: number; paid: Partial<Resources>; workRequired: number; workDone: number }
+export type ConstructionOrder = BuildingConstructionOrder | ImprovementConstructionOrder;
+export interface BuildingConstructionCompletion { tileId?: number; orderId: string; cityId: string; buildingId: string; startedRound: number; completedRound: number; paid: Partial<Resources>; workRequired: number; eventId: string }
+export interface ImprovementConstructionCompletion { kind: 'improvement'; orderId: string; cityId: string; improvementId: string; tileId: number; startedRound: number; completedRound: number; paid: Partial<Resources>; workRequired: number; eventId: string }
+export type ConstructionCompletion = BuildingConstructionCompletion | ImprovementConstructionCompletion;
+export interface ImprovementOperationResult { round: number; status: 'operated' | 'blocked' | 'paused'; paid: Partial<Resources>; produced: Partial<Resources>; residents: ResidentAllocationResult; blockedReason: 'resident-shortage' | 'site-ineligible' | null }
+export interface CityImprovement { improvementId: string; tileId: number; completion: ImprovementConstructionCompletion; operation: { enabled: boolean; lastResult: ImprovementOperationResult | null } }
 export interface CityConstruction { active: ConstructionOrder | null; lastCompleted: ConstructionCompletion | null }
 export interface ResearchCompletion { technologyId: string; completedRound: number; eventId: string }
 export type DecisionBlocker = CapabilityBlocker | { kind: 'no-available-choice' } | { kind: 'zero-work' } | { kind: 'active-commitment'; targetId: string };
@@ -27,7 +33,7 @@ export interface DecisionObligation { kind: 'research' | 'construction'; cityId:
 export interface DecisionObligations { research: DecisionObligation; construction: DecisionObligation[] }
 export interface CoastalFoundingQuote { mode: 'coast'; ruleVersion: 1; tileIds: number[]; edges: number }
 export interface CoastalFoundingReceipt { ruleVersion: 1; sourceCityId: string; sourceTileId: number; destinationTileId: number; pathTileIds: number[]; population: number; paid: Partial<Resources>; foundedRound: number; eventId: string }
-export interface City { districtSites?: Record<string, number>; coastalFounding?: CoastalFoundingReceipt; id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
+export interface City { improvements?: Record<string, CityImprovement>; districtSites?: Record<string, number>; coastalFounding?: CoastalFoundingReceipt; id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
 export interface Civilization { id: number; name: string; color: string; adjective: string; objective: string; era: number; resources: Resources; technologies: string[]; researchTarget: string; researchProgress: number; lastResearchCompletion?: ResearchCompletion; influence: number; legitimacy: number; marsProgress: number; marsPopulation: number; marsSupplyStreak: number; federationStreak: number; score: number }
 export interface Route { id: string; from: string; to: string; owner: number; partner: number; active: boolean; damage: number; volume: number; agreement?: TradeAgreement }
 export interface LandTransportQuote { mode: 'land'; ruleVersion: 1; tileIds: number[]; edges: number }
@@ -51,6 +57,8 @@ export type GameAction =
   | { type: 'focus'; focus: Focus; cityId?: string }
   | { type: 'research'; technology: string }
   | { type: 'build'; project: string; cityId?: string; tileId?: number }
+  | { type: 'improve'; cityId: string; tileId: number; improvementId: string }
+  | { type: 'set-improvement-operation'; cityId: string; tileId: number; improvementId: string; enabled: boolean }
   | { type: 'set-building-operation'; cityId: string; buildingId: string; enabled: boolean }
   | { type: 'settle'; tileId: number; sourceCityId?: string }
   | { type: 'settle-coast'; tileId: number; sourceCityId: string }
@@ -87,6 +95,7 @@ export type EffectDefinition =
 export interface TechnologyDefinition { id: string; name: string; requiredFeatures: readonly string[]; era: number; cost: number; requires: string[]; capability: string }
 export type BuildingCapability = 'coastal-departure';
 export interface DistrictDefinition { range: number; adjacency: { terrain: Terrain; resource: Resource; amount: number; maximum: number } }
+export interface ImprovementDefinition { id: string; name: string; description: string; requiredFeatures: readonly string[]; requires: string[]; minEra: number; cost: Partial<Resources>; requiredWork: number; siteRange: number; siteRequirement: 'hill'; residentsRequired: number; production: Partial<Resources> }
 export interface BuildingDefinition { district?: DistrictDefinition; requiresBuildings?: readonly string[]; capabilities?: readonly BuildingCapability[]; siteRequirement?: 'coastal'; id: string; name: string; requiredFeatures: readonly string[]; minEra: number; cost: Partial<Resources>; requires: string[]; effects: EffectDefinition[]; production: Partial<Resources>; operatingInputs?: Partial<Resources>; description: string }
 
 export interface FeatureDefinition { id: string; name: string; description: string }

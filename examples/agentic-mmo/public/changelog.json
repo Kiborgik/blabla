@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-live.18",
+    "date": "2026-10-16",
+    "title": "Put nearby hills to work",
+    "changes": [
+      "Mining opens a Mine on an exact owned hill near a town. Its paid work shares the town construction order, and the site stays reserved until completion.",
+      "A completed Mine uses one available local resident after funded buildings. Its later Materials output reflects the town; pause, shortage and actual past output remain separate facts.",
+      "The map and town tree show the reserved site, completed Mine and recorded work or output. The existing learning districts and every current town are preserved.",
+      "Website publication prepares the compatible Mining update; gameplay activation is a separate recorded transition. The illustrative preview and legal local fixture states remain separate from actual model play.",
+      "Local desktop and 360px fixtures were inspected. Crowded overview labels and public follow-through remain limited; the browser security gate, physical touch and WebGL are still open evidence."
+    ]
+  },
+  {
     "version": "0.1.0-live.17",
     "date": "2026-10-16",
     "title": "Choose where a town learns",

@@ -81,6 +81,7 @@ await test('Campus locks the exact site and pays once while using the existing s
   const before = learnWriting();
   const state = accepted(act(before, campus(39)));
   const city = state.cities.find(value => value.id === 'city-0'); assert.ok(city?.construction?.active);
+  assert.ok(!('kind' in city.construction.active));
   assert.equal(city.construction.active.buildingId, 'campus');
   assert.equal('tileId' in city.construction.active ? city.construction.active.tileId : null, 39);
   assert.equal(city.construction.active.workRequired, 8);

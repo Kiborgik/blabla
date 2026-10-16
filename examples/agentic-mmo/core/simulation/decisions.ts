@@ -1,6 +1,7 @@
-import { BUILDINGS, TECHNOLOGIES } from '../content.ts';
+import { constructionTarget } from './improvements.ts';
+import { BUILDINGS, IMPROVEMENTS, TECHNOLOGIES } from '../content.ts';
 import { DIRECTOR_SEAT, type DecisionObligation, type DecisionObligations, type GameAction, type WorldState } from '../types.ts';
-import { buildingEligibility, researchEligibility } from './capabilities.ts';
+import { buildingEligibility, improvementEligibility, researchEligibility } from './capabilities.ts';
 import { constructionWork } from './construction.ts';
 import { hasFeatures } from './history.ts';
 import { citiesOf, civilizationById } from './world.ts';
@@ -28,15 +29,21 @@ export function decisionObligations(state: WorldState, civilizationId: number): 
     const active = city.construction?.active;
     if (active) {
       lane.status = constructionWork(city) > 0 ? 'active' : 'blocked';
-      lane.targetId = active.buildingId;
+      lane.targetId = constructionTarget(active);
       lane.progress = { done: active.workDone, required: active.workRequired };
-      if (lane.status === 'blocked') lane.blockers.push({ capabilityId: active.buildingId, reason: { kind: 'zero-work' } });
+      if (lane.status === 'blocked') lane.blockers.push({ capabilityId: constructionTarget(active), reason: { kind: 'zero-work' } });
     } else {
       for (const building of BUILDINGS) {
         const eligibility = buildingEligibility(state, civilizationId, building, city.id);
         if (eligibility.completed) continue;
         if (!eligibility.blockers.length) lane.availableIds.push(building.id);
         else lane.blockers.push(...eligibility.blockers.map(reason => ({ capabilityId: building.id, reason })));
+      }
+      if (hasFeatures(state, ['worked-land'])) for (const definition of IMPROVEMENTS) {
+        const eligibility = improvementEligibility(state, civilizationId, definition, city.id);
+        const capabilityId = `improvement:${definition.id}`;
+        if (!eligibility.blockers.length) lane.availableIds.push(capabilityId);
+        else lane.blockers.push(...eligibility.blockers.map(reason => ({ capabilityId, reason })));
       }
       if (lane.availableIds.length) lane.status = 'required';
       else lane.blockers.push({ capabilityId: null, reason: { kind: 'no-available-choice' } });
@@ -51,9 +58,9 @@ export function decisionActionBlock(state: WorldState, seat: number, action: Gam
   const civilization = civilizationById(state, seat);
   if (action.type === 'research' && civilization.researchTarget)
     return `Active research ${civilization.researchTarget} must finish before another research commitment`;
-  if (action.type === 'build') {
+  if (action.type === 'build' || action.type === 'improve') {
     const city = state.cities.find(candidate => candidate.civId === seat && candidate.id === action.cityId);
-    if (city?.construction?.active) return `Active construction ${city.construction.active.buildingId} in ${city.id} must finish before another commitment`;
+    if (city?.construction?.active) return `Active construction ${constructionTarget(city.construction.active)} in ${city.id} must finish before another commitment`;
   }
   if (action.type === 'wait') {
     const decisions = decisionObligations(state, seat);

@@ -1,3 +1,4 @@
+import { installImprovement, isImprovementOrder } from './improvements.ts';
 import { buildingBaseProduction, describeDistrictProduction } from './districts.ts';
 import { BUILDINGS, CONSTRUCTION_RULES, RESOURCE_IDS } from '../content.ts';
 import type { BuildingDefinition, City, GameEvent, WorldState } from '../types.ts';
@@ -62,6 +63,11 @@ export function resolveConstruction(state: WorldState, opening: ReadonlyMap<stri
     if (!construction || !order || work === undefined || state.round <= order.startedRound) continue;
     order.workDone = Math.min(order.workRequired, Math.round((order.workDone + work) * 100) / 100);
     if (order.workDone < order.workRequired) continue;
+    if (isImprovementOrder(order)) {
+      installImprovement(state, city, order, events);
+      construction.active = null;
+      continue;
+    }
     const definition = BUILDINGS.find(building => building.id === order.buildingId);
     if (!definition || city.buildings.includes(order.buildingId)) throw new RangeError('Construction completion requires its exact unbuilt definition');
     const event = installBuilding(state, city, definition, events, order.tileId);

@@ -1,8 +1,10 @@
+import { availableImprovementSites, orderedImprovements } from './improvements.ts';
 import { availableDistrictSites, describeDistrictProduction } from './districts.ts';
 import { availableCoastalActions, foundingSiteEligible, foundingSourceEligible } from './coastal.ts';
 import {
   ACTION_FEATURES,
   BUILDINGS,
+  IMPROVEMENTS,
   DIRECTOR_EVENTS,
   ECONOMY_RULES,
   FOCUS_IDS,
@@ -18,7 +20,7 @@ import { availablePublicProjectActions } from './public-projects.ts';
 import { availableTradeActions, type TradePresentation } from './trade.ts';
 import { orderedBuildings, paidRecipe } from './operations.ts';
 import { canAct } from './turns.ts';
-import { buildingEligibility, researchEligibility } from './capabilities.ts';
+import { buildingEligibility, improvementEligibility, researchEligibility } from './capabilities.ts';
 import { decisionActionBlock } from './decisions.ts';
 import { requiredConstructionWork } from './construction.ts';
 
@@ -138,6 +140,26 @@ export function availableActions(
       }
     }
   }
+  if (actionFeatureAvailable(state, 'improve')) {
+    for (const definition of IMPROVEMENTS) for (const city of cities) {
+      if (improvementEligibility(state, seat, definition, city.id).blockers.length) continue;
+      for (const tileId of availableImprovementSites(state, city, definition)) choices.push({
+        action: { type: 'improve', cityId: city.id, tileId, improvementId: definition.id },
+        label: `Build ${definition.name} for ${city.name} at site ${tileId}`,
+        reason: `${definition.description} Exact owned site; pay once ${resourceAmounts(definition.cost)}; ${definition.requiredWork} work. Base output before town productivity: ${resourceAmounts(definition.production)}. Needs ${definition.residentsRequired} remaining opening residents after paid buildings; first output after completion.`,
+      });
+    }
+  }
+  if (actionFeatureAvailable(state, 'set-improvement-operation')) {
+    for (const city of cities) for (const improvement of orderedImprovements(city)) {
+      const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
+      if (!definition || !hasFeatures(state, definition.requiredFeatures)) continue;
+      choices.push({ action: { type: 'set-improvement-operation', cityId: city.id, tileId: improvement.tileId, improvementId: improvement.improvementId, enabled: !improvement.operation.enabled },
+        label: `${improvement.operation.enabled ? 'Pause' : 'Resume'} ${definition.name} in ${city.name} at site ${improvement.tileId}`,
+        reason: 'Changes future opening resident allocation only; retained historical output is unchanged',
+      });
+    }
+  }
   if (actionFeatureAvailable(state, 'set-building-operation')) {
     for (const city of cities) {
       for (const building of orderedBuildings(city).filter(paidRecipe)) {
@@ -227,6 +249,10 @@ export function sameAction(left: GameAction, right: unknown): boolean {
       return 'technology' in right && left.technology === right.technology;
     case 'build':
       return 'project' in right && left.project === right.project && left.cityId === ('cityId' in right ? right.cityId : undefined) && left.tileId === ('tileId' in right ? right.tileId : undefined);
+    case 'improve':
+      return 'cityId' in right && 'tileId' in right && 'improvementId' in right && left.cityId === right.cityId && left.tileId === right.tileId && left.improvementId === right.improvementId;
+    case 'set-improvement-operation':
+      return 'cityId' in right && 'tileId' in right && 'improvementId' in right && 'enabled' in right && left.cityId === right.cityId && left.tileId === right.tileId && left.improvementId === right.improvementId && left.enabled === right.enabled;
     case 'set-building-operation':
       return 'cityId' in right && 'buildingId' in right && 'enabled' in right && left.cityId === right.cityId && left.buildingId === right.buildingId && left.enabled === right.enabled;
     case 'settle-coast':

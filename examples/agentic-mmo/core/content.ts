@@ -2,7 +2,7 @@ import { CIV_COUNT } from './types.ts';
 import type {
   BuildingCapability, BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
   EraDefinition, FeatureDefinition, Focus, GameAction, HistoricalMilestone, Resource,
-  Resources, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe,
+  Resources, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe, ImprovementDefinition,
 } from './types.ts';
 
 export const RESOURCE_IDS: readonly Resource[] = ['food', 'materials', 'energy', 'credits', 'science', 'culture'];
@@ -25,10 +25,13 @@ export const BUILDING_CAPABILITY_ACTIONS: Record<BuildingCapability, readonly Ga
 export const RESEARCH_INVESTMENT_RULES = { ruleVersion: 1, featureId: 'productive-research', budget: 'current-city-science-output' } as const;
 
 export const DISTRICT_RULES = { ruleVersion: 1, featureId: 'district-planning', baseCapacity: 1, populationPerDistrict: 4 } as const;
+export const IMPROVEMENT_RULES = { ruleVersion: 1, featureId: 'worked-land', hillElevation: { minimum: 70, maximum: 88 }, allocationPriority: 'paid-buildings-then-numeric-tile' } as const;
 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'worked-land', name: 'People work the land', description: 'Commit an exact owned site to a timed improvement, then assign local residents to its actual output.' },
+  { id: 'mining', name: 'Work useful hills', description: 'Mining opens resident-supported material production on existing hill sites. Finite strategic deposits remain a later capability.' },
   { id: 'district-planning', name: 'Choose a district site', description: 'A town commits its existing construction lane to an exact owned site; nearby terrain changes its later output.' },
   { id: 'writing', name: 'Writing and local learning', description: 'Writing opens a real Campus and its own Library; specialist and great-person systems remain planned.' },
   { id: 'coastal-founding', name: 'New shores', description: 'Navigation and a completed coastal Boat yard let existing residents found a new coastal town along a recorded ocean path.' },
@@ -70,6 +73,8 @@ export const FEATURES: FeatureDefinition[] = [
 ];
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  improve: ['worked-land', 'mining', 'recurring-decisions', 'resident-capacity'],
+  'set-improvement-operation': ['worked-land', 'resident-capacity'],
   focus: ['settlement-production'], research: ['settlement-research'], build: ['settlement-production'],
   'set-building-operation': ['building-operations'],
   'settle-coast': ['settlement-expansion', 'conserved-founding', 'coastal-founding', 'navigation'],
@@ -81,6 +86,7 @@ export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
+  { id: 'mining', name: 'Mining', requiredFeatures: ['mining', 'worked-land'], era: 0, cost: 20, requires: ['kiln-firing'], capability: 'Commit useful owned hills to Mines, then assign local residents to make building materials.' },
   { id: 'writing', name: 'Writing', requiredFeatures: ['writing', 'district-planning'], era: 0, cost: 24, requires: ['agriculture'], capability: 'Choose an exact owned Campus site, then support its Library with credits for more productive research.' },
   { id: 'agriculture', name: 'Cultivation', requiredFeatures: ['settlement-research'], era: 0, cost: 10, requires: [], capability: 'Cultivation supports farms, workshops and more reliable settlements.' },
   { id: 'water-management', name: 'Water management', requiredFeatures: ['settlement-crafts'], era: 0, cost: 16, requires: ['agriculture'], capability: 'Irrigation uses materials to supply more food.' },
@@ -107,6 +113,10 @@ export const ERAS: EraDefinition[] = ERA_PRESENTATION.map(era => {
   if (!technology) throw new Error(`Era ${era.id} has no discovery`);
   return { ...era, cost: technology.cost, capability: technology.capability };
 });
+
+export const IMPROVEMENTS: ImprovementDefinition[] = [
+  { id: 'mine', name: 'Mine', description: 'Work an owned hill with one local resident to make materials. Pausing releases that resident on the next economy beat.', requiredFeatures: ['worked-land', 'mining', 'resident-capacity', 'recurring-decisions'], requires: ['mining'], minEra: 0, cost: { materials: 6, credits: 3 }, requiredWork: 4, siteRange: 3, siteRequirement: 'hill', residentsRequired: 1, production: { materials: 2 } },
+];
 
 export const BUILDINGS: BuildingDefinition[] = [
   { id: 'campus', name: 'Campus', requiredFeatures: ['district-planning', 'writing'], minEra: 0, cost: { materials: 16, credits: 8 }, requires: ['writing'], effects: [], production: { science: 1 }, district: { range: 3, adjacency: { terrain: 'mountain', resource: 'science', amount: 1, maximum: 3 } }, description: 'Commit an owned site near this town to learning. Nearby mountains add up to 3 base science; output begins after completion.' },
@@ -191,6 +201,8 @@ export interface ContentCatalog {
   technologies: TechnologyDefinition[];
   eras: EraDefinition[];
   buildings: BuildingDefinition[];
+  improvements: ImprovementDefinition[];
+  improvementRules: typeof IMPROVEMENT_RULES;
   events: DirectorEventDefinition[];
   milestones: HistoricalMilestone[];
   actionFeatures: Record<GameAction['type'], readonly string[]>;
@@ -206,7 +218,7 @@ export interface ContentCatalog {
 
 export const CONTENT: ContentCatalog = {
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
-  buildings: BUILDINGS, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
+  buildings: BUILDINGS, improvements: IMPROVEMENTS, improvementRules: IMPROVEMENT_RULES, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
   actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES,
   tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES, landTransportRules: LAND_TRANSPORT_RULES, publicProjectRecipes: PUBLIC_PROJECT_RECIPES, publicProjectRules: PUBLIC_PROJECT_RULES, siteOutputs: SETTLEMENT_SITE_OUTPUTS,
 };
@@ -254,6 +266,24 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   }
   const technologies = new Map(catalog.technologies.map(technology => [technology.id, technology]));
   const buildings = new Map(catalog.buildings.map(building => [building.id, building]));
+  const improvementRules = catalog.improvementRules;
+  if (improvementRules.ruleVersion !== 1 || !features.has(improvementRules.featureId) || improvementRules.allocationPriority !== 'paid-buildings-then-numeric-tile' || !Number.isFinite(improvementRules.hillElevation.minimum) || !Number.isFinite(improvementRules.hillElevation.maximum) || improvementRules.hillElevation.minimum < 0 || improvementRules.hillElevation.maximum > 100 || improvementRules.hillElevation.minimum > improvementRules.hillElevation.maximum) errors.push('improvements: invalid site or allocation rules');
+  unique('improvements', catalog.improvements.map(improvement => improvement.id));
+  for (const improvement of catalog.improvements) {
+    const label = `improvement ${improvement.id}`;
+    requireFeatures(label, improvement.requiredFeatures);
+    if (!improvement.requiredFeatures.includes(improvementRules.featureId) || !improvement.requiredFeatures.includes('resident-capacity') || !improvement.requiredFeatures.includes('recurring-decisions')) errors.push(`${label}: missing operation or construction gate`);
+    if (!eraValid(improvement.minEra) || !Number.isSafeInteger(improvement.requiredWork) || improvement.requiredWork < 1 || !Number.isSafeInteger(improvement.siteRange) || improvement.siteRange < 1 || !Number.isSafeInteger(improvement.residentsRequired) || improvement.residentsRequired < 1 || improvement.siteRequirement !== 'hill') errors.push(`${label}: invalid work, site or resident requirement`);
+    resources(`${label} cost`, improvement.cost);
+    resources(`${label} production`, improvement.production);
+    if (!Object.values(improvement.cost).some(positive) || !Object.values(improvement.production).some(positive)) errors.push(`${label}: requires meaningful construction cost and production`);
+    if (new Set(improvement.requires).size !== improvement.requires.length) errors.push(`${label}: duplicate prerequisites`);
+    for (const required of improvement.requires) {
+      const technology = technologies.get(required);
+      if (!technology) errors.push(`${label}: missing prerequisite ${required}`);
+      else if (technology.era > improvement.minEra) errors.push(`${label}: future prerequisite ${required}`);
+    }
+  }
   const milestones = new Map(catalog.milestones.map(milestone => [milestone.id, milestone]));
   unique('public project recipes', catalog.publicProjectRecipes.map(recipe => recipe.id));
   for (const [name, value] of Object.entries(catalog.publicProjectRules)) {

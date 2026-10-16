@@ -12,6 +12,34 @@ function required<T>(value: T | undefined): T {
   return value;
 }
 
+await test('worked land has an explicit meaningful improvement catalogue', () => {
+  const improvements: unknown = Reflect.get(CONTENT, 'improvements');
+  assert.ok(Array.isArray(improvements) && improvements.length > 0);
+});
+
+await test('worked Mine data rejects broken site support and productive purpose', () => {
+  const mine = required(CONTENT.improvements.find(improvement => improvement.id === 'mine'));
+  assert.deepEqual(mine.cost, { materials: 6, credits: 3 });
+  assert.equal(mine.requiredWork, 4);
+  assert.equal(mine.residentsRequired, 1);
+  assert.deepEqual(mine.production, { materials: 2 });
+  assert.deepEqual(mine.requires, ['mining']);
+  for (const mutate of [
+    (catalog: typeof CONTENT) => { required(catalog.improvements[0]).residentsRequired = 0; },
+    (catalog: typeof CONTENT) => { required(catalog.improvements[0]).siteRange = 0; },
+    (catalog: typeof CONTENT) => { required(catalog.improvements[0]).requiredWork = -1; },
+    (catalog: typeof CONTENT) => { required(catalog.improvements[0]).production = {}; },
+    (catalog: typeof CONTENT) => { required(catalog.improvements[0]).requires = ['unknown']; },
+    (catalog: typeof CONTENT) => { required(catalog.improvements[0]).requires = ['spaceflight']; },
+    (catalog: typeof CONTENT) => { required(catalog.improvements[0]).requiredFeatures = ['mining']; },
+    (catalog: typeof CONTENT) => { required(catalog.improvements[0]).cost.materials = Number.NaN; },
+  ]) {
+    const broken = structuredClone(CONTENT);
+    mutate(broken);
+    assert.ok(validateContent(broken).some(error => error.includes('improvement')));
+  }
+});
+
 await test('the shared catalogue is valid and has five distinct civilization identities', () => {
   assert.deepEqual(validateContent(), []);
   assert.equal(CIVILIZATIONS.length, CIV_COUNT);
@@ -227,7 +255,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -237,7 +265,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });

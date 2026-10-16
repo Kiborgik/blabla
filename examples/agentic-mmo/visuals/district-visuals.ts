@@ -20,7 +20,7 @@ export interface DistrictView {
 export const DISTRICT_PART_BUDGETS = { far: 12, mid: 18, close: 24 } as const;
 
 export function districtCaptionPlacement(anchor: { x: number; y: number }, occupied: readonly { x: number; y: number; width: number; height: number }[], width: number, height: number, labelWidth: number, labelHeight = 16): { x: number; y: number; width: number; height: number } | null {
-  for (const [dx, dy] of [[0, -36], [-76, -16], [76, -16], [0, 40], [-76, 40], [76, 40], [0, -76], [0, 76]]) {
+  for (const [dx, dy] of [[0, -36], [-76, -16], [76, -16], [0, 40], [-76, 40], [76, 40], [0, -60], [0, 60], [0, -76], [0, 76]]) {
     const x = anchor.x + (dx ?? 0);
     const y = anchor.y + (dy ?? 0);
     const box = { x, y, width: labelWidth, height: labelHeight };

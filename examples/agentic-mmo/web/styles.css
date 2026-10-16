@@ -1258,5 +1258,6 @@ dialog h2 {
 .coastal-source { min-height: 44px; padding: 8px 12px; margin-bottom: 8px; }
 .resident-allocation { font-weight: 700; }
 .flat-district { cursor: pointer; }
-.flat-district:focus-visible .district-hit { stroke: #fff3b6; stroke-width: .12; }
+.flat-district:focus-visible { outline: none; }
+.flat-district:focus-visible .district-hit { stroke: #fff3b6; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .district-label { min-width: 44px; min-height: 44px; font-size: 12px; }

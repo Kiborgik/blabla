@@ -1,10 +1,10 @@
-import { DISTRICT_RULES, RESOURCE_IDS } from '../content.ts';
+import { DISTRICT_RULES, IMPROVEMENT_RULES, RESOURCE_IDS } from '../content.ts';
 import type { BuildingDefinition, City, Resources, WorldState } from '../types.ts';
 import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
 
-export function districtSiteOccupied(state: WorldState, tileId: number): boolean {
-  return state.cities.some(city => Object.values(city.districtSites ?? {}).includes(tileId) || city.construction?.active?.tileId === tileId);
+export function districtSiteOccupied(state: WorldState, tileId: number, installed?: { cityId: string; tileId: number }): boolean {
+  return state.cities.some(city => Object.values(city.districtSites ?? {}).includes(tileId) || city.construction?.active?.tileId === tileId || (hasFeatures(state, [IMPROVEMENT_RULES.featureId]) && Object.values(city.improvements ?? {}).some(improvement => improvement.tileId === tileId && !(installed?.cityId === city.id && installed.tileId === tileId))));
 }
 
 export function districtCapacity(city: City): number {
@@ -12,7 +12,7 @@ export function districtCapacity(city: City): number {
 }
 
 export function districtCount(city: City): number {
-  return Object.keys(city.districtSites ?? {}).length + (city.construction?.active?.tileId === undefined ? 0 : 1);
+  return Object.keys(city.districtSites ?? {}).length + (city.construction?.active && !('kind' in city.construction.active) && city.construction.active.tileId !== undefined ? 1 : 0);
 }
 
 export function districtSiteBlock(state: WorldState, city: City, building: BuildingDefinition, tileId: number): string | null {

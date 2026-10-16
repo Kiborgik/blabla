@@ -1,7 +1,8 @@
+import { availableImprovementSites, constructionTarget } from './improvements.ts';
 import { availableDistrictSites, districtCapacity, districtCount } from './districts.ts';
 import { isCoastalSite } from './coastal.ts';
 import { ACTION_FEATURES, BUILDINGS, RESOURCE_IDS } from '../content.ts';
-import type { BuildingDefinition, TechnologyDefinition, WorldState } from '../types.ts';
+import type { BuildingDefinition, ImprovementDefinition, TechnologyDefinition, WorldState } from '../types.ts';
 import { hasFeatures } from './history.ts';
 import { citiesOf } from './world.ts';
 
@@ -14,6 +15,7 @@ export type CapabilityBlocker =
   | { kind: 'coastal-site'; cityId: string }
   | { kind: 'building'; buildingId: string; cityId: string }
   | { kind: 'district-site'; cityId: string }
+  | { kind: 'improvement-site'; cityId: string; improvementId: string }
   | { kind: 'district-capacity'; cityId: string; required: number; available: number }
   | { kind: 'city-selection' }
   | { kind: 'missing-city'; cityId: string }
@@ -76,11 +78,34 @@ export function buildingEligibility(state: WorldState, civilizationId: number, b
     }
   }
   if (hasFeatures(state, ['recurring-decisions']) && city?.construction?.active)
-    blockers.push({ kind: 'active-commitment', targetId: city.construction.active.buildingId });
+    blockers.push({ kind: 'active-commitment', targetId: constructionTarget(city.construction.active) });
   return {
     completed: city !== undefined && city.civId === civilizationId && city.buildings.includes(building.id),
     researching: false,
     blockers,
     targetCityId: city?.civId === civilizationId ? city.id : null,
   };
+}
+
+export function improvementEligibility(state: WorldState, civilizationId: number, definition: ImprovementDefinition, cityId: string | null): CapabilityEligibility {
+  const civilization = state.civilizations.find(candidate => candidate.id === civilizationId);
+  const city = state.cities.find(candidate => candidate.id === cityId);
+  const blockers = featureBlockers(state, [...ACTION_FEATURES.improve, ...definition.requiredFeatures]);
+  if (!civilization) blockers.push({ kind: 'civilization', civilizationId });
+  else {
+    for (const technologyId of definition.requires) if (!civilization.technologies.includes(technologyId)) blockers.push({ kind: 'technology', technologyId });
+    if (civilization.era < definition.minEra) blockers.push({ kind: 'era', required: definition.minEra, available: civilization.era });
+    for (const resource of RESOURCE_IDS) {
+      const required = definition.cost[resource] ?? 0;
+      if (civilization.resources[resource] < required) blockers.push({ kind: 'resource', resource, required, available: civilization.resources[resource] });
+    }
+  }
+  if (cityId === null) blockers.push({ kind: 'city-selection' });
+  else if (!city) blockers.push({ kind: 'missing-city', cityId });
+  else if (city.civId !== civilizationId) blockers.push({ kind: 'foreign-city', cityId, owner: city.civId });
+  else {
+    if (city.construction?.active) blockers.push({ kind: 'active-commitment', targetId: constructionTarget(city.construction.active) });
+    if (!availableImprovementSites(state, city, definition).length) blockers.push({ kind: 'improvement-site', cityId, improvementId: definition.id });
+  }
+  return { completed: false, researching: false, blockers, targetCityId: city?.civId === civilizationId ? city.id : null };
 }

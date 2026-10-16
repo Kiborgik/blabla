@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
 import { applyCommand, applyRelease, catchUpStrategy, createWorld } from '../core/engine.ts';
-import { capabilityTreeNodes, createCapabilityTreeSheet } from '../web/capability-tree.ts';
+import { capabilityTreeNodes, createCapabilityTreeSheet, restoreCapabilityOpener } from '../web/capability-tree.ts';
 import type { CapabilityTreeInput } from '../web/capability-tree.ts';
 
 const time = '2026-10-16T00:00:00.000Z';
@@ -10,6 +10,27 @@ function fixture(): CapabilityTreeInput {
   const state = createWorld(1701, time);
   return { runId: 'fixture-a', civilizationName: 'Aster', towns: state.cities.filter(city => city.civId === 0).map(city => ({ id: city.id, name: city.name })), catalogue: capabilityCatalogue(), projection: projectCapabilities(state, 0, 'city-0', time) };
 }
+
+await test('Mine catalogue and canonical site facts remain separate from installed pause and historical output', () => {
+  const input = fixture();
+  const completion = { kind: 'improvement' as const, orderId: 'mine-56', cityId: 'city-0', improvementId: 'mine', tileId: 56, startedRound: 2, completedRound: 4, paid: { materials: 6, credits: 3 }, workRequired: 4, eventId: 'fixture:4' };
+  input.projection.improvements = [{ nodeId: 'improvement:mine', status: 'available', support: 'applied', blockers: [], choiceRefs: [], availableSites: [{ tileId: 58, baseProduction: { materials: 2 } }], installed: [{ cityId: 'city-0', improvementId: 'mine', tileId: 56, completion, operation: { enabled: false, lastResult: { round: 5, status: 'operated', paid: {}, produced: { materials: 2.4 }, residents: { ruleVersion: 1, openingPopulation: 12, communityReserve: 3, required: 1, available: 3, allocated: 1 }, blockedReason: null } } }] }];
+  const before = structuredClone(input);
+  const node = capabilityTreeNodes(input).find(item => item.id === 'improvement:mine');
+  assert.ok(node);
+  assert.equal(node.kind, 'improvement');
+  assert.ok(node.requires.includes('technology:mining'));
+  assert.ok(node.facts.some(fact => fact.label === 'Available site 58' && fact.value.includes('2 Materials')));
+  assert.ok(node.facts.some(fact => fact.label === 'Built site 56' && fact.value === 'Paused now'));
+  assert.ok(node.facts.some(fact => fact.label === 'Site 56 last record' && fact.value.includes('Round 5') && fact.value.includes('2.4 Materials') && fact.value.includes('Assigned 1')));
+  assert.deepEqual(input, before);
+});
+
+await test('a canonical improvement-site blocker names the town without inventing hill eligibility', () => {
+  const input = fixture();
+  input.projection.improvements = [{ nodeId: 'improvement:mine', status: 'locked', support: 'applied', blockers: [{ kind: 'improvement-site', cityId: 'city-0', improvementId: 'mine' }], choiceRefs: [], availableSites: [], installed: [] }];
+  assert.deepEqual(capabilityTreeNodes(input).find(node => node.id === 'improvement:mine')?.blockers, ['Dawnwell needs an available site for Mine']);
+});
 
 await test('exact learning-site blockers use canonical named town requirements without inventing eligibility', () => {
   const input = fixture();
@@ -38,7 +59,7 @@ await test('complete tree retains every canonical node and both incoming fuel pr
   const input = fixture();
   const before = structuredClone(input);
   const nodes = capabilityTreeNodes(input);
-  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length);
+  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length);
   assert.equal(new Set(nodes.map(node => node.id)).size, nodes.length);
   assert.equal(nodes.reduce((count, node) => count + node.requires.length, 0), input.catalogue.edges.length);
   const fuel = nodes.find(node => node.id === 'technology:fuel-management');
@@ -62,7 +83,7 @@ await test('presentation preserves canonical statuses, current research and unav
   assert.equal(nodes.find(node => node.id === farm.nodeId)?.status, 'done');
   assert.equal(nodes.find(node => node.id === 'building:kiln')?.status, null);
   assert.equal(nodes.find(node => node.id === 'building:kiln')?.label, 'Facts unavailable');
-  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length);
+  assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length);
 });
 
 await test('planned source support and exact construction blockers use distinct familiar facts', () => {
@@ -163,7 +184,7 @@ await test('native sheet exposes all node disclosures, exact town choice and mul
   assert.ok(sheet);
   sheet.open(input);
   assert.equal(record.open, true);
-  assert.equal(record.all().filter(node => node.dataset['nodeId']).length, input.catalogue.technologies.length + input.catalogue.buildings.length);
+  assert.equal(record.all().filter(node => node.dataset['nodeId']).length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length);
   assert.match(record.content(), /Options now/);
   assert.match(record.content(), /Aster.*Dawnwell/);
   assert.equal(record.control('town').tag, 'select');
@@ -382,3 +403,34 @@ await test('legacy tree keeps its investment wording without the new production 
   assert.doesNotMatch(record.content(), /Stored reserves do not speed it up/);
   sheet.destroy();
 }));
+
+await test('namespaced Mine commitments and retained completions navigate to the canonical worked-site node', () => withDom((dialog, record) => {
+  const input = fixture();
+  const order = { kind: 'improvement' as const, id: 'mine-56', cityId: 'city-0', improvementId: 'mine', tileId: 56, ruleVersion: 1 as const, startedRound: 2, paid: { materials: 6, credits: 3 }, workRequired: 4, workDone: 1 };
+  input.projection.improvements = [{ nodeId: 'improvement:mine', status: 'available', support: 'applied', blockers: [], choiceRefs: [], availableSites: [], installed: [], construction: order }];
+  input.projection.decisions = { research: { kind: 'research', cityId: null, status: 'required', targetId: null, progress: null, availableIds: [], blockers: [] }, construction: [{ kind: 'construction', cityId: 'city-0', status: 'active', targetId: 'improvement:mine', progress: { done: 1, required: 4 }, availableIds: ['improvement:mine'], blockers: [] }] };
+  input.projection.lastConstructionCompletion = { kind: 'improvement', orderId: 'mine-58', cityId: 'city-0', improvementId: 'mine', tileId: 58, startedRound: 0, completedRound: 1, paid: { materials: 6, credits: 3 }, workRequired: 4, eventId: 'fixture:1' };
+  const sheet = createCapabilityTreeSheet(dialog, () => undefined);
+  sheet.open(input);
+  assert.match(record.content(), /Last construction completed: Mine/);
+  assert.match(record.content(), /Exact worked site · Tile 58/);
+  assert.match(record.content(), /local support in a later season/);
+  assert.doesNotMatch(record.content(), /building:improvement:mine/);
+  record.control('decision:construction:city-0:improvement:mine').dispatch('click');
+  assert.equal(dom.activeElement, record.control('node:improvement:mine'));
+  assert.equal(record.control('node:improvement:mine').parent?.open, true);
+  sheet.destroy();
+}));
+
+await test('tree return resolves the current opener and reveals its narrow parent before focusing', () => {
+  const events: string[] = [];
+  const stale = { isConnected: false, focus: () => { events.push('stale'); } };
+  const current = { isConnected: true, focus: (options?: FocusOptions) => { assert.deepEqual(options, { preventScroll: true }); events.push('focus'); } };
+  let resolved: Pick<HTMLElement, 'isConnected' | 'focus'> = stale;
+  const restore = () => restoreCapabilityOpener(() => resolved, () => events.push('reveal'));
+  restore();
+  assert.deepEqual(events, []);
+  resolved = current;
+  restore();
+  assert.deepEqual(events, ['reveal', 'focus']);
+});

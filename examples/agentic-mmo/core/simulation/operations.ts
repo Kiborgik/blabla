@@ -1,3 +1,4 @@
+import { allocateImprovements } from './improvements.ts';
 import { BUILDINGS, RESIDENT_CAPACITY_RULES, RESOURCE_IDS } from '../content.ts';
 import type { BuildingDefinition, City, GameEvent, Observation, WorldState } from '../types.ts';
 import { emitEvent } from './events.ts';
@@ -51,6 +52,7 @@ export function allocateOperations(state: WorldState): void {
       }
       operation.lastResult = { ...result, status: 'operated', paid };
     }
+    allocateImprovements(state, city, available);
   }
 }
 

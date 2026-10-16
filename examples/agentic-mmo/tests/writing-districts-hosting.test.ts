@@ -99,7 +99,8 @@ await test('Library active completed and installed records require their own com
   for (const fixture of [journey.libraryStarted, journey.libraryCompleted, journey.operated]) {
     const state = structuredClone(fixture); const city = town(state);
     city.buildings = city.buildings.filter(id => id !== 'campus'); delete city.districtSites;
-    if (city.construction?.lastCompleted?.buildingId === 'campus') city.construction.lastCompleted = null;
+    const last = city.construction?.lastCompleted;
+    if (last && !('kind' in last) && last.buildingId === 'campus' && city.construction) city.construction.lastCompleted = null;
     assert.equal(isWorldState(state), false);
   }
 });

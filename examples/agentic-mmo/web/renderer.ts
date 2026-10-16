@@ -16,7 +16,8 @@ import type { ViewerPreferences } from './viewer-state.ts';
 import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor } from './inspection-camera.ts';
 import type { CameraView, ScreenPoint } from './inspection-camera.ts';
-import { createSettlementMeshes, createDistrictMeshes } from './settlement-three.ts';
+import { createSettlementMeshes, createDistrictMeshes, createImprovementMeshes } from './settlement-three.ts';
+import { improvementLabel } from '../visuals/improvement-visuals.ts';
 import { districtCaptionPlacement, districtLabel } from '../visuals/district-visuals.ts';
 import { mapOverlayBounds } from './settlement-parts.ts';
 import { createWorldCues, visualIcon } from './world-cues.ts';
@@ -244,20 +245,25 @@ export function createAtlasRenderer(
   }
   const settlements = createSettlementMeshes(world, material);
   const districtMeshes = createDistrictMeshes(world, material);
-  const districtLabels = (world.districts ?? []).map(district => {
+  const improvementMeshes = createImprovementMeshes(world, material);
+  const sites = [
+    ...(world.districts ?? []).map(site => ({ ...site, label: districtLabel(site) })),
+    ...(world.improvements ?? []).map(site => ({ ...site, label: improvementLabel(site) })),
+  ];
+  const districtLabels = sites.map(district => {
     const point = hexPosition(district.q, district.r);
     const element = document.createElement('button');
     element.type = 'button'; element.className = 'city-label district-label';
     element.dataset['districtId'] = district.id; element.dataset['tileId'] = String(district.tileId);
     element.style.setProperty('--civ-color', district.color);
-    element.textContent = districtLabel(district);
-    element.setAttribute('aria-label', `Inspect ${districtLabel(district)} of ${district.townName}, tile ${district.tileId}`);
+    element.textContent = district.label;
+    element.setAttribute('aria-label', `Inspect ${district.label} of ${district.townName}, tile ${district.tileId}`);
     element.addEventListener('click', () => onSelect(district.cityId));
     labels.append(element);
     return { element, point: new THREE.Vector3(point.x, district.height + .8, point.z), id: district.id };
   });
   const landscapeMeshes = createLandscapeMeshes(world, material);
-  scene.add(landscapeMeshes.group, settlements.group, districtMeshes.group);
+  scene.add(landscapeMeshes.group, settlements.group, districtMeshes.group, improvementMeshes.group);
   const cues = createWorldCues(container, world, (x, z, height) => {
     const point = new THREE.Vector3(x, height, z).project(camera);
     return { x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight };
@@ -370,6 +376,7 @@ export function createAtlasRenderer(
     const detail = settlements.update(tilePixels);
     landscapeMeshes.update(tilePixels);
     districtMeshes.update(tilePixels);
+    improvementMeshes.update(tilePixels);
     const mapLabels = [...cityLabels, ...districtLabels];
     const positions = mapLabels.map((label) => {
       const point = label.point.clone().project(camera);
@@ -387,7 +394,7 @@ export function createAtlasRenderer(
     const placedRouteLabel = projectedRoute && selectedRoute && routes.visible
       ? routeLabelPlacement({ x: (projectedRoute.x + 1) / 2 * container.clientWidth, y: (1 - projectedRoute.y) / 2 * container.clientHeight }, townTargets, container.clientWidth, container.clientHeight) : null;
     if (placedRouteLabel && selectedRoute) positions.unshift({ id: routeLabelKey(selectedRoute), ...placedRouteLabel });
-    const selectedDistricts = new Set((world.districts ?? []).filter(district => district.cityId === selected).map(district => district.id));
+    const selectedDistricts = new Set(sites.filter(district => district.cityId === selected).map(district => district.id));
     const prioritized = positions.toSorted((a, b) => Number(selectedDistricts.has(b.id)) - Number(selectedDistricts.has(a.id)));
     const shown = mapLabelVisibility(prioritized, selected, detail, container.clientWidth, container.clientHeight);
     const visibilityById = new Map(prioritized.map((label, index) => [label.id, shown[index]]));
@@ -475,6 +482,7 @@ export function createAtlasRenderer(
       controls.dispose();
       settlements.dispose();
       districtMeshes.dispose();
+      improvementMeshes.dispose();
       landscapeMeshes.dispose();
       cues.dispose();
       const geometries = new Set<THREE.BufferGeometry>();
