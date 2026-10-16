@@ -1,7 +1,10 @@
 import type { RouteResultCue } from '../visuals/route-cues.ts';
 import type { VisualEvent } from '../visuals/world-visuals.ts';
 import type { RouteView } from '../visuals/route-visuals.ts';
+import { routePathPoints, routePathOmission } from '../visuals/route-paths.ts';
 import type { SettlementFacts } from '../visuals/world-visuals.ts';
+import { hexPosition } from '../visuals/landscape.ts';
+export { hexPosition } from '../visuals/landscape.ts';
 
 export type AtlasCue = VisualEvent | RouteResultCue;
 
@@ -36,6 +39,32 @@ export interface AtlasWorld {
   cities: AtlasCivilization[];
   routes: RouteView[];
   illustrative?: boolean;
+}
+
+export interface RouteMapPoint { x: number; y: number; z: number }
+
+export function routeMapPositions(route: RouteView): RouteMapPoint[] {
+  return routePathOmission(route) ? [] : routePathPoints(route).map(point => ({ ...hexPosition(point.q, point.r), y: point.height }));
+}
+
+export function routeMapAnchor(route: RouteView): RouteMapPoint | null {
+  const points = routeMapPositions(route);
+  const lengths = points.map((point, index) => {
+    const previous = points[index - 1];
+    return previous ? Math.hypot(point.x - previous.x, point.z - previous.z) : 0;
+  });
+  let remaining = lengths.reduce((sum, length) => sum + length, 0) / 2;
+  for (let index = 1; index < points.length; index++) {
+    const start = points[index - 1];
+    const end = points[index];
+    const length = lengths[index] ?? 0;
+    if (start && end && remaining <= length) {
+      const t = length ? remaining / length : 0;
+      return { x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t, z: start.z + (end.z - start.z) * t };
+    }
+    remaining -= length;
+  }
+  return points[0] ?? null;
 }
 
 export const TERRAIN_COLORS = {
@@ -105,10 +134,6 @@ export const CIVILIZATIONS: readonly AtlasCivilization[] = [
     r: 5,
   },
 ];
-
-export function hexPosition(q: number, r: number): { x: number; z: number } {
-  return { x: Math.sqrt(3) * (q + r / 2), z: 1.5 * r };
-}
 
 function terrainNoise(q: number, r: number): number {
   return Math.abs(Math.sin(q * 127.1 + r * 311.7) * 43758.5453) % 1;

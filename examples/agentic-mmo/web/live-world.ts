@@ -1,3 +1,4 @@
+import { projectRoutePath, mapTileHeight } from '../visuals/route-paths.ts';
 import { ERAS } from '../core/content.ts';
 import type { GameEvent, WorldState } from '../core/types.ts';
 import { eventVisual } from '../visuals/world-visuals.ts';
@@ -68,14 +69,14 @@ export function projectWorld(state: WorldState): AtlasWorld {
     return city ? { id, name: city.capital, civilization: city.name, color: city.color, q: city.q, r: city.r } : null;
   };
   const routes: AtlasWorld['routes'] = state.routes.map((route) => ({
-    ...structuredClone(route), ownerName: civilizations.get(route.owner)?.name ?? `Civilization ${route.owner}`, partnerName: civilizations.get(route.partner)?.name ?? `Civilization ${route.partner}`, fromTown: town(route.from), toTown: town(route.to),
+    ...structuredClone(route), path: projectRoutePath(route, state), ownerName: civilizations.get(route.owner)?.name ?? `Civilization ${route.owner}`, partnerName: civilizations.get(route.partner)?.name ?? `Civilization ${route.partner}`, fromTown: town(route.from), toTown: town(route.to),
   }));
   return {
     illustrative: false,
     cities,
     tiles: state.tiles.flatMap((tile) => tile.terrain === 'ocean' ? [] : [{
       id: tile.id, q: tile.q - centerQ, r: tile.r - centerR, owner: tile.owner,
-      terrain: tile.terrain, height: 0.25 + Math.max(0, Math.min(tile.elevation / 100, 1)) * 0.22,
+      terrain: tile.terrain, height: mapTileHeight(tile.elevation),
     }]),
     routes,
   };

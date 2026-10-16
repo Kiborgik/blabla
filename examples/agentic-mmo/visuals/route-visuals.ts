@@ -1,4 +1,5 @@
 import type { Route } from '../core/types.ts';
+import type { RoutePath } from './route-paths.ts';
 
 export interface RouteTown {
   id: string;
@@ -10,6 +11,7 @@ export interface RouteTown {
 }
 
 export interface RouteView extends Route {
+  path?: RoutePath;
   ownerName: string;
   partnerName: string;
   fromTown: RouteTown | null;
@@ -18,7 +20,7 @@ export interface RouteView extends Route {
 }
 
 export interface RouteVisual {
-  status: 'sample' | 'legacy' | 'stopped' | 'damaged' | 'blocked' | 'agreed';
+  status: 'sample' | 'legacy' | 'stopped' | 'damaged' | 'path-blocked' | 'blocked' | 'agreed';
   label: string;
   symbol: string;
   dash: readonly number[];
@@ -48,6 +50,7 @@ export function routeVisual(route: RouteView): RouteVisual {
     nextDue: agreement.enabled ? `${agreement.deliveryCount === 0 ? 'First' : 'Next'} due round ${agreement.nextDeliveryRound}` : 'No future deliveries while stopped',
   };
   if (!agreement.enabled) return { ...facts, status: 'stopped', label: 'Trade stopped', symbol: '■', dash: [3, 7], color: '#b9c9d6' };
+  if (route.path?.currentBlock) return { ...facts, status: 'path-blocked', label: 'Path cannot pass now', symbol: '!', dash: [8, 3], color: '#f4c27e' };
   if (route.damage >= agreement.terms.damageDisableAt) return { ...facts, status: 'damaged', label: `Damage now ${route.damage}%`, symbol: '!', dash: [8, 3], color: '#f4c27e' };
   if (agreement.blockedReason !== null) return { ...facts, status: 'blocked', label: 'Last attempt blocked', symbol: '!', dash: [8, 3], color: '#f4c27e' };
   return { ...facts, status: 'agreed', label: agreement.deliveryCount === 0 ? 'Agreed · first delivery pending' : 'Agreed trade', symbol: '↔', dash: [], color: '#ffe3a0' };
@@ -61,6 +64,12 @@ export function visibleRoutes(routes: readonly RouteView[], selected: string | n
 
 export function routeTitle(route: RouteView): string {
   return `${route.fromTown?.name ?? route.from} ↔ ${route.toTown?.name ?? route.to}`;
+}
+
+export function routeMapLabel(route: RouteView): string {
+  const visual = routeVisual(route);
+  const label = visual.status === 'agreed' ? route.path?.kind === 'land' ? 'Recorded land path' : 'Agreed · schematic' : visual.label;
+  return `${visual.symbol} ${label}`;
 }
 
 export function routeLabelKey(id: string): string { return `route:${id}`; }

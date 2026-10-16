@@ -173,6 +173,65 @@ function buildingOperations(value: City, round: number, features: string[]): boo
     && (operation.lastResult === null || operationResult(operation.lastResult, round)));
 }
 
+function orderRevision(value: unknown, revision: number): number | null {
+  if (!boundedText(value) || !/^construction-[1-9]\d*$/.test(value)) return null;
+  const result = Number(value.slice('construction-'.length));
+  return integer(result, 1, revision) ? result : null;
+}
+
+function completionRevision(value: unknown, revision: number): number | null {
+  if (!boundedText(value) || !/^[1-9]\d*:(0|[1-9]\d*)$/.test(value)) return null;
+  const [head, tail] = value.split(':');
+  const result = Number(head);
+  return integer(result, 1, revision) && integer(Number(tail)) ? result : null;
+}
+
+function construction(value: unknown, settlement: City, round: number, revision: number, ids: string[]): boolean {
+  if (!record(value) || !exactKeys(value, ['active', 'lastCompleted'])) return false;
+  const active = value.active;
+  if (active !== null) {
+    if (!record(active) || !exactKeys(active, ['id', 'cityId', 'buildingId', 'ruleVersion', 'startedRound', 'paid', 'workRequired', 'workDone'])
+      || orderRevision(active.id, revision) === null || typeof active.id !== 'string'
+      || active.cityId !== settlement.id || !BUILDINGS.some(building => building.id === active.buildingId)
+      || typeof active.buildingId !== 'string' || settlement.buildings.includes(active.buildingId)
+      || active.ruleVersion !== 1 || !integer(active.startedRound, 0, round)
+      || !resourceAmounts(active.paid) || !finite(active.workRequired, Number.MIN_VALUE)
+      || !finite(active.workDone) || active.workDone >= active.workRequired) return false;
+    ids.push(active.id);
+  }
+  const completed = value.lastCompleted;
+  if (completed !== null) {
+    if (!record(completed) || !exactKeys(completed, ['orderId', 'cityId', 'buildingId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId'])) return false;
+    const startedRevision = orderRevision(completed.orderId, revision);
+    const endedRevision = completionRevision(completed.eventId, revision);
+    if (startedRevision === null || endedRevision === null || endedRevision <= startedRevision
+      || typeof completed.orderId !== 'string' || completed.cityId !== settlement.id
+      || typeof completed.buildingId !== 'string' || !settlement.buildings.includes(completed.buildingId)
+      || !integer(completed.startedRound, 0, round) || !integer(completed.completedRound, completed.startedRound + 1, round)
+      || !resourceAmounts(completed.paid) || !finite(completed.workRequired, Number.MIN_VALUE)) return false;
+    if (record(active) && (!integer(active.startedRound, completed.completedRound, round)
+      || (orderRevision(active.id, revision) ?? 0) <= endedRevision)) return false;
+    ids.push(completed.orderId);
+  }
+  return true;
+}
+
+function recurringRecords(cities: City[], civilizations: Civilization[], features: string[], round: number, revision: number): boolean {
+  const enabled = features.includes('recurring-decisions');
+  const orderIds: string[] = [];
+  for (const settlement of cities) {
+    if (Object.hasOwn(settlement, 'construction') && (!enabled || !construction(settlement.construction, settlement, round, revision, orderIds))) return false;
+  }
+  for (const actor of civilizations) {
+    if (!Object.hasOwn(actor, 'lastResearchCompletion')) continue;
+    const completed: unknown = actor.lastResearchCompletion;
+    if (!enabled || !record(completed) || !exactKeys(completed, ['technologyId', 'completedRound', 'eventId'])
+      || typeof completed.technologyId !== 'string' || !actor.technologies.includes(completed.technologyId)
+      || !integer(completed.completedRound, 0, round) || completionRevision(completed.eventId, revision) === null) return false;
+  }
+  return unique(orderIds);
+}
+
 function tile(value: unknown): value is HexTile {
   return (
     record(value) &&
@@ -519,6 +578,7 @@ export function isWorldState(
     ) ||
     !unique(cities.map((item) => item.tileId)) ||
     !cities.every((item) => buildingOperations(item, round, features)) ||
+    !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
     !value.civilizations.every((item) =>
       cities.some((settlement) => settlement.civId === item.id),
     ) ||

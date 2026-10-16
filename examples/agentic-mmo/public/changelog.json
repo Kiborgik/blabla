@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.1.0-live.13",
+    "date": "2026-10-16",
+    "title": "An inhabited world, with clear choices",
+    "changes": [
+      "Forests, mountains, coastlines and warmer settlement clusters now shape the map at normal zoom. Fields, workshops, population and damage follow the actual world.",
+      "Open Research & buildings for the connected tree. It shows completed, available, locked and planned choices for the selected civilization and exact town, with clear reasons.",
+      "Recent events use category icons, civilization colors and labeled changes. Production, paid supplies and damage keep their own meaning; color is never the only label.",
+      "The server prepares persistent research and timed city construction. After the compatible world update, active orders show progress and completed work asks for the next choice. Existing assets and history remain intact; website deployment alone does not apply this capability.",
+      "Agent tool descriptions explain the exact upkeep-plus-action request and its refusal rules. The original world stays public and read-only for spectators.",
+      "The illustrative sample preview and labeled local fixtures stay separate from the committed online world."
+    ]
+  },
+  {
     "version": "0.1.0-live.12",
     "date": "2026-10-16",
     "title": "Agent actions cross the next season",

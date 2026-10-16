@@ -2,6 +2,7 @@ import { RESOURCE_IDS } from '../core/content.ts';
 import type { Resources } from '../core/types.ts';
 import { routeTitle, routeVisual, ROUTE_LIMIT } from '../visuals/route-visuals.ts';
 import type { RouteView } from '../visuals/route-visuals.ts';
+import { hasRouteQuote, routePathOmission, routeTilePage } from '../visuals/route-paths.ts';
 import { resourceGuide } from './viewer-appearance.ts';
 import { visualIcon } from './world-cues.ts';
 
@@ -46,12 +47,53 @@ function amounts(label: string, values: Partial<Resources>): HTMLElement {
   return row;
 }
 
-export function renderRouteCard(host: HTMLElement, route: RouteView, onTown: (id: string) => void): void {
+export interface RoutePathInspection { open: boolean; page: number }
+
+export function routeInspectionIdentity(route: RouteView): string { return JSON.stringify([route.id, route.agreement?.offerId ?? null]); }
+
+export function retainedRoutePathInspection(previous: string | undefined, route: RouteView, open: boolean, page: number): RoutePathInspection {
+  return previous === routeInspectionIdentity(route) ? { open, page: routeTilePage(route, page).page } : { open: false, page: 0 };
+}
+
+function renderPathTiles(card: HTMLElement, route: RouteView, retained: RoutePathInspection): void {
+  let page = routeTilePage(route, retained.page);
+  if (!page.total) return;
+  const details = text('details', '', 'route-path-tiles');
+  details.open = retained.open;
+  const summary = text('summary', `Recorded tiles · ${page.total}`);
+  summary.dataset['routeFocus'] = 'path-summary';
+  const ids = text('p', '', 'route-tile-ids');
+  const status = text('span', '');
+  const change = (value: number): void => { page = routeTilePage(route, value); render(); };
+  const previous = button('Previous tiles', 'path-previous', () => change(page.page - 1));
+  const next = button('Next tiles', 'path-next', () => change(page.page + 1));
+  const render = (): void => {
+    details.dataset['page'] = String(page.page);
+    ids.textContent = page.ids.join(' → ');
+    status.textContent = `${page.page + 1} / ${page.pages}`;
+    previous.disabled = page.page === 0;
+    next.disabled = page.page + 1 === page.pages;
+  };
+  details.append(summary, text('p', 'Each step joins neighboring tiles. This corridor is not a constructed road.', 'inspection-note'), ids);
+  if (page.pages > 1) {
+    const pager = text('div', '', 'route-pages');
+    pager.append(previous, status, next);
+    details.append(pager);
+  }
+  render();
+  card.append(details);
+}
+
+export function renderRouteCard(host: HTMLElement, route: RouteView, onTown: (id: string) => void, retained: RoutePathInspection = { open: false, page: 0 }): void {
   const visual = routeVisual(route);
   const card = text('section', '', 'route-card');
   card.setAttribute('aria-label', 'Selected trade route');
   card.append(text('span', 'TRADE ROUTE', 'eyebrow'), text('h2', routeTitle(route)), text('strong', `${visual.symbol} ${visual.label}`, 'route-status'));
-  card.append(text('p', 'Schematic link between towns. No travel time or terrain path is recorded.', 'inspection-note'));
+  const quoted = hasRouteQuote(route);
+  const total = routeTilePage(route, 0).total;
+  card.append(text('p', quoted ? total ? `Recorded land path · ${total - 1} steps` : 'Recorded path unavailable' : 'Schematic link between towns. No travel time or terrain path is recorded.', 'inspection-note'));
+  const omission = routePathOmission(route);
+  if (omission) card.append(text('p', omission, 'inspection-note'));
   for (const [id, town] of [[route.from, route.fromTown], [route.to, route.toTown]] as const) {
     const endpoint = text('div', '', 'route-endpoint');
     endpoint.append(text('strong', town?.name ?? id), text('small', town ? `${town.civilization} · ${id}` : `Endpoint unavailable · ${id}`));
@@ -59,11 +101,14 @@ export function renderRouteCard(host: HTMLElement, route: RouteView, onTown: (id
     card.append(endpoint);
   }
   card.append(text('h3', 'Current state'), text('p', visual.consent), text('p', `${route.ownerName} ↔ ${route.partnerName}`), text('p', `Damage now: ${route.damage}%`));
+  if (route.path?.currentBlock) card.append(text('p', `Path now: ${route.path.currentBlock}`, 'route-status'), text('p', 'This describes current terrain, not a new delivery attempt.', 'inspection-note'));
   if (route.agreement) card.append(text('p', `Deliveries cannot run at ${route.agreement.terms.damageDisableAt}% damage or more.`));
   card.append(text('h3', 'Recorded deliveries'), text('p', visual.lastAttempt), text('p', visual.lastDelivery), text('p', visual.nextDue));
   if (route.agreement?.blockedReason) card.append(text('p', 'The block describes that attempt. Supplies or damage may have changed since then.', 'inspection-note'));
   const terms = route.agreement?.terms;
   if (terms) {
+    card.append(text('h3', 'Stored schedule'), text('p', `Exchange interval: ${terms.cadenceRounds} rounds`));
+    if (quoted) card.append(text('p', 'Cargo is exchanged on a due successful round. There is no shipment in progress between rounds.', 'inspection-note'));
     card.append(text('h3', 'Agreed terms'), text('p', 'Amounts for each successful delivery. These are not new gains.', 'inspection-note'));
     for (const [town, cargo, upkeep, commerce] of [
       [route.fromTown?.name ?? route.from, terms.proposerCargo, terms.proposerUpkeep, terms.proposerYield],
@@ -71,8 +116,9 @@ export function renderRouteCard(host: HTMLElement, route: RouteView, onTown: (id
     ] as const) {
       card.append(text('h4', town), amounts('Sends', cargo), amounts('Transport cost', upkeep), amounts('Commerce received', commerce));
     }
-    card.append(text('p', `Every ${terms.cadenceRounds} rounds · agreement ${route.agreement?.offerId}`, 'inspection-note'));
+    card.append(text('p', `Agreement ${route.agreement?.offerId}`, 'inspection-note'));
   }
+  renderPathTiles(card, route, retained);
   card.append(text('p', `Route ${route.id}`, 'inspection-note'));
   host.append(card);
 }

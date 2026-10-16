@@ -1,0 +1,34 @@
+state decision_feature_active: bool
+state decision_eligible_next: bool
+state decision_required: bool
+state decision_hold_refused: bool
+state decision_refusal_unchanged: bool
+state decision_construction_paid_once: bool
+state decision_construction_completed_once: bool
+state decision_no_early_output: bool
+state decision_other_actor_progressed: bool
+state decision_shared_economy_progressed: bool
+state decision_old_release_preserved: bool
+
+action decision_fixture(kind: int)
+action complete_research_and_observe()
+action hold_with_open_decisions()
+action start_and_complete_construction()
+action advance_with_absent_actor()
+action compare_legacy_decisions()
+
+when complete_research_and_observe {
+    expect "completion-exposes-next-required-choice": not (before.decision_feature_active and after.decision_eligible_next) or after.decision_required
+}
+when hold_with_open_decisions {
+    expect "hold-cannot-hide-actionable-obligations": not (before.decision_feature_active and before.decision_required) or (after.decision_hold_refused and after.decision_refusal_unchanged)
+}
+when start_and_complete_construction {
+    expect "construction-pays-and-completes-once": after.decision_construction_paid_once and after.decision_construction_completed_once and after.decision_no_early_output
+}
+when advance_with_absent_actor {
+    expect "absent-actor-does-not-stop-world": after.decision_other_actor_progressed and after.decision_shared_economy_progressed
+}
+when compare_legacy_decisions {
+    expect "older-release-keeps-original-decisions": after.decision_old_release_preserved
+}

@@ -22,10 +22,14 @@ use behavior "contracts/public-projects.bla"
 draft behavior "contracts/trade-endpoints.bla"
 draft behavior "contracts/agent-observations.bla"
 draft behavior "contracts/action-receipts.bla"
-draft behavior "contracts/land-transport.bla"
+use behavior "contracts/land-transport.bla"
 draft behavior "contracts/operating-resource-exchange.bla"
 draft behavior "contracts/choice-pages.bla"
+draft behavior "contracts/route-map.bla"
 draft behavior "contracts/strategy-actions.bla"
+draft behavior "contracts/resident-capacity.bla"
+draft behavior "contracts/spectator-decisions.bla"
+draft behavior "contracts/required-decisions.bla"
 verify behavior {
   command ["node", "cli/adapter.ts"]
   seed 1701

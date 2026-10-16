@@ -548,3 +548,20 @@ await test('compact desktop story is height-scoped and retains scrolling numbers
   assert.ok(Number.parseInt(declarations('.live-observatory .chronicle #event-title').get('font-size') ?? '') >= 16);
   assert.ok(!compact.includes('.inspection'));
 });
+
+await test('the committed inspector wires canonical exact-town capability projection and semantic history', () => {
+  const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(main, /projectCapabilities\(snapshot\.state, civilization\.id, preferences\.selectedCity, observedAt\)/);
+  assert.match(main, /runId: snapshot\.identity/);
+  assert.match(main, /towns: snapshot\.state\.cities\.filter\(city => city\.civId === civilization\.id\)/);
+  assert.match(main, /if \(!snapshot \|\| mode === 'sample' \|\| !observedAt\) return null/);
+  assert.match(main, /capabilityTree\.observe\(input\)/);
+  assert.match(main, /capabilityTree\.open\(input, treeOpener\)/);
+  assert.match(main, /renderEventLog\(element\('#event-list'\), events/);
+  assert.doesNotMatch(main, /element\('#event-list'\)\.innerHTML/);
+  assert.match(main, /if \(dialogs\.get\('events'\)\?\.open && !eventHistoryCaptured\) renderEventHistory\(\)/);
+  assert.match(main, /const quiet = document\.hidden \|\| dialogs\.get\('events'\)\?\.open \|\| capabilityDialog\?\.open/);
+  assert.match(html, /web\/event-log\.css/);
+  assert.match(html, /web\/capability-tree\.css/);
+});

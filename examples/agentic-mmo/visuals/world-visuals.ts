@@ -10,7 +10,7 @@ export type { DetailLevel, VisualIcon } from './visual-language.ts';
 
 export interface VisualPart {
   id: string;
-  shape: 'box' | 'gable' | 'cylinder';
+  shape: 'box' | 'gable' | 'cylinder' | 'cone' | 'canopy';
   material: keyof typeof VISUAL_PALETTE | 'identity';
   position: readonly [number, number, number];
   scale: readonly [number, number, number];
@@ -32,11 +32,15 @@ export interface SettlementVisual {
 }
 
 const HOME_SITES: ReadonlyArray<readonly [number, number]> = [
-  [-0.36, -0.3], [0.24, 0.18], [-0.3, 0.34], [0.27, -0.42],
-  [0.63, -0.1], [-0.71, -0.12], [0.15, 0.66], [-0.56, 0.65],
+  [-.46, -.36], [.04, -.32], [.49, -.23], [-.45, .2],
+  [.04, .24], [.48, .32], [-.17, .68], [.22, -.73],
 ];
 const POPULATION_STEPS = [1, 4, 7, 10, 14, 20, 28, 40] as const;
 export type SettlementFacts = Pick<City, 'id' | 'civId' | 'tileId' | 'name' | 'population' | 'wellbeing' | 'damage' | 'buildings' | 'buildingOperations'>;
+
+export function populationFootprint(population: number): number {
+  return .72 + Math.min(1, Math.log2(Math.max(1, population) + 1) / 6) * .46;
+}
 
 export function settlementVisual(city: SettlementFacts, detail: DetailLevel): SettlementVisual {
   const budget = DETAIL_BUDGETS[detail];
@@ -45,10 +49,13 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
   const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale'], rotation = 0): void => {
     parts.push({ id, shape, material, position, scale, rotation });
   };
-  for (const [index, [x, z]] of HOME_SITES.slice(0, houses).entries()) {
-    const height = 0.3 + (index % 3) * 0.06;
-    add(`home-${index}-wall`, 'box', 'plaster', [x, height / 2, z], [0.34, height, 0.3]);
-    add(`home-${index}-roof`, 'gable', 'identity', [x, height + 0.1, z], [0.39, 0.2, 0.36], index % 2 ? Math.PI / 2 : 0);
+  const density = populationFootprint(city.population);
+  for (const [index, [siteX, siteZ]] of HOME_SITES.slice(0, houses).entries()) {
+    const x = siteX * density;
+    const z = siteZ * density;
+    const height = (.29 + (index % 3) * .07) * density;
+    add(`home-${index}-wall`, 'box', 'plaster', [x, height / 2, z], [.4 * density, height, .36 * density]);
+    add(`home-${index}-roof`, 'gable', index === 0 ? 'identity' : 'roof', [x, height + .12, z], [.46 * density, .24, .42 * density], index % 2 ? Math.PI / 2 : 0);
   }
   const appearances = buildingAppearances(city.buildings, detail);
   const buildings = appearances.map(({ icon, label }) => ({ icon, label, value: 1 }));

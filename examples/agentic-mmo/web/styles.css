@@ -1144,6 +1144,11 @@ dialog h2 {
 .route-amounts { display: flex; flex-wrap: wrap; gap: 5px; }
 .route-amounts span { display: inline-flex; align-items: center; gap: 4px; }
 .route-pages { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.route-path-tiles { margin-top: 14px; border-top: 1px solid var(--border); }
+.route-path-tiles summary { min-height: 44px; box-sizing: border-box; padding: 12px 4px; cursor: pointer; font-weight: 600; }
+.route-path-tiles summary:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.route-tile-ids { overflow-wrap: anywhere; line-height: 1.8; font-variant-numeric: tabular-nums; }
+.route-path-tiles .route-pages { flex-wrap: wrap; }
 .route-close { display: block; min-height: 44px; min-width: 74px; margin-left: auto; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; }
 .route-map-label { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; width: 180px; min-height: 44px; padding: 6px; color: #fff5d8; background: #193a3c; border: 1px solid #ffe3a0; border-radius: 5px; font-size: 12px; }
 .route-map-label[hidden] { display: none; }
@@ -1186,3 +1191,14 @@ dialog h2 {
   cursor: pointer;
 }
 .update-notice button:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+
+/* A single read-only entry keeps the complete tree off the map until requested. */
+.capability-open {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  width: 100%; min-height: 52px; padding: 12px 14px; margin: 12px 0;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface); color: var(--ink); font: inherit;
+  font-size: 14px; font-weight: 700; text-align: left; touch-action: manipulation;
+}
+.capability-open > span { font-size: 12px; font-weight: 400; color: var(--muted); }
+.capability-open:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }

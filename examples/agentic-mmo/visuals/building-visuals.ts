@@ -19,7 +19,7 @@ const APPEARANCES: Record<string, { icon: VisualIcon; label: string; corePartIds
     icon: 'farm', label: 'Farm', corePartIds: ['farm-soil', 'farm-row-0'], parts: (detail) => {
       const rows = DETAIL_BUDGETS[detail].fieldRows;
       return [part('farm-soil', 'box', 'soil', [1.02, .04, .35], [.78, .08, 1.12]),
-        ...Array.from({ length: rows }, (_, row) => part(`farm-row-${row}`, 'box', 'crop', [1.02 + ((row + .5) / rows - .5) * .7, .1, .35], [.11, .12, .98]))];
+        ...Array.from({ length: rows }, (_, row) => part(`farm-row-${row}`, 'box', 'crop', [1.02 + ((row + .5) / rows - .5) * .7, .1, .35], [.58 / rows, .09, .98]))];
     },
   },
   workshop: {

@@ -19,6 +19,7 @@ export const RELEASES: readonly CompatibleReleaseDefinition[] = [
   { id: 'settlement-endpoints-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-charters-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints'] },
   { id: 'settlement-land-transport-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-endpoints-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints', 'land-transport'] },
   { id: 'settlement-operating-exchange-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-land-transport-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints', 'land-transport', 'operating-resource-exchange'] },
+  { id: 'settlement-decisions-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-operating-exchange-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints', 'land-transport', 'operating-resource-exchange', 'recurring-decisions'] },
 ];
 function currentRelease(): CompatibleReleaseDefinition {
   const release = RELEASES.find((candidate) => candidate.id === 'settlement-foundations-1');

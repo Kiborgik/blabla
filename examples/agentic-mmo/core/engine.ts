@@ -17,6 +17,7 @@ import {
 } from './types.ts';
 import { availableActions, sameAction } from './simulation/choices.ts';
 import { executeAction } from './simulation/commands.ts';
+import { decisionActionBlock, decisionHoldFacts, decisionObligations } from './simulation/decisions.ts';
 import { parseUtcTimestamp } from './simulation/clock.ts';
 import { commitEvents } from './simulation/events.ts';
 import { createMap, hexDistance } from './simulation/geography.ts';
@@ -165,6 +166,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
     ...(hasFeatures(state, ['bounded-plans'])
       ? { actionPlan: plan === null ? null : observeActionPlan(state, seat, plan, timestamp) }
       : {}),
+    ...(!director && hasFeatures(state, ['recurring-decisions']) ? { decisions: decisionObligations(state, seat) } : {}),
     ...(hasFeatures(state, ['building-operations']) ? { buildingRecipes: observedRecipes(director ? state.cities : citiesOf(state, seat)) } : {}),
     civilization,
     cities: director ? state.cities : citiesOf(state, seat),
@@ -236,6 +238,8 @@ export function applyCommand(state: WorldState, command: Command): TransitionRes
   if (denied) return refuseAction(state, command,
     denied.startsWith('strategy_catchup_required:') ? 'strategy_catchup_required' : 'action_admission_blocked',
     denied, 'blocked');
+  const decisionBlock = decisionActionBlock(state, command.seat, command.action);
+  if (decisionBlock) return refuseAction(state, command, command.action.type === 'wait' ? 'required_decisions' : 'active_commitment', decisionBlock, 'blocked');
   const available = legalActions(state, command.seat, command.timestamp);
   if (!available.some((choice) => sameAction(choice.action, command.action))) {
     return refuseAction(state, command, 'illegal_action', 'Action is not legal in the current released world');
@@ -254,7 +258,7 @@ export function applyCommand(state: WorldState, command: Command): TransitionRes
       ok: true,
       state: next,
       events,
-      actionOutcome: { status: 'completed', code: 'action_completed', reason: `Action accepted at revision ${next.revision}` },
+      actionOutcome: { status: 'completed', code: 'action_completed', reason: `Action accepted at revision ${next.revision}${command.action.type === 'wait' && command.seat !== DIRECTOR_SEAT && hasFeatures(next, ['recurring-decisions']) ? `; ${decisionHoldFacts(next, command.seat).join('; ')}` : ''}` },
     };
   }
   return { ok: true, state: next, events };

@@ -1,7 +1,8 @@
-import { BUILDINGS, DIRECTOR_EVENTS, ECONOMY_RULES, RESOURCE_IDS } from '../content.ts';
+import { BUILDINGS, CONSTRUCTION_RULES, DIRECTOR_EVENTS, ECONOMY_RULES, RESOURCE_IDS } from '../content.ts';
 import { DIRECTOR_SEAT, type GameAction, type GameEvent, type Resources, type WorldState } from '../types.ts';
 import { hasFeatures } from './history.ts';
-import { paidRecipe } from './operations.ts';
+import { installBuilding, requiredConstructionWork } from './construction.ts';
+import { decisionHoldFacts } from './decisions.ts';
 import { executePublicProjectAction } from './public-projects.ts';
 import { executeTradeAction } from './trade.ts';
 import { applyEffects, directorEffects } from './effects.ts';
@@ -55,7 +56,7 @@ export function executeAction(
       target: null,
       tileId: null,
       cause: 'The actor chose to preserve its current position',
-      effects: ['The next actor may act'],
+      effects: seat !== DIRECTOR_SEAT && hasFeatures(state, ['recurring-decisions']) ? decisionHoldFacts(state, seat) : ['The next actor may act'],
       importance: 0,
     });
     return;
@@ -107,29 +108,24 @@ export function executeAction(
       if (!definition || !city)
         throw new RangeError('Construction requires a released building and eligible settlement');
       transferCost(civilization.resources, definition.cost);
-      city.buildings.push(definition.id);
-      if (paidRecipe(definition)) {
-        city.buildingOperations ??= {};
-        city.buildingOperations[definition.id] = { enabled: true, lastResult: null };
-      }
-      const effects = applyEffects(state, seat, definition.effects, city.id);
-      emitEvent(state, events, {
-        type: 'building-completed',
-        title: `${city.name} builds ${definition.name}`,
-        detail: definition.description,
-        actor: seat,
-        target: seat,
-        tileId: city.tileId,
-        cause: 'Known technology and a paid material investment enabled this construction',
-        effects: [
-          ...effects,
-          ...RESOURCE_IDS.filter((resource) => (definition.operatingInputs?.[resource] ?? 0) > 0).map((resource) => `Operating input ${resource} ${definition.operatingInputs?.[resource]} per funded beat`),
-          ...RESOURCE_IDS.filter((resource) => (definition.production[resource] ?? 0) > 0).map(
-            (resource) => `Seasonal ${resource} +${definition.production[resource]}${paidRecipe(definition) ? " when the complete operating recipe is funded" : ""}`,
-          ),
-        ],
-        importance: 4,
-      });
+      if (hasFeatures(state, ['recurring-decisions'])) {
+        city.construction ??= { active: null, lastCompleted: null };
+        city.construction.active = {
+          id: `construction-${state.revision}`, cityId: city.id, buildingId: definition.id,
+          ruleVersion: CONSTRUCTION_RULES.version, startedRound: state.round,
+          paid: structuredClone(definition.cost), workRequired: requiredConstructionWork(definition.id), workDone: 0,
+        };
+        emitEvent(state, events, {
+          type: 'construction-started', title: `${city.name} starts ${definition.name}`,
+          detail: city.construction.active.id, actor: seat, target: seat, tileId: city.tileId,
+          cause: 'The exact town committed its full construction cost once to a strategic work order',
+          effects: [
+            ...RESOURCE_IDS.filter(resource => (definition.cost[resource] ?? 0) > 0).map(resource => `Paid ${definition.cost[resource]} ${resource}`),
+            `Work 0/${city.construction.active.workRequired}`,
+            'No building effects or production until construction completes',
+          ], importance: 3,
+        });
+      } else installBuilding(state, city, definition, events);
       return;
     }
     case 'set-building-operation': {

@@ -1,7 +1,10 @@
-import { routeLabelKey, routeLabelPlacement, routeTitle, routeVisual, visibleRoutes } from '../visuals/route-visuals.ts';
+import { visibleRoutePaths } from '../visuals/route-paths.ts';
+import { routeLabelKey, routeLabelPlacement, routeTitle, routeVisual, routeMapLabel } from '../visuals/route-visuals.ts';
 import { damageMapLabel } from '../visuals/damage-visuals.ts';
 import { cityKey, selectedCity } from './city-selection.ts';
-import { hexPosition, TERRAIN_COLORS } from './atlas.ts';
+import { projectLandscape, landscapeSurface, LANDSCAPE_COLORS } from '../visuals/landscape.ts';
+import { hexPosition, routeMapPositions, routeMapAnchor } from './atlas.ts';
+import type { RouteView } from '../visuals/route-visuals.ts';
 import type { AtlasWorld } from './atlas.ts';
 import type { AtlasRenderer } from './renderer.ts';
 import type { ViewerPreferences } from './viewer-state.ts';
@@ -9,7 +12,7 @@ import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor } from './inspection-camera.ts';
 import { settlementVisual, VISUAL_PALETTE, visualDetail } from '../visuals/world-visuals.ts';
 import type { DetailLevel } from '../visuals/world-visuals.ts';
-import { flatPartFaces } from './settlement-parts.ts';
+import { flatSceneFaces } from './settlement-parts.ts';
 import { createWorldCues } from './world-cues.ts';
 import { mapLabelVisibility } from './map-labels.ts';
 
@@ -23,6 +26,8 @@ export function cityScreenMetrics(pixelsPerUnit: number): { targetRadius: number
     labelY: Math.max(0.7, 10 / scale) + 15 / scale,
   };
 }
+
+export function flatRoutePoints(route: RouteView): string { return routeMapPositions(route).map(point => `${point.x},${point.z}`).join(' '); }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -40,7 +45,9 @@ export function createFlatAtlasRenderer(
   onRoute: (id: string) => void,
 ): AtlasRenderer {
   const svg = node('svg', { class: 'flat-atlas', role: 'group', 'aria-label': `${world.illustrative ? 'Sample' : 'Committed world'} two dimensional map. Select a city to inspect.` });
+  const coast = node('g', { 'pointer-events': 'none' });
   const land = node('g', {});
+  const terrain = node('g', { 'pointer-events': 'none', class: 'landscape-parts' });
   const borders = node('g', { 'pointer-events': 'none' });
   const routes = node('g', { class: 'flat-routes' });
   let selectedRoute: string | null = null;
@@ -60,34 +67,48 @@ export function createFlatAtlasRenderer(
       const angle = Math.PI / 3 * index + Math.PI / 6;
       return `${point.x + Math.cos(angle)},${point.z + Math.sin(angle)}`;
     }).join(' ');
-    land.append(node('polygon', { points, fill: TERRAIN_COLORS[tile.terrain], stroke: '#2c6269', 'stroke-width': '0.035' }));
-    const owner = world.cities.find((city) => city.id === tile.owner);
-    if (owner) borders.append(node('polygon', { points, fill: owner.color, 'fill-opacity': '0.12', stroke: owner.color, 'stroke-opacity': '0.6', 'stroke-width': '0.055' }));
+    land.append(node('polygon', { points, fill: landscapeSurface(tile), stroke: landscapeSurface(tile), 'stroke-width': '0.025' }));
   }
+  const landscape = projectLandscape(world.tiles, world.cities, 'far');
+  const coastPath = landscape.coast.map(edge => `M${edge.from.join(' ')}L${edge.to.join(' ')}`).join(' ');
+  coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shallow, 'stroke-width': '.42', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shore, 'stroke-width': '.14', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  for (const edge of landscape.borders) {
+    const owner = world.cities.find(city => city.id === edge.owner);
+    if (owner) borders.append(node('path', { d: `M${edge.from.join(' ')}L${edge.to.join(' ')}`, fill: 'none', stroke: owner.color, 'stroke-opacity': '.9', 'stroke-width': '.09', 'stroke-linecap': 'round' }));
+  }
+  const paintParts = (host: SVGGElement, parts: Parameters<typeof flatSceneFaces>[0], identity: string): void => {
+    host.replaceChildren();
+    for (const face of flatSceneFaces(parts)) {
+      const color = face.part.material === 'identity' ? identity : VISUAL_PALETTE[face.part.material];
+      host.append(node('polygon', { 'data-part': face.part.id, points: face.points, fill: color }));
+      if (face.shade) host.append(node('polygon', { points: face.points, fill: '#18382e', 'fill-opacity': String(face.shade) }));
+    }
+  };
   const drawRoutes = (): void => {
     routes.replaceChildren();
     routeLabel = null;
-    for (const route of visibleRoutes(world.routes, selectedRoute)) {
+    for (const route of visibleRoutePaths(world.routes, selectedRoute).toReversed()) {
       if (!route.fromTown || !route.toTown) continue;
-      const a = hexPosition(route.fromTown.q, route.fromTown.r);
-      const b = hexPosition(route.toTown.q, route.toTown.r);
+      const anchor = routeMapAnchor(route);
+      if (!anchor) continue;
       const visual = routeVisual(route);
-      const line = { x1: String(a.x), y1: String(a.z), x2: String(b.x), y2: String(b.z), 'vector-effect': 'non-scaling-stroke' };
+      const line = { points: flatRoutePoints(route), fill: 'none', 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke' };
       const group = node('g', { class: 'flat-route', 'data-route-id': route.id, role: 'button', tabindex: '0', 'aria-label': `Inspect ${routeTitle(route)}. ${visual.label}`, 'aria-pressed': String(route.id === selectedRoute) });
       const choose = (): void => onRoute(route.id);
       group.addEventListener('click', choose);
       group.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); } });
-      group.append(node('line', { ...line, stroke: '#173a3c', 'stroke-width': route.id === selectedRoute ? '7' : '5', 'pointer-events': 'none' }));
-      group.append(node('line', { ...line, stroke: visual.color, 'stroke-width': route.id === selectedRoute ? '3' : '2', 'stroke-dasharray': visual.dash.length ? visual.dash.join(' ') : 'none', 'pointer-events': 'none' }));
-      group.append(node('line', { ...line, stroke: 'transparent', 'stroke-width': '14', 'pointer-events': 'stroke' }));
+      group.append(node('polyline', { ...line, stroke: '#173a3c', 'stroke-width': route.id === selectedRoute ? '7' : '5', 'pointer-events': 'none' }));
+      group.append(node('polyline', { ...line, stroke: visual.color, 'stroke-width': route.id === selectedRoute ? '3' : '2', 'stroke-dasharray': visual.dash.length ? visual.dash.join(' ') : 'none', 'pointer-events': 'none' }));
+      group.append(node('polyline', { ...line, stroke: 'transparent', 'stroke-width': '14', 'pointer-events': 'stroke' }));
       if (route.id === selectedRoute) {
         const label = node('g', { class: 'flat-route-label' });
         const background = node('rect', { x: '-90', y: '-22', width: '180', height: '44', rx: '5', fill: '#193a3c', stroke: visual.color });
         const title = node('text', { 'text-anchor': 'middle', y: '4', fill: '#fff5d8', 'font-size': '12', 'font-family': 'Arial, sans-serif' });
-        title.textContent = `${visual.symbol} ${visual.status === 'damaged' ? visual.label : visual.status === 'blocked' ? 'Last attempt blocked' : visual.status === 'agreed' ? 'Agreed trade' : visual.label}`;
+        title.textContent = routeMapLabel(route);
         label.append(background, title);
         group.append(label);
-        routeLabel = { element: label, x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, id: routeLabelKey(route.id) };
+        routeLabel = { element: label, x: anchor.x, z: anchor.z, id: routeLabelKey(route.id) };
       }
       routes.append(group);
     }
@@ -115,7 +136,7 @@ export function createFlatAtlasRenderer(
   }
   borders.style.display = preferences.borders ? '' : 'none';
   routes.style.display = preferences.routes ? '' : 'none';
-  svg.append(land, borders, routes, cities);
+  svg.append(coast, land, borders, terrain, routes, cities);
   container.prepend(svg);
   const cues = createWorldCues(container, world, (px, pz) => {
     const box = svg.viewBox.baseVal;
@@ -132,6 +153,7 @@ export function createFlatAtlasRenderer(
     if (nextDetail !== detail) {
       detail = nextDetail;
       svg.dataset['detail'] = detail;
+      paintParts(terrain, projectLandscape(world.tiles, world.cities, detail).parts, VISUAL_PALETTE.stone);
       for (const entry of settlements) {
         const city = world.cities[entry.index];
         if (!city?.settlement) continue;
@@ -139,15 +161,7 @@ export function createFlatAtlasRenderer(
         entry.element.replaceChildren();
         entry.element.dataset['houses'] = String(visual.houses);
         entry.element.dataset['buildings'] = city.settlement.buildings.join(' ');
-        for (const part of visual.parts) {
-          const color = part.material === 'identity' ? city.color : VISUAL_PALETTE[part.material];
-          const group = node('g', { 'data-part': part.id });
-          for (const face of flatPartFaces(part)) {
-            group.append(node('polygon', { points: face.points, fill: color, stroke: '#233e37', 'stroke-width': '0.025', 'stroke-linejoin': 'round' }));
-            if (face.shade) group.append(node('polygon', { points: face.points, fill: '#172c30', 'fill-opacity': String(face.shade) }));
-          }
-          entry.element.append(group);
-        }
+        paintParts(entry.element, visual.parts, city.color);
       }
     }
     for (const city of cityNodes) {

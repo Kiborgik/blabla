@@ -2,10 +2,12 @@ import { ECONOMY_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
 import type { City, GameEvent, Resources, WorldState } from '../types.ts';
 import { siteProduction } from './sites.ts';
 import { emitEvent } from './events.ts';
-import { citiesOf, civilizationById, clamp } from './world.ts';
+import { citiesOf, civilizationById, cityProductivity, clamp } from './world.ts';
 import { allocateOperations, emitOperations, paidRecipe, productiveBuildings } from './operations.ts';
 import { resolvePublicProjects } from './public-projects.ts';
 import { resolveTrade } from './trade.ts';
+import { openingConstructionWork, resolveConstruction } from './construction.ts';
+import { hasFeatures } from './history.ts';
 
 function quantize(value: number): number {
   return Math.round(value * 100) / 100;
@@ -18,8 +20,7 @@ function produceCity(
   const civilization = civilizationById(state, city.civId);
   const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[city.focus];
   const site = state.tiles.find((tile) => tile.id === city.tileId);
-  const productivity =
-    (0.5 + city.wellbeing / 100) * (1 - city.damage / 100) * (1 + city.infrastructure / 10);
+  const productivity = cityProductivity(city);
   const siteOutputs = site ? siteProduction(state, site) : {};
   const produced = { food: 0, science: 0, culture: 0 };
   const buildings = productiveBuildings(state, city);
@@ -125,7 +126,7 @@ function resolveResearch(state: WorldState, civilizationId: number, events: Game
   civilization.technologies.push(technology.id);
   civilization.researchTarget = '';
   civilization.researchProgress = 0;
-  emitEvent(state, events, {
+  const completed = emitEvent(state, events, {
     type: 'research-completed',
     title: `${civilization.name} discovers ${technology.name}`,
     detail: technology.capability,
@@ -139,9 +140,11 @@ function resolveResearch(state: WorldState, civilizationId: number, events: Game
     ],
     importance: 4,
   });
+  if (hasFeatures(state, ['recurring-decisions'])) civilization.lastResearchCompletion = { technologyId: technology.id, completedRound: state.round, eventId: completed.id };
 }
 
 export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
+  const openingWork = openingConstructionWork(state);
   allocateOperations(state);
   for (const civilization of state.civilizations) {
     let culture = 0;
@@ -185,4 +188,5 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   resolveTrade(state, events);
   resolvePublicProjects(state, events);
   for (const civilization of state.civilizations) resolveResearch(state, civilization.id, events);
+  resolveConstruction(state, openingWork, events);
 }

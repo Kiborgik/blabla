@@ -1,4 +1,5 @@
 import type { ActionPlan, ActionPlanItem } from './planning.ts';
+import type { CapabilityBlocker } from './simulation/capabilities.ts';
 export const SCHEMA_VERSION = 1;
 export const GAME_VERSION = '0.1.0';
 export const CIV_COUNT = 5;
@@ -15,8 +16,15 @@ export type VictoryKind = 'mars' | 'federation' | 'cultural' | 'economic' | 'mil
 export interface HexTile { id: number; q: number; r: number; terrain: Terrain; elevation: number; owner: number | null; resource: Resource | null }
 export interface BuildingOperationResult { round: number; status: 'operated' | 'blocked' | 'paused'; paid: Partial<Resources>; produced: Partial<Resources>; shortages: Array<{ resource: Resource; required: number; available: number }> }
 export interface BuildingOperation { enabled: boolean; lastResult: BuildingOperationResult | null }
-export interface City { id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation> }
-export interface Civilization { id: number; name: string; color: string; adjective: string; objective: string; era: number; resources: Resources; technologies: string[]; researchTarget: string; researchProgress: number; influence: number; legitimacy: number; marsProgress: number; marsPopulation: number; marsSupplyStreak: number; federationStreak: number; score: number }
+export interface ConstructionOrder { id: string; cityId: string; buildingId: string; ruleVersion: 1; startedRound: number; paid: Partial<Resources>; workRequired: number; workDone: number }
+export interface ConstructionCompletion { orderId: string; cityId: string; buildingId: string; startedRound: number; completedRound: number; paid: Partial<Resources>; workRequired: number; eventId: string }
+export interface CityConstruction { active: ConstructionOrder | null; lastCompleted: ConstructionCompletion | null }
+export interface ResearchCompletion { technologyId: string; completedRound: number; eventId: string }
+export type DecisionBlocker = CapabilityBlocker | { kind: 'no-available-choice' } | { kind: 'zero-work' } | { kind: 'active-commitment'; targetId: string };
+export interface DecisionObligation { kind: 'research' | 'construction'; cityId: string | null; status: 'required' | 'active' | 'blocked'; targetId: string | null; progress: { done: number; required: number } | null; availableIds: string[]; blockers: Array<{ capabilityId: string | null; reason: DecisionBlocker }> }
+export interface DecisionObligations { research: DecisionObligation; construction: DecisionObligation[] }
+export interface City { id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
+export interface Civilization { id: number; name: string; color: string; adjective: string; objective: string; era: number; resources: Resources; technologies: string[]; researchTarget: string; researchProgress: number; lastResearchCompletion?: ResearchCompletion; influence: number; legitimacy: number; marsProgress: number; marsPopulation: number; marsSupplyStreak: number; federationStreak: number; score: number }
 export interface Route { id: string; from: string; to: string; owner: number; partner: number; active: boolean; damage: number; volume: number; agreement?: TradeAgreement }
 export interface LandTransportQuote { mode: 'land'; ruleVersion: 1; tileIds: number[]; edges: number }
 export interface TradeTerms { transport?: LandTransportQuote; recipeId: string; recipeVersion: number; constructionCost: Partial<Resources>; proposerCargo: Partial<Resources>; recipientCargo: Partial<Resources>; proposerUpkeep: Partial<Resources>; recipientUpkeep: Partial<Resources>; proposerYield: Partial<Resources>; recipientYield: Partial<Resources>; cadenceRounds: number; damageDisableAt: number }
@@ -57,7 +65,7 @@ export type GameAction =
   | { type: 'wait' };
 export interface Command { seat: number; expectedRevision: number; action: GameAction; timestamp?: string; plan?: ActionPlanItem[]; observedRevision?: number }
 export interface ActionOption { action: GameAction; label: string; reason: string; tradeQuote?: { transport: LandTransportQuote; cadenceRounds: number } }
-export interface Observation { gameVersion: string; revision: number; round: number; year: number; seat: number; activeSeat: number | null; admission?: TurnAdmission; actionPlan?: ActionPlan | null; buildingRecipes?: Array<{ buildingId: string; inputs: Partial<Resources>; outputs: Partial<Resources> }>; civilization: Civilization | null; cities: City[]; rivals: Array<{ id: number; name: string; era: number; population: number; objective: string }>; routes: Route[]; treaties: Treaty[]; tradeOffers?: TradeOffer[]; publicProjects?: PublicProject[]; recentEvents: GameEvent[]; legalActions: ActionOption[]; outcome: Outcome | null }
+export interface Observation { gameVersion: string; revision: number; round: number; year: number; seat: number; activeSeat: number | null; admission?: TurnAdmission; decisions?: DecisionObligations; actionPlan?: ActionPlan | null; buildingRecipes?: Array<{ buildingId: string; inputs: Partial<Resources>; outputs: Partial<Resources> }>; civilization: Civilization | null; cities: City[]; rivals: Array<{ id: number; name: string; era: number; population: number; objective: string }>; routes: Route[]; treaties: Treaty[]; tradeOffers?: TradeOffer[]; publicProjects?: PublicProject[]; recentEvents: GameEvent[]; legalActions: ActionOption[]; outcome: Outcome | null }
 export interface ActionOutcome { status: 'completed' | 'blocked' | 'failed'; code: string; reason: string }
 export interface TransitionResult { ok: boolean; state: WorldState; events: GameEvent[]; error?: string; actionOutcome?: ActionOutcome }
 export interface ReplayFrame { state: WorldState; events: GameEvent[] }

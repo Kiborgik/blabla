@@ -17,7 +17,10 @@ export const CIVILIZATIONS: CivilizationDefinition[] = [
   { name: 'Vesper', adjective: 'Vesperian', color: '#cea2ed', capital: 'Lumen', focus: 'culture', objective: 'Give people a shared story worth joining.' },
 ];
 
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4 } } as const;
+
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'recurring-decisions', name: 'Choose the next commitment', description: 'Research and each town retain real commitments and expose required next choices after completion without stopping other civilizations.' },
   { id: 'settlement-turns', name: 'Five civilizations awaken', description: 'Five civilization actors and one World Director inhabit a shared, revisioned world.' },
   { id: 'settlement-production', name: 'Working settlements', description: 'Food, materials, city focus and buildings sustain actual populations.' },
   { id: 'settlement-research', name: 'First discoveries', description: 'Civilizations invest their knowledge in released discoveries.' },

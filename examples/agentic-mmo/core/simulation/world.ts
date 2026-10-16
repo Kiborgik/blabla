@@ -1,6 +1,10 @@
 import { RESOURCE_IDS } from '../content.ts';
 import type { City, Civilization, Resources, WorldState } from '../types.ts';
 
+export function cityProductivity(city: City): number {
+  return (0.5 + city.wellbeing / 100) * (1 - city.damage / 100) * (1 + city.infrastructure / 10);
+}
+
 export function civilizationById(state: WorldState, id: number): Civilization {
   const civilization = state.civilizations.find((candidate) => candidate.id === id);
   if (!civilization) throw new RangeError(`Unknown civilization ${id}`);

@@ -16,8 +16,17 @@ const CYLINDER: PartShape = {
   faces: [Array.from({ length: 8 }, (_, i) => 7 - i), Array.from({ length: 8 }, (_, i) => i + 8), ...Array.from({ length: 8 }, (_, i) => [i, (i + 1) % 8, (i + 1) % 8 + 8, i + 8])],
 };
 
+const CONE: PartShape = {
+  vertices: [...Array.from({ length: 6 }, (_, i): Point3 => [Math.cos(i * Math.PI / 3) / 2, -.5, Math.sin(i * Math.PI / 3) / 2]), [0, .5, 0]],
+  faces: [[5, 4, 3, 2, 1, 0], ...Array.from({ length: 6 }, (_, i) => [i, (i + 1) % 6, 6])],
+};
+const CANOPY: PartShape = {
+  vertices: [...Array.from({ length: 12 }, (_, i): Point3 => [Math.cos(i % 6 * Math.PI / 3) * (i < 6 ? .5 : .3), i < 6 ? -.25 : .3, Math.sin(i % 6 * Math.PI / 3) * (i < 6 ? .5 : .3)]), [0, .5, 0], [0, -.5, 0]],
+  faces: [...Array.from({ length: 6 }, (_, i) => [i, (i + 1) % 6, (i + 1) % 6 + 6, i + 6]), ...Array.from({ length: 6 }, (_, i) => [i + 6, (i + 1) % 6 + 6, 12]), ...Array.from({ length: 6 }, (_, i) => [(i + 1) % 6, i, 13])],
+};
+
 export function partShape(shape: VisualPart['shape']): PartShape {
-  return shape === 'gable' ? GABLE : shape === 'cylinder' ? CYLINDER : BOX;
+  return shape === 'gable' ? GABLE : shape === 'cylinder' ? CYLINDER : shape === 'cone' ? CONE : shape === 'canopy' ? CANOPY : BOX;
 }
 
 export function transformedVertices(part: VisualPart): Point3[] {
@@ -32,12 +41,22 @@ export function transformedVertices(part: VisualPart): Point3[] {
 
 export function flatPartFaces(part: VisualPart): Array<{ points: string; shade: number; depth: number }> {
   const vertices = transformedVertices(part);
-  return partShape(part.shape).faces.map((face, index) => {
+  return partShape(part.shape).faces.flatMap((face, index) => {
     const points = face.flatMap((i) => vertices[i] ? [vertices[i]] : []);
-    return { points: points.map(([x, y, z]) => `${x.toFixed(3)},${(z - y * .85).toFixed(3)}`).join(' '),
-      shade: index === 1 ? 0 : index % 2 ? .13 : .27,
-      depth: points.reduce((sum, point) => sum + point[2] + point[1] * .01, 0) / Math.max(1, points.length) };
+    const projected = points.map(([x, y, z]) => [x, z - y * .85] as const);
+    const area = projected.reduce((sum, p, i) => {
+      const next = projected[(i + 1) % projected.length];
+      return sum + (next ? p[0] * next[1] - next[0] * p[1] : 0);
+    }, 0);
+    if (area <= .000001) return [];
+    return [{ points: projected.map(([x, y]) => `${x.toFixed(3)},${y.toFixed(3)}`).join(' '),
+      shade: index === 1 ? 0 : index % 2 ? .10 : .22,
+      depth: points.reduce((sum, point) => sum + point[2] * .85 + point[1], 0) / Math.max(1, points.length) }];
   }).toSorted((a, b) => a.depth - b.depth);
+}
+
+export function flatSceneFaces(parts: readonly VisualPart[]): Array<{ part: VisualPart; points: string; shade: number; depth: number }> {
+  return parts.flatMap(part => flatPartFaces(part).map(face => ({ part, ...face }))).toSorted((a, b) => a.depth - b.depth || a.part.id.localeCompare(b.part.id));
 }
 
 export function shapeTriangles(shape: VisualPart['shape']): number[] {

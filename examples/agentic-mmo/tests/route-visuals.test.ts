@@ -282,3 +282,79 @@ await test('route list DOM output exposes native buttons, stable focus keys and 
     else Reflect.deleteProperty(globalThis, 'document');
   }
 });
+
+await test('land route inspection separates stored schedule, current passability and prior delivery', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const nodes: RecordedNode[] = [];
+  const make = (tag: string): RecordedNode => { const node = new RecordedNode(tag); nodes.push(node); return node; };
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+    createElement: make, createElementNS: (_namespace: string, tag: string) => make(tag),
+    createTextNode: (value: string) => { const node = make('#text'); node.textContent = value; return node; },
+  } });
+  try {
+    const route = fixtureView();
+    assert.ok(route.agreement);
+    route.agreement.terms.transport = { mode: 'land', ruleVersion: 1, tileIds: [19, 20, 38], edges: 2 };
+    route.agreement.terms.cadenceRounds = 5;
+    route.agreement.nextDeliveryRound = 12;
+    route.agreement.lastDeliveryRound = 7;
+    route.agreement.lastAttemptRound = 7;
+    route.agreement.deliveryCount = 1;
+    route.path = { kind: 'land', points: [{ tileId: 19, q: 1, r: 1, height: 0.4 }, { tileId: 20, q: 2, r: 1, height: 0.4 }, { tileId: 38, q: 2, r: 2, height: 0.4 }], currentBlock: 'Land quote tile 20 is impassable ocean', reason: null };
+    renderRouteCard(document.createElement('section'), route, () => undefined);
+    const content = nodes[0]?.content() ?? '';
+    assert.match(content, /Recorded land path · 2 steps/);
+    assert.match(content, /Exchange interval: 5 rounds/);
+    assert.match(content, /Next due round 12/);
+    assert.match(content, /Last delivered round 7/);
+    assert.match(content, /Path now: Land quote tile 20 is impassable ocean/);
+    assert.doesNotMatch(content, /No travel time or terrain path is recorded/);
+    assert.match(content, /19 → 20 → 38/);
+    assert.equal(routeVisual(route).status, 'path-blocked');
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'document', previous);
+    else Reflect.deleteProperty(globalThis, 'document');
+  }
+});
+
+await test('recorded tile disclosure pages complete immutable order through stable native controls', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const nodes: RecordedNode[] = [];
+  const make = (tag: string): RecordedNode => { const node = new RecordedNode(tag); nodes.push(node); return node; };
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: {
+    createElement: make, createElementNS: (_namespace: string, tag: string) => make(tag),
+    createTextNode: (value: string) => { const node = make('#text'); node.textContent = value; return node; },
+  } });
+  try {
+    const route = fixtureView();
+    assert.ok(route.agreement);
+    const ids = Array.from({ length: 70 }, (_, index) => index + 1);
+    route.agreement.terms.transport = { mode: 'land', ruleVersion: 1, tileIds: ids, edges: 69 };
+    const before = structuredClone(route);
+    renderRouteCard(document.createElement('section'), route, () => undefined, { open: true, page: 1 });
+    const details = nodes.find(node => node.tag === 'details');
+    const values = nodes.find(node => node.className === 'route-tile-ids');
+    const next = nodes.find(node => node.dataset['routeFocus'] === 'path-next');
+    const back = nodes.find(node => node.dataset['routeFocus'] === 'path-previous');
+    assert.ok(details && values && next && back);
+    assert.equal(details.dataset['page'], '1');
+    assert.equal(values.textContent, ids.slice(32, 64).join(' → '));
+    assert.equal(next.type, 'button');
+    assert.equal(back.type, 'button');
+    assert.equal(next.disabled, false);
+    next.click?.();
+    assert.equal(details.dataset['page'], '2');
+    assert.equal(values.textContent, ids.slice(64).join(' → '));
+    assert.equal(next.disabled, true);
+    back.click?.();
+    back.click?.();
+    assert.equal(details.dataset['page'], '0');
+    assert.equal(values.textContent, ids.slice(0, 32).join(' → '));
+    assert.equal(back.disabled, true);
+    assert.equal(nodes.find(node => node.dataset['routeFocus'] === 'path-next'), next);
+    assert.deepEqual(route, before);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'document', previous);
+    else Reflect.deleteProperty(globalThis, 'document');
+  }
+});

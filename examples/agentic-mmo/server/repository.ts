@@ -2,6 +2,7 @@ import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, cat
 import { type ActionOutcome, type Command, type DirectorTickCommand, type GameAction, type HistoryAdvanceCommand, type ReleaseApplyCommand, type TransitionResult, type WorldState } from '../core/types.ts';
 import { isGameAction, validateAttachedPlan } from '../core/planning.ts';
 import { isDirectorEvent } from '../core/validation.ts';
+import { decisionActionBlock } from '../core/simulation/decisions.ts';
 import { decodeHistorySnapshot, HISTORY_SNAPSHOT_PREFIX } from './snapshot-codec.ts';
 import { HistoryOutputBudget, selectHistoryRows } from './history-budget.ts';
 import { type ActionReceiptRead, readActionReceipt } from './action-receipt.ts';
@@ -171,7 +172,11 @@ export class WorldRepository {
           let action: GameAction | undefined;
           if (input.choice !== undefined && input.action !== undefined) throw new RequestFailure(400, 'one_action_selector_required');
           if (input.choice !== undefined) action = options[boundedInteger(input.choice, 0, options.length - 1, 'choice')]?.action;
-          else action = options.find((option) => canonical(option.action) === canonical(intent?.kind === 'action' ? intent.action : input.action))?.action;
+          else {
+            const exact = intent?.kind === 'action' ? intent.action : input.action;
+            action = options.find((option) => canonical(option.action) === canonical(exact))?.action;
+            if (!action && isGameAction(exact) && decisionActionBlock(actionState, seat, exact)) action = exact;
+          }
           if (!action) throw new RequestFailure(400, 'illegal_action');
           const command: Command = { seat, expectedRevision: actionState.revision, action, ...(actionState.independentTurns ? { timestamp } : {}) };
           if (input.plan !== undefined) {

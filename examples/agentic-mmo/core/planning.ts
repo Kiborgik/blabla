@@ -12,6 +12,7 @@ import {
   TURN_RULES,
 } from './content.ts';
 import { availableActions, sameAction } from './simulation/choices.ts';
+import { decisionActionBlock } from './simulation/decisions.ts';
 import { hasFeatures } from './simulation/history.ts';
 import { admissionError, usesIndependentTurns } from './simulation/turns.ts';
 import { citiesOf } from './simulation/world.ts';
@@ -163,6 +164,7 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
       if (civilization?.researchTarget === action.technology) return invalidated(`Research ${action.technology} is already underway`);
       return null;
     case 'build':
+      if (hasFeatures(state, ['recurring-decisions']) && cities.find(city => city.id === action.cityId)?.construction?.active?.buildingId === action.project) return invalidated(`Construction ${action.project} is already underway in ${action.cityId}`);
       if (!BUILDINGS.some((building) => building.id === action.project)) return invalidated(`Building ${action.project} no longer exists`);
       if (specialized) return cities.find((city) => city.id === action.cityId)?.buildings.includes(action.project) ? invalidated(`City ${action.cityId} already has ${action.project}`) : null;
       if (!cities.length) return invalidated('No settlement remains for this construction');
@@ -240,6 +242,8 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
 }
 
 function unavailableReason(state: WorldState, seat: number, action: GameAction): string {
+  const decisionBlock = decisionActionBlock(state, seat, action);
+  if (decisionBlock) return decisionBlock;
   if (action.type === 'propose-public-project' || action.type === 'respond-public-project' || action.type === 'cancel-public-project') return publicProjectActionFailure(state, seat, action) ?? 'Review the current charter and admission';
   const civilization = state.civilizations.find((candidate) => candidate.id === seat);
   const requiredFeatures = [...ACTION_FEATURES[action.type]];

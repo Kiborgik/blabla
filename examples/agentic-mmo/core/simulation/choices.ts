@@ -16,6 +16,9 @@ import { availablePublicProjectActions } from './public-projects.ts';
 import { availableTradeActions, type TradePresentation } from './trade.ts';
 import { orderedBuildings, paidRecipe } from './operations.ts';
 import { canAct } from './turns.ts';
+import { buildingEligibility, researchEligibility } from './capabilities.ts';
+import { decisionActionBlock } from './decisions.ts';
+import { requiredConstructionWork } from './construction.ts';
 
 export function actionFeatureAvailable(state: WorldState, action: GameAction['type']): boolean {
   return hasFeatures(state, ACTION_FEATURES[action]);
@@ -39,7 +42,7 @@ export function availableActions(
 ): ActionOption[] {
   if (!canAct(state, seat, timestamp)) return [];
   const choices: ActionOption[] = [];
-  if (actionFeatureAvailable(state, 'wait'))
+  if (actionFeatureAvailable(state, 'wait') && !decisionActionBlock(state, seat, { type: 'wait' }))
     choices.push({
       action: { type: 'wait' },
       label: 'Hold position',
@@ -91,13 +94,8 @@ export function availableActions(
   }
   if (actionFeatureAvailable(state, 'research')) {
     for (const technology of TECHNOLOGIES) {
-      if (
-        !hasFeatures(state, technology.requiredFeatures) ||
-        civilization.technologies.includes(technology.id) ||
-        civilization.researchTarget === technology.id ||
-        !technology.requires.every((id) => civilization.technologies.includes(id))
-      )
-        continue;
+      const eligibility = researchEligibility(state, seat, technology);
+      if (eligibility.completed || eligibility.researching || eligibility.blockers.length) continue;
       choices.push({
         action: { type: 'research', technology: technology.id },
         label: `Research ${technology.name}`,
@@ -107,26 +105,21 @@ export function availableActions(
   }
   if (actionFeatureAvailable(state, 'build')) {
     for (const building of BUILDINGS) {
-      if (
-        !hasFeatures(state, building.requiredFeatures) ||
-        civilization.era < building.minEra ||
-        !building.requires.every((id) => civilization.technologies.includes(id)) ||
-        !canAfford(civilization.resources, building.cost) ||
-        !cities.some((city) => !city.buildings.includes(building.id))
-      )
-        continue;
       if (specialized) {
         for (const city of cities) {
-          if (city.buildings.includes(building.id)) continue;
+          const eligibility = buildingEligibility(state, seat, building, city.id);
+          if (eligibility.completed || eligibility.blockers.length) continue;
           const site = state.tiles.find((tile) => tile.id === city.tileId);
           if (!site) continue;
           choices.push({
             action: { type: 'build', project: building.id, cityId: city.id },
             label: `Build ${building.name} in ${city.name}`,
-            reason: `${building.description} ${describeConstruction(building)} Construct only in ${city.name}. ${describeSettlementSite(state, site)}`,
+            reason: `${building.description} ${describeConstruction(building)}${hasFeatures(state, ['recurring-decisions']) ? ` Paid once at start; ${requiredConstructionWork(building.id)} work required over strategic beats; first output after completion.` : ''} Construct only in ${city.name}. ${describeSettlementSite(state, site)}`,
           });
         }
       } else {
+        const eligibility = buildingEligibility(state, seat, building);
+        if (eligibility.completed || eligibility.blockers.length) continue;
         choices.push({
           action: { type: 'build', project: building.id },
           label: `Build ${building.name}`,
