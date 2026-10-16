@@ -328,3 +328,80 @@ keep their existing behavior. Both delivery close paths reload current authority
 claims and recursive reviews before recording; ordinary delivery close also reruns
 its existing project/check/challenge eligibility. These checks detect the tested
 intervening mutations, not arbitrary filesystem races after the final read.
+
+### Captured active effort
+
+`task phase NAME development|verification|review|integration|blocked --worker WORKER --model MODEL`
+records an explicit phase boundary on the existing task. Use one stable worker identity across
+tasks and projects; a model name is not a worker identity. A switch attests that the preceding
+interval was active. Use `stop` before inactivity or switching tasks, and `interrupt --reason TEXT`
+when the preceding interval's attention is uncertain. `blocked` requires the external waiting
+reason. No historical timestamps can be supplied. Same-phase repetitions are no-ops.
+
+```sh
+blabla task phase feature development --worker my-worker --model my-model
+blabla task phase feature verification --worker my-worker --model my-model
+blabla task phase feature stop --worker my-worker --model my-model
+blabla task budget --json
+blabla task budget --include-project examples/agentic-mmo --since 1792177000 --until 1792180000 --json
+```
+
+The denominator is captured development + verification + independent review + integration/publication
+worker-seconds. The latter three together target at most 20% of that total. A reviewer running a
+check remains in review; an unattended child process adds no automatic worker effort. Distinct
+workers may work simultaneously. Same-worker overlaps make totals untrusted rather than counting
+them twice. Stop before moving between project stores; aggregation diagnoses cross-project overlap
+but does not introduce a cross-project writer lock.
+
+Pending and interrupted intervals are excluded; external blocked time is separate. Legacy tasks and
+unrecorded gaps remain unknown. The current view always reports partial or unknown coverage, never
+whole-project compliance. `observed_target=within` describes only captured valid intervals;
+`totals_valid=false` and a null fraction flag malformed/overlapping/inaccessible input. A zero active
+denominator also has a null fraction. Detail is capped at 50 intervals; totals cover every row.
+
+Normal starts require the current accepted permitted model. The declared orchestrator may account
+integration on READY/CLOSED packets; this does not reopen the source task. A model may stop or
+interrupt its own pending interval after hand-back. The original interval's model remains binding. If that model is revoked, its pending interval stays
+excluded and visible; another model cannot impersonate it. This first slice has no reassignment override.
+Accounting preserves source evidence, epoch, target pins, semantic revisions and challenge receipts;
+writer provenance follows the existing safety path. Reads never create or update task records.
+
+Record necessary exceptions with an explicit `policy::development-time-budget` task note naming the
+correctness/release reason, accountable owner and next reduction action. Time accounting never waives
+a failing check, independent review, delivery obligation, closure guard or publication permission.
+
+### Inspect receipt-relative freshness
+
+Use `blabla task freshness NAME` or `blabla task freshness NAME --json` before
+reassessing a stale hand-back. `--identity system::NAME` narrows the displayed
+intent receipts; it changes no eligibility or authority. In this repository,
+invoke the current source with `cargo run --locked --quiet --bin blabla --`.
+
+The read-only view groups equal receipt comparisons once and distinguishes the
+latest matching check, each latest affected-intent receipt, reflection, and
+recursive review-target links. If no current check matches, it labels the latest
+historical evidence as nonmatching. Missing receipts and missing/unreadable/cyclic
+targets remain explicit. A changed shared source path can stale an unchanged
+identity; that is not an instruction to confirm the identity unchanged.
+
+JSON `receipts[].shared_delta` references a response-local `deltas[].id`.
+Each group exposes its context, epoch change, opaque assignment digest comparison,
+selected path changes, and exact identity fingerprint changes. Assignment field
+history is `baseline-unavailable`. Reflection and review comparisons include
+composite receipt context; the view never guesses which historical field changed.
+A legacy check without an epoch reports `epoch_availability=baseline-unavailable`.
+
+Changed directory children are shown only when the saved opening tree reproduces
+that exact receipt's selected digest, the current projection matches too, and the
+selection is safely reconstructible. Otherwise child history is unavailable.
+`opened-tree-digest-match` is a fingerprint boundary, not semantic proof. Leaf
+changes describe tracked membership: ignored/symlink/unreadable members may be
+absent, and large files may use metadata hashing rather than content hashing.
+
+Receipts, groups, selected paths and identities each have a 50-row presentation
+cap with complete total/shown/omitted counts. All displayed groups share a global
+50-child-row budget. Child totals cover available comparisons, including roots
+hidden by the path cap; unavailable baselines have null totals. The same child
+can occur in different receipt contexts. No task/status/evidence bytes, target
+pins, check predicates, claim authority or closure rules change. Follow the
+existing explicit disposition/reflect/evidence routes after inspecting the cause.

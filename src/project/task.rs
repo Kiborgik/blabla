@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub mod delivery;
+pub mod effort;
 pub mod revision;
 pub mod store;
 
@@ -1149,6 +1150,7 @@ pub fn apply(task: &mut Task, to: &str) -> bool {
 
 fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String {
     let mut record = task.clone();
+    record.work_intervals.clear();
     record.challenged = None;
     record.state.clear();
     record.closed_unix = None;
@@ -1780,6 +1782,8 @@ pub enum ResultBasis {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub work_intervals: Vec<effort::Interval>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub delivery_obligations: BTreeMap<String, delivery::Obligation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1871,6 +1875,7 @@ fn open_state() -> String {
 impl Default for Task {
     fn default() -> Task {
         Task {
+            work_intervals: Vec::new(),
             delivery_obligations: BTreeMap::new(),
             delivery_reviews: Vec::new(),
             goal_reflection_required: false,

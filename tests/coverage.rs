@@ -474,6 +474,7 @@ mod composed_bridge {
         questions: questions::Questions,
         expert: expert::Expert,
         task_roles: task_roles::TaskRoles,
+        effort: development_effort::DevelopmentEffort,
     }
 
     impl App {
@@ -489,6 +490,7 @@ mod composed_bridge {
                 questions: questions::Questions::new(),
                 expert: expert::Expert::new(),
                 task_roles: task_roles::TaskRoles::new(),
+                effort: development_effort::DevelopmentEffort::new(),
             }
         }
     }
@@ -505,6 +507,10 @@ mod composed_bridge {
             call: &blabla::report::Call,
         ) -> Result<(), blabla::diagnostic::AppError> {
             if let Some(result) = self.task_roles.call(&call.action, &json!(call.args)) {
+                return result
+                    .map_err(|error| blabla::diagnostic::AppError::new("E_ACTION", error));
+            }
+            if let Some(result) = self.effort.call(&call.action, &json!(call.args)) {
                 return result
                     .map_err(|error| blabla::diagnostic::AppError::new("E_ACTION", error));
             }
@@ -542,6 +548,7 @@ mod composed_bridge {
                 self.questions.observe(),
                 self.expert.observe(),
                 self.task_roles.observe(),
+                self.effort.observe(),
             ] {
                 state
                     .as_object_mut()
@@ -556,6 +563,72 @@ mod composed_bridge {
             Ok(())
         }
     }
+}
+
+#[test]
+fn effort_composed_probe_uses_real_dispatch_and_preserves_legacy_state() {
+    let mut app = composed_bridge::App::new();
+    let initial = app.observe(&[]).unwrap();
+    app.call(&Call {
+        action: "positive_phase_fixture".into(),
+        args: vec![],
+    })
+    .unwrap();
+    assert_eq!(app.observe(&[]).unwrap()["eligible"], true);
+    app.call(&Call {
+        action: "switch_phase".into(),
+        args: vec![],
+    })
+    .unwrap();
+    let positive = app.observe(&[]).unwrap();
+    assert_eq!(positive["succeeded"], true);
+    assert_eq!(positive["phase_interval_count"], 1);
+    for (key, value) in initial.as_object().unwrap() {
+        if ![
+            "phase_fixture_initialized",
+            "eligible",
+            "succeeded",
+            "records_unchanged",
+            "intervals_nonoverlapping",
+            "freshness_preserved",
+            "phase_exit",
+            "phase_interval_count",
+        ]
+        .contains(&key.as_str())
+        {
+            assert_eq!(&positive[key], value, "{key}");
+        }
+    }
+    app.call(&Call {
+        action: "threshold_budget_fixture".into(),
+        args: vec![],
+    })
+    .unwrap();
+    assert_eq!(app.observe(&[]).unwrap()["budget_fixture_qualified"], true);
+    app.call(&Call {
+        action: "inspect_budget".into(),
+        args: vec![],
+    })
+    .unwrap();
+    let budget = app.observe(&[]).unwrap();
+    assert_eq!(budget["budget"]["active_seconds"], 100);
+    assert_eq!(budget["budget"]["overhead_seconds"], 20);
+    assert_eq!(budget["budget"]["observed_target"], "within");
+    app.call(&Call {
+        action: "report_module_unreported".into(),
+        args: vec![],
+    })
+    .unwrap();
+    let changed = app.observe(&[]).unwrap();
+    assert_eq!(changed["determinable"], false);
+    for (key, value) in budget.as_object().unwrap() {
+        if !["determinable", "verdicts"].contains(&key.as_str()) {
+            assert_eq!(&changed[key], value, "{key}");
+        }
+    }
+    app.reset().unwrap();
+    assert_eq!(app.observe(&[]).unwrap(), initial);
+    app.finish().unwrap();
 }
 
 fn reordered_composed_contract() -> blabla::ir::Contract {

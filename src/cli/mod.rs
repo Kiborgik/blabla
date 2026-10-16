@@ -206,6 +206,26 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
 
 #[derive(Subcommand)]
 enum TaskAction {
+    #[command(about = "Record an explicit active-worker phase boundary")]
+    Phase {
+        name: String,
+        phase: String,
+        #[arg(long)]
+        worker: String,
+        #[arg(long)]
+        model: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    #[command(about = "Inspect captured active effort; missing coverage stays unknown")]
+    Budget {
+        #[arg(long)]
+        include_project: Vec<std::path::PathBuf>,
+        #[arg(long)]
+        since: Option<u64>,
+        #[arg(long)]
+        until: Option<u64>,
+    },
     #[command(about = "Record a bounded task and snapshot the tree it starts from")]
     Open {
         name: String,
@@ -522,6 +542,12 @@ enum TaskAction {
     },
     #[command(about = "Show one bounded task, or every recorded task without a name")]
     Show { name: Option<String> },
+    #[command(about = "Explain receipt-relative task freshness without changing records")]
+    Freshness {
+        name: String,
+        #[arg(long)]
+        identity: Option<String>,
+    },
     #[command(about = "Accept a task and record which model took it")]
     Accept {
         name: String,
@@ -1223,8 +1249,23 @@ fn execute(cli: Cli) -> i32 {
                         swallowed.join(", ")
                     );
                 }
+                if let TaskAction::Budget {
+                    ref include_project,
+                    since,
+                    until,
+                } = action
+                {
+                    return task::effort::budget(&loaded, include_project, since, until, json);
+                }
                 if let TaskAction::Falsify { name } = action {
                     return task::falsify(&loaded, &name, json);
+                }
+                if let TaskAction::Freshness {
+                    ref name,
+                    ref identity,
+                } = action
+                {
+                    return task::freshness::show(&loaded, name, identity.as_deref(), json);
                 }
                 if let TaskAction::Show { name } = action {
                     return task::show(&loaded, name.as_deref(), json);
@@ -1236,6 +1277,22 @@ fn execute(cli: Cli) -> i32 {
                     return task::evidence_run(&loaded, &name, json);
                 }
                 task::locked(&loaded, json, || match action {
+                    TaskAction::Phase {
+                        name,
+                        phase,
+                        worker,
+                        model,
+                        reason,
+                    } => task::effort::phase(
+                        &loaded,
+                        &name,
+                        &phase,
+                        &worker,
+                        &model,
+                        reason.as_deref(),
+                        json,
+                    ),
+                    TaskAction::Budget { .. } => unreachable!("budget handled without record lock"),
                     TaskAction::Open {
                         name,
                         role,
@@ -1448,6 +1505,9 @@ fn execute(cli: Cli) -> i32 {
                         task::reconcile_withdrawal(&loaded, &name, &path, &successor, &model, json)
                     }
                     TaskAction::Show { name } => task::show(&loaded, name.as_deref(), json),
+                    TaskAction::Freshness { .. } => {
+                        unreachable!("freshness handled without record lock")
+                    }
                     TaskAction::Accept { name, model } => {
                         task::accept(&loaded, &name, &model, json)
                     }

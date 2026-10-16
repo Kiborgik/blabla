@@ -1,0 +1,49 @@
+state phase_fixture_initialized: bool
+state budget_fixture_initialized: bool
+state budget_fixture_qualified: bool
+state eligible: bool
+state succeeded: bool
+state records_unchanged: bool
+state intervals_nonoverlapping: bool
+state exact_active_totals: bool
+state blocked_excluded: bool
+state pending_unknown_excluded: bool
+state denominator_positive: bool
+state ratio_defined: bool
+state target_arithmetic_exact: bool
+state incomplete_coverage_visible: bool
+state freshness_preserved: bool
+state authority_preserved: bool
+state view_read_only: bool
+
+action phase_fixture(kind: int)
+action positive_phase_fixture()
+action budget_fixture(kind: int)
+action threshold_budget_fixture()
+action switch_phase()
+action inspect_budget()
+
+when phase_fixture {
+    expect "phase-fixture-establishes-observed-context": after.phase_fixture_initialized
+}
+when positive_phase_fixture {
+    expect "positive-phase-fixture-is-actually-eligible": after.phase_fixture_initialized and after.eligible
+}
+when budget_fixture {
+    expect "budget-fixture-establishes-observed-records": after.budget_fixture_initialized
+}
+when threshold_budget_fixture {
+    expect "threshold-fixture-has-exact-observed-inputs": after.budget_fixture_initialized and after.budget_fixture_qualified
+}
+when switch_phase {
+    expect "eligible-phase-records-actual-interval": not before.phase_fixture_initialized or not before.eligible or (after.succeeded and after.intervals_nonoverlapping)
+    expect "invalid-phase-refuses-without-writes": not before.phase_fixture_initialized or before.eligible or (not after.succeeded and after.records_unchanged)
+    expect "accounting-preserves-source-freshness-and-authority": not before.phase_fixture_initialized or (after.freshness_preserved and after.authority_preserved)
+}
+when inspect_budget {
+    expect "budget-counts-active-effort-once": not before.budget_fixture_initialized or (after.exact_active_totals and after.blocked_excluded and after.pending_unknown_excluded)
+    expect "zero-denominator-is-unknown": not before.budget_fixture_initialized or (after.denominator_positive or not after.ratio_defined)
+    expect "twenty-percent-target-uses-total-active-denominator": not before.budget_fixture_initialized or (after.target_arithmetic_exact)
+    expect "missing-coverage-remains-visible": not before.budget_fixture_initialized or (after.incomplete_coverage_visible)
+    expect "budget-view-cannot-waive-gates": not before.budget_fixture_initialized or (after.view_read_only and after.authority_preserved)
+}
