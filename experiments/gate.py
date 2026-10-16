@@ -12,7 +12,7 @@ PYTHON = sys.executable
 STEPS = (
     ("fmt", ("cargo", "fmt", "--all", "--", "--check")),
     ("clippy", ("cargo", "clippy", "@cargo", "--all-targets", "--", "-D", "warnings")),
-    ("rust-tests", ("cargo", "nextest", "run", "@cargo", "--no-fail-fast")),
+    ("rust-tests", ("cargo", "nextest", "run", "@cargo", "--no-fail-fast", "--color", "never")),
     ("gate-schedule", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_gate*.py")),
     ("systemone-provider", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_systemone_provider.py")),
     ("native-expert", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_native_expert.py")),

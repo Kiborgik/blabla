@@ -95,6 +95,10 @@ class RunnerUsesTheSchedule(unittest.TestCase):
         self.assertIn("--offline", offline["rust-tests"])
         self.assertNotIn("--offline", online["rust-tests"])
 
+    def test_the_rust_test_log_is_uncolored_so_its_summary_parses_under_a_forced_color_terminal(self):
+        command = dict(checks(Path("."), False))["rust-tests"]
+        self.assertEqual(command[command.index("--color") + 1], "never")
+
 
 FAILED_LINE = "FAIL [   0.142s] (2/3) blabla::cli a_check_fails"
 TIMED_OUT_LINE = "TIMEOUT [   2.001s] (3/3) blabla::cli a_check_hangs"
