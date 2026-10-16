@@ -2,7 +2,7 @@
 
 ## Current result
 
-The connected viewer and earlier automatic deployment update are verified in the public browser. Live.2 at an actual 500 × 757 CSS viewport repairs hidden events, unreadable labels and cramped resources. **Mobile presentation is still not accepted:** opening details obscures every city behind the sheet, leaving empty ocean above it. The repair is tracked as finding 2; production changes need independent review after this reviewer takes the author role. Source checks and absence of overflow do not establish usability.
+The connected viewer and earlier automatic deployment update are verified in the public browser. The actual live.3 SVG screenshots now show the selected city above the open inspection sheet at both 500 × 761 and 500 × 561 CSS viewports. The earlier hidden-event, cramped-inspection and selected-city-concealment findings have been resolved by the orchestrator using the recorded source, interaction and pixel evidence. **The bounded camera repair is supported for these observed viewports.** This is not certification of 360/390/430 px rendered layouts, physical touch or WebGL, and does not complete the broader spectator goal. See the final addendum for exact reviewer attribution and limits.
 
 Task: `review-live-spectator`, reviewing `connect-live-spectator`. Actual reviewer model: `gpt-6-astra`. Date: 2026-10-16 UTC. Production source was not edited by this reviewer.
 
@@ -66,7 +66,7 @@ Independently reran `npm run verify:scaffold` from the nested project: **12 web 
 
 These checks support the source repair only. **No deployed live.2 mobile pixels or interactions have been verified by this reviewer. Finding 1 remains open.** The succeeding Art Director must verify the automatic update in the retained tab, actual narrow and desktop composition, city/dock selection, readable resources/research, sheet scrolling and Close/Escape, event history, and footer links. In particular, check whether the selected city remains recognizable above an open sheet; selection currently highlights without recentering. Do not resolve the usability finding from test results alone.
 
-## Remaining verification and limits
+## Verification limits recorded before live.2 deployment
 
 - Recheck the actual mobile repair and its deployed update when ready. Current finding 1 remains unresolved until the repair is verified or explicitly dispositioned by the orchestrator.
 - WebGL is disabled in this cloud browser and earlier device-emulation attempts were blocked by browser policy. Those controls will not be bypassed. A responsive desktop window does not establish touch-device or WebGL behavior.
@@ -87,3 +87,32 @@ Verified visually and interactively:
 **Finding 2:** The open mobile inspection sheet starts at y232 and ends at y641, while all land and cities occupy y270–510. The selected Cinderhold and every other city are concealed, leaving only empty water above. Selected-city focus must frame the city in the remaining upper map without shrinking its label. Closing should restore the prior overview unless the viewer deliberately panned/zoomed. The same projection/camera behavior should support both renderers. Screenshot: `live2-500-inspection.png` in the review execution artifacts.
 
 Exact `npm run verify:scaffold` independently rerun before author edits: exit 0, 12 tests, strict TypeScript/lint/build all pass. No production source was changed during this independent pass. The author now takes the bounded connect-live-spectator task for finding 2; an independent reviewer must review that change.
+
+
+## Independent live.3 camera addendum, 09:45 UTC
+
+The Creative Director (`gpt-6-astra`) inspected the new camera helper and its integration into `web/main.ts`, `web/flat-renderer.ts`, `web/renderer.ts`, the short-height stylesheet and focused camera tests. This reviewer authored earlier connected-viewer/mobile-layout work, but **did not author this camera successor**. This addendum reviews the new camera patch; it does not replace the earlier independent review of that earlier work. The Art Director authored the camera change and performed the stated browser interactions. The orchestrator and root separately inspected the short-view pixels before resolving finding 2.
+
+### Actual pixels inspected by this reviewer
+
+Used `view_image` on these transferred, real cloud-browser screenshots. The preserved `.png` names contain JPEG image bytes; no crop or synthetic viewport was substituted.
+
+- `live3-500-overview.png`, 500 × 761: the closed overview shows all five named cities, the five-civilization dock, visible latest-event text and Recent events control, camera buttons and footer links.
+- `live3-500-ember-inspection.png`, 500 × 761: selected Cinderhold and its label are visibly above the sheet. The sheet has readable resource values, research and city facts, a visible Close control and scrollbar. It no longer leaves only empty ocean above the details.
+- `live3-500x561-pelagos.png`, 500 × 561: selected Tidehaven and its label remain above the shorter sheet. The six resource values are readable, the five-civilization dock and footer remain reachable, and further facts continue in the scrolling sheet. This is the actual short-height evidence for the bounded repair.
+- `live3-500-aster-scrolled.png`, 500 × 761: selected Dawnwell remains visible while the scrolled sheet shows food, materials, energy, credits, science, culture, research, population, wellbeing, focus and the actual Terraced fields/Artisan quarter building names. The Close control remains visible.
+
+These screenshots support composition and legibility at their stated dimensions. They do not independently prove scrolling, clicking, camera restoration or focus behavior. The author reports those actual interactions separately, including matching before/after city rectangles on Close; no distinct closed-restoration screenshot was captured. This reviewer did not rerun the browser interactions or claim to have done so.
+
+### Source assessment of the new patch
+
+- `inspectionAnchor` derives a safe point from the map, heading, sheet and controls. Both renderers use the same camera-plane shift helper instead of unrelated hard-coded offsets. The SVG path updates its view box; the Three path translates camera and target together using projected basis vectors.
+- `createInspectionSession` saves the original view once, so changing the selected civilization does not overwrite the return view. Close restores it; explicit pan, wheel, zoom or Home releases automatic restoration. The main view preserves the saved overview during ordinary polling and reapplies framing after replacement or resize.
+- The short-height sheet leaves an actual map region above it. The new tests exercise the safe anchor, both flat and tilted Three projection mathematics at several widths/zoom levels, and restoration/manual override. Those mathematical Three tests do not establish a WebGL browser render.
+- No world write or simulation rule is introduced by this patch. Its state is observational camera state only. Current one-city-per-civilization framing is coherent; future multi-city selection must identify the selected city rather than silently frame the capital, as already noted in the roadmap.
+
+### Bounded disposition and remaining limits
+
+No new blocking defect was found in this camera successor. The selected-city-concealment finding is supported as resolved for the actual 500 px SVG views. Reuse the recorded current focused check and prior independent source review; this addendum does not fabricate a fresh test run or restart valid review work merely to recreate evidence. The orchestrator owns any required check/receipt refresh and final task approval.
+
+360/390/430 px rendered layouts, hardware touch and WebGL remain unverified. Secondary footer/About controls remain smaller than the 44 px comfort target noted earlier. Dense technical event prose, on-map building/growth cues, zoom detail, theme/effect settings and future concurrent-mode activity wording are successor work. Their absence does not reopen this bounded camera repair, and this review does not claim that they already exist.

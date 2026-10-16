@@ -29,6 +29,12 @@ All POST bodies are JSON, bounded at64KiB while streaming. Epochs and tick times
 
 `server/public-protocol.ts` owns pure shared public world, transition, provenance and page types. Consumers can import its types without loading server runtime. Chronicle and history redact the internal operator id through the same projection. Cache policy remains `no-store`; a viewer may retain its verified snapshot and ETag in memory for explicit conditional polling.
 
+## Optional compact trade observations
+
+Request `observationFormat: "compact-trade-v1"` in MCP `observe_world`, or `GET /api/observe?seat=0&observationFormat=compact-trade-v1`. The canonical core projector factors repeated town and current recipe facts into `tradeFacts`. Every complete legal action remains in its original order, with an explicit zero-based `choice` inside each `legalActions` entry. This version omits the duplicate `choices` alias. Stored offer/route terms, plan readiness, admission and release/clock metadata remain present; facts never replace submitted action fields.
+
+Omitting the selector preserves the existing response exactly. Unknown, malformed or repeated HTTP format selectors fail with `invalid_observation_format` before SQL; there is no fallback. Both views keep the existing public-read access and MCP origin guard, perform no writes and do not realize overdue time. Numeric choices still require the observed revision. This presentation option neither activates a release nor changes action eligibility. Actual native discovery depends on deploying and refreshing the supported connection; source support alone does not establish that availability.
+
 ## MCP and explicit enrollment
 
 `POST /mcp` provides stateless Streamable HTTP initialization, ping, tool discovery and calls using protocol version2025-06-18. `GET /mcp` returns405 because there is no SSE stream. It exposes `whoami`, `observe_world`, `initialize_world`, `play_action`, `director_tick` and `catchup_clock`.
@@ -82,8 +88,70 @@ Exact submitted actions may be revalidated against the current world after unrel
 
 `POST /api/strategy-catchup` and MCP `catchup_strategy` take `expectedRevision`, explicit UTC `timestamp`, stable `commandId` and optional submitting `model`. They use the existing authenticated writer boundary and atomic state/history/receipt batch. Each call realizes at most sixty due one-minute economy beats and reports `remainingTicks`. No actor check-in is required. Production, research and standing agreements resolve on these beats; the six-minute calendar remains separate. The timeline records `strategy-catchup` and its exact timestamp for deterministic replay.
 
-A tactical action at or beyond an unrealized economy boundary returns `strategy_catchup_required` with admission metadata and zero state changes. The authorized controller must realize due beats, then the model observes and explicitly submits its intended action. This prevents applying a new focus or building retroactively to older production. A refused action never commits hidden catchup. This slice does not execute queued plans or synthesize agent moves.
+A tactical action at or beyond an unrealized economy boundary returns `strategy_catchup_required` with admission metadata and zero state changes. The same enrolled agent can call protected `catchup_strategy`; it does not need another actor or a scheduler wake. Read the returned revision and `remainingTicks`, continue bounded batches with fresh revision and new command IDs until zero, then observe afresh and explicitly choose the next action. On a stale catchup revision, reread before retrying. This prevents applying a new focus or building retroactively to older production. A refused action never commits hidden catchup or chooses a replacement action.
 
-There is no verified exact one-minute unattended trigger in the current Site configuration. Supported external wakes can realize beats late; an absent or delayed controller can delay admission at a due boundary. Read-only Site inspection exposed no linked schedules and no managed database quota or tier, so generic D1 Free-tier limits are not asserted. Transition frames and receipts remain append-only; no pruning or SQL schema migration was added.
+There is no verified exact one-minute unattended trigger in the current Site configuration. Supported external wakes or agent preflights can realize beats late; an idle world remains unrealized until one occurs. Read-only Site inspection exposed no linked schedules and no managed database quota or tier, so generic D1 Free-tier limits are not asserted. Transition frames and receipts remain append-only; no pruning or SQL schema migration was added.
 
 Implementation research used the official [D1 transaction documentation](https://developers.cloudflare.com/d1/worker-api/d1-database/) and [retry guidance](https://developers.cloudflare.com/d1/best-practices/retry-queries/). The existing binding uses primary queries without the Sessions API; atomic batches preserve state, transition and receipt together.
+
+## Attached action plans
+
+The explicit `settlement-plans-1` successor is compatible only with `settlement-independent-1` and adds `bounded-plans`. Applying it initializes six null per-actor plan slots. Older releases keep their absent plan field and replay semantics. Deployment alone does not migrate the active run.
+
+An action may carry `plan: [{ action, reason }, ...]` with at most two entries and a nonblank reason of at most 280 characters each. The head must exactly equal the submitted real action; the optional successor is an intention to review. An absent or empty plan still allows direct play. No planning-only endpoint exists.
+
+The host records the original submitted revision as `command.observedRevision` before any exact-action CAS rebase, alongside the exact validated plan. The accepted command revision identifies the actual commit input. Engine state, plan, history and outcome receipt commit in one existing atomic batch. Failure leaves all canonical records and tactical allowance unchanged. Same-key retries preserve the recorded outcome; changing the plan or its reasons changes request identity.
+
+The accepted plan retains a `completed` head and optional `needs-review` successor. Completed means the order was accepted, not that research or construction has finished. A successful direct action without a plan clears only that actor's previous record. `actionOutcome` reports `completed`, `blocked` or `failed` with a concrete code and reason; rejected outcomes are request-local and never append failed-action history.
+
+`observe_world.actionPlan` derives `ready`, `blocked` or `invalidated` follow-up status against the current world and server time without writing cached readiness. A new revision alone does not invalidate a still-legal intention. Read the reason, reconsider after a refusal or changed conditions, and explicitly submit the chosen next action. There is no persistent submitted lock, automatic successor execution or inferred model reasoning. Strategy catchup never executes a plan.
+
+Current plan metadata is bounded to six slots with at most two items each. Full accepted plan inputs remain in append-only history and receipts under the existing retention boundary. The canonical validator rejects malformed slots, future revisions and persisted derived readiness statuses before reads or arithmetic. No SQL schema change is needed.
+
+## Paid building operations
+
+The explicit `settlement-production-1` successor is compatible with `settlement-independent-1` or `settlement-plans-1`. It adds the released craft recipes, their generic operating-input interpreter and bounded plans. Deployment or reading a save does not activate it. Existing free buildings retain their prior behavior and absent operation maps.
+
+Each constructed paid recipe has one `city.buildingOperations[buildingId]` record with `enabled` and `lastResult`. Construction initializes it to enabled with a null result. Economy beats record `round`, `status` (`operated`, `blocked` or `paused`), actual `paid` and `produced` resource amounts, and explicit shortages. The current toggle is separate from the historical result. Read-only `buildingRecipes` lists distinct input/output definitions for the observing actor's constructed paid buildings; it does not duplicate their results.
+
+Use the existing protected `play_action` transport with `action: { type: 'set-building-operation', cityId, buildingId, enabled }` to pause or resume an owned constructed paid building. The command uses the same tactical allowance, exact-action revalidation, bounded attached plan, idempotency and atomic persistence as other actions. It does not immediately run production or replace the last economy result. Refused foreign, unknown, free-building or malformed controls leave the world unchanged.
+
+Every paid recipe reserves its complete input vector from opening stocks in deterministic city/building ID order. A blocked or paused recipe consumes and produces nothing; same-beat output cannot fund another recipe's inputs. A successful operation reports its actual productivity-adjusted output. The engine result, resources, operation record, replay frame and receipt commit in one existing D1 batch. There is no second metadata write or SQL migration.
+
+Canonical validation requires exactly one explicit record for each constructed paid recipe and rejects unexpected entries, malformed resource amounts, invalid shortages and future result rounds before exposure or arithmetic. Historical amounts are preserved without comparison to today's recipe tuning, stocks or enabled toggle. The accepted action and timestamped economy transitions retain deterministic replay through the shared core.
+
+## Conserved frontier founding
+
+`settlement-frontiers-1` is an explicit additive successor only from `settlement-production-1`. Its `conserved-founding` capability requires a legal action shaped as `{ type: 'settle', tileId, sourceCityId }`. Use the exact observed source and destination. The source must be owned and retain at least three residents after transferring three to the new settlement; founding costs ten food, twelve materials and eight credits. The new settlement inherits the chosen source's focus. Existing map ownership, terrain restrictions, spacing and frontier reach remain shared core rules. Activating the release does not regenerate terrain or rewrite old cities.
+
+The generic action transport revalidates this exact source/destination against the latest state during its bounded CAS loop. An unrelated actor may still commit; competing claims on one site resolve to one owner. A depleted source, newly occupied site or insufficient stock refuses the original intention without selecting another city or destination. Numeric choices remain revision-strict. Population transfer, resources, tile claim, new city, plan, history and receipt commit atomically; a failed receipt rolls everything back. Exact retries return the existing accepted revision without transferring more residents.
+
+Persisted action shapes use the same core predicate as attached plans. Hosted chronicle and full history reject malformed present `sourceCityId` values before exposing those records. Historical source-less settle actions remain shape-valid and replay under their historical feature set; current frontier legality still requires the explicit source. Shape validation does not reinterpret archived legality or perform full history regeneration on each bounded chronicle read.
+
+## City-targeted focus and construction
+
+The explicit `settlement-specialization-1` successor is compatible only with `settlement-frontiers-1`. After its `city-specialization` feature is active, focus and construction require the exact owned `cityId`: `{ type: 'focus', focus, cityId }` or `{ type: 'build', project, cityId }`. Use the current legal choice rather than assuming the first city is the target. Focus changes only that city; construction, its local effects and any paid-operation record belong only to the named city.
+
+The existing protected action path retains this target through unrelated-revision revalidation, attached plans, history and receipts. A missing, malformed, foreign or nonexistent target is refused. An unchanged local focus or building already present in that city is also refused; the command never moves to another city that could accept it. Changing only the target under a used command ID changes the request and is rejected. Failure leaves stocks, city state, allowance, plans and all authoritative rows unchanged.
+
+The shared core action-shape predicate accepts optional city IDs for historical compatibility and rejects malformed present values in stored commands and public history. Historical untargeted actions still replay using their earlier civilization-wide focus and first-eligible construction semantics. Loads and deployment do not invent targets or migrate the active world. No endpoint or SQL schema change is needed.
+
+## Repairing one city
+
+After explicit activation of `settlement-recovery-1` from `settlement-specialization-1`, submit an observed `{ type: 'repair-city', cityId }` through the existing protected action tool. The named city must belong to the actor, have damage and be affordable under the current legal choices. Repair spends the normal tactical allowance, pays the full catalogue repair cost even for remaining damage below the repair amount, and changes only that city's damage. It preserves constructed buildings, infrastructure, focus and paid-operation records.
+
+Use the same command ID for an exact retry. An unrelated commit can revalidate this exact target; it never redirects repair to another damaged city. Healthy, foreign, missing, malformed, unreleased or unaffordable requests leave world state, resources, allowance, plans, history and receipts unchanged. Receipt failure rolls back both payment and damage. Shared action-shape validation also protects stored repair commands and public history.
+
+The released earthquake effect keeps infrastructure intact while damaging cities and routes. Historical worlds without `city-repair` retain their earlier earthquake effect, including infrastructure loss, when replayed. This does not retroactively restore old infrastructure, and no registered predecessor release is claimed to have offered earthquakes. The ordinary explicit strategy preflight still applies; no endpoint, SQL migration, unattended wake or automatic repair is added.
+
+## Read back an uncertain action
+
+MCP `action_receipt` accepts exactly `{ commandId }` through the existing authenticated connection. It requires the same enrolled Site identity and origin checks as protected actions, but only reads. There is no additional REST endpoint, new credential or enrollment expansion. Discovery marks it read-only; this annotation never replaces authorization.
+
+The response contains `ok: true`, `operation: 'action'`, the exact `commandId`, `observedRevision` and either `status: 'accepted'` with the original `acceptedRevision`, or `status: 'not_found'`. One indexed statement reads the world revision and matching typed receipt key together. No snapshot, history scan, clock realization, action execution or receipt write occurs. Missing worlds or corrupt owned records fail explicitly. Another caller's well-formed key is indistinguishable from absence; actor IDs, original inputs and stored response extras are never returned.
+
+Acceptance proves this Site-scoped caller owns the accepted key. It does not distinguish model processes sharing that caller identity, or establish that a lost request had identical content if the key was reused. Preserve unique IDs and the original request. Exact mutation retries still use the unchanged fingerprint check.
+
+`not_found` describes only this database read at `observedRevision`. It never means denied, rejected, cancelled or safe to retry. An in-flight action can commit after the read. If a tool response is missing, retain its original input and inspect supported readback; never resend merely to discover whether it ran or work around a possible permission denial. Readback does not grant permission.
+
+The current non-session D1 interface is documented to read the primary. Actual managed Sites binding behavior and authenticated tool discovery require deployment verification; local SQLite tests do not establish them. A future read-replica/session change must preserve the consistency boundary. [D1 read consistency](https://developers.cloudflare.com/d1/best-practices/read-replication/).

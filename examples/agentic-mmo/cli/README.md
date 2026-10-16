@@ -81,6 +81,54 @@ The replay timeline adds typed `release-apply` and `history-advance` commands. R
 
 Apply the explicit compatible `settlement-independent-1` release with `--at` to set the independent cadence epoch. Older worlds remain sequential. Independent `action` commands also require `--at`; the CLI never reads the clock to decide their tactical allowance. An exact `--action` can be revalidated after unrelated revisions while holding the local writer lock. A numeric `--choice` remains revision-strict. Timestamps are part of idempotency identity and recorded engine commands.
 
-`strategy-catchup --revision N --at UTC --id ID` is a separate protected-host equivalent, also available as JSONL `op: "strategy-catchup"`. It realizes at most sixty due one-minute economy beats and reports remaining work. Repeated no-due strategy calls retain durable receipts without inventing replay frames. Refused independent commands preserve the original campaign bytes. A due strategic boundary must be realized before another action can be admitted, so delayed host wakes may delay play. No CLI timer or automated agent decision is installed.
+`strategy-catchup --revision N --at UTC --id ID` is a separate protected-host equivalent, also available as JSONL `op: "strategy-catchup"`. It realizes at most sixty due one-minute economy beats and reports remaining work. Repeated no-due strategy calls retain durable receipts without inventing replay frames. Refused independent commands preserve the original campaign bytes. On `strategy_catchup_required`, the caller can perform this preflight itself: read the result, continue bounded batches with fresh revisions and IDs until `remainingTicks` is zero, observe again, then choose and explicitly submit an action. No other actor or scheduler wake is required. No CLI timer or automated agent decision is installed.
 
-Independent observations have `activeSeat: null` and admission timing. Untimestamped local observations list structural intents; the explicit action timestamp is revalidated on submission. The replay timeline includes `strategy-catchup`, replayed through `catchUpStrategy`, and timestamped release/action commands. No active two-item plan queue is claimed in this slice.
+Independent observations have `activeSeat: null` and admission timing. `observe --at UTC` checks admission and plan readiness at an explicit time; JSONL observations accept `timestamp`. Untimestamped local observations list structural intents and leave follow-up timing as `needs-review`. The explicit action timestamp is always revalidated on submission. The replay timeline includes `strategy-catchup`, replayed through `catchUpStrategy`, and timestamped release/action commands.
+
+## Bounded plans attached to real actions
+
+After explicitly applying `settlement-plans-1` from `settlement-independent-1`, an action accepts `--plan '[{"action":{"type":"wait"},"reason":"Reassess reserves before spending"}]'`, or the equivalent JSONL `plan` array. A plan has at most two items, each with an exact action and nonblank reason of at most 280 characters. Its first action must match the actual submitted `--action` or selected `--choice`. No separate planning command exists, so adding intent requires taking a real legal action.
+
+The accepted record contains a `completed` head and optional `needs-review` follow-up, the original observed revision and actual committed revision. The CLI stamps original `expectedRevision` before exact-action rebasing and preserves both revisions and the exact plan in replay. Successful retries return the same durable `actionOutcome`; changed reasons under the same command ID are refused. Invalid plans, including unreleased nonempty attachments, leave original campaign bytes unchanged.
+
+Read the detached `actionPlan` and `actionOutcome` status, code and reason. A successor may be ready, blocked or invalidated by current circumstances. It never reserves resources or executes automatically, including during strategy catchup. Reconsider and explicitly submit a chosen action after observing a result or changed conditions. An absent or empty attachment allows direct play and clears only that actor's previous plan after success; refusal preserves prior intent. Completed means the order was accepted, not that an ongoing project has finished.
+
+## Paid building operation records
+
+After explicitly applying `settlement-production-1` from `settlement-independent-1` or `settlement-plans-1`, the existing `action` command accepts `--action '{"type":"set-building-operation","cityId":"city-0","buildingId":"irrigation","enabled":false}'` with seat, revision, timestamp, model and command ID. Set `enabled` to true to resume. This is an ordinary owner-only tactical action, and it can be the head or reviewed successor of a bounded attached plan.
+
+The city's `buildingOperations` record keeps the current toggle and the most recent economy result separately. Pausing preserves the previous result until another explicit strategy beat records `paused`; resuming also waits for a beat. An `operated` result reports actual paid inputs and produced outputs. A `blocked` result names each input shortage and has empty paid/produced maps. Allocation uses opening stocks, so same-beat output cannot pay another recipe's input. Distinct `buildingRecipes` definitions accompany observations without duplicating historical results.
+
+Operation records travel with the same atomic campaign write and exact replay timeline as resources and plans. Invalid controls preserve file bytes; exact retries return the original receipt. Legacy free buildings retain absent operation maps. Corrupt records fail closed without repair, defaults or a rewritten save.
+
+## Explicit frontier sources
+
+After explicitly applying `settlement-frontiers-1` from `settlement-production-1`, select an observed `{ "type": "settle", "tileId": 21, "sourceCityId": "city-0" }` action and pass it through the usual `--action` command with seat, revision, timestamp, model and command ID. The numbers above are illustrative; only the current legal choices establish valid sources and sites. Three residents move from the named owned city, which must keep at least three; food, material and credit costs are paid once. The new city's focus comes from that named source.
+
+An exact action can be revalidated after an unrelated revision, but never swaps its source or destination. On refusal, observe and decide again. A numeric choice is tied to its observed revision. Separate-process retries preserve the original command and receipt, and failed independent commands leave campaign bytes unchanged.
+
+Saved commands and action timeline entries now share the core action-shape predicate. A malformed present source fails closed before replay export or further writes. An absent source remains valid for historical settle commands, preserving their original feature-gated replay behavior rather than inventing a migration or population correction.
+
+## Choosing one city
+
+After explicitly applying `settlement-specialization-1` from `settlement-frontiers-1`, copy the exact owned `cityId` from an observed focus or build choice into `--action`, for example `{"type":"focus","focus":"growth","cityId":"city-0"}`. Construction uses `{"type":"build","project":"farm","cityId":"city-0"}`. These examples describe the shape; current legal choices determine valid targets and projects.
+
+Only the named city changes. A failed, foreign or already-satisfied target is never redirected to a different city, even during an exact-action rebase. Numeric choices stay revision-strict. Attached plans and replay retain the target and original observed revision; changing the target under the same command ID is refused. Independent refusals preserve campaign bytes.
+
+Historical untargeted focus/build commands remain readable and replay their original all-city focus or first-eligible build behavior before the feature was released. Malformed present IDs fail the shared shape check on saved commands and timeline entries; no load-time target inference or save rewrite occurs.
+
+## Repairing a damaged city
+
+After explicitly applying `settlement-recovery-1` from `settlement-specialization-1`, select a current repair choice and submit `--action '{"type":"repair-city","cityId":"city-0"}'` with the usual seat, observed revision, explicit timestamp, model and command ID. The example gives the shape; current ownership, damage and available resources determine legality. Partial repairs pay the full catalogue cost, and an accepted repair uses the actor's normal allowance.
+
+An exact retry returns its durable receipt without paying again. The target survives stale exact-action revalidation, bounded attached plans, process restart and replay. Invalid, healthy, foreign or unaffordable targets leave independent campaign bytes unchanged and are never replaced by another city. A failed request needs a fresh observation and an explicit model decision; no repair queue runs itself.
+
+Current earthquake effects preserve infrastructure and leave repairable damage. Historical saves without `city-repair` continue replaying their original effects; loading never rewrites old damage or infrastructure. Malformed stored repair shapes fail closed through the shared action predicate. When a strategy beat is due, use explicit `strategy-catchup`, inspect remaining ticks, observe again and choose the next real action.
+
+## Compact trade observations
+
+Opt in for one read with `observe --seat 0 --at UTC --observation-format compact-trade-v1`, or JSONL `{"op":"observe","seat":0,"timestamp":"2026-10-16T00:00:00.000Z","observationFormat":"compact-trade-v1"}`. Use the intended explicit observation time; the example is illustrative. The response identifies its format and includes deduplicated `tradeFacts.cities`, current proposal `tradeFacts.recipes` and shared explanation semantics. Town facts derive from canonical site production; base yields precede focus, productivity, buildings and upkeep. Geometric hex distance is not a traversed path or travel time.
+
+This versioned opt-in returns every legal action in its original order with a `choice` index on each `legalActions` entry. It omits the duplicate `choices` alias. Copy the full `action` into a normal submission, or use its numeric `choice` with the observed revision. Numeric choices remain revision-strict. Two-item plans, admission checks and explicit submission rules are unchanged; observation never executes an action or advances the world.
+
+Pending offers and accepted agreements retain their authoritative snapshotted terms. Current recipe facts never replace old consent. Omitting the selector preserves the original observation, including unindexed `legalActions` and indexed `choices`. Unsupported or malformed format values fail before reading the durable save or acquiring its lock. The selector is accepted only on observation requests; it is rejected on other JSONL operations and is not a command setting stored in the world.

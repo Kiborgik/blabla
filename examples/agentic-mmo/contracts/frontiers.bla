@@ -1,0 +1,12 @@
+state frontier_source_population: int
+state frontier_destination_population: int
+state frontier_total_population: int
+state frontier_paid_units: int
+state frontier_accepted: bool
+
+action found()
+when found {
+    expect "founding-conserves-population": after.frontier_total_population == before.frontier_total_population
+    expect "source-remains-inhabited": not after.frontier_accepted or after.frontier_source_population >= 3
+    expect "refusal-spends-nothing": after.frontier_accepted or after.frontier_paid_units == 0
+}

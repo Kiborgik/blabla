@@ -1,6 +1,7 @@
 import { ACTION_FEATURES, RESOURCE_IDS, TRADE_RECIPES, TRADE_RULES } from '../content.ts';
 import type {
   ActionOption,
+  City,
   GameAction,
   GameEvent,
   Resources,
@@ -10,7 +11,10 @@ import type {
   WorldState,
 } from '../types.ts';
 import { emitEvent } from './events.ts';
+import { describeSettlementSite } from './sites.ts';
+import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
+import { createLandTransportPlanner, describeLandTransport, landTransportBlock, landTransportCadence } from './transport.ts';
 import { canAfford, citiesOf, civilizationById, transferCost } from './world.ts';
 
 type TradeAction = Extract<
@@ -39,13 +43,30 @@ function endpointsExist(state: WorldState, offer: TradeOffer): boolean {
   );
 }
 
+function offeredTransportBlock(state: WorldState, offer: TradeOffer): string | null {
+  const quote = offer.terms.transport;
+  if (!quote) return null;
+  const from = state.cities.find(city => city.id === offer.from && city.civId === offer.proposer);
+  const to = state.cities.find(city => city.id === offer.to && city.civId === offer.recipient);
+  return from && to ? landTransportBlock(state, quote, from.tileId, to.tileId) : 'An exact endpoint is missing';
+}
+
 function nextBeat(round: number, cadence: number): number {
   return (Math.floor(round / cadence) + 1) * cadence;
+}
+
+function describeTradeEndpoints(state: WorldState, from: City, to: City): string {
+  const origin = state.tiles.find((tile) => tile.id === from.tileId);
+  const destination = state.tiles.find((tile) => tile.id === to.tileId);
+  if (!origin || !destination) return 'An endpoint site is missing';
+  return `${from.name} (${from.id}): ${describeSettlementSite(state, origin)}. ${to.name} (${to.id}): ${describeSettlementSite(state, destination)}. Straight-line hex distance ${hexDistance(origin, destination)}; not a traversed path or travel time. Supplies remain shared across each civilization.`;
 }
 
 export function availableTradeActions(state: WorldState, seat: number): ActionOption[] {
   const choices: ActionOption[] = [];
   const civilization = civilizationById(state, seat);
+  const land = hasFeatures(state, ['land-transport']);
+  const planner = land ? createLandTransportPlanner(state) : null;
   if (hasFeatures(state, ACTION_FEATURES['propose-trade'])) {
     for (const partner of state.civilizations) {
       if (
@@ -65,7 +86,18 @@ export function availableTradeActions(state: WorldState, seat: number): ActionOp
           !canAfford(civilization.resources, recipe.terms.constructionCost)
         )
           continue;
-        choices.push({
+        if (hasFeatures(state, ['exact-trade-endpoints'])) {
+          for (const from of citiesOf(state, seat)) for (const to of citiesOf(state, partner.id)) {
+            const transport = planner?.quote(from.tileId, to.tileId);
+            if (land && !transport) continue;
+            choices.push({
+              action: { type: 'propose-trade', partner: partner.id, recipeId: recipe.id, sourceCityId: from.id, recipientCityId: to.id },
+              ...(transport ? { tradeQuote: { transport, cadenceRounds: landTransportCadence(recipe.terms.cadenceRounds, transport) } } : {}),
+              label: `Offer ${recipe.id}: ${from.name} to ${to.name}`,
+              reason: `Request consent to these exact towns and recurring terms; no recipient stock is spent by a proposal. ${transport ? `${describeLandTransport(transport, landTransportCadence(recipe.terms.cadenceRounds, transport))}. ` : ''}${describeTradeEndpoints(state, from, to)}`,
+            });
+          }
+        } else choices.push({
           action: { type: 'propose-trade', partner: partner.id, recipeId: recipe.id },
           label: `Offer ${recipe.id} to ${partner.name}`,
           reason:
@@ -84,14 +116,19 @@ export function availableTradeActions(state: WorldState, seat: number): ActionOp
       });
       if (
         endpointsExist(state, offer) &&
+        offeredTransportBlock(state, offer) === null &&
         activeAgreements(state, offer.proposer, offer.recipient) < TRADE_RULES.maxActivePerPair &&
         canAfford(civilizationById(state, offer.proposer).resources, offer.terms.constructionCost)
-      )
+      ) {
+        const from = state.cities.find((city) => city.id === offer.from && city.civId === offer.proposer);
+        const to = state.cities.find((city) => city.id === offer.to && city.civId === offer.recipient);
         choices.push({
           action: { type: 'respond-trade', offerId: offer.id, accept: true },
+          ...(offer.terms.transport ? { tradeQuote: { transport: structuredClone(offer.terms.transport), cadenceRounds: offer.terms.cadenceRounds } } : {}),
           label: `Accept ${offer.id}`,
-          reason: `Consent to deliveries every ${offer.terms.cadenceRounds} rounds; first shipment is on a later strategic beat`,
+          reason: `Consent to deliveries every ${offer.terms.cadenceRounds} rounds; ${offer.terms.transport ? describeLandTransport(offer.terms.transport, offer.terms.cadenceRounds) : 'first shipment is on a later strategic beat'}${hasFeatures(state, ['exact-trade-endpoints']) && from && to ? `. ${describeTradeEndpoints(state, from, to)}` : ''}`,
         });
+      }
     }
     if (offer.proposer === seat && hasFeatures(state, ACTION_FEATURES['withdraw-trade']))
       choices.push({
@@ -122,10 +159,18 @@ export function executeTradeAction(
   const actor = civilizationById(state, seat);
   if (action.type === 'propose-trade') {
     const recipe = TRADE_RECIPES.find((candidate) => candidate.id === action.recipeId);
-    const from = citiesOf(state, seat)[0];
-    const to = citiesOf(state, action.partner)[0];
+    const exact = hasFeatures(state, ['exact-trade-endpoints']);
+    const from = exact ? citiesOf(state, seat).find((city) => city.id === action.sourceCityId) : citiesOf(state, seat)[0];
+    const to = exact ? citiesOf(state, action.partner).find((city) => city.id === action.recipientCityId) : citiesOf(state, action.partner)[0];
     if (!recipe || !from || !to)
       throw new RangeError('Trade proposal requires a released recipe and two existing endpoints');
+    const terms = structuredClone(recipe.terms);
+    if (hasFeatures(state, ['land-transport'])) {
+      const quote = createLandTransportPlanner(state).quote(from.tileId, to.tileId);
+      if (!quote) throw new RangeError('The exact trade towns have no passable land path');
+      terms.transport = quote;
+      terms.cadenceRounds = landTransportCadence(terms.cadenceRounds, quote);
+    }
     const offer: TradeOffer = {
       id: `offer-${state.revision}`,
       proposer: seat,
@@ -135,7 +180,7 @@ export function executeTradeAction(
       createdRound: state.round,
       expiresRound: state.round + TRADE_RULES.offerExpiryRounds,
       status: 'pending',
-      terms: structuredClone(recipe.terms),
+      terms,
       routeId: null,
     };
     state.tradeOffers ??= [];
@@ -199,6 +244,8 @@ export function executeTradeAction(
     });
     return;
   }
+  const transportBlock = offeredTransportBlock(state, offer);
+  if (transportBlock) throw new RangeError(transportBlock);
   transferCost(civilizationById(state, offer.proposer).resources, offer.terms.constructionCost);
   const route: Route = {
     id: `route-${state.revision}`,
@@ -214,7 +261,7 @@ export function executeTradeAction(
       terms: structuredClone(offer.terms),
       enabled: true,
       acceptedRound: state.round,
-      nextDeliveryRound: nextBeat(state.round, offer.terms.cadenceRounds),
+      nextDeliveryRound: offer.terms.transport ? state.round + offer.terms.cadenceRounds : nextBeat(state.round, offer.terms.cadenceRounds),
       lastAttemptRound: null,
       lastDeliveryRound: null,
       deliveryCount: 0,
@@ -264,6 +311,14 @@ function shipmentBlock(
     return { by: route.owner, reason: 'The proposer endpoint no longer exists' };
   if (!state.cities.some((city) => city.id === route.to && city.civId === route.partner))
     return { by: route.partner, reason: 'The recipient endpoint no longer exists' };
+  if (terms.transport) {
+    const from = state.cities.find(city => city.id === route.from);
+    const to = state.cities.find(city => city.id === route.to);
+    if (from && to) {
+      const reason = landTransportBlock(state, terms.transport, from.tileId, to.tileId);
+      if (reason) return { by: null, reason };
+    }
+  }
   if (route.damage >= terms.damageDisableAt)
     return { by: null, reason: `Route damage ${route.damage} prevents transport` };
   for (const [id, cargo, upkeep] of [
@@ -303,7 +358,7 @@ export function resolveTrade(state: WorldState, events: GameEvent[]): void {
     if (state.round < agreement.nextDeliveryRound || agreement.lastAttemptRound === state.round)
       continue;
     agreement.lastAttemptRound = state.round;
-    agreement.nextDeliveryRound = nextBeat(state.round, agreement.terms.cadenceRounds);
+    agreement.nextDeliveryRound = agreement.terms.transport ? state.round + agreement.terms.cadenceRounds : nextBeat(state.round, agreement.terms.cadenceRounds);
     route.volume = 0;
     const blocked = shipmentBlock(state, route, agreement.terms);
     agreement.blockedBy = blocked?.by ?? null;

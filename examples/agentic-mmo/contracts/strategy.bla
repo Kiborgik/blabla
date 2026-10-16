@@ -1,0 +1,16 @@
+state strategy_can_consent: bool
+state strategy_last_valid: bool
+state strategy_agreement_enabled: bool
+state strategy_delivery_count: int
+state strategy_round: int
+state strategy_next_delivery_round: int
+
+action consent()
+action strategic_beat()
+
+when consent {
+    expect "immediate-order-affects-persistent-commitment": not before.strategy_can_consent or after.strategy_last_valid and after.strategy_agreement_enabled and after.strategy_delivery_count == before.strategy_delivery_count and after.strategy_next_delivery_round > after.strategy_round
+}
+when strategic_beat {
+    expect "cargo-waits-for-due-beat": after.strategy_delivery_count == before.strategy_delivery_count or after.strategy_round >= before.strategy_next_delivery_round
+}

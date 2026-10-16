@@ -1,0 +1,81 @@
+import type { Route } from '../core/types.ts';
+
+export interface RouteTown {
+  id: string;
+  name: string;
+  civilization: string;
+  color: string;
+  q: number;
+  r: number;
+}
+
+export interface RouteView extends Route {
+  ownerName: string;
+  partnerName: string;
+  fromTown: RouteTown | null;
+  toTown: RouteTown | null;
+  illustrative?: boolean;
+}
+
+export interface RouteVisual {
+  status: 'sample' | 'legacy' | 'stopped' | 'damaged' | 'blocked' | 'agreed';
+  label: string;
+  symbol: string;
+  dash: readonly number[];
+  color: string;
+  consent: string;
+  lastAttempt: string;
+  lastDelivery: string;
+  nextDue: string;
+}
+
+export const ROUTE_LIMIT = 12;
+
+export function routeVisual(route: RouteView): RouteVisual {
+  const agreement = route.agreement;
+  const base = { lastAttempt: 'No recorded attempt', lastDelivery: 'No recorded delivery', nextDue: 'No scheduled delivery recorded' };
+  if (route.illustrative) return { ...base, status: 'sample', label: 'Sample link', symbol: '◇', dash: [3, 4], color: '#b9c9d6', consent: 'Illustrative only' };
+  if (!agreement) return { ...base, status: 'legacy', label: 'Legacy route', symbol: '◇', dash: [2, 5], color: '#b9c9d6', consent: 'Agreement not recorded' };
+  const lastAttempt = agreement.lastAttemptRound === null ? 'No recorded attempt'
+    : agreement.blockedReason ? `Last attempt blocked · round ${agreement.lastAttemptRound}: ${agreement.blockedReason}`
+      : agreement.lastDeliveryRound === agreement.lastAttemptRound ? `Last attempt delivered · round ${agreement.lastAttemptRound}`
+        : `Last attempt · round ${agreement.lastAttemptRound}; result unavailable`;
+  const facts = {
+    consent: agreement.enabled ? `Agreed · accepted round ${agreement.acceptedRound}` : `Trade stopped${agreement.closedRound === null ? '' : ` · round ${agreement.closedRound}`}`,
+    lastAttempt,
+    lastDelivery: agreement.lastDeliveryRound === null ? 'No recorded delivery'
+      : `Last delivered round ${agreement.lastDeliveryRound} · ${agreement.deliveryCount} completed ${agreement.deliveryCount === 1 ? 'delivery' : 'deliveries'}`,
+    nextDue: agreement.enabled ? `${agreement.deliveryCount === 0 ? 'First' : 'Next'} due round ${agreement.nextDeliveryRound}` : 'No future deliveries while stopped',
+  };
+  if (!agreement.enabled) return { ...facts, status: 'stopped', label: 'Trade stopped', symbol: '■', dash: [3, 7], color: '#b9c9d6' };
+  if (route.damage >= agreement.terms.damageDisableAt) return { ...facts, status: 'damaged', label: `Damage now ${route.damage}%`, symbol: '!', dash: [8, 3], color: '#f4c27e' };
+  if (agreement.blockedReason !== null) return { ...facts, status: 'blocked', label: 'Last attempt blocked', symbol: '!', dash: [8, 3], color: '#f4c27e' };
+  return { ...facts, status: 'agreed', label: agreement.deliveryCount === 0 ? 'Agreed · first delivery pending' : 'Agreed trade', symbol: '↔', dash: [], color: '#ffe3a0' };
+}
+
+export function visibleRoutes(routes: readonly RouteView[], selected: string | null): RouteView[] {
+  return routes.filter((route) => route.fromTown && route.toTown && (route.id === selected || route.illustrative || route.agreement?.enabled))
+    .toSorted((a, b) => Number(b.id === selected) - Number(a.id === selected) || a.id.localeCompare(b.id))
+    .slice(0, ROUTE_LIMIT);
+}
+
+export function routeTitle(route: RouteView): string {
+  return `${route.fromTown?.name ?? route.from} ↔ ${route.toTown?.name ?? route.to}`;
+}
+
+export function routeLabelKey(id: string): string { return `route:${id}`; }
+
+export interface RouteLabelBounds { x: number; y: number; width: number; height: number }
+
+export function routeLabelPlacement(anchor: { x: number; y: number }, occupied: readonly RouteLabelBounds[], width: number, height: number): RouteLabelBounds | null {
+  const offsets = [[0, 0], [0, -72], [0, 72], [-112, -72], [112, -72], [-112, 72], [112, 72], [-196, 0], [196, 0]] as const;
+  for (const [dx, dy] of offsets) {
+    const label = { x: anchor.x + dx, y: anchor.y + dy - 22, width: 180, height: 44 };
+    if (label.x - 90 < 8 || label.x + 90 > width - 8 || label.y < 8 || label.y + 44 > height - 8) continue;
+    if (occupied.some((other) => Math.abs(label.x - other.x) < (label.width + other.width) / 2 + 6 && label.y < other.y + other.height + 6 && label.y + label.height + 6 > other.y)) continue;
+    return label;
+  }
+  return null;
+}
+
+export function routeInspectionCity(route: RouteView): string | null { return route.fromTown?.id ?? route.toTown?.id ?? null; }

@@ -25,11 +25,16 @@ import {
   legalActions,
   observe,
 } from '../core/engine.ts';
+import { observeCompactTrade, type CompactTradeObservation } from '../core/observation.ts';
 import { parseUtcTimestamp } from '../core/simulation/clock.ts';
 import { isDirectorEvent, isWorldState } from '../core/validation.ts';
+import { isGameAction, validateAttachedPlan } from '../core/planning.ts';
 import {
   GAME_VERSION,
   SCHEMA_VERSION,
+  type ActionOutcome,
+  type ActionOption,
+  type Observation,
   type CampaignReplay,
   type Command,
   type DirectorTickCommand,
@@ -60,6 +65,7 @@ export interface ActionProvenance {
   recordedAt: string;
   request: Record<string, unknown>;
   remainingTicks?: number;
+  actionOutcome?: ActionOutcome;
 }
 
 export interface LocalCampaign {
@@ -84,12 +90,26 @@ export interface ActionReply {
   commandId?: string;
   error?: string;
   remainingTicks?: number;
+  actionOutcome?: ActionOutcome;
 }
 
 export interface RecordedReplay extends CampaignReplay {
   timeline: RecordedTransition[];
   provenance: ActionProvenance[];
 }
+
+interface LocalObservationMetadata {
+  releaseId: string;
+  unlockedFeatures: string[];
+  calendarMilestones: WorldState['calendarMilestones'];
+  clockEpoch: string | null;
+  clockTicks: number;
+  last_valid: boolean;
+}
+
+type IndexedActionOption = ActionOption & { choice: number };
+export type LocalObservation = Observation & LocalObservationMetadata & { choices: IndexedActionOption[] };
+export type CompactLocalObservation = CompactTradeObservation & LocalObservationMetadata & { legalActions: IndexedActionOption[] };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -209,6 +229,7 @@ function validateCampaign(value: unknown): asserts value is LocalCampaign {
     !value.timeline.every(
       (entry: unknown) =>
         isRecord(entry) &&
+        (entry.kind !== 'action' || isRecord(entry.command) && isGameAction(entry.command.action)) &&
         (entry.kind === 'action' ||
           entry.kind === 'director-tick' ||
           entry.kind === 'clock-catchup' || entry.kind === 'strategy-catchup' || entry.kind === 'history-advance' || entry.kind === 'release-apply'),
@@ -218,7 +239,7 @@ function validateCampaign(value: unknown): asserts value is LocalCampaign {
         isRecord(entry) &&
         integer(entry.seat) &&
         integer(entry.expectedRevision) &&
-        isRecord(entry.action),
+        isGameAction(entry.action),
     ) ||
     !value.frames.every(
       (entry: unknown) => isRecord(entry) && isRecord(entry.state) && Array.isArray(entry.events),
@@ -338,20 +359,35 @@ export class GameStore {
     return this.locked(() => this.load());
   }
 
-  observation(seat?: unknown) {
+  observation(seat?: unknown, timestamp?: unknown): LocalObservation;
+  observation(seat: unknown, timestamp: unknown, observationFormat: 'compact-trade-v1'): CompactLocalObservation;
+  observation(seat: unknown, timestamp: unknown, observationFormat: unknown): LocalObservation | CompactLocalObservation;
+  observation(seat?: unknown, timestamp?: unknown, observationFormat?: unknown): LocalObservation | CompactLocalObservation {
+    if (observationFormat !== undefined && observationFormat !== 'compact-trade-v1')
+      throw new ProtocolError('observationFormat must be compact-trade-v1 when supplied');
     const campaign = this.snapshot();
     const selected = seat ?? campaign.state.phase;
     if (!integer(selected) || selected < 0 || selected > 5)
       throw new ProtocolError('seat must be an integer from 0 to 5');
-    const observation = observe(campaign.state, selected);
-    return {
-      ...observation,
+    if (timestamp !== undefined && (typeof timestamp !== 'string' || parseUtcTimestamp(timestamp) === null))
+      throw new ProtocolError('timestamp must be an explicit UTC ISO timestamp');
+    const at = typeof timestamp === 'string' ? timestamp : undefined;
+    const metadata: LocalObservationMetadata = {
       releaseId: campaign.state.releaseId,
       unlockedFeatures: campaign.state.unlockedFeatures,
       calendarMilestones: campaign.state.calendarMilestones,
       clockEpoch: campaign.state.clockEpoch ?? null,
       clockTicks: campaign.state.clockTicks ?? 0,
       last_valid: campaign.lastValid,
+    };
+    if (observationFormat === 'compact-trade-v1') {
+      const compact = observeCompactTrade(campaign.state, selected, at);
+      return { ...compact, ...metadata, legalActions: compact.legalActions.map((option, choice) => ({ choice, ...option })) };
+    }
+    const observation = observe(campaign.state, selected, at);
+    return {
+      ...observation,
+      ...metadata,
       choices: observation.legalActions.map((option, choice) => ({ choice, ...option })),
     };
   }
@@ -359,12 +395,13 @@ export class GameStore {
   submit(input: Record<string, unknown>, contractProbe = false): ActionReply {
     return this.locked(() => {
       const campaign = this.load();
-      const refuse = (error: string): ActionReply => {
-        if (!campaign.state.independentTurns) {
+      const refuse = (error: string, actionOutcome?: ActionOutcome): ActionReply => {
+        if (!campaign.state.independentTurns && input.plan === undefined) {
           campaign.lastValid = false;
           atomicWrite(this.path, campaign);
         }
-        return { ok: false, revision: campaign.state.revision, last_valid: false, error };
+        const outcome = actionOutcome ?? (input.plan !== undefined || campaign.state.unlockedFeatures.includes('bounded-plans') ? { status: 'failed' as const, code: 'invalid_command', reason: error } : undefined);
+        return { ok: false, revision: campaign.state.revision, last_valid: false, error, ...(outcome ? { actionOutcome: outcome } : {}) };
       };
       const seat = input.seat;
       const expectedRevision = input.expectedRevision;
@@ -390,6 +427,7 @@ export class GameStore {
       if (input.choice !== undefined) request.choice = input.choice;
       if (input.action !== undefined) request.action = input.action;
       if (input.timestamp !== undefined) request.timestamp = input.timestamp;
+      if (input.plan !== undefined) request.plan = input.plan;
       const prior = campaign.provenance.find(
         (entry) => entry.operation === 'action' && entry.commandId === commandId,
       );
@@ -408,6 +446,7 @@ export class GameStore {
           last_valid: true,
           commandId,
           ...(prior.remainingTicks === undefined ? {} : { remainingTicks: prior.remainingTicks }),
+          ...(prior.actionOutcome ? { actionOutcome: prior.actionOutcome } : {}),
         };
       }
       const canRebase = campaign.state.independentTurns !== undefined && input.action !== undefined && input.choice === undefined;
@@ -429,8 +468,14 @@ export class GameStore {
       const timestamp = input.timestamp;
       if ((timestamp !== undefined || campaign.state.independentTurns) && (typeof timestamp !== 'string' || parseUtcTimestamp(timestamp) === null)) return refuse('timestamp must be an explicit UTC ISO timestamp');
       const command: Command = { seat, expectedRevision: campaign.state.revision, action, ...(typeof timestamp === 'string' ? { timestamp } : {}) };
+      if (input.plan !== undefined) {
+        command.observedRevision = expectedRevision;
+        const checked = validateAttachedPlan(campaign.state, command, input.plan);
+        if (!checked.ok) return refuse(checked.error, { status: 'failed', code: checked.code, reason: checked.error });
+        command.plan = checked.plan;
+      }
       const result = applyCommand(campaign.state, command);
-      if (!result.ok) return refuse(result.error ?? 'command refused by the engine');
+      if (!result.ok) return refuse(result.error ?? 'command refused by the engine', result.actionOutcome);
       campaign.state = result.state;
       campaign.commands.push(command);
       campaign.frames.push({ state: result.state, events: result.events });
@@ -445,6 +490,7 @@ export class GameStore {
         revision: result.state.revision,
         recordedAt: new Date().toISOString(),
         request,
+        ...(result.actionOutcome ? { actionOutcome: result.actionOutcome } : {}),
       });
       campaign.lastValid = true;
       atomicWrite(this.path, campaign);
@@ -454,6 +500,7 @@ export class GameStore {
         acceptedRevision: result.state.revision,
         last_valid: true,
         commandId,
+        ...(result.actionOutcome ? { actionOutcome: result.actionOutcome } : {}),
       };
     });
   }

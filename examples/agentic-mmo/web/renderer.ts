@@ -1,25 +1,34 @@
+import type { RouteView } from '../visuals/route-visuals.ts';
+import { routeLabelKey, routeLabelPlacement, routeTitle, routeVisual, visibleRoutes } from '../visuals/route-visuals.ts';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { damageCondition, damageMapLabel } from '../visuals/damage-visuals.ts';
+import { cityKey, selectedCity } from './city-selection.ts';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TERRAIN_COLORS, hexPosition } from './atlas.ts';
-import type { AtlasTile, AtlasWorld } from './atlas.ts';
+import type { AtlasCue, AtlasTile, AtlasWorld } from './atlas.ts';
 import type { ViewerPreferences } from './viewer-state.ts';
+import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor } from './inspection-camera.ts';
 import type { CameraView, ScreenPoint } from './inspection-camera.ts';
-import type { VisualEvent } from '../visuals/world-visuals.ts';
 import { createSettlementMeshes } from './settlement-three.ts';
-import { createWorldCues } from './world-cues.ts';
+import { createWorldCues, visualIcon } from './world-cues.ts';
 import { mapLabelVisibility } from './map-labels.ts';
 
 export interface AtlasRenderer {
   zoom: (factor: number) => void;
   reset: () => void;
-  select: (id: number) => void;
-  frameCity: (id: number, anchor: ScreenPoint) => void;
+  select: (id: string) => void;
+  selectRoute: (id: string | null) => void;
+  frameCity: (id: string, anchor: ScreenPoint) => void;
   restoreCamera: (camera: CameraView) => void;
   setLayer: (layer: 'borders' | 'routes', visible: boolean) => void;
   snapshot: () => Pick<ViewerPreferences, 'zoom' | 'x' | 'z'>;
   setMotion: (moving: boolean) => void;
-  showEvents: (events: readonly VisualEvent[]) => void;
+  showEvents: (events: readonly AtlasCue[]) => void;
+  clearEvents: () => void;
   dispose: () => void;
 }
 const NEIGHBORS: readonly (readonly [number, number])[] = [
@@ -31,12 +40,29 @@ const NEIGHBORS: readonly (readonly [number, number])[] = [
   [1, -1],
 ];
 
+export function routeLineMeshes(route: RouteView, selected: boolean): readonly [Line2, Line2] | null {
+  if (!route.fromTown || !route.toTown) return null;
+  const a = hexPosition(route.fromTown.q, route.fromTown.r);
+  const b = hexPosition(route.toTown.q, route.toTown.r);
+  const visual = routeVisual(route);
+  const geometry = new LineGeometry().setPositions([a.x, 0.72, a.z, b.x, 0.72, b.z]);
+  const backing = new Line2(geometry, new LineMaterial({ color: '#173a3c', linewidth: selected ? 7 : 5, depthTest: false }));
+  const line = new Line2(geometry, new LineMaterial({ color: visual.color, linewidth: selected ? 3 : 2,
+    dashed: visual.dash.length > 0, dashSize: visual.dash[0] ?? 1, gapSize: visual.dash[1] ?? 0, depthTest: false }));
+  backing.renderOrder = 2;
+  line.renderOrder = 3;
+  line.computeLineDistances();
+  line.userData['routeId'] = route.id;
+  return [backing, line];
+}
+
 export function createAtlasRenderer(
   container: HTMLElement,
   labels: HTMLElement,
   world: AtlasWorld,
   preferences: ViewerPreferences,
-  onSelect: (id: number) => void,
+  onSelect: (id: string) => void,
+  onRoute: (id: string) => void,
 ): AtlasRenderer {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#163d50');
@@ -194,7 +220,7 @@ export function createAtlasRenderer(
   for (const tile of world.tiles) addTile(tile);
   borders.visible = preferences.borders;
   scene.add(borders);
-  const cityLabels: Array<{ element: HTMLButtonElement; point: THREE.Vector3; id: number }> = [];
+  const cityLabels: Array<{ element: HTMLButtonElement; point: THREE.Vector3; id: string }> = [];
   for (const city of world.cities) {
     const { x, z } = hexPosition(city.q, city.r);
     const floor = tileLookup.get(`${city.q},${city.r}`)?.height ?? 0.4;
@@ -250,16 +276,23 @@ export function createAtlasRenderer(
     }
     const element = document.createElement('button');
     element.className = 'city-label';
+    element.dataset['cityId'] = cityKey(city);
     element.style.setProperty('--civ-color', city.color);
     const title = document.createElement('strong');
     title.textContent = city.capital;
     const subtitle = document.createElement('small');
     subtitle.textContent = `${city.shortName}${city.population === undefined ? '' : ` · ${city.population} people`}`;
+    const condition = damageCondition(city.settlement?.damage ?? 0);
+    if (condition) {
+      subtitle.className = 'city-condition';
+      subtitle.textContent = condition.text;
+      subtitle.prepend(visualIcon(condition.icon));
+    }
     element.append(title, subtitle);
-    element.setAttribute('aria-label', `Inspect ${city.name}, ${city.capital}`);
-    element.addEventListener('click', () => onSelect(city.id));
+    element.setAttribute('aria-label', `Inspect ${city.name}, ${damageMapLabel(city.capital, city.settlement?.damage ?? 0)}`);
+    element.addEventListener('click', () => onSelect(cityKey(city)));
     labels.append(element);
-    cityLabels.push({ element, point: new THREE.Vector3(x, floor + 1.45, z), id: city.id });
+    cityLabels.push({ element, point: new THREE.Vector3(x, floor + 1.45, z), id: cityKey(city) });
   }
   const settlements = createSettlementMeshes(world, material);
   scene.add(settlements.group);
@@ -267,43 +300,58 @@ export function createAtlasRenderer(
     const point = new THREE.Vector3(x, height, z).project(camera);
     return { x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight };
   });
-  let selected = preferences.selected;
-  const ships: Array<{ mesh: THREE.Mesh; curve: THREE.QuadraticBezierCurve3; offset: number }> = [];
-  for (const [from, to] of world.routes) {
-    const origin = world.cities[from];
-    const destination = world.cities[to];
-    if (!origin || !destination) continue;
-    const a = hexPosition(origin.q, origin.r);
-    const b = hexPosition(destination.q, destination.r);
-    const curve = new THREE.QuadraticBezierCurve3(
-      new THREE.Vector3(a.x, 0.68, a.z),
-      new THREE.Vector3((a.x + b.x) / 2, 1.3, (a.z + b.z) / 2 + 1.2),
-      new THREE.Vector3(b.x, 0.68, b.z),
-    );
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(curve.getPoints(60)),
-      new THREE.LineDashedMaterial({
-        color: '#f5e5ad',
-        dashSize: 0.14,
-        gapSize: 0.18,
-        transparent: true,
-        opacity: 0.55,
-      }),
-    );
-    line.computeLineDistances();
-    routes.add(line);
-    const ship = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.07),
-      new THREE.MeshBasicMaterial({ color: '#fff2bf' }),
-    );
-    if (world.illustrative) {
-      routes.add(ship);
-      ships.push({ mesh: ship, curve, offset: from * 0.17 });
-    } else {
-      ship.geometry.dispose();
-      ship.material.dispose();
+  const initialCity = selectedCity(world, preferences);
+  let selected = initialCity ? cityKey(initialCity) : '';
+  let selectedRoute: string | null = null;
+  const routeLines: Line2[] = [];
+  let routePoint: THREE.Vector3 | null = null;
+  const routeLabel = document.createElement('button');
+  routeLabel.type = 'button';
+  routeLabel.className = 'route-map-label';
+  routeLabel.hidden = true;
+  routeLabel.addEventListener('click', () => { if (selectedRoute) onRoute(selectedRoute); });
+  labels.append(routeLabel);
+  const drawRoutes = (): void => {
+    const geometries = new Set<THREE.BufferGeometry>();
+    for (const child of routes.children) {
+      if (child instanceof Line2) { geometries.add(child.geometry); child.material.dispose(); }
     }
-  }
+    for (const geometry of geometries) geometry.dispose();
+    routes.clear();
+    routeLines.length = 0;
+    routePoint = null;
+    routeLabel.hidden = true;
+    for (const route of visibleRoutes(world.routes, selectedRoute)) {
+      const pair = routeLineMeshes(route, route.id === selectedRoute);
+      if (!pair || !route.fromTown || !route.toTown) continue;
+      const [backing, line] = pair;
+      const a = hexPosition(route.fromTown.q, route.fromTown.r);
+      const b = hexPosition(route.toTown.q, route.toTown.r);
+      const visual = routeVisual(route);
+      routes.add(backing, line);
+      routeLines.push(line);
+      if (route.id === selectedRoute) {
+        routePoint = new THREE.Vector3((a.x + b.x) / 2, 0.72, (a.z + b.z) / 2);
+        routeLabel.textContent = `${visual.symbol} ${visual.status === 'agreed' ? 'Agreed trade' : visual.label}`;
+        routeLabel.setAttribute('aria-label', `Inspect ${routeTitle(route)}. ${visual.label}`);
+      }
+    }
+  };
+  drawRoutes();
+  const raycaster = new THREE.Raycaster();
+  raycaster.params.Line2 = { threshold: 12 };
+  let routePointer: { x: number; y: number } | null = null;
+  renderer.domElement.addEventListener('pointerdown', (event) => { routePointer = { x: event.clientX, y: event.clientY }; });
+  renderer.domElement.addEventListener('pointercancel', () => { routePointer = null; });
+  renderer.domElement.addEventListener('pointerup', (event) => {
+    const start = routePointer;
+    routePointer = null;
+    if (!start || !routes.visible || Math.hypot(start.x - event.clientX, start.y - event.clientY) > 5) return;
+    const box = renderer.domElement.getBoundingClientRect();
+    raycaster.setFromCamera(new THREE.Vector2((event.clientX - box.left) / box.width * 2 - 1, 1 - (event.clientY - box.top) / box.height * 2), camera);
+    const id: unknown = raycaster.intersectObjects(routeLines, false)[0]?.object.userData['routeId'];
+    if (typeof id === 'string') onRoute(id);
+  });
   routes.visible = preferences.routes;
   scene.add(routes);
   const ring = new THREE.Mesh(
@@ -317,8 +365,8 @@ export function createAtlasRenderer(
   );
   ring.rotation.x = -Math.PI / 2;
   scene.add(ring);
-  const select = (id: number): void => {
-    const city = world.cities.find((candidate) => candidate.id === id);
+  const select = (id: string): void => {
+    const city = world.cities.find((candidate) => cityKey(candidate) === id);
     if (!city) return;
     selected = id;
     const point = hexPosition(city.q, city.r);
@@ -328,7 +376,7 @@ export function createAtlasRenderer(
       label.element.setAttribute('aria-pressed', String(label.id === id));
     }
   };
-  select(preferences.selected);
+  select(selected);
   const resize = (): void => {
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -345,20 +393,13 @@ export function createAtlasRenderer(
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   resize();
-  let moving =
-    !preferences.paused && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const moving =
+    resolveAppearance(preferences, false, window.matchMedia('(prefers-reduced-motion: reduce)').matches).motion;
   cues.setMotion(moving);
-  let elapsed = 0;
-  let previousTime = 0;
   let frame = 0;
-  const animate = (time: number): void => {
-    if (document.hidden) { previousTime = time; frame = requestAnimationFrame(animate); return; }
-    const delta = Math.min((time - previousTime) / 1000, 0.1);
-    previousTime = time;
-    if (moving) elapsed += delta;
+  const animate = (): void => {
+    if (document.hidden) { frame = requestAnimationFrame(animate); return; }
     controls.update();
-    for (const ship of ships)
-      ship.mesh.position.copy(ship.curve.getPoint((elapsed * 0.035 + ship.offset) % 1));
     camera.updateMatrixWorld();
     const left = new THREE.Vector3(-1, 0, 0).project(camera);
     const right = new THREE.Vector3(1, 0, 0).project(camera);
@@ -367,12 +408,25 @@ export function createAtlasRenderer(
       const point = label.point.clone().project(camera);
       return { id: label.id, x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight, width: Math.max(76, label.element.offsetWidth), height: Math.max(44, label.element.offsetHeight) };
     });
+    const projectedRoute = routePoint?.clone().project(camera);
+    const townTargets = positions.map((position) => ({ ...position, y: position.y - position.height * 1.1, height: position.height * 1.1 + 8 }));
+    const placedRouteLabel = projectedRoute && selectedRoute && routes.visible
+      ? routeLabelPlacement({ x: (projectedRoute.x + 1) / 2 * container.clientWidth, y: (1 - projectedRoute.y) / 2 * container.clientHeight }, townTargets, container.clientWidth, container.clientHeight) : null;
+    if (placedRouteLabel && selectedRoute) positions.unshift({ id: routeLabelKey(selectedRoute), ...placedRouteLabel });
     const visible = mapLabelVisibility(positions, selected, detail, container.clientWidth, container.clientHeight);
+    const routeLabelOffset = placedRouteLabel ? 1 : 0;
+    routeLabel.hidden = !routeLabelOffset || !projectedRoute || projectedRoute.z > 1 || projectedRoute.z < -1 || !visible[0];
+    if (placedRouteLabel) {
+      routeLabel.style.left = `${placedRouteLabel.x}px`;
+      routeLabel.style.top = `${placedRouteLabel.y + 22}px`;
+    }
+    const pixelsPerUnit = Math.max(0.01, Math.hypot((right.x - left.x) * container.clientWidth / 2, (right.y - left.y) * container.clientHeight / 2) / 2);
+    for (const line of routeLines) line.material.dashScale = pixelsPerUnit;
     for (const [index, label] of cityLabels.entries()) {
       const projected = label.point.clone().project(camera);
       label.element.style.left = `${(projected.x * 0.5 + 0.5) * container.clientWidth}px`;
       label.element.style.top = `${(-projected.y * 0.5 + 0.5) * container.clientHeight}px`;
-      label.element.hidden = projected.z > 1 || projected.z < -1 || !visible[index];
+      label.element.hidden = projected.z > 1 || projected.z < -1 || !visible[index + routeLabelOffset];
     }
     cues.update();
     renderer.render(scene, camera);
@@ -392,6 +446,7 @@ export function createAtlasRenderer(
       controls.update();
     },
     select,
+    selectRoute: (id) => { if (id !== selectedRoute) { selectedRoute = id; drawRoutes(); } },
     frameCity: (id, anchor) => {
       const city = cityLabels.find((candidate) => candidate.id === id);
       if (!city) return;
@@ -431,8 +486,8 @@ export function createAtlasRenderer(
     },
     snapshot: () => ({ zoom: camera.zoom, x: controls.target.x, z: controls.target.z }),
     showEvents: cues.show,
+    clearEvents: cues.clear,
     setMotion: (value) => {
-      moving = value;
       cues.setMotion(value);
     },
     dispose: () => {

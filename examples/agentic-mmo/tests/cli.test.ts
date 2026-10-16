@@ -9,8 +9,9 @@ import { createCampaignAdapter } from '../cli/adapter.ts';
 import { GameProtocol } from '../cli/protocol.ts';
 import { GameStore, isRecord } from '../cli/store.ts';
 import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy } from '../core/engine.ts';
+import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
-import { TRADE_RECIPES } from '../core/content.ts';
+import { TRADE_RECIPES, ECONOMY_RULES } from '../core/content.ts';
 import type { WorldState } from '../core/types.ts';
 
 const cli = new URL('../cli/main.ts', import.meta.url).pathname;
@@ -172,6 +173,566 @@ void test('explicit action timestamps survive CLI provenance and distinguish cha
     assert.equal(item.store.snapshot().commands[0]?.timestamp, input.timestamp);
     assert.equal(item.store.submit({ ...input, timestamp: '2026-10-16T01:00:10.000Z' }).ok, false);
     assert.equal(item.store.submit(input).duplicate, true);
+  } finally { item.cleanup(); }
+});
+
+void test('unreleased attached CLI plans are refused without rewriting campaign bytes', () => {
+  const item = fixture();
+  try {
+    item.store.initialize(1701);
+    const bytes = readFileSync(item.store.path, 'utf8');
+    const result = item.store.submit({ ...command(), plan: [{ action: { type: 'wait' }, reason: 'A real intended action' }] });
+    assert.equal(result.ok, false);
+    assert.equal(result.actionOutcome?.status, 'failed');
+    assert.equal(result.actionOutcome?.code, 'plan_not_released');
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+  } finally { item.cleanup(); }
+});
+
+function planningCampaign(store: GameStore): void {
+  store.initialize(1701, false, '2026-10-16T01:00:00.000Z');
+  const releases = ['settlement-foundations-1', 'settlement-foundations-2', 'settlement-independent-1', 'settlement-plans-1'];
+  for (let index = 0; index < 3; index += 1) {
+    const reply = store.authoredTransition({ expectedRevision: index, expectedFromReleaseId: releases[index], targetReleaseId: releases[index + 1], timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: `planning-release-${index}` }, 'release-apply');
+    assert.equal(reply.ok, true, reply.error);
+  }
+}
+
+void test('targeted focus and construction use shared optional historical action shapes', () => {
+  for (const action of [{ type: 'focus', focus: 'industry' }, { type: 'build', project: 'farm' }]) {
+    assert.equal(isGameAction({ ...action, cityId: 'city-0' }), true);
+    assert.equal(isGameAction(action), true);
+    for (const cityId of [null, 7, '', ' ', 'x'.repeat(129)]) assert.equal(isGameAction({ ...action, cityId }), false);
+    assert.equal(isGameAction({ ...action, cityId: 'city-0', fallback: 'city-1' }), false);
+  }
+});
+
+function frontierCampaign(store: GameStore): void {
+  planningCampaign(store);
+  for (const targetReleaseId of ['settlement-production-1', 'settlement-frontiers-1']) {
+    const state = store.snapshot().state;
+    const reply = store.authoredTransition({ expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, model: 'gpt-6-astra', commandId: `cli-${targetReleaseId}` }, 'release-apply');
+    assert.equal(reply.ok, true, reply.error);
+  }
+}
+
+void test('city repair uses one strict shared action shape', () => {
+  assert.equal(isGameAction({ type: 'repair-city', cityId: 'city-0' }), true);
+  for (const action of [{ type: 'repair-city' }, ...[null, 4, '', ' ', 'x'.repeat(129)].map((cityId) => ({ type: 'repair-city', cityId })), { type: 'repair-city', cityId: 'city-0', amount: 100 }])
+    assert.equal(isGameAction(action), false);
+});
+
+function recoveryCampaign(store: GameStore): void {
+  frontierCampaign(store);
+  for (const targetReleaseId of ['settlement-specialization-1', 'settlement-recovery-1']) {
+    const state = store.snapshot().state;
+    const reply = store.authoredTransition({ expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: `cli-${targetReleaseId}` }, 'release-apply');
+    assert.equal(reply.ok, true, reply.error);
+  }
+}
+
+void test('city recovery CLI process retries charge once and replay released earthquakes exactly', () => {
+  const item = fixture();
+  try {
+    recoveryCampaign(item.store);
+    const before = item.store.snapshot().state;
+    const quake = { expectedRevision: before.revision, kind: 'event', intervalId: 'cli-recovery-quake', timestamp: '2026-10-16T01:00:00.000Z', event: 'earthquake', target: 0, model: 'gpt-6-astra' };
+    assert.equal(item.store.directorTick(quake).ok, true);
+    assert.equal(item.store.directorTick(quake).duplicate, true);
+    const damaged = item.store.snapshot().state;
+    assert.equal(damaged.cities[0]?.damage, 35);
+    assert.equal(damaged.cities[0]?.infrastructure, before.cities[0]?.infrastructure);
+    const repair = { type: 'repair-city', cityId: 'city-0' };
+    const args = ['action', '--seat', '0', '--revision', String(damaged.revision), '--action', JSON.stringify(repair), '--plan', JSON.stringify([{ action: repair, reason: 'Restore the named damaged city' }]), '--at', '2026-10-16T01:00:00.000Z', '--model', 'gpt-6-astra', '--id', 'cli-repair-once'];
+    assert.equal(run(item.directory, args).ok, true);
+    const first = new GameStore(item.store.path).snapshot();
+    assert.equal(first.state.cities[0]?.damage, 10);
+    assert.equal(first.state.civilizations[0]?.resources.materials, (damaged.civilizations[0]?.resources.materials ?? 0) - ECONOMY_RULES.repair.cost.materials);
+    assert.equal(run(item.directory, args).duplicate, true);
+    assert.deepEqual(item.store.snapshot(), first);
+    const second = item.store.submit({ seat: 0, expectedRevision: damaged.revision, action: repair, timestamp: '2026-10-16T01:00:10.000Z', model: 'gpt-6-astra', commandId: 'cli-partial-repair' });
+    assert.equal(second.ok, true, second.error);
+    const repaired = item.store.snapshot();
+    assert.equal(repaired.state.cities[0]?.damage, 0);
+    assert.equal(repaired.state.civilizations[0]?.resources.materials, (damaged.civilizations[0]?.resources.materials ?? 0) - 2 * ECONOMY_RULES.repair.cost.materials);
+    assert.equal(repaired.state.civilizations[0]?.resources.energy, (damaged.civilizations[0]?.resources.energy ?? 0) - 2 * ECONOMY_RULES.repair.cost.energy);
+    assert.deepEqual(repaired.state.cities.slice(1), damaged.cities.slice(1));
+    const bytes = readFileSync(item.store.path, 'utf8');
+    for (const cityId of ['city-0', 'city-1', 'missing-city', '', null]) {
+      assert.equal(item.store.submit({ seat: 0, expectedRevision: repaired.state.revision, action: { type: 'repair-city', cityId }, timestamp: '2026-10-16T01:00:20.000Z', model: 'gpt-6-astra', commandId: `refused-repair-${String(cityId)}` }).ok, false);
+      assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+    }
+    const changed = [...args];
+    changed[changed.indexOf('--action') + 1] = JSON.stringify({ ...repair, cityId: 'city-1' });
+    assert.equal(run(item.directory, changed).ok, false);
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+    let reproduced = repaired.initial;
+    for (const transition of repaired.timeline) {
+      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
+        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+          : transition.kind === 'director-tick' ? applyDirectorTick(reproduced, transition.command) : null;
+      assert.ok(result?.ok);
+      reproduced = result.state;
+    }
+    assert.deepEqual(reproduced, repaired.state);
+  } finally { item.cleanup(); }
+});
+
+void test('synthetic historical earthquake saves retain their original infrastructure loss during replay', () => {
+  const item = fixture();
+  try {
+    item.store.initialize(1701, false, '2026-10-16T01:00:00.000Z');
+    const saved = item.store.snapshot();
+    saved.initial.unlockedFeatures.push('disaster-recovery');
+    saved.state.unlockedFeatures.push('disaster-recovery');
+    writeFileSync(item.store.path, JSON.stringify(saved));
+    const historical = item.store.snapshot().state;
+    assert.equal(historical.unlockedFeatures.includes('city-repair'), false);
+    assert.equal(isWorldState(historical), true);
+    const quake = { expectedRevision: historical.revision, kind: 'event', intervalId: 'historical-quake', timestamp: '2026-10-16T01:00:00.000Z', event: 'earthquake', target: 0, model: 'gpt-6-astra' };
+    assert.equal(item.store.directorTick(quake).ok, true);
+    const damaged = new GameStore(item.store.path).snapshot();
+    assert.equal(damaged.state.cities[0]?.infrastructure, (historical.cities[0]?.infrastructure ?? 0) - 1);
+    assert.equal(damaged.state.cities[0]?.damage, 35);
+    const transition = damaged.timeline[0];
+    assert.ok(transition?.kind === 'director-tick');
+    const replayed = applyDirectorTick(damaged.initial, transition.command);
+    assert.equal(replayed.ok, true);
+    assert.deepEqual(replayed.state, damaged.state);
+    assert.equal(item.store.directorTick(quake).duplicate, true);
+    assert.deepEqual(item.store.snapshot(), damaged);
+  } finally { item.cleanup(); }
+});
+
+void test('malformed stored city repair actions fail closed without rewriting campaign bytes', () => {
+  const item = fixture();
+  try {
+    recoveryCampaign(item.store);
+    const state = item.store.snapshot().state;
+    assert.equal(item.store.directorTick({ expectedRevision: state.revision, kind: 'event', intervalId: 'corrupt-repair-quake', timestamp: '2026-10-16T01:00:00.000Z', event: 'earthquake', target: 0, model: 'gpt-6-astra' }).ok, true);
+    assert.equal(item.store.submit({ seat: 0, expectedRevision: item.store.snapshot().state.revision, action: { type: 'repair-city', cityId: 'city-0' }, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: 'repair-shape-fixture' }).ok, true);
+    const saved = parse(readFileSync(item.store.path, 'utf8'));
+    for (const action of [{ type: 'repair-city' }, { type: 'repair-city', cityId: null }, { type: 'repair-city', cityId: ' ' }, { type: 'repair-city', cityId: 'city-0', amount: 999 }]) {
+      for (const field of ['commands', 'timeline']) {
+        const corrupted = structuredClone(saved);
+        const entry = array(corrupted[field]).map(record).find((candidate) => field === 'commands' || candidate.kind === 'action');
+        assert.ok(entry);
+        const storedCommand = field === 'commands' ? entry : record(entry.command);
+        storedCommand.action = action;
+        const bytes = JSON.stringify(corrupted);
+        writeFileSync(item.store.path, bytes);
+        assert.throws(() => item.store.snapshot(), ProtocolError);
+        assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+      }
+    }
+  } finally { item.cleanup(); }
+});
+
+void test('city-targeted CLI actions preserve historical untargeted behavior and exact process retries', () => {
+  const item = fixture();
+  try {
+    frontierCampaign(item.store);
+    const act = (action: Record<string, unknown>, timestamp: string, commandId: string) => {
+      const reply = item.store.submit({ seat: 0, expectedRevision: item.store.snapshot().state.revision, action, timestamp, model: 'gpt-6-astra', commandId });
+      assert.equal(reply.ok, true, reply.error);
+    };
+    const founding = item.store.observation(0).legalActions.find((option) => option.action.type === 'settle')?.action;
+    assert.ok(founding);
+    act(founding, '2026-10-16T01:00:00.000Z', 'city-target-frontier');
+    act({ type: 'research', technology: 'agriculture' }, '2026-10-16T01:00:10.000Z', 'city-target-cultivation');
+    assert.equal(item.store.strategyCatchUp({ expectedRevision: item.store.snapshot().state.revision, timestamp: '2026-10-16T01:02:00.000Z', commandId: 'city-target-research-beats' }).ok, true);
+    act({ type: 'focus', focus: 'industry' }, '2026-10-16T01:02:00.000Z', 'legacy-wide-focus');
+    act({ type: 'build', project: 'farm' }, '2026-10-16T01:02:10.000Z', 'legacy-first-building');
+    const legacy = item.store.snapshot().state;
+    const cities = legacy.cities.filter((city) => city.civId === 0);
+    const target = cities.find((city) => city.id !== 'city-0');
+    assert.ok(target);
+    assert.equal(cities.length, 2);
+    assert.equal(cities.every((city) => city.focus === 'industry'), true);
+    assert.equal(cities[0]?.buildings.includes('farm'), true);
+    assert.equal(target.buildings.includes('farm'), false);
+    assert.equal(item.store.authoredTransition({ expectedRevision: legacy.revision, expectedFromReleaseId: 'settlement-frontiers-1', targetReleaseId: 'settlement-specialization-1', model: 'gpt-6-astra', commandId: 'cli-specialization' }, 'release-apply').ok, true);
+    const revision = item.store.snapshot().state.revision;
+    const focus = { type: 'focus', focus: 'growth', cityId: target.id };
+    const build = { type: 'build', project: 'farm', cityId: target.id };
+    const plan = [{ action: focus, reason: 'Feed the frontier while the capital supplies materials' }, { action: build, reason: 'Review a farm at this named settlement' }];
+    const args = ['action', '--seat', '0', '--revision', String(revision), '--action', JSON.stringify(focus), '--plan', JSON.stringify(plan), '--at', '2026-10-16T01:02:20.000Z', '--model', 'gpt-6-astra', '--id', 'cli-target-focus'];
+    assert.equal(run(item.directory, args).ok, true);
+    assert.equal(run(item.directory, args).duplicate, true);
+    const focused = item.store.snapshot().state;
+    assert.equal(focused.cities.find((city) => city.id === target.id)?.focus, 'growth');
+    assert.deepEqual(focused.cities.find((city) => city.id === 'city-0'), legacy.cities.find((city) => city.id === 'city-0'));
+    const buildReply = item.store.submit({ seat: 0, expectedRevision: revision, action: build, plan: [{ action: build, reason: 'Build the reviewed frontier farm' }], timestamp: '2026-10-16T01:02:30.000Z', model: 'gpt-6-astra', commandId: 'cli-target-build' });
+    assert.equal(buildReply.ok, true, buildReply.error);
+    const built = item.store.snapshot();
+    assert.equal(built.state.cities.find((city) => city.id === target.id)?.buildings.includes('farm'), true);
+    assert.equal(built.state.actionPlans?.[0]?.observedRevision, revision);
+    const bytes = readFileSync(item.store.path, 'utf8');
+    for (const action of [{ type: 'focus', focus: 'research' }, { ...focus, cityId: 'city-1' }, { ...build, cityId: target.id }]) {
+      assert.equal(item.store.submit({ seat: 0, expectedRevision: built.state.revision, action, timestamp: '2026-10-16T01:02:40.000Z', model: 'gpt-6-astra', commandId: `refused-${JSON.stringify(action)}` }).ok, false);
+      assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+    }
+    const changed = [...args];
+    changed[changed.indexOf('--action') + 1] = JSON.stringify({ ...focus, cityId: 'city-0' });
+    assert.equal(run(item.directory, changed).ok, false);
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+    let reproduced = built.initial;
+    for (const transition of built.timeline) {
+      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
+        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+          : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
+      assert.ok(result?.ok);
+      reproduced = result.state;
+    }
+    assert.deepEqual(reproduced, built.state);
+  } finally { item.cleanup(); }
+});
+
+void test('stored targeted focus and build reject malformed city IDs in both command collections', () => {
+  const item = fixture();
+  try {
+    item.store.initialize(1701);
+    assert.equal(item.store.submit(command()).ok, true);
+    const saved = parse(readFileSync(item.store.path, 'utf8'));
+    for (const action of [{ type: 'focus', focus: 'industry', cityId: 4 }, { type: 'build', project: 'farm', cityId: '' }]) {
+      for (const field of ['commands', 'timeline']) {
+        const corrupted = structuredClone(saved);
+        const entry = record(array(corrupted[field])[0]);
+        const storedCommand = field === 'commands' ? entry : record(entry.command);
+        storedCommand.action = action;
+        const bytes = JSON.stringify(corrupted);
+        writeFileSync(item.store.path, bytes);
+        assert.throws(() => item.store.snapshot(), ProtocolError);
+        assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+      }
+    }
+  } finally { item.cleanup(); }
+});
+
+void test('CLI frontier founding requires explicit source and survives separate process retry', () => {
+  const item = fixture();
+  try {
+    frontierCampaign(item.store);
+    const before = item.store.snapshot().state;
+    const view = item.store.observation(0);
+    const action = view.legalActions.find((option) => option.action.type === 'settle')?.action;
+    assert.ok(action?.type === 'settle');
+    assert.equal(action.sourceCityId, 'city-0');
+    const bytes = readFileSync(item.store.path, 'utf8');
+    const missing = item.store.submit({ seat: 0, expectedRevision: before.revision, action: { type: 'settle', tileId: action.tileId }, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: 'missing-source' });
+    assert.equal(missing.ok, false);
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+    const args = ['action', '--seat', '0', '--revision', String(before.revision), '--action', JSON.stringify(action), '--at', '2026-10-16T01:00:00.000Z', '--model', 'gpt-6-astra', '--id', 'cli-frontier'];
+    assert.equal(run(item.directory, args).ok, true);
+    assert.equal(run(item.directory, args).duplicate, true);
+    const after = item.store.snapshot();
+    assert.equal(after.state.cities[0]?.population, (before.cities[0]?.population ?? 0) - ECONOMY_RULES.settle.population);
+    assert.equal(after.state.cities.length, before.cities.length + 1);
+    assert.deepEqual(after.commands.at(-1)?.action, action);
+    assert.equal(isWorldState(after.state), true);
+    const replay = item.store.replay();
+    let reproduced = replay.initial;
+    for (const transition of replay.timeline) {
+      const next = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
+        : transition.kind === 'action' ? applyCommand(reproduced, transition.command) : null;
+      assert.ok(next?.ok);
+      reproduced = next.state;
+    }
+    assert.deepEqual(reproduced, after.state);
+  } finally { item.cleanup(); }
+});
+
+void test('historical source-less founding remains shape-valid and replays its original population behavior', () => {
+  const item = fixture();
+  try {
+    item.store.initialize(1701);
+    const legacy = item.store.snapshot();
+    legacy.initial.unlockedFeatures.push('settlement-expansion');
+    legacy.state.unlockedFeatures.push('settlement-expansion');
+    writeFileSync(item.store.path, JSON.stringify(legacy));
+    const founding = item.store.observation(0).legalActions.find((option) => option.action.type === 'settle')?.action;
+    assert.ok(founding?.type === 'settle');
+    assert.equal(Object.hasOwn(founding, 'sourceCityId'), false);
+    assert.equal(item.store.submit({ seat: 0, expectedRevision: 0, action: founding, model: 'gpt-6-astra', commandId: 'archived-source-less' }).ok, true);
+    const bytes = readFileSync(item.store.path, 'utf8');
+    const replay = item.store.replay();
+    const archived = replay.commands[0];
+    assert.ok(archived);
+    const result = applyCommand(replay.initial, archived);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.state, item.store.snapshot().state);
+    assert.equal(result.state.cities[0]?.population, legacy.state.cities[0]?.population);
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+  } finally { item.cleanup(); }
+});
+
+void test('stored founding command shapes reject malformed present sources without rewriting campaign bytes', () => {
+  const item = fixture();
+  try {
+    item.store.initialize(1701);
+    assert.equal(item.store.submit(command()).ok, true);
+    const saved = parse(readFileSync(item.store.path, 'utf8'));
+    for (const sourceCityId of [7, null, '', '   ', 'x'.repeat(129)]) {
+      for (const field of ['commands', 'timeline']) {
+        const corrupt = structuredClone(saved);
+        const first = record(array(corrupt[field])[0]);
+        const storedCommand = field === 'commands' ? first : record(first.command);
+        storedCommand.action = { type: 'settle', tileId: 0, sourceCityId };
+        const bytes = JSON.stringify(corrupt);
+        writeFileSync(item.store.path, bytes);
+        assert.throws(() => item.store.replay(), ProtocolError, `${field}: ${String(sourceCityId)}`);
+        assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+      }
+    }
+  } finally { item.cleanup(); }
+});
+
+void test('unconstructed operation records are rejected without rewriting legacy campaign bytes', () => {
+  const item = fixture();
+  try {
+    item.store.initialize(1701);
+    const current = item.store.snapshot();
+    assert.equal(Object.hasOwn(current.state.cities[0] ?? {}, 'buildingOperations'), false);
+    const corrupt = record(structuredClone(current));
+    const city = record(array(record(corrupt.state).cities)[0]);
+    city.buildingOperations = { 'unconstructed-operation': { enabled: true, lastResult: null } };
+    assert.equal(isWorldState(corrupt.state), false);
+    const bytes = JSON.stringify(corrupt);
+    writeFileSync(item.store.path, bytes);
+    assert.throws(() => item.store.observation(0), ProtocolError);
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+  } finally { item.cleanup(); }
+});
+
+function worldWithOperation(): WorldState {
+  const item = fixture();
+  try {
+    planningCampaign(item.store);
+    assert.equal(item.store.authoredTransition({ expectedRevision: 3, expectedFromReleaseId: 'settlement-plans-1', targetReleaseId: 'settlement-production-1', model: 'gpt-6-astra', commandId: 'operation-fixture-release' }, 'release-apply').ok, true);
+    const state = item.store.snapshot().state;
+    const city = state.cities[0];
+    const civilization = state.civilizations[0];
+    assert.ok(city && civilization);
+    state.round = 4;
+    civilization.technologies = ['agriculture', 'water-management'];
+    city.buildings.push('irrigation');
+    city.buildingOperations = { irrigation: { enabled: true, lastResult: { round: 3, status: 'operated', paid: { materials: 1 }, produced: { food: 5.75 }, shortages: [] } } };
+    return state;
+  } finally { item.cleanup(); }
+}
+
+void test('canonical operation records reject malformed shape, accounting and chronology', () => {
+  assert.equal(isWorldState(worldWithOperation()), true);
+  const mutations: Array<[string, (state: Record<string, unknown>, city: Record<string, unknown>, operation: Record<string, unknown>, result: Record<string, unknown>) => void]> = [
+    ['map must be an object', (_state, city) => { city.buildingOperations = []; }],
+    ['required paid operation cannot be absent', (_state, city) => { delete city.buildingOperations; }],
+    ['required paid operation cannot be omitted', (_state, city) => { city.buildingOperations = {}; }],
+    ['unconstructed operations are forbidden', (_state, city, operation) => { record(city.buildingOperations).kiln = operation; }],
+    ['free buildings cannot have paid operation records', (_state, city, operation) => { array(city.buildings).push('farm'); record(city.buildingOperations).farm = operation; }],
+    ['operation requires enabled boolean', (_state, _city, operation) => { operation.enabled = 'yes'; }],
+    ['operation requires last result or null', (_state, _city, operation) => { delete operation.lastResult; }],
+    ['operation rejects unknown fields', (_state, _city, operation) => { operation.reserved = 1; }],
+    ['result status must be known', (_state, _city, _operation, result) => { result.status = 'queued'; }],
+    ['result round cannot be future', (_state, _city, _operation, result) => { result.round = 5; }],
+    ['result round must be nonnegative integer', (_state, _city, _operation, result) => { result.round = -1; }],
+    ['result rejects unknown fields', (_state, _city, _operation, result) => { result.current = true; }],
+    ['paid amounts must use known resources', (_state, _city, _operation, result) => { result.paid = { gold: 1 }; }],
+    ['paid amounts cannot be negative', (_state, _city, _operation, result) => { result.paid = { materials: -1 }; }],
+    ['paid amounts must be finite', (_state, _city, _operation, result) => { result.paid = { materials: Infinity }; }],
+    ['produced amounts must use known resources', (_state, _city, _operation, result) => { result.produced = { gold: 1 }; }],
+    ['produced amounts cannot be negative', (_state, _city, _operation, result) => { result.produced = { food: -1 }; }],
+    ['shortages must be an array', (_state, _city, _operation, result) => { result.shortages = {}; }],
+    ['operated result cannot have shortages', (_state, _city, _operation, result) => { result.shortages = [{ resource: 'materials', required: 1, available: 0 }]; }],
+    ['paused result cannot report payment', (_state, _city, _operation, result) => { result.status = 'paused'; result.produced = {}; }],
+    ['blocked result requires shortages', (_state, _city, _operation, result) => { result.status = 'blocked'; result.paid = {}; result.produced = {}; }],
+    ['operations require their released capability', (state) => { state.unlockedFeatures = array(state.unlockedFeatures).filter((feature) => feature !== 'building-operations'); }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const state = record(worldWithOperation());
+    const city = record(array(state.cities)[0]);
+    const operation = record(record(city.buildingOperations).irrigation);
+    const result = record(operation.lastResult);
+    mutate(state, city, operation, result);
+    assert.equal(isWorldState(state), false, label);
+  }
+});
+
+void test('historical operation facts survive toggles and tuning while malformed shortages fail closed', () => {
+  const state = worldWithOperation();
+  const city = state.cities[0];
+  const operation = city?.buildingOperations?.irrigation;
+  assert.ok(city && operation);
+  operation.enabled = false;
+  assert.equal(isWorldState(state), true);
+  operation.lastResult = { round: 1, status: 'operated', paid: { energy: 2.25 }, produced: {}, shortages: [] };
+  assert.equal(isWorldState(state), true);
+  operation.enabled = true;
+  operation.lastResult = { round: 2, status: 'paused', paid: {}, produced: {}, shortages: [] };
+  assert.equal(isWorldState(state), true);
+  const blocked = { round: 3, status: 'blocked', paid: {}, produced: {}, shortages: [{ resource: 'materials', required: 2, available: 0.25 }] } as const;
+  operation.lastResult = structuredClone({ ...blocked, shortages: [...blocked.shortages] });
+  assert.equal(isWorldState(state), true);
+  const corruptions: unknown[] = [
+    [{ resource: 'gold', required: 2, available: 0 }],
+    [{ resource: 'materials', required: 1, available: 1 }],
+    [{ resource: 'materials', required: 0, available: 0 }],
+    [{ resource: 'materials', required: 1, available: -1 }],
+    [{ resource: 'materials', required: Infinity, available: 0 }],
+    [{ resource: 'materials', required: 1, available: NaN }],
+    [{ resource: 'materials', required: 1, available: 0, extra: true }],
+    [blocked.shortages[0], blocked.shortages[0]],
+    Array.from({ length: 1 }),
+  ];
+  for (const shortages of corruptions) {
+    const corrupted = record(structuredClone(state));
+    const result = record(record(record(record(array(corrupted.cities)[0]).buildingOperations).irrigation).lastResult);
+    result.shortages = shortages;
+    assert.equal(isWorldState(corrupted), false);
+  }
+  operation.lastResult = null;
+  assert.equal(isWorldState(state), true);
+  city.buildings = [];
+  city.buildingOperations = {};
+  assert.equal(isWorldState(state), true);
+  delete city.buildingOperations;
+  assert.equal(isWorldState(state), true);
+});
+
+void test('CLI paid operations survive restarted pause and resume commands with exact replay', () => {
+  const item = fixture();
+  try {
+    planningCampaign(item.store);
+    assert.equal(item.store.authoredTransition({ expectedRevision: 3, expectedFromReleaseId: 'settlement-plans-1', targetReleaseId: 'settlement-production-1', model: 'gpt-6-astra', commandId: 'production-release' }, 'release-apply').ok, true);
+    const act = (action: Record<string, unknown>, timestamp: string, commandId: string) => {
+      const reply = item.store.submit({ seat: 0, expectedRevision: item.store.snapshot().state.revision, action, timestamp, model: 'gpt-6-astra', commandId });
+      assert.equal(reply.ok, true, reply.error);
+    };
+    const beat = (timestamp: string, commandId: string) => {
+      const reply = item.store.strategyCatchUp({ expectedRevision: item.store.snapshot().state.revision, timestamp, commandId });
+      assert.equal(reply.ok, true, reply.error);
+    };
+    act({ type: 'research', technology: 'agriculture' }, '2026-10-16T01:00:00.000Z', 'cultivation');
+    beat('2026-10-16T01:04:00.000Z', 'four-beats');
+    act({ type: 'research', technology: 'water-management' }, '2026-10-16T01:04:00.000Z', 'water');
+    beat('2026-10-16T01:06:00.000Z', 'water-beats');
+    act({ type: 'build', project: 'irrigation' }, '2026-10-16T01:06:00.000Z', 'irrigation');
+    beat('2026-10-16T01:07:00.000Z', 'first-operation');
+    const before = item.store.snapshot().state;
+    const previousResult = before.cities[0]?.buildingOperations?.irrigation?.lastResult;
+    assert.equal(previousResult?.status, 'operated');
+    const pause = { type: 'set-building-operation', cityId: 'city-0', buildingId: 'irrigation', enabled: false };
+    const plan = [{ action: pause, reason: 'Reserve materials for the next improvement' }, { action: { ...pause, enabled: true }, reason: 'Review reserves before resuming irrigation' }];
+    const args = ['action', '--seat', '0', '--revision', String(before.revision), '--action', JSON.stringify(pause), '--plan', JSON.stringify(plan), '--at', '2026-10-16T01:07:00.000Z', '--model', 'gpt-6-astra', '--id', 'pause-paid'];
+    assert.equal(run(item.directory, args).ok, true);
+    assert.equal(run(item.directory, args).duplicate, true);
+    assert.deepEqual(item.store.snapshot().state.cities[0]?.buildingOperations?.irrigation, { enabled: false, lastResult: previousResult });
+    const bytes = readFileSync(item.store.path, 'utf8');
+    const rejected = item.store.submit({ seat: 1, expectedRevision: before.revision, action: pause, timestamp: '2026-10-16T01:07:00.000Z', model: 'gpt-6-astra', commandId: 'outsider-pause' });
+    assert.equal(rejected.ok, false);
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+    beat('2026-10-16T01:08:00.000Z', 'paused-beat');
+    const paused = item.store.snapshot().state;
+    assert.equal(paused.cities[0]?.buildingOperations?.irrigation?.lastResult?.status, 'paused');
+    const observed = run(item.directory, ['observe', '--seat', '0', '--at', '2026-10-16T01:08:00.000Z']);
+    assert.deepEqual(observed.buildingRecipes, [{ buildingId: 'irrigation', inputs: { materials: 1 }, outputs: { food: 5 } }]);
+    assert.equal(record(array(record(observed.actionPlan).items)[1]).status, 'ready');
+    act({ ...pause, enabled: true }, '2026-10-16T01:08:00.000Z', 'explicit-resume');
+    beat('2026-10-16T01:09:00.000Z', 'resumed-beat');
+    assert.equal(item.store.snapshot().state.cities[0]?.buildingOperations?.irrigation?.lastResult?.status, 'operated');
+    const replay = item.store.replay();
+    let reproduced = replay.initial;
+    for (const transition of replay.timeline) {
+      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
+        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+          : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
+      assert.ok(result?.ok);
+      reproduced = result.state;
+    }
+    assert.deepEqual(reproduced, item.store.snapshot().state);
+  } finally { item.cleanup(); }
+});
+
+void test('attached CLI plans survive process restart, retain original revision and require explicit successor submission', () => {
+  const item = fixture();
+  try {
+    planningCampaign(item.store);
+    const plan = [{ action: { type: 'focus', focus: 'industry' }, reason: 'Stock materials' }, { action: { type: 'wait' }, reason: 'Reassess stock before spending' }];
+    const args = ['action', '--seat', '0', '--revision', '3', '--action', JSON.stringify(plan[0]?.action), '--plan', JSON.stringify(plan), '--at', '2026-10-16T01:00:00.000Z', '--model', 'gpt-6-astra', '--id', 'planned-cli'];
+    const reply = run(item.directory, args);
+    assert.equal(reply.ok, true);
+    assert.equal(record(reply.actionOutcome).status, 'completed');
+    const stale = item.store.submit({ seat: 1, expectedRevision: 3, observedRevision: 999, action: plan[0]?.action, plan, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: 'second-planned-cli' });
+    assert.equal(stale.ok, true);
+    assert.equal(item.store.snapshot().state.actionPlans?.[1]?.observedRevision, 3);
+    assert.equal(item.store.snapshot().commands[1]?.observedRevision, 3);
+    assert.equal(run(item.directory, args).duplicate, true);
+    const changedArgs = [...args];
+    changedArgs[changedArgs.indexOf('--plan') + 1] = JSON.stringify([{ ...plan[0], reason: 'Changed intent' }]);
+    const beforeFailure = readFileSync(item.store.path, 'utf8');
+    assert.equal(run(item.directory, changedArgs).ok, false);
+    assert.equal(readFileSync(item.store.path, 'utf8'), beforeFailure);
+    const blocked = run(item.directory, ['observe', '--seat', '0', '--at', '2026-10-16T01:00:00.000Z']);
+    assert.equal(record(array(record(blocked.actionPlan).items)[1]).status, 'blocked');
+    const ready = run(item.directory, ['observe', '--seat', '0', '--at', '2026-10-16T01:00:10.000Z']);
+    assert.equal(record(array(record(ready.actionPlan).items)[1]).status, 'ready');
+    assert.equal(readFileSync(item.store.path, 'utf8'), beforeFailure);
+    assert.equal(item.store.strategyCatchUp({ expectedRevision: 5, timestamp: '2026-10-16T01:01:00.000Z', commandId: 'planning-beat' }).ok, true);
+    const afterBeat = item.store.snapshot();
+    assert.equal(afterBeat.commands.length, 2);
+    assert.equal(afterBeat.state.actionPlans?.[0]?.items[1]?.status, 'needs-review');
+    const failureBytes = readFileSync(item.store.path, 'utf8');
+    const refusal = item.store.submit({ seat: 0, expectedRevision: 6, action: { type: 'wait' }, plan: [{ action: { type: 'wait' }, reason: '' }], timestamp: '2026-10-16T01:01:00.000Z', model: 'gpt-6-astra', commandId: 'invalid-replan' });
+    assert.equal(refusal.actionOutcome?.status, 'failed');
+    assert.equal(readFileSync(item.store.path, 'utf8'), failureBytes);
+    assert.equal(item.store.submit({ seat: 0, expectedRevision: 6, action: { type: 'wait' }, timestamp: '2026-10-16T01:01:00.000Z', model: 'gpt-6-astra', commandId: 'explicit-follow-up' }).ok, true);
+    assert.equal(item.store.snapshot().state.actionPlans?.[0], null);
+    assert.notEqual(item.store.snapshot().state.actionPlans?.[1], null);
+    const replay = item.store.replay();
+    let reproduced = replay.initial;
+    for (const transition of replay.timeline) {
+      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
+        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+          : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
+      assert.ok(result?.ok);
+      reproduced = result.state;
+    }
+    assert.deepEqual(reproduced, item.store.snapshot().state);
+  } finally { item.cleanup(); }
+});
+
+void test('corrupt durable plan slots fail before observation without rewriting bytes', () => {
+  const item = fixture();
+  try {
+    planningCampaign(item.store);
+    const campaign = parse(readFileSync(item.store.path, 'utf8'));
+    record(campaign.state).actionPlans = [];
+    const bytes = JSON.stringify(campaign);
+    writeFileSync(item.store.path, bytes);
+    assert.throws(() => item.store.observation(0), ProtocolError);
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+  } finally { item.cleanup(); }
+});
+
+void test('canonical plans reject malformed slots and persisted derived statuses', () => {
+  const item = fixture();
+  try {
+    planningCampaign(item.store);
+    const state = item.store.snapshot().state;
+    assert.equal(isWorldState(state), true);
+    const plan = { observedRevision: 1, committedRevision: 2, items: [{ action: { type: 'wait' }, reason: 'Hold resources', status: 'completed', result: 'Accepted' }, { action: { type: 'wait' }, reason: 'Reassess later', status: 'needs-review', result: 'Needs model review' }] };
+    const valid = { ...state, actionPlans: [plan, null, null, null, null, null] };
+    assert.equal(isWorldState(valid), true);
+    const invalid: unknown[] = [undefined, null, {}, [], Array.from({ length: 6 }), [plan], [...valid.actionPlans, null], [{ ...plan, observedRevision: 2 }, ...valid.actionPlans.slice(1)], [{ ...plan, committedRevision: 4 }, ...valid.actionPlans.slice(1)], [{ ...plan, items: [...plan.items, plan.items[1]] }, ...valid.actionPlans.slice(1)], [{ ...plan, items: plan.items.map((entry, index) => ({ ...entry, status: index === 0 ? 'completed' : 'ready' })) }, ...valid.actionPlans.slice(1)]];
+    const sparse = Array.from({ length: 6 }, () => null);
+    Reflect.deleteProperty(sparse, '0');
+    invalid.push(sparse);
+    for (const actionPlans of invalid) assert.equal(isWorldState({ ...state, actionPlans }), false, JSON.stringify(actionPlans));
+    const absent = { ...state };
+    delete absent.actionPlans;
+    assert.equal(isWorldState(absent), false);
+    const legacy = item.store.snapshot().initial;
+    assert.equal(isWorldState(legacy), true);
+    assert.equal(isWorldState({ ...legacy, actionPlans: Array.from({ length: 6 }, () => null) }), false);
   } finally { item.cleanup(); }
 });
 

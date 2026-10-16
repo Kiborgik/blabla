@@ -16,6 +16,7 @@ state last_valid: bool
 action play(seat: int, choice: int)
 action hold()
 action restart()
+action legacy_cycle()
 
 always "five-civilizations" { civilizations == 5 }
 always "six-actor-turn-order" { phase >= 0 and phase <= 5 }
@@ -36,4 +37,8 @@ when hold {
 }
 when restart {
     expect "restart-preserves-world": after.revision == before.revision and after.round == before.round and after.population == before.population
+}
+when legacy_cycle {
+    expect "legacy-cycle-resolves-one-round": after.round == before.round + 1 and after.phase == before.phase
+    expect "legacy-cycle-preserves-calendar": after.year == before.year
 }

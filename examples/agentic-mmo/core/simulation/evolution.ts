@@ -155,6 +155,9 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
   next.unlockedFeatures = [...target.featureIds];
   if (startsIndependent && command.timestamp !== undefined)
     next.independentTurns = createIndependentTurns(command.timestamp);
+  if (target.featureIds.includes('bounded-plans') && !source.featureIds.includes('bounded-plans'))
+    next.actionPlans = Array.from({ length: DIRECTOR_SEAT + 1 }, () => null);
+  if (target.featureIds.includes('public-projects') && !source.featureIds.includes('public-projects')) next.publicProjects = [];
   const added = target.featureIds.filter((feature) => !source.featureIds.includes(feature));
   emitEvent(next, events, {
     type: 'release-applied',

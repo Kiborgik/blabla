@@ -2,7 +2,7 @@ import { CIV_COUNT } from './types.ts';
 import type {
   BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
   EraDefinition, FeatureDefinition, Focus, GameAction, HistoricalMilestone, Resource,
-  Resources, TechnologyDefinition, TradeRecipe,
+  Resources, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe,
 } from './types.ts';
 
 export const RESOURCE_IDS: readonly Resource[] = ['food', 'materials', 'energy', 'credits', 'science', 'culture'];
@@ -26,8 +26,18 @@ export const FEATURES: FeatureDefinition[] = [
   { id: 'release-evolution', name: 'A world that keeps growing', description: 'Compatible delivered releases enter the inhabited world once while preserving its state, identity and history.' },
   { id: 'independent-actions', name: 'Civilizations act together', description: 'Independent fair tactical windows and shared strategic beats let each civilization act without waiting for another actor.' },
   { id: 'bounded-plans', name: 'The next useful step', description: 'At most two explicit actionable intentions guide real agent decisions and retain concrete lifecycle results without automatic execution.' },
+  { id: 'building-operations', name: 'Working choices', description: 'Pause or operate constructed recipes that consume scarce inputs for useful output.' },
+  { id: 'settlement-crafts', name: 'Water and fire', description: 'Connected discoveries create distinct food and material production commitments.' },
+  { id: 'city-repair', name: 'Rebuild a working city', description: 'Materials and energy restore damage in an exactly selected owned city.' },
+  { id: 'city-specialization', name: 'Distinct settlement roles', description: 'Each settlement can choose its own focus and construction while sharing civilization supplies.' },
+  { id: 'conserved-founding', name: 'People build a frontier', description: 'New settlements transfer people from an owned source city without creating population.' },
+  { id: 'terrain-production', name: 'Useful land', description: 'Released terrain yields make food and material locations distinct productive choices.' },
   { id: 'settlement-expansion', name: 'Beyond the first hearth', description: 'New settlements make land, migration and supply consequential.' },
   { id: 'trade-routes', name: 'Roads between peoples', description: 'Routes exchange scarce goods and can be disrupted and repaired.' },
+  { id: 'public-projects', name: 'Promises that build', description: 'Consenting partners fund delayed shared repairs from their actual supplies.' },
+  { id: 'exact-trade-endpoints', name: 'Choose the towns that connect', description: 'A trade proposal names two exact owned towns while keeping shared civilization stocks and the existing delivery schedule.' },
+  { id: 'land-transport', name: 'Paths between towns', description: 'New consensual exchanges quote actual passable land paths and an acceptance-relative delivery interval.' },
+  { id: 'operating-resource-exchange', name: 'Fuel through cooperation', description: 'Consenting partners exchange energy and materials to support later productive work.' },
   { id: 'statecraft', name: 'Institutions and belonging', description: 'Public institutions connect knowledge, culture, welfare and political cooperation.' },
   { id: 'navigation', name: 'A connected world', description: 'Navigation expands the reach of exchange, exploration and influence.' },
   { id: 'industrialization', name: 'Power and production', description: 'Energy, mass production and their social consequences reshape cities.' },
@@ -44,15 +54,20 @@ export const FEATURES: FeatureDefinition[] = [
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
   focus: ['settlement-production'], research: ['settlement-research'], build: ['settlement-production'],
+  'set-building-operation': ['building-operations'],
   settle: ['settlement-expansion'], trade: ['trade-routes'], federate: ['federations'],
   'propose-trade': ['trade-routes'], 'respond-trade': ['trade-routes'], 'withdraw-trade': ['trade-routes'], 'stop-trade': ['trade-routes'],
-  repair: ['trade-routes'], expedition: ['interplanetary-logistics'], event: ['director-events'],
+  'propose-public-project': ['public-projects'], 'respond-public-project': ['public-projects'], 'cancel-public-project': ['public-projects'],
+  'repair-city': ['city-repair'], repair: ['trade-routes'], expedition: ['interplanetary-logistics'], event: ['director-events'],
   wait: ['settlement-turns'],
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
   { id: 'agriculture', name: 'Cultivation', requiredFeatures: ['settlement-research'], era: 0, cost: 10, requires: [], capability: 'Cultivation supports farms, workshops and more reliable settlements.' },
+  { id: 'water-management', name: 'Water management', requiredFeatures: ['settlement-crafts'], era: 0, cost: 16, requires: ['agriculture'], capability: 'Irrigation uses materials to supply more food.' },
+  { id: 'kiln-firing', name: 'Kiln firing', requiredFeatures: ['settlement-crafts'], era: 0, cost: 16, requires: ['agriculture'], capability: 'Kilns use energy to supply more building materials.' },
   { id: 'civic-institutions', name: 'Civic institutions', requiredFeatures: ['statecraft'], era: 1, cost: 24, requires: ['agriculture'], capability: 'Public institutions connect learning, belonging and durable cooperation.' },
+  { id: 'fuel-management', name: 'Fuel management', requiredFeatures: ['statecraft', 'settlement-crafts'], era: 1, cost: 28, requires: ['civic-institutions', 'kiln-firing'], capability: 'Fuel yards use materials to supply energy for production, trade and repairs.' },
   { id: 'navigation', name: 'Navigation', requiredFeatures: ['navigation'], era: 2, cost: 42, requires: ['civic-institutions'], capability: 'Navigation extends the reach of trade and cultural contact.' },
   { id: 'industrialization', name: 'Industrialization', requiredFeatures: ['industrialization'], era: 3, cost: 66, requires: ['navigation'], capability: 'Energy and mechanization change production, transport and urban life.' },
   { id: 'computing', name: 'Planetary computing', requiredFeatures: ['planetary-networks'], era: 4, cost: 100, requires: ['industrialization'], capability: 'Information networks connect markets and political projects across the planet.' },
@@ -77,14 +92,17 @@ export const ERAS: EraDefinition[] = ERA_PRESENTATION.map(era => {
 export const BUILDINGS: BuildingDefinition[] = [
   { id: 'farm', name: 'Terraced fields', requiredFeatures: ['settlement-production'], minEra: 0, cost: { materials: 8, credits: 4 }, requires: ['agriculture'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }, { kind: 'city', field: 'wellbeing', amount: 4 }], production: { food: 4 }, description: 'Reliable harvests sustain people and leave a surplus for future growth.' },
   { id: 'workshop', name: 'Artisan quarter', requiredFeatures: ['settlement-production'], minEra: 0, cost: { materials: 12, credits: 8 }, requires: ['agriculture'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }], production: { materials: 3, energy: 1 }, description: 'Specialized work supplies the materials other projects need.' },
-  { id: 'academy', name: 'House of learning', requiredFeatures: ['statecraft'], minEra: 1, cost: { materials: 16, credits: 10 }, requires: ['civic-institutions'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }], production: { science: 3, culture: 1 }, description: 'Shared learning supports discoveries and cultural exchange.' },
+  { id: 'irrigation', name: 'Irrigation works', requiredFeatures: ['settlement-crafts', 'building-operations'], minEra: 0, cost: { materials: 12, credits: 8 }, requires: ['water-management'], effects: [], operatingInputs: { materials: 1 }, production: { food: 5 }, description: 'Use one material each economy beat to supply food. Operation can be paused.' },
+  { id: 'kiln', name: 'Kiln', requiredFeatures: ['settlement-crafts', 'building-operations'], minEra: 0, cost: { materials: 10, credits: 8 }, requires: ['kiln-firing'], effects: [], operatingInputs: { energy: 2 }, production: { materials: 4 }, description: 'Use two energy each economy beat to make materials. Operation can be paused.' },
+  { id: 'academy', name: 'House of learning', requiredFeatures: ['statecraft', 'building-operations'], minEra: 1, cost: { materials: 16, credits: 10 }, requires: ['civic-institutions'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }], operatingInputs: { culture: 2, credits: 1 }, production: { science: 3 }, description: 'Use culture and credits each economy beat to support learning. Operation can be paused.' },
   { id: 'monument', name: 'Civic gathering place', requiredFeatures: ['statecraft'], minEra: 1, cost: { materials: 12, credits: 8 }, requires: ['civic-institutions'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }, { kind: 'civilization', field: 'legitimacy', amount: 4 }], production: { culture: 4 }, description: 'A public place makes collective identity and political commitments visible.' },
+  { id: 'fuel-yard', name: 'Fuel yard', requiredFeatures: ['statecraft', 'settlement-crafts', 'building-operations'], minEra: 1, cost: { materials: 14, credits: 8 }, requires: ['fuel-management'], effects: [], operatingInputs: { materials: 2 }, production: { energy: 3 }, description: 'Use materials each economy beat to supply energy. Operation can be paused.' },
   { id: 'launchpad', name: 'Orbital gateway', requiredFeatures: ['interplanetary-logistics'], minEra: 5, cost: { materials: 40, energy: 24, credits: 30 }, requires: ['spaceflight'], effects: [{ kind: 'city', field: 'infrastructure', amount: 2 }], production: {}, description: 'Launch infrastructure connects Earth’s industry to an off-world supply line.' },
 ];
 
 export const DIRECTOR_EVENTS: DirectorEventDefinition[] = [
   { id: 'drought', name: 'The rains fail', requiredFeatures: ['director-events'], minEra: 0, description: 'A dry season threatens a civilization’s food reserves.', consequence: 'Food scarcity tests growth choices and the wellbeing of settlements.', effects: [{ kind: 'resource', resource: 'food', amount: -12 }, { kind: 'city', field: 'wellbeing', amount: -10 }], cooldown: 2 },
-  { id: 'earthquake', name: 'The earth moves', requiredFeatures: ['director-events', 'disaster-recovery'], minEra: 0, description: 'A fault ruptures beneath settled land.', consequence: 'Damaged buildings and routes create a need for reconstruction and relief.', effects: [{ kind: 'city', field: 'damage', amount: 35 }, { kind: 'city', field: 'infrastructure', amount: -1 }, { kind: 'route', field: 'damage', amount: 25 }], cooldown: 3 },
+  { id: 'earthquake', name: 'The earth moves', requiredFeatures: ['director-events', 'disaster-recovery'], minEra: 0, description: 'A fault ruptures beneath settled land.', consequence: 'Damaged buildings and routes create a need for reconstruction and relief.', effects: [{ kind: 'city', field: 'damage', amount: 35 }, { kind: 'city', field: 'infrastructure', amount: -1 }, { kind: 'route', field: 'damage', amount: 25 }], releasedEffects: { requiredFeatures: ['city-repair'], effects: [{ kind: 'city', field: 'damage', amount: 35 }, { kind: 'route', field: 'damage', amount: 25 }] }, cooldown: 3 },
   { id: 'resource-boom', name: 'A rich seam', requiredFeatures: ['director-events'], minEra: 0, description: 'A newly exposed deposit creates an unexpected opportunity.', consequence: 'Materials and energy can support growth or a new strategic investment.', effects: [{ kind: 'resource', resource: 'materials', amount: 18 }, { kind: 'resource', resource: 'energy', amount: 8 }, { kind: 'civilization', field: 'legitimacy', amount: 3 }], cooldown: 2 },
   { id: 'crypto-boom', name: 'A speculative fever', requiredFeatures: ['director-events', 'speculative-markets'], minEra: 4, description: 'A digital-asset mania draws wealth and attention.', consequence: 'New liquidity comes with political discontent and diverted investment.', effects: [{ kind: 'resource', resource: 'credits', amount: 28 }, { kind: 'resource', resource: 'materials', amount: -5 }, { kind: 'civilization', field: 'legitimacy', amount: -8 }], cooldown: 3 },
   { id: 'ufo-contact', name: 'Visitors in the sky', requiredFeatures: ['director-events', 'anomalous-contact'], minEra: 0, description: 'An unexplained encounter challenges what people believe.', consequence: 'A scientific opportunity arrives alongside cultural fascination and disagreement.', effects: [{ kind: 'resource', resource: 'science', amount: 24 }, { kind: 'resource', resource: 'culture', amount: 8 }, { kind: 'civilization', field: 'legitimacy', amount: -6 }], cooldown: 4 },
@@ -107,16 +125,26 @@ export const ECONOMY_RULES = {
   populationFoodUpkeep: 0.5, suppliedWellbeingGain: 1, shortageWellbeingLoss: 8,
   shortageLegitimacyLoss: 2, starvationWellbeing: 20, starvationPopulationLoss: 1,
   growth: { foodReserve: 10, foodCost: 6, wellbeing: 60, populationGain: 1, cityPopulationCap: 20 },
-  settle: { cost: { food: 10, materials: 12, credits: 8 }, population: 3 },
+  settle: { cost: { food: 10, materials: 12, credits: 8 }, population: 3, minimumSourcePopulation: 3 },
   trade: { cost: { materials: 6, credits: 8 }, ownerCargo: { food: 2 }, partnerCargo: { materials: 2 }, commerceYield: { credits: 2 }, upkeep: { energy: 1 }, damageDisableAt: 50 },
   repair: { cost: { materials: 5, energy: 2 }, damageReduction: 25 },
   expedition: { cost: { food: 5, materials: 8, energy: 8, credits: 6 }, progress: 25, population: 1 },
 };
 
+export const SETTLEMENT_SITE_OUTPUTS: Readonly<Partial<Record<Terrain, Partial<Resources>>>> = { grassland: { food: 2 }, forest: { materials: 2 } };
+
+export const LAND_TRANSPORT_RULES = { ruleVersion: 1 as const, edgesPerBeat: 2, passable: { grassland: true, forest: true, desert: true, tundra: true, mountain: false, ocean: false } satisfies Record<Terrain, boolean> };
 export const TRADE_RULES = { offerExpiryRounds: 8, maxPendingPerPair: 1, maxActivePerPair: 1 };
 
 export const TRADE_RECIPES: TradeRecipe[] = [
   { id: 'harvest-for-materials', version: 1, name: 'Harvest for materials', description: 'A food surplus supports a partner while materials return to build the next settlement project.', requiredFeatures: ['trade-routes'], terms: { recipeId: 'harvest-for-materials', recipeVersion: 1, constructionCost: { materials: 6, credits: 8 }, proposerCargo: { food: 4 }, recipientCargo: { materials: 3 }, proposerUpkeep: { energy: 1 }, recipientUpkeep: { energy: 1 }, proposerYield: { credits: 2 }, recipientYield: { credits: 2 }, cadenceRounds: 4, damageDisableAt: 50 } },
+  { id: 'energy-for-materials', version: 1, name: 'Energy for materials', description: 'Send energy for a partner’s later work and receive materials. Each partner also pays transport energy before receiving cargo.', requiredFeatures: ['trade-routes', 'operating-resource-exchange'], terms: { recipeId: 'energy-for-materials', recipeVersion: 1, constructionCost: { materials: 6, credits: 8 }, proposerCargo: { energy: 4 }, recipientCargo: { materials: 3 }, proposerUpkeep: { energy: 1 }, recipientUpkeep: { energy: 1 }, proposerYield: { credits: 2 }, recipientYield: { credits: 2 }, cadenceRounds: 4, damageDisableAt: 50 } },
+];
+
+export const PUBLIC_PROJECT_RULES = { maxActivePerPair: 1, maxActiveTotal: CIV_COUNT * (CIV_COUNT - 1) / 2 };
+
+export const PUBLIC_PROJECT_RECIPES: PublicProjectRecipe[] = [
+  { id: 'joint-road-repair', version: 1, name: 'Joint road repair', description: 'Both route partners promise supplies for a later shared repair. Either may cancel before completion.', requiredFeatures: ['public-projects', 'statecraft', 'trade-routes'], requiredTechnology: 'civic-institutions', requiredBuilding: 'monument', terms: { recipeId: 'joint-road-repair', recipeVersion: 1, proposerContribution: { materials: 2, energy: 1 }, recipientContribution: { materials: 2, energy: 1 }, damageReduction: 25, pendingLifetimeRounds: 4, completionDelayRounds: 2 } },
 ];
 
 export const VICTORY_RULES = {
@@ -147,13 +175,17 @@ export interface ContentCatalog {
   victoryRules: typeof VICTORY_RULES;
   tradeRecipes: TradeRecipe[];
   tradeRules: typeof TRADE_RULES;
+  landTransportRules: typeof LAND_TRANSPORT_RULES;
+  publicProjectRecipes: PublicProjectRecipe[];
+  publicProjectRules: typeof PUBLIC_PROJECT_RULES;
+  siteOutputs: typeof SETTLEMENT_SITE_OUTPUTS;
 }
 
 export const CONTENT: ContentCatalog = {
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
   buildings: BUILDINGS, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
   actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES,
-  tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES,
+  tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES, landTransportRules: LAND_TRANSPORT_RULES, publicProjectRecipes: PUBLIC_PROJECT_RECIPES, publicProjectRules: PUBLIC_PROJECT_RULES, siteOutputs: SETTLEMENT_SITE_OUTPUTS,
 };
 
 function positive(value: number): boolean {
@@ -172,11 +204,17 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
       if (!RESOURCE_IDS.some(id => id === resource) || !Number.isFinite(value) || value < 0) errors.push(`${label}: invalid resource cost or production ${resource}`);
     }
   };
+  for (const [terrain, outputs] of Object.entries(catalog.siteOutputs)) {
+    if (!['grassland', 'forest', 'desert', 'tundra'].includes(terrain)) errors.push(`site output ${terrain}: unsupported productive terrain`);
+    resources(`site output ${terrain}`, outputs);
+  }
   const features = new Set(catalog.features.map(feature => feature.id));
   const requireFeatures = (label: string, required: readonly string[]) => {
     if (required.length === 0) errors.push(`${label}: missing release feature gate`);
     for (const id of required) if (!features.has(id)) errors.push(`${label}: unknown feature ${id}`);
   };
+  if (catalog.landTransportRules.ruleVersion !== 1 || !Number.isSafeInteger(catalog.landTransportRules.edgesPerBeat) || catalog.landTransportRules.edgesPerBeat < 1) errors.push('land transport: invalid version or pace');
+  if (Object.keys(catalog.landTransportRules.passable).length !== 6 || ['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].some(terrain => typeof Reflect.get(catalog.landTransportRules.passable, terrain) !== 'boolean')) errors.push('land transport: invalid terrain passability');
   unique('trade recipes', catalog.tradeRecipes.map(recipe => recipe.id));
   for (const [name, value] of Object.entries(catalog.tradeRules)) {
     if (!Number.isSafeInteger(value) || value < 1) errors.push(`trade rules: invalid ${name}`);
@@ -193,6 +231,23 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   const technologies = new Map(catalog.technologies.map(technology => [technology.id, technology]));
   const buildings = new Map(catalog.buildings.map(building => [building.id, building]));
   const milestones = new Map(catalog.milestones.map(milestone => [milestone.id, milestone]));
+  unique('public project recipes', catalog.publicProjectRecipes.map(recipe => recipe.id));
+  for (const [name, value] of Object.entries(catalog.publicProjectRules)) {
+    if (!Number.isSafeInteger(value) || value < 1) errors.push(`public project rules: invalid ${name}`);
+  }
+  for (const recipe of catalog.publicProjectRecipes) {
+    const label = `public project ${recipe.id}`;
+    const terms = recipe.terms;
+    requireFeatures(label, recipe.requiredFeatures);
+    if (!technologies.has(recipe.requiredTechnology) || !buildings.has(recipe.requiredBuilding)) errors.push(`${label}: unknown civic prerequisite`);
+    if (!Number.isSafeInteger(recipe.version) || recipe.version < 1 || terms.recipeId !== recipe.id || terms.recipeVersion !== recipe.version) errors.push(`${label}: inconsistent recipe identity`);
+    if (!positive(terms.damageReduction) || terms.damageReduction > 100 || !Number.isSafeInteger(terms.pendingLifetimeRounds) || terms.pendingLifetimeRounds < 1 || !Number.isSafeInteger(terms.completionDelayRounds) || terms.completionDelayRounds < 1) errors.push(`${label}: invalid repair or timing`);
+    for (const [side, contribution] of Object.entries({ proposer: terms.proposerContribution, recipient: terms.recipientContribution })) {
+      resources(`${label} ${side}`, contribution);
+      if (!Object.values(contribution).some(positive)) errors.push(`${label}: missing ${side} contribution`);
+    }
+  }
+
   unique('civilizations', catalog.civilizations.map(civ => civ.name));
   unique('capitals', catalog.civilizations.map(civ => civ.capital));
   unique('features', catalog.features.map(feature => feature.id));
@@ -244,6 +299,9 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     if (!eraValid(building.minEra)) errors.push(`building ${building.id}: invalid era`);
     resources(`${building.id} cost`, building.cost);
     resources(`${building.id} production`, building.production);
+    resources(`${building.id} operating inputs`, building.operatingInputs ?? {});
+    if (Object.values(building.operatingInputs ?? {}).some(positive) && !building.requiredFeatures.includes('building-operations')) errors.push(`building ${building.id}: operating inputs require the building-operations feature`);
+    if (building.effects.length === 0 && !Object.values(building.production).some(positive)) errors.push(`building ${building.id}: no production or world effect`);
     effects(building.id, building.effects);
     for (const required of building.requires) {
       const technology = technologies.get(required);
@@ -256,6 +314,11 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     if (!eraValid(event.minEra) || !Number.isInteger(event.cooldown) || event.cooldown < 0) errors.push(`event ${event.id}: invalid era or cooldown`);
     if (event.id !== 'calm' && event.effects.length === 0) errors.push(`event ${event.id}: no world effect`);
     effects(event.id, event.effects);
+    if (event.releasedEffects) {
+      requireFeatures(`${event.id} released effects`, event.releasedEffects.requiredFeatures);
+      if (event.releasedEffects.effects.length === 0) errors.push(`${event.id}: empty released effects`);
+      effects(`${event.id} released effects`, event.releasedEffects.effects);
+    }
   }
   for (const [action, required] of Object.entries(catalog.actionFeatures)) requireFeatures(action, required);
   for (const milestone of catalog.milestones) {

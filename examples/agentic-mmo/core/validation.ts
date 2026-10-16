@@ -6,11 +6,14 @@ import {
   FOCUS_IDS,
   HISTORICAL_MILESTONES,
   RESOURCE_IDS,
+  PUBLIC_PROJECT_RULES,
   TECHNOLOGIES,
   TRADE_RULES,
   TURN_RULES,
 } from './content.ts';
 import { parseUtcTimestamp } from './simulation/clock.ts';
+import { isLandTransportQuote, landTransportTopologyBlock } from './simulation/transport.ts';
+import { isPersistedActionPlan } from './planning.ts';
 import {
   CIV_COUNT,
   DIRECTOR_SEAT,
@@ -23,6 +26,7 @@ import {
   type HexTile,
   type Outcome,
   type Route,
+  type Resources,
   type Treaty,
   type TradeAgreement,
   type TradeOffer,
@@ -131,6 +135,44 @@ function city(value: unknown): value is City {
   );
 }
 
+function resourceAmounts(value: unknown): value is Partial<Resources> {
+  return record(value) && Object.entries(value).every(([resource, amount]) =>
+    RESOURCE_IDS.some((known) => known === resource) && finite(amount));
+}
+
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function operationResult(value: unknown, round: number): boolean {
+  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages'])
+    || !integer(value.round, 0, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
+    || !Array.isArray(value.shortages)) return false;
+  const resources: string[] = [];
+  for (const shortage of value.shortages) {
+    if (!record(shortage) || !exactKeys(shortage, ['resource', 'required', 'available'])
+      || typeof shortage.resource !== 'string' || !RESOURCE_IDS.some((resource) => resource === shortage.resource)
+      || !finite(shortage.available) || !finite(shortage.required, Number.MIN_VALUE)
+      || shortage.required <= shortage.available) return false;
+    resources.push(shortage.resource);
+  }
+  if (!unique(resources)) return false;
+  if (value.status === 'operated') return resources.length === 0;
+  return Object.keys(value.paid).length === 0 && Object.keys(value.produced).length === 0
+    && (value.status === 'paused' ? resources.length === 0 : value.status === 'blocked' && resources.length > 0);
+}
+
+function buildingOperations(value: City, round: number, features: string[]): boolean {
+  const paid = BUILDINGS.filter((building) => value.buildings.includes(building.id)
+    && RESOURCE_IDS.some((resource) => (building.operatingInputs?.[resource] ?? 0) > 0)).map((building) => building.id);
+  if (!Object.hasOwn(value, 'buildingOperations')) return paid.length === 0;
+  const operations: unknown = value.buildingOperations;
+  if (!features.includes('building-operations') || !record(operations) || !exactKeys(operations, paid)) return false;
+  return Object.values(operations).every((operation) => record(operation)
+    && exactKeys(operation, ['enabled', 'lastResult']) && typeof operation.enabled === 'boolean'
+    && (operation.lastResult === null || operationResult(operation.lastResult, round)));
+}
+
 function tile(value: unknown): value is HexTile {
   return (
     record(value) &&
@@ -166,10 +208,7 @@ const tradeResourceFields = ['constructionCost', 'proposerCargo', 'recipientCarg
 function tradeTerms(value: unknown): value is TradeTerms {
   return record(value) && text(value.recipeId) && integer(value.recipeVersion, 1)
     && integer(value.cadenceRounds, 1) && finite(value.damageDisableAt, Number.MIN_VALUE, 100)
-    && tradeResourceFields.every((field) => {
-      const amounts = value[field];
-      return record(amounts) && Object.entries(amounts).every(([resource, amount]) => RESOURCE_IDS.some((known) => known === resource) && finite(amount));
-    });
+    && tradeResourceFields.every((field) => resourceAmounts(value[field]));
 }
 
 function tradeAgreement(value: unknown): value is TradeAgreement {
@@ -196,20 +235,34 @@ function tradeOffer(value: unknown): value is TradeOffer {
 function sameTradeTerms(first: TradeTerms, second: TradeTerms): boolean {
   return first.recipeId === second.recipeId && first.recipeVersion === second.recipeVersion
     && first.cadenceRounds === second.cadenceRounds && first.damageDisableAt === second.damageDisableAt
+    && (first.transport === undefined ? second.transport === undefined : second.transport !== undefined
+      && first.transport.mode === second.transport.mode && first.transport.ruleVersion === second.transport.ruleVersion
+      && first.transport.edges === second.transport.edges && first.transport.tileIds.length === second.transport.tileIds.length
+      && first.transport.tileIds.every((id, index) => id === second.transport?.tileIds[index]))
     && tradeResourceFields.every((field) => RESOURCE_IDS.every((resource) => first[field][resource] === second[field][resource]));
+}
+
+function tradeTransport(terms: TradeTerms, from: string, to: string, cities: City[], tiles: HexTile[], features: string[]): boolean {
+  if (!Object.hasOwn(terms, 'transport')) return true;
+  if (!features.includes('land-transport') || !isLandTransportQuote(terms.transport, tiles.length)) return false;
+  const origin = cities.find(settlement => settlement.id === from);
+  const destination = cities.find(settlement => settlement.id === to);
+  return origin !== undefined && destination !== undefined
+    && landTransportTopologyBlock({ tiles }, terms.transport, origin.tileId, destination.tileId) === null;
 }
 
 function tradePair(first: number, second: number): string {
   return `${Math.min(first, second)}:${Math.max(first, second)}`;
 }
 
-function tradeState(value: unknown, routes: Route[], cities: City[], round: number): boolean {
+function tradeState(value: unknown, routes: Route[], cities: City[], tiles: HexTile[], round: number, features: string[]): boolean {
   if (!Array.isArray(value) || !value.every(tradeOffer) || !unique(value.map((offer) => offer.id))) return false;
   const pendingPairs = new Map<string, number>();
   const enabledPairs = new Map<string, number>();
   for (const offer of value) {
     if (offer.createdRound > round || !cities.some((settlement) => settlement.id === offer.from && settlement.civId === offer.proposer)
-      || !cities.some((settlement) => settlement.id === offer.to && settlement.civId === offer.recipient)) return false;
+      || !cities.some((settlement) => settlement.id === offer.to && settlement.civId === offer.recipient)
+      || !tradeTransport(offer.terms, offer.from, offer.to, cities, tiles, features)) return false;
     if (offer.status === 'accepted') {
       const accepted = routes.find((connection) => connection.id === offer.routeId);
       if (!accepted?.agreement || accepted.agreement.offerId !== offer.id) return false;
@@ -224,16 +277,18 @@ function tradeState(value: unknown, routes: Route[], cities: City[], round: numb
   for (const connection of routes) {
     const agreement = connection.agreement;
     if (!agreement) continue;
+    if (!tradeTransport(agreement.terms, connection.from, connection.to, cities, tiles, features)) return false;
+    const cadenceOrigin = agreement.terms.transport === undefined ? 0 : agreement.acceptedRound;
     const offer = value.find((candidate) => candidate.id === agreement.offerId);
     if (!offer || offer.status !== 'accepted' || offer.routeId !== connection.id
       || offer.proposer !== connection.owner || offer.recipient !== connection.partner
       || offer.from !== connection.from || offer.to !== connection.to || !sameTradeTerms(offer.terms, agreement.terms)
       || agreement.acceptedRound < offer.createdRound || agreement.acceptedRound >= offer.expiresRound
       || agreement.acceptedRound > round || agreement.nextDeliveryRound <= agreement.acceptedRound
-      || agreement.nextDeliveryRound % agreement.terms.cadenceRounds !== 0
+      || (agreement.nextDeliveryRound - cadenceOrigin) % agreement.terms.cadenceRounds !== 0
       || (agreement.enabled && agreement.nextDeliveryRound <= round)
-      || (agreement.lastAttemptRound !== null && (agreement.lastAttemptRound <= agreement.acceptedRound || agreement.lastAttemptRound > round || agreement.lastAttemptRound % agreement.terms.cadenceRounds !== 0))
-      || (agreement.lastDeliveryRound !== null && (agreement.lastAttemptRound === null || agreement.lastDeliveryRound > agreement.lastAttemptRound || agreement.lastDeliveryRound <= agreement.acceptedRound || agreement.lastDeliveryRound % agreement.terms.cadenceRounds !== 0))
+      || (agreement.lastAttemptRound !== null && (agreement.lastAttemptRound <= agreement.acceptedRound || agreement.lastAttemptRound > round || (agreement.lastAttemptRound - cadenceOrigin) % agreement.terms.cadenceRounds !== 0))
+      || (agreement.lastDeliveryRound !== null && (agreement.lastAttemptRound === null || agreement.lastDeliveryRound > agreement.lastAttemptRound || agreement.lastDeliveryRound <= agreement.acceptedRound || (agreement.lastDeliveryRound - cadenceOrigin) % agreement.terms.cadenceRounds !== 0))
       || ((agreement.deliveryCount === 0) !== (agreement.lastDeliveryRound === null))
       || (agreement.blockedBy !== null && (agreement.blockedBy !== connection.owner && agreement.blockedBy !== connection.partner || agreement.blockedReason === null))
       || (agreement.enabled ? agreement.closedRound !== null : agreement.closedRound === null || agreement.closedRound < agreement.acceptedRound || agreement.closedRound > round || agreement.blockedBy !== null || agreement.blockedReason !== null || connection.active || connection.volume !== 0)) return false;
@@ -245,6 +300,63 @@ function tradeState(value: unknown, routes: Route[], cities: City[], round: numb
     }
   }
   return true;
+}
+
+function boundedText(value: unknown, maximum = 128): value is string {
+  return text(value) && value.trim().length > 0 && value.length <= maximum;
+}
+
+function projectVector(value: unknown): value is Partial<Resources> {
+  return resourceAmounts(value) && Object.keys(value).length > 0
+    && Object.values(value).every((amount) => finite(amount, Number.MIN_VALUE));
+}
+
+function publicProjectTerms(value: unknown): boolean {
+  return record(value) && exactKeys(value, ['recipeId', 'recipeVersion', 'proposerContribution', 'recipientContribution', 'damageReduction', 'pendingLifetimeRounds', 'completionDelayRounds'])
+    && boundedText(value.recipeId) && integer(value.recipeVersion, 1)
+    && projectVector(value.proposerContribution) && projectVector(value.recipientContribution)
+    && finite(value.damageReduction, Number.MIN_VALUE, 100)
+    && integer(value.pendingLifetimeRounds, 1) && integer(value.completionDelayRounds, 1);
+}
+
+function publicProjects(value: unknown, round: number, routes: Route[]): boolean {
+  if (!Array.isArray(value) || value.length > PUBLIC_PROJECT_RULES.maxActiveTotal) return false;
+  const ids: string[] = [];
+  const pairs: string[] = [];
+  for (const project of value) {
+    if (!record(project) || !boundedText(project.id) || !boundedText(project.routeId) || !boundedText(project.agreementOfferId)
+      || !integer(project.proposer, 0, CIV_COUNT - 1) || !integer(project.recipient, 0, CIV_COUNT - 1) || project.proposer === project.recipient
+      || !integer(project.proposedRound, 0, round) || !publicProjectTerms(project.terms) || !record(project.terms)) return false;
+    const base = ['id', 'routeId', 'agreementOfferId', 'proposer', 'recipient', 'terms', 'proposedRound', 'status'];
+    if (project.status === 'pending') {
+      if (!exactKeys(project, [...base, 'expiresRound']) || !integer(project.expiresRound, round + 1)
+        || project.expiresRound !== project.proposedRound + Number(project.terms.pendingLifetimeRounds)) return false;
+    } else if (project.status === 'committed') {
+      if (!exactKeys(project, [...base, 'acceptedRound', 'dueRound']) || !integer(project.acceptedRound, project.proposedRound, round)
+        || project.acceptedRound >= project.proposedRound + Number(project.terms.pendingLifetimeRounds)
+        || !integer(project.dueRound, round + 1) || project.dueRound !== project.acceptedRound + Number(project.terms.completionDelayRounds)) return false;
+    } else return false;
+    const connection = routes.find((candidate) => candidate.id === project.routeId);
+    if (connection && tradePair(connection.owner, connection.partner) !== tradePair(project.proposer, project.recipient)) return false;
+    ids.push(project.id);
+    pairs.push(tradePair(project.proposer, project.recipient));
+  }
+  return unique(ids) && pairs.every((key) => pairs.filter((other) => other === key).length <= PUBLIC_PROJECT_RULES.maxActivePerPair);
+}
+
+function publicProjectResult(value: unknown): boolean {
+  if (!record(value) || !exactKeys(value, ['projectId', 'routeId', 'agreementOfferId', 'outcome', 'reason', 'proposer', 'recipient', 'proposerPaid', 'recipientPaid', 'damageBefore', 'damageAfter'])
+    || !boundedText(value.projectId) || !boundedText(value.routeId) || !boundedText(value.agreementOfferId) || !boundedText(value.reason, 1000)
+    || !integer(value.proposer, 0, CIV_COUNT - 1) || !integer(value.recipient, 0, CIV_COUNT - 1) || value.proposer === value.recipient
+    || !resourceAmounts(value.proposerPaid) || !resourceAmounts(value.recipientPaid)) return false;
+  const damage = (value.damageBefore === null && value.damageAfter === null)
+    || (finite(value.damageBefore, 0, 100) && finite(value.damageAfter, 0, 100) && value.damageAfter <= value.damageBefore);
+  if (!damage) return false;
+  if (value.outcome === 'completed') return projectVector(value.proposerPaid) && projectVector(value.recipientPaid)
+    && finite(value.damageBefore, Number.MIN_VALUE, 100) && finite(value.damageAfter, 0, 100) && value.damageAfter < value.damageBefore;
+  return typeof value.outcome === 'string' && ['declined', 'cancelled', 'expired', 'failed', 'no-work-needed'].includes(value.outcome)
+    && Object.keys(value.proposerPaid).length === 0 && Object.keys(value.recipientPaid).length === 0 && value.damageBefore === value.damageAfter
+    && (value.outcome !== 'no-work-needed' || value.damageBefore === 0);
 }
 
 function treaty(value: unknown): value is Treaty {
@@ -270,7 +382,8 @@ function event(value: unknown): value is GameEvent {
     (value.tileId === null || integer(value.tileId)) &&
     strings(value.effects) &&
     value.effects.length > 0 &&
-    finite(value.importance)
+    finite(value.importance) &&
+    (!Object.hasOwn(value, 'publicProjectResult') || (publicProjectResult(value.publicProjectResult) && record(value.publicProjectResult) && value.type === `public-project-${String(value.publicProjectResult.outcome)}`))
   );
 }
 
@@ -303,6 +416,11 @@ function independentTurns(value: unknown, round: number): boolean {
     && epoch + window * TURN_RULES.tacticalWindowMs < nextBoundary
     && integer(counts[seat], 0, TURN_RULES.actionsPerWindow)
     && (window === -1 ? counts[seat] === 0 : counts[seat] > 0));
+}
+
+function actionPlans(value: unknown, revision: number): boolean {
+  return Array.isArray(value) && value.length === DIRECTOR_SEAT + 1
+    && Array.from(value).every((plan: unknown) => plan === null || isPersistedActionPlan(plan, revision));
 }
 
 export function isWorldState(
@@ -344,6 +462,8 @@ export function isWorldState(
     ('historyAdvances' in value && !historyAdvances(value.historyAdvances, value.revision, value.year, value.unlockedFeatures)) ||
     (value.unlockedFeatures.includes('independent-actions') !== ('independentTurns' in value)) ||
     ('independentTurns' in value && !independentTurns(value.independentTurns, value.round)) ||
+    (value.unlockedFeatures.includes('bounded-plans') !== ('actionPlans' in value)) ||
+    ('actionPlans' in value && !actionPlans(value.actionPlans, value.revision)) ||
     !outcome(value.outcome)
   )
     return false;
@@ -387,6 +507,7 @@ export function isWorldState(
   const tiles = value.tiles;
   const cities = value.cities;
   const round = value.round;
+  const features = value.unlockedFeatures;
   const counts = value.eventCounts;
   if (
     tiles.length !== width * height ||
@@ -397,6 +518,7 @@ export function isWorldState(
       tiles.some((site) => site.id === item.tileId && site.owner === item.civId),
     ) ||
     !unique(cities.map((item) => item.tileId)) ||
+    !cities.every((item) => buildingOperations(item, round, features)) ||
     !value.civilizations.every((item) =>
       cities.some((settlement) => settlement.civId === item.id),
     ) ||
@@ -405,7 +527,10 @@ export function isWorldState(
         cities.some((endpoint) => endpoint.id === item.from && endpoint.civId === item.owner) &&
         cities.some((endpoint) => endpoint.id === item.to && endpoint.civId === item.partner),
     ) ||
-    !tradeState('tradeOffers' in value ? value.tradeOffers : [], value.routes, cities, round) ||
+    !tradeState('tradeOffers' in value ? value.tradeOffers : [], value.routes, cities, tiles, round, features) ||
+    (features.includes('public-projects') !== Object.hasOwn(value, 'publicProjects')) ||
+    ('publicProjects' in value && !publicProjects(value.publicProjects, round, value.routes)) ||
+    (!features.includes('public-projects') && value.events.some((item) => Object.hasOwn(item, 'publicProjectResult'))) ||
     !value.treaties.every((item) => item.since <= round) ||
     !value.events.every(
       (item) =>

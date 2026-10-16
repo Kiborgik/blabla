@@ -1,3 +1,5 @@
+import { damageMapLabel } from '../visuals/damage-visuals.ts';
+import { cityKey, resolveCitySelection, selectedCity, retainedReceiptBuilding } from '../web/city-selection.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -5,7 +7,8 @@ import { createWorld } from '../core/engine.ts';
 import { cameraShiftForAnchor, createInspectionSession, inspectionAnchor } from '../web/inspection-camera.ts';
 import * as THREE from 'three';
 import { cityScreenMetrics } from '../web/flat-renderer.ts';
-import { ERAS } from '../core/content.ts';
+import { ERAS, RESOURCE_IDS } from '../core/content.ts';
+import { VIEWER_PALETTES, resolveAppearance, resourceGuide } from '../web/viewer-appearance.ts';
 import type { GameEvent } from '../core/types.ts';
 import { createSettlementMeshes } from '../web/settlement-three.ts';
 import { flatPartFaces, shapeTriangles, transformedVertices } from '../web/settlement-parts.ts';
@@ -186,7 +189,8 @@ await test('route endpoints follow city IDs while multiple cities retain one civ
   state.routes.push({ id: 'route-live', from: 'second-hearth', to: second.id, owner: first.civId, partner: second.civId, active: true, damage: 0, volume: 2 });
   state.routes.push({ id: 'route-blocked', from: first.id, to: second.id, owner: first.civId, partner: second.civId, active: false, damage: 0, volume: 0 });
   const world = projectWorld(state);
-  assert.deepEqual(world.routes, [[5, 1]]);
+  assert.deepEqual(world.routes.map((route) => [route.id, route.from, route.to]), [['route-live', 'second-hearth', second.id], ['route-blocked', first.id, second.id]]);
+  assert.equal(world.routes[0]?.fromTown?.name, 'Second Hearth');
   assert.equal(uniqueCivilizations(world).length, 5);
   assert.equal(uniqueCivilizations(world)[0]?.capital, first.name);
 });
@@ -308,7 +312,7 @@ await test('Three settlement instances use only active detail and reuse their ge
   const state = createWorld(1701);
   const city = state.cities[0];
   assert.ok(city);
-  city.buildings = ['farm', 'workshop'];
+  city.buildings = ['farm', 'workshop', 'irrigation', 'kiln'];
   city.population = 30;
   const world = projectWorld(state);
   const material = new THREE.MeshBasicMaterial();
@@ -353,4 +357,194 @@ await test('meaningful changes stay visible after clock bookkeeping and independ
   const anchor = eventAnchor(projectWorld(state), visual);
   assert.ok(anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.z));
   assert.equal(eventAnchor(projectWorld(state), { ...visual, tileId: null, actor: 5, target: null }), null);
+});
+
+await test('viewer appearance preserves old saves and safely parses explicit choices', () => {
+  const old = parsePreferences({ schemaVersion: 1, zoom: 1.5, selected: 3, paused: true, routes: false });
+  assert.equal(old.theme, 'system');
+  assert.equal(old.effects, 'calm');
+  assert.equal(old.zoom, 1.5);
+  assert.equal(old.selected, 3);
+  assert.equal(old.routes, false);
+  assert.equal(parsePreferences({ schemaVersion: 1, effects: 'unknown', theme: '<script>' }).theme, 'system');
+  assert.equal(parsePreferences({ schemaVersion: 1, effects: 'unknown' }).effects, 'rich');
+  for (const theme of ['system', 'light', 'dark'] as const) {
+    for (const effects of ['calm', 'rich', 'cinematic'] as const) {
+      const preferences = { ...DEFAULT_PREFERENCES, theme, effects, x: 4, z: -3, borders: false };
+      assert.deepEqual(parsePreferences(JSON.parse(JSON.stringify(preferences))), preferences);
+    }
+  }
+});
+
+await test('system theme follows the device and reduced motion overrides every effects level', () => {
+  for (const systemDark of [false, true]) {
+    for (const theme of ['system', 'light', 'dark'] as const) {
+      for (const effects of ['calm', 'rich', 'cinematic'] as const) {
+        const expected = theme === 'system' ? systemDark ? 'dark' : 'light' : theme;
+        assert.deepEqual(resolveAppearance({ theme, effects }, systemDark, false), {
+          theme: expected, effects, motion: effects !== 'calm',
+        });
+        assert.deepEqual(resolveAppearance({ theme, effects }, systemDark, true), {
+          theme: expected, effects: 'calm', motion: false,
+        });
+      }
+    }
+  }
+});
+
+function luminance(color: string): number {
+  const values = [1, 3, 5].map((index) => {
+    const channel = Number.parseInt(color.slice(index, index + 2), 16) / 255;
+    return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+  });
+  return (values[0] ?? 0) * .2126 + (values[1] ?? 0) * .7152 + (values[2] ?? 0) * .0722;
+}
+
+function contrastRatio(first: string, second: string): number {
+  const a = luminance(first);
+  const b = luminance(second);
+  return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+}
+
+await test('both shared palettes meet text and key control contrast targets', () => {
+  for (const palette of Object.values(VIEWER_PALETTES)) {
+    for (const background of [palette.paper, palette.panel, palette.surface, palette.selection]) {
+      assert.ok(contrastRatio(palette.ink, background) >= 4.5, `${palette.ink} on ${background}`);
+      assert.ok(contrastRatio(palette.muted, background) >= 4.5, `${palette.muted} on ${background}`);
+      assert.ok(contrastRatio(palette.gold, background) >= 3, `focus on ${background}`);
+      assert.ok(contrastRatio(palette.border, background) >= 3, `control edge on ${background}`);
+    }
+    assert.ok(contrastRatio(palette.positive, palette['positive-surface']) >= 4.5);
+    assert.ok(contrastRatio(palette.negative, palette['negative-surface']) >= 4.5);
+    assert.ok(contrastRatio(palette['cue-ink'], palette['cue-paper']) >= 4.5);
+    assert.ok(contrastRatio(palette['cue-border'], palette['cue-paper']) >= 3);
+  }
+});
+
+await test('each current resource has one short plain-language guide and shared label', () => {
+  for (const resource of RESOURCE_IDS) {
+    const guide = resourceGuide(resource);
+    assert.equal(guide.label.toLowerCase(), resource);
+    assert.ok(guide.explanation.length > 20 && guide.explanation.length < 100);
+    assert.ok(!/[<>]/.test(guide.explanation));
+  }
+});
+
+
+await test('production quantities are not formatted as net stock gains', () => {
+  const production = eventVisual({ id: 'production:1', type: 'settlement-production', round: 1, actor: 0, target: null, tileId: null, importance: 1, title: 'Working season', cause: 'Production', detail: 'Production', effects: ['Produced 13.28 food'] });
+  const fact = production?.deltas[0];
+  assert.ok(fact);
+  assert.equal(fact.kind, 'production');
+  assert.equal(deltaNumber(fact), '13.28');
+  assert.equal(fact.qualifier, 'produced before costs');
+});
+
+
+await test('a frontier town keeps its canonical selection without adding a civilization dock row', () => {
+  const state = createWorld(1701);
+  const first = state.cities[0];
+  const tile = state.tiles.find((entry) => entry.terrain !== 'ocean' && !state.cities.some((city) => city.tileId === entry.id));
+  assert.ok(first && tile);
+  state.cities.push({ ...first, id: 'frontier-town', name: 'Riverbend', tileId: tile.id });
+  const world = projectWorld(state);
+  const town = world.cities.find((city) => city.cityId === 'frontier-town');
+  assert.ok(town);
+  const preferences = { ...DEFAULT_PREFERENCES, selectedCity: cityKey(town) };
+  assert.equal(selectedCity(world, preferences), town);
+  assert.deepEqual(resolveCitySelection(world, preferences), { selected: first.civId, selectedCity: 'frontier-town' });
+  assert.equal(uniqueCivilizations(world).length, 5);
+  assert.notDeepEqual(hexPosition(town.q, town.r), hexPosition(world.cities[0]?.q ?? 0, world.cities[0]?.r ?? 0));
+  const labels = world.cities.map((city) => ({ id: cityKey(city), x: 100, y: 100, width: 80, height: 14 }));
+  const visible = mapLabelVisibility(labels, cityKey(town), 'far', 500, 700);
+  assert.equal(visible[5], true);
+  assert.equal(visible[0], false);
+  assert.deepEqual(parsePreferences(JSON.parse(JSON.stringify(preferences))), preferences);
+  assert.equal(resolveCitySelection(world, { selected: first.civId, selectedCity: 'removed-town' }).selectedCity, first.id);
+  assert.equal(resolveCitySelection(world, { selected: 99, selectedCity: null }).selectedCity, first.id);
+  assert.deepEqual(resolveCitySelection({ cities: [], tiles: [], routes: [] }, preferences), { selected: 0, selectedCity: null });
+  assert.equal(parsePreferences({ schemaVersion: 1, selectedCity: 77 }).selectedCity, null);
+  assert.equal(parsePreferences({ schemaVersion: 1, selectedCity: 'x'.repeat(161) }).selectedCity, null);
+  const preview = createPreviewWorld();
+  assert.equal(resolveCitySelection(preview, { selected: 2, selectedCity: first.id }).selectedCity, 'sample:2');
+});
+
+await test('operation projection deeply copies optional historical receipts and exact resource values', () => {
+  const state = createWorld(1701);
+  const city = state.cities[0];
+  assert.ok(city);
+  city.buildings.push('irrigation');
+  city.buildingOperations = { irrigation: { enabled: false, lastResult: { round: 9, status: 'blocked', paid: {}, produced: {}, shortages: [{ resource: 'materials', required: 1, available: .75 }] } } };
+  const projected = projectWorld(state).cities[0]?.settlement?.buildingOperations;
+  assert.deepEqual(projected, city.buildingOperations);
+  assert.notEqual(projected, city.buildingOperations);
+  const receipt = projected?.['irrigation']?.lastResult;
+  assert.ok(receipt && receipt.shortages[0]);
+  receipt.shortages[0].available = 99;
+  assert.equal(city.buildingOperations['irrigation']?.lastResult?.shortages[0]?.available, .75);
+});
+
+await test('paid input chips cannot be mistaken for produced goods or a net resource gain', () => {
+  const visual = eventVisual({ id: 'operation', round: 9, type: 'building-operation', title: 'Kiln operated', detail: 'hearth/kiln at strategic round 9', actor: 0, target: 0, tileId: 1, cause: 'Recipe paid', effects: ['Paid 2 energy', 'Produced 3.5 materials'], importance: 1 });
+  assert.ok(visual?.deltas[0] && visual.deltas[1]);
+  assert.equal(deltaNumber(visual.deltas[0]), '2');
+  assert.equal(visual.deltas[0].kind, 'payment');
+  assert.equal(deltaNumber(visual.deltas[1]), '3.5');
+  assert.equal(visual.deltas[1].kind, 'production');
+});
+
+
+await test('receipt keyboard focus is retained by building only within the same selected town', () => {
+  assert.equal(retainedReceiptBuilding('frontier-town', 'frontier-town', 'kiln'), 'kiln');
+  assert.equal(retainedReceiptBuilding('frontier-town', 'frontier-town', 'irrigation'), 'irrigation');
+  assert.equal(retainedReceiptBuilding('capital', 'frontier-town', 'kiln'), null);
+  assert.equal(retainedReceiptBuilding('frontier-town', 'capital', 'kiln'), null);
+  assert.equal(retainedReceiptBuilding(null, null, 'kiln'), null);
+  assert.equal(retainedReceiptBuilding('frontier-town', 'frontier-town', undefined), null);
+});
+
+
+await test('damage labels retain readable screen metrics and real repair cues anchor to the exact town', () => {
+  assert.equal(damageMapLabel('New Haven', 10.25), 'New Haven · 10.25% damage');
+  const world = projectWorld(createWorld(1701));
+  const city = world.cities[1];
+  const tile = world.tiles.find((entry) => entry.q === city?.q && entry.r === city?.r);
+  assert.ok(city && tile && tile.id !== undefined);
+  const repaired = eventVisual({ id: 'repair', round: 9, type: 'city-repaired', title: 'City repaired', detail: 'Exact town', actor: 0, target: 0, tileId: tile.id, cause: 'Paid recovery', effects: ['City damage 10 → 0', 'Paid 5 materials', 'Paid 2 energy'], importance: 3 });
+  assert.ok(repaired?.deltas[0]);
+  assert.equal(deltaNumber(repaired.deltas[0]), '-10');
+  assert.equal(eventAnchor(world, repaired)?.key, `tile:${tile.id}`);
+  for (const scale of [6, 12, 24, 48]) {
+    const metrics = cityScreenMetrics(scale);
+    assert.ok(metrics.targetRadius * scale * 2 >= 44);
+    assert.ok(metrics.labelFont * scale >= 12);
+  }
+  assert.ok(contrastRatio('#ffe0b5', '#1c3738') >= 4.5);
+  assert.ok(contrastRatio('#efaa79', '#153d54') >= 3);
+});
+
+await test('compact desktop story is height-scoped and retains scrolling numbers and a large history target', () => {
+  const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
+  const compact = css.slice(css.lastIndexOf('@media (min-width: 1001px) and (max-height: 850px)'));
+  const declarations = (selector: string): Map<string, string> => {
+    const start = compact.indexOf(`${selector} {`);
+    assert.ok(start >= 0);
+    const block = compact.slice(compact.indexOf('{', start) + 1, compact.indexOf('}', start));
+    return new Map(block.split(';').filter((entry) => entry.trim()).map((entry) => {
+      const colon = entry.indexOf(':');
+      return [entry.slice(0, colon).trim(), entry.slice(colon + 1).trim()];
+    }));
+  };
+  assert.ok(compact.startsWith('@media (min-width: 1001px) and (max-height: 850px)'));
+  const card = declarations('.live-observatory .chronicle');
+  assert.equal(card.get('overflow'), 'auto');
+  assert.equal(Number.parseInt(card.get('max-height') ?? ''), 126);
+  assert.equal(Number.parseInt(card.get('bottom') ?? ''), 28);
+  const history = declarations('.live-observatory #events-open');
+  assert.ok(Number.parseInt(history.get('min-height') ?? '') >= 44);
+  assert.ok(Number.parseInt(history.get('min-width') ?? '') >= 44);
+  assert.equal(history.get('grid-row'), '1 / 3');
+  assert.equal(declarations('.live-observatory .chronicle .story-deltas').get('grid-column'), '1 / -1');
+  assert.ok(Number.parseInt(declarations('.live-observatory .chronicle #event-title').get('font-size') ?? '') >= 16);
+  assert.ok(!compact.includes('.inspection'));
 });

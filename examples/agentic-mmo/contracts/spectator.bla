@@ -1,0 +1,41 @@
+state reload_remote_valid: bool
+state reload_distinct: bool
+state reload_newer: bool
+state reload_attempted: bool
+state reload_requested: bool
+state reload_requests: int
+state cue_count: int
+state cue_ids_from_window: bool
+state cue_ids_not_in_previous_window: bool
+state cue_first_observation: bool
+state cue_appended_known: bool
+
+action deployment_offer(kind: int)
+action deployment_newer()
+action deployment_poll()
+action cue_poll()
+action cue_append(kind: int)
+action cue_flood()
+action cue_new_run()
+
+when deployment_poll {
+    expect "reload-request-follows-version-policy": after.reload_requested == (before.reload_remote_valid and before.reload_distinct and before.reload_newer and not before.reload_attempted)
+    expect "reload-request-count-matches-policy": after.reload_requested and after.reload_requests == before.reload_requests + 1 or not after.reload_requested and after.reload_requests == before.reload_requests
+}
+
+always "cues-come-from-new-window" {
+    cue_count >= 0 and cue_count <= 3 and cue_ids_from_window and cue_ids_not_in_previous_window
+}
+when cue_poll {
+    expect "unchanged-events-do-not-replay": after.cue_count == 0
+}
+when cue_new_run {
+    expect "new-run-history-does-not-replay": after.cue_count == 0
+}
+when cue_append {
+    expect "new-recognized-event-emits-cue": before.cue_first_observation or not after.cue_appended_known or after.cue_count == 1
+    expect "first-observation-does-not-replay-append": not before.cue_first_observation or after.cue_count == 0
+}
+when cue_flood {
+    expect "first-observation-does-not-replay-flood": not before.cue_first_observation or after.cue_count == 0
+}

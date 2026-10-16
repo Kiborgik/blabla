@@ -1,9 +1,9 @@
 import { DETAIL_BUDGETS } from '../visuals/world-visuals.ts';
 import type { DetailLevel } from '../visuals/world-visuals.ts';
 
-export interface MapLabel { id: number; x: number; y: number; width: number; height: number }
+export interface MapLabel { id: string | number; x: number; y: number; width: number; height: number }
 
-export function mapLabelVisibility(labels: readonly MapLabel[], selected: number, detail: DetailLevel, width: number, height: number): boolean[] {
+export function mapLabelVisibility(labels: readonly MapLabel[], selected: string | number, detail: DetailLevel, width: number, height: number): boolean[] {
   const visible = labels.map(() => false);
   const chosen = labels.findIndex((label) => label.id === selected);
   const order = labels.map((_, index) => index).toSorted((a, b) => Number(b === chosen) - Number(a === chosen));

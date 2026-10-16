@@ -58,16 +58,18 @@ export function projectWorld(state: WorldState): AtlasWorld {
       q: tile.q - centerQ, r: tile.r - centerR,
       population: city.population, buildings: [...city.buildings],
       settlement: { id: city.id, civId: city.civId, tileId: city.tileId, name: city.name,
-        population: city.population, wellbeing: city.wellbeing, damage: city.damage, buildings: [...city.buildings] },
+        population: city.population, wellbeing: city.wellbeing, damage: city.damage, buildings: [...city.buildings],
+        ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}) },
     };
   });
-  const cityIndices = new Map(cities.map((city, index) => [city.cityId, index]));
-  const routes: AtlasWorld['routes'] = [];
-  for (const route of state.routes) {
-    const from = cityIndices.get(route.from);
-    const to = cityIndices.get(route.to);
-    if (route.active && from !== undefined && to !== undefined) routes.push([from, to]);
-  }
+  const cityById = new Map(cities.map((city) => [city.cityId, city]));
+  const town = (id: string) => {
+    const city = cityById.get(id);
+    return city ? { id, name: city.capital, civilization: city.name, color: city.color, q: city.q, r: city.r } : null;
+  };
+  const routes: AtlasWorld['routes'] = state.routes.map((route) => ({
+    ...structuredClone(route), ownerName: civilizations.get(route.owner)?.name ?? `Civilization ${route.owner}`, partnerName: civilizations.get(route.partner)?.name ?? `Civilization ${route.partner}`, fromTown: town(route.from), toTown: town(route.to),
+  }));
   return {
     illustrative: false,
     cities,

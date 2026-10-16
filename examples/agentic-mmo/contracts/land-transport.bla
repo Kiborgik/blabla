@@ -1,0 +1,45 @@
+state land_quote_valid: bool
+state land_consent_accepted: bool
+state land_quote_preserved: bool
+state land_attempt_due: bool
+state land_last_attempt_due: bool
+state land_delivered: bool
+state land_refusal_unchanged: bool
+state land_legacy_preserved: bool
+state land_cadence_exact: bool
+state land_payment_exact: bool
+state land_consent_eligible: bool
+state land_exchange_funded: bool
+state land_route_usable: bool
+
+action land_transport_fixture(kind: int)
+action eligible_land_consent_fixture()
+action funded_due_land_fixture()
+action quote_land_exchange()
+action consent_land_exchange()
+action resolve_land_exchange()
+action replay_abstract_exchange()
+when eligible_land_consent_fixture {
+    expect "eligible-consent-fixture-is-reachable": after.land_consent_eligible and after.land_quote_valid
+}
+when funded_due_land_fixture {
+    expect "funded-due-fixture-is-reachable": after.land_attempt_due and after.land_exchange_funded and after.land_quote_valid and after.land_route_usable
+}
+when quote_land_exchange {
+    expect "new-geographic-quote-has-exact-shortest-path": after.land_quote_valid
+    expect "geographic-cadence-uses-shared-path-data": after.land_cadence_exact
+}
+when consent_land_exchange {
+    expect "eligible-geographic-consent-succeeds": not before.land_consent_eligible or after.land_consent_accepted
+    expect "consent-keeps-the-quoted-path-and-terms": not after.land_consent_accepted or after.land_quote_preserved
+    expect "invalid-geographic-consent-spends-nothing": after.land_consent_accepted or after.land_refusal_unchanged
+}
+when resolve_land_exchange {
+    expect "funded-valid-due-exchange-delivers": not (before.land_attempt_due and before.land_exchange_funded and before.land_quote_valid and before.land_route_usable) or after.land_delivered
+    expect "geographic-delivery-waits-the-accepted-interval": not after.land_delivered or after.land_last_attempt_due
+    expect "blocked-geographic-exchange-spends-nothing": after.land_delivered or after.land_refusal_unchanged
+    expect "delivered-geographic-exchange-pays-exactly": not after.land_delivered or after.land_payment_exact
+}
+when replay_abstract_exchange {
+    expect "older-abstract-terms-and-schedule-survive": after.land_legacy_preserved
+}

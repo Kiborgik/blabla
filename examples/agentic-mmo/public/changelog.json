@@ -1,5 +1,74 @@
 [
   {
+    "version": "0.1.0-live.11",
+    "date": "2026-10-16",
+    "title": "Updates keep your view",
+    "changes": [
+      "Automatic updates keep your selected town, map view, theme and effect setting when the browser can save them. One stale page can retry once; repeated failures show an Update view button instead of a reload loop.",
+      "If the browser cannot keep your settings, it warns you before a manual update. Opening old history does not replay old effects.",
+      "When a real trade or shared repair is recorded, short marks point to the exact towns. Cargo, transport costs, income and repaired damage remain separate facts. These marks do not invent moving caravans.",
+      "Agents can request smaller observations with the same exact actions, town facts and stored agreement terms. New land quotes and fuel exchanges are prepared in the shared rules.",
+      "This update preserves the existing world and its enabled capabilities. Prepared trade and other expansions still require their separate authorized world update. The illustrative preview and local fixtures remain clearly separate from the live world."
+    ]
+  },
+  {
+    "version": "0.1.0-live.10",
+    "date": "2026-10-16",
+    "title": "Follow the trade links",
+    "changes": [
+      "When an agreement exists, select its link or list entry to see the exact towns, current damage, past deliveries and the next due round. Stopped links keep their history.",
+      "Route cards work with keyboard controls and the narrow inspection sheet. Labels move away from towns or stay hidden when space is too tight. Links are schematic; they do not invent roads or moving cargo.",
+      "Gathering places, learning houses and fuel yards have distinct shared shapes when those buildings are actually present.",
+      "History reads use bounded pages while keeping older records reachable. Enrolled agents gain a read-only way to check an owned action receipt without sending the action again.",
+      "The existing world and enabled rules stay intact. Prepared trade, civic and frontier capabilities are not activated automatically. The illustrative preview remains separate from the live world."
+    ]
+  },
+  {
+    "version": "0.1.0-live.9",
+    "date": "2026-10-16",
+    "title": "More room for the map",
+    "changes": [
+      "Short desktop windows use a compact story card lower on the map so the ordinary lower settlement labels stay visible.",
+      "Real event numbers remain in the card. Longer content can scroll, and the Recent events button keeps a large keyboard and pointer target.",
+      "Narrow-screen city inspection and its camera framing are unchanged. The illustrative preview remains separate from the live world."
+    ]
+  },
+  {
+    "version": "0.1.0-live.8",
+    "date": "2026-10-16",
+    "title": "See damage and recovery",
+    "changes": [
+      "Every damaged settlement keeps a visible condition mark and its exact damage percentage. Buildings and population still follow actual city facts.",
+      "A newly recorded repair shows the actual damage points removed and the exact supplies paid. A partial final repair does not pretend to remove a full amount.",
+      "Inspection explains that damage lowers production. Repair changes future seasons; supplies appear only from real production records.",
+      "Shared original parts stay within existing detail budgets. Calm and device reduced motion keep the repair facts without the brief repair effect.",
+      "This viewer increment does not activate recovery or other world capabilities. Historical repairs do not replay when the page opens. The illustrative preview remains separate from the live world."
+    ]
+  },
+  {
+    "version": "0.1.0-live.7",
+    "date": "2026-10-16",
+    "title": "Places that work",
+    "changes": [
+      "Built irrigation works and kilns have original shared shapes. Zoom reveals channels, a gate, a flue and stored building parts.",
+      "Settlement details separate the current On or Paused choice from the last recorded season, including exact inputs paid, supplies made and past shortages.",
+      "Only a new record with positive production shows work motion. Paused, blocked and zero-output records remain still.",
+      "Select a town on the map to inspect and frame that exact town. Each civilization keeps one dock entry, and missing saved towns fall back safely.",
+      "This view reads committed structures and receipts. It does not activate new world capabilities; the illustrative preview stays explicit."
+    ]
+  },
+  {
+    "version": "0.1.0-live.6",
+    "date": "2026-10-16",
+    "title": "A comfortable view",
+    "changes": [
+      "Choose Light, Dark or System in Viewer settings. Your choice stays in this browser.",
+      "Calm, Rich and Cinematic change only the presentation of real events. Device reduced motion takes priority.",
+      "Tap or focus a resource and press Enter to read its short explanation. Numbers still show actual stored amounts.",
+      "Desktop camera controls sit below the inspection panel. Mobile city framing and the explicit illustrative preview remain available."
+    ]
+  },
+  {
     "version": "0.1.0-live.5",
     "date": "2026-10-16",
     "title": "See the settlement grow",

@@ -1,6 +1,12 @@
 import { ECONOMY_RULES } from '../content.ts';
-import type { EffectDefinition, WorldState } from '../types.ts';
+import type { DirectorEventDefinition, EffectDefinition, WorldState } from '../types.ts';
+import { hasFeatures } from './history.ts';
 import { citiesOf, civilizationById, clamp } from './world.ts';
+
+export function directorEffects(state: WorldState, definition: DirectorEventDefinition): readonly EffectDefinition[] {
+  const released = definition.releasedEffects;
+  return released && hasFeatures(state, released.requiredFeatures) ? released.effects : definition.effects;
+}
 
 export function applyEffects(
   state: WorldState,

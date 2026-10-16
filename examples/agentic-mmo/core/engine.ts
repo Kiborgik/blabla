@@ -1,5 +1,7 @@
+import { observedRecipes } from './simulation/operations.ts';
 import { CIVILIZATIONS, ECONOMY_RULES, validateContent } from './content.ts';
 import { CURRENT_RELEASE } from './release.ts';
+import { completeAttachedPlan, observeActionPlan, validateAttachedPlan } from './planning.ts';
 import {
   CIV_COUNT,
   DIRECTOR_SEAT,
@@ -17,7 +19,7 @@ import { executeAction } from './simulation/commands.ts';
 import { parseUtcTimestamp } from './simulation/clock.ts';
 import { commitEvents } from './simulation/events.ts';
 import { createMap, hexDistance } from './simulation/geography.ts';
-import { resolveHistory } from './simulation/history.ts';
+import { hasFeatures, resolveHistory } from './simulation/history.ts';
 import { normalizeSeed } from './simulation/random.ts';
 import { citiesOf, totalPopulation } from './simulation/world.ts';
 import {
@@ -74,6 +76,8 @@ export function createWorld(seed: number, clockEpoch?: string): WorldState {
       throw new RangeError('Independent worlds require an explicit epoch');
     state.independentTurns = createIndependentTurns(clockEpoch);
   }
+  if (hasFeatures(state, ['bounded-plans']))
+    state.actionPlans = Array.from({ length: DIRECTOR_SEAT + 1 }, () => null);
   const anchors = [
     { q: 3, r: 3 },
     { q: 12, r: 2 },
@@ -148,6 +152,7 @@ export function legalActions(state: WorldState, seat: number, timestamp?: string
 export function observe(state: WorldState, seat: number, timestamp?: string): Observation {
   const civilization = state.civilizations.find((candidate) => candidate.id === seat) ?? null;
   const director = seat === DIRECTOR_SEAT;
+  const plan = state.actionPlans?.[seat] ?? null;
   return structuredClone({
     gameVersion: state.gameVersion,
     revision: state.revision,
@@ -156,6 +161,10 @@ export function observe(state: WorldState, seat: number, timestamp?: string): Ob
     seat,
     activeSeat: usesIndependentTurns(state) ? null : state.phase,
     admission: turnAdmission(state, seat),
+    ...(hasFeatures(state, ['bounded-plans'])
+      ? { actionPlan: plan === null ? null : observeActionPlan(state, seat, plan, timestamp) }
+      : {}),
+    ...(hasFeatures(state, ['building-operations']) ? { buildingRecipes: observedRecipes(director ? state.cities : citiesOf(state, seat)) } : {}),
     civilization,
     cities: director ? state.cities : citiesOf(state, seat),
     rivals: state.civilizations
@@ -179,10 +188,31 @@ export function observe(state: WorldState, seat: number, timestamp?: string): Ob
         state.round < offer.expiresRound &&
         (director || offer.proposer === seat || offer.recipient === seat),
     ),
+    ...(hasFeatures(state, ['public-projects']) ? { publicProjects: (state.publicProjects ?? []).filter((project) => director || project.proposer === seat || project.recipient === seat) } : {}),
     recentEvents: state.events.slice(-12),
     legalActions: legalActions(state, seat, timestamp),
     outcome: state.outcome,
   });
+}
+
+function refuseAction(
+  state: WorldState,
+  command: unknown,
+  code: string,
+  reason: string,
+  status: 'failed' | 'blocked' = 'failed',
+): TransitionResult {
+  const attached = typeof command === 'object' && command !== null && 'plan' in command
+    && command.plan !== undefined && (!Array.isArray(command.plan) || command.plan.length > 0);
+  return {
+    ok: false,
+    state,
+    events: [],
+    error: reason,
+    ...(hasFeatures(state, ['bounded-plans']) || attached
+      ? { actionOutcome: { status, code, reason } }
+      : {}),
+  };
 }
 
 export function applyCommand(state: WorldState, command: Command): TransitionResult {
@@ -197,23 +227,17 @@ export function applyCommand(state: WorldState, command: Command): TransitionRes
     state.outcome ||
     !Number.isSafeInteger(state.revision + 1)
   ) {
-    return {
-      ok: false,
-      state,
-      events: [],
-      error: 'Command is terminal, out of turn, or has an invalid revision or seat',
-    };
+    return refuseAction(state, command, 'invalid_command', 'Command is terminal, out of turn, or has an invalid revision or seat');
   }
+  const planning = validateAttachedPlan(state, command, command.plan);
+  if (!planning.ok) return refuseAction(state, command, planning.code, planning.error);
   const denied = admissionError(state, command.seat, command.timestamp);
-  if (denied) return { ok: false, state, events: [], error: denied };
+  if (denied) return refuseAction(state, command,
+    denied.startsWith('strategy_catchup_required:') ? 'strategy_catchup_required' : 'action_admission_blocked',
+    denied, 'blocked');
   const available = legalActions(state, command.seat, command.timestamp);
   if (!available.some((choice) => sameAction(choice.action, command.action))) {
-    return {
-      ok: false,
-      state,
-      events: [],
-      error: 'Action is not legal in the current released world',
-    };
+    return refuseAction(state, command, 'illegal_action', 'Action is not legal in the current released world');
   }
   const next = structuredClone(state);
   const events: GameEvent[] = [];
@@ -222,5 +246,15 @@ export function applyCommand(state: WorldState, command: Command): TransitionRes
   finishAction(next, command, events);
   resolveHistory(next, events);
   commitEvents(next, events);
+  if (hasFeatures(next, ['bounded-plans'])) {
+    next.actionPlans ??= Array.from({ length: DIRECTOR_SEAT + 1 }, () => null);
+    next.actionPlans[command.seat] = completeAttachedPlan(planning.plan, command.observedRevision ?? command.expectedRevision, next.revision);
+    return {
+      ok: true,
+      state: next,
+      events,
+      actionOutcome: { status: 'completed', code: 'action_completed', reason: `Action accepted at revision ${next.revision}` },
+    };
+  }
   return { ok: true, state: next, events };
 }

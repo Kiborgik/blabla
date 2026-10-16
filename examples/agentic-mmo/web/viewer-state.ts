@@ -11,10 +11,13 @@ export interface ViewerPreferences {
   x: number;
   z: number;
   selected: number;
+  selectedCity: string | null;
   speed: number;
   paused: boolean;
   borders: boolean;
   routes: boolean;
+  theme: 'light' | 'dark' | 'system';
+  effects: 'calm' | 'rich' | 'cinematic';
 }
 
 export const DEFAULT_PREFERENCES: ViewerPreferences = {
@@ -23,10 +26,13 @@ export const DEFAULT_PREFERENCES: ViewerPreferences = {
   x: 0,
   z: 0,
   selected: 0,
+  selectedCity: null,
   speed: 1,
   paused: false,
   borders: true,
   routes: true,
+  theme: 'system',
+  effects: 'rich',
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -47,6 +53,7 @@ export function parsePreferences(value: unknown): ViewerPreferences {
   const data = object(value);
   if (data?.['schemaVersion'] !== 1) return { ...DEFAULT_PREFERENCES };
   const selected = data['selected'];
+  const selectedCity = data['selectedCity'];
   return {
     schemaVersion: 1,
     zoom: bounded(data['zoom'], 1, 0.65, 2.2),
@@ -56,10 +63,15 @@ export function parsePreferences(value: unknown): ViewerPreferences {
       typeof selected === 'number' && Number.isInteger(selected) && selected >= 0 && selected < 5
         ? selected
         : 0,
+    selectedCity: typeof selectedCity === 'string' && selectedCity.length > 0 && selectedCity.length <= 160 ? selectedCity : null,
     speed: bounded(data['speed'], 1, 0.5, 4),
     paused: typeof data['paused'] === 'boolean' ? data['paused'] : false,
     borders: typeof data['borders'] === 'boolean' ? data['borders'] : true,
     routes: typeof data['routes'] === 'boolean' ? data['routes'] : true,
+    theme: data['theme'] === 'light' || data['theme'] === 'dark' ? data['theme'] : 'system',
+    effects: data['effects'] === 'calm' || data['effects'] === 'rich' || data['effects'] === 'cinematic'
+      ? data['effects']
+      : data['paused'] === true ? 'calm' : 'rich',
   };
 }
 

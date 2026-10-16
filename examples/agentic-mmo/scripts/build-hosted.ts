@@ -2,8 +2,10 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
 import { build } from 'vite-plus';
+import { captureBuildInputs, writeBuildProvenance } from './build-provenance.ts';
 
 const root = process.cwd();
+const inputDigest = captureBuildInputs(root).inputDigest;
 const client = resolve(root, '.blabla/site-client');
 const server = resolve(root, 'dist/server');
 const metadata = resolve(root, 'dist/.openai');
@@ -72,4 +74,5 @@ await build({
 await mkdir(metadata, { recursive: true });
 await writeFile(resolve(metadata, 'hosting.json'), manifestText);
 await cp(resolve(root, 'server/migrations'), resolve(metadata, 'drizzle'), { recursive: true });
+writeBuildProvenance(root, inputDigest);
 process.stdout.write(`${JSON.stringify({ entrypoint: 'dist/server/index.js', embeddedAssets: Object.keys(assets).length })}\n`);

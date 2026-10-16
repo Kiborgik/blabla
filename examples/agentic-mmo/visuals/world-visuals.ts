@@ -1,3 +1,5 @@
+import { damageCondition, damageParts } from './damage-visuals.ts';
+import { allocateBuildingParts, buildingAppearances } from './building-visuals.ts';
 import type { City, WorldState } from '../core/types.ts';
 import { DETAIL_BUDGETS } from './visual-language.ts';
 import type { DetailLevel, VisualIcon, VISUAL_PALETTE } from './visual-language.ts';
@@ -34,7 +36,7 @@ const HOME_SITES: ReadonlyArray<readonly [number, number]> = [
   [0.63, -0.1], [-0.71, -0.12], [0.15, 0.66], [-0.56, 0.65],
 ];
 const POPULATION_STEPS = [1, 4, 7, 10, 14, 20, 28, 40] as const;
-export type SettlementFacts = Pick<City, 'id' | 'civId' | 'tileId' | 'name' | 'population' | 'wellbeing' | 'damage' | 'buildings'>;
+export type SettlementFacts = Pick<City, 'id' | 'civId' | 'tileId' | 'name' | 'population' | 'wellbeing' | 'damage' | 'buildings' | 'buildingOperations'>;
 
 export function settlementVisual(city: SettlementFacts, detail: DetailLevel): SettlementVisual {
   const budget = DETAIL_BUDGETS[detail];
@@ -48,30 +50,17 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
     add(`home-${index}-wall`, 'box', 'plaster', [x, height / 2, z], [0.34, height, 0.3]);
     add(`home-${index}-roof`, 'gable', 'identity', [x, height + 0.1, z], [0.39, 0.2, 0.36], index % 2 ? Math.PI / 2 : 0);
   }
-  const buildings: VisualBadge[] = [];
-  if (city.buildings.includes('farm')) {
-    buildings.push({ icon: 'farm', label: 'Farm', value: 1 });
-    add('farm-soil', 'box', 'soil', [1.02, 0.04, 0.35], [0.78, 0.08, 1.12]);
-    for (let row = 0; row < budget.fieldRows; row += 1) {
-      const x = 1.02 + ((row + 0.5) / budget.fieldRows - 0.5) * 0.7;
-      add(`farm-row-${row}`, 'box', 'crop', [x, 0.1, 0.35], [0.11, 0.12, 0.98]);
-    }
-  }
-  if (city.buildings.includes('workshop')) {
-    buildings.push({ icon: 'workshop', label: 'Workshop', value: 1 });
-    add('workshop-wall', 'box', 'timber', [-1.02, 0.25, 0.37], [0.68, 0.5, 0.7]);
-    add('workshop-roof', 'gable', 'roof', [-1.02, 0.65, 0.37], [0.78, 0.32, 0.8]);
-    if (detail !== 'far') add('workshop-chimney', 'box', 'stone', [-0.77, 0.55, 0.55], [0.15, 1.1, 0.15]);
-    if (detail === 'close') {
-      add('workshop-stack-0', 'box', 'timber', [-1.1, 0.1, 0.96], [0.42, 0.2, 0.18]);
-      add('workshop-stack-1', 'box', 'grain', [-0.8, 0.08, 0.96], [0.18, 0.16, 0.18]);
-    }
-  }
+  const appearances = buildingAppearances(city.buildings, detail);
+  const buildings = appearances.map(({ icon, label }) => ({ icon, label, value: 1 }));
+  const conditionParts = damageParts(city.damage);
+  parts.push(...allocateBuildingParts(appearances, budget.parts - parts.length - conditionParts.length));
   const conditions: VisualBadge[] = [];
   if (city.wellbeing < 40) conditions.push({ icon: 'wellbeing', label: 'Wellbeing', value: city.wellbeing });
-  if (city.damage > 0) conditions.push({ icon: 'damage', label: 'Damage', value: city.damage });
+  const damaged = damageCondition(city.damage);
+  if (damaged) conditions.push(damaged);
+  parts.push(...conditionParts);
   return { cityId: city.id, civId: city.civId, tileId: city.tileId, name: city.name, population: city.population,
-    houses, parts: parts.slice(0, budget.parts), buildings, conditions, detail };
+    houses, parts, buildings, conditions, detail };
 }
 
 export function projectWorldVisuals(state: WorldState, detail: DetailLevel): SettlementVisual[] {

@@ -1,5 +1,6 @@
-import { DIRECTOR_EVENTS } from '../core/content.ts';
+import { DIRECTOR_EVENTS, TURN_RULES } from '../core/content.ts';
 import { observe } from '../core/engine.ts';
+import { observeCompactTrade } from '../core/observation.ts';
 import { type D1Database, WorldRepository } from './repository.ts';
 import type { PublicProvenance, PublicWorldRead } from './public-protocol.ts';
 import { boundedInteger, record, RequestFailure } from './validation.ts';
@@ -11,14 +12,16 @@ export interface WorkerOptions { now?: () => Date }
 const objectSchema = { type: 'object', additionalProperties: false };
 const revisionField = { type: 'integer', minimum: 0 };
 const stringField = { type: 'string', minLength: 1, maxLength: 200 };
+const planField = { type: 'array', maxItems: TURN_RULES.maximumPlanItems, items: { ...objectSchema, properties: { action: { type: 'object' }, reason: { type: 'string', minLength: 1, maxLength: 280 } }, required: ['action', 'reason'] } };
 const tools = [
   { name: 'whoami', description: 'Return this authenticated caller’s Site-scoped identity for explicit operator enrollment.', inputSchema: { ...objectSchema, properties: {} }, annotations: { readOnlyHint: true } },
-  { name: 'observe_world', description: 'Read the persistent world and available actions for one seat.', inputSchema: { ...objectSchema, properties: { seat: { type: 'integer', minimum: 0, maximum: 5 } } }, annotations: { readOnlyHint: true } },
+  { name: 'action_receipt', description: 'Read this enrolled caller’s accepted action command ID and its original committed revision without changing the world. not_found means no matching receipt in the reported revision snapshot; it does not diagnose denial or authorize a retry. Preserve the original request and permission boundary.', inputSchema: { ...objectSchema, properties: { commandId: stringField }, required: ['commandId'] }, annotations: { readOnlyHint: true } },
+  { name: 'observe_world', description: 'Read the persistent world, action-plan readiness and admission times for one seat. Optional observationFormat compact-trade-v1 factors trade facts and returns every indexed legalActions entry without a duplicate choices list. If strategy is due, this enrolled caller can invoke catchup_strategy, then observe again before choosing an action.', inputSchema: { ...objectSchema, properties: { seat: { type: 'integer', minimum: 0, maximum: 5 }, observationFormat: { enum: ['compact-trade-v1'] } } }, annotations: { readOnlyHint: true } },
   { name: 'initialize_world', description: 'Initialize a clearly named new online world once; never replace an existing world.', inputSchema: { ...objectSchema, properties: { seed: { type: 'integer' }, clockEpoch: stringField, commandId: stringField }, required: ['seed', 'clockEpoch', 'commandId'] } },
-  { name: 'play_action', description: 'Submit an exact model-chosen action. Independent releases revalidate exact actions after unrelated commits; choice indexes require the observed revision. Server time enforces the actor budget.', inputSchema: { ...objectSchema, properties: { seat: { type: 'integer', minimum: 0, maximum: 5 }, expectedRevision: revisionField, choice: { type: 'integer', minimum: 0 }, action: { type: 'object' }, model: stringField, commandId: stringField }, required: ['seat', 'expectedRevision', 'model', 'commandId'] } },
+  { name: 'play_action', description: 'Submit one model-chosen action with an optional plan of at most two reasoned items after bounded-plans is released. The head must equal this action; the successor is never autoexecuted. Exact actions are revalidated after unrelated commits; indexed choices remain revision-strict. Preserve the observed cityId or sourceCityId exactly; released city specialization requires a named owned city for focus and build. Released repair-city also requires the exact owned damaged city and current resources. On strategy_catchup_required, call catchup_strategy until remainingTicks is zero, observe afresh and explicitly choose the next submission. Server time enforces the actor budget.', inputSchema: { ...objectSchema, properties: { seat: { type: 'integer', minimum: 0, maximum: 5 }, expectedRevision: revisionField, choice: { type: 'integer', minimum: 0 }, action: { type: 'object' }, plan: planField, model: stringField, commandId: stringField }, required: ['seat', 'expectedRevision', 'model', 'commandId'] } },
   { name: 'director_tick', description: 'Submit an idempotent Director event, review or exact clock interval.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, kind: { enum: ['event', 'review', 'clock'] }, intervalId: stringField, timestamp: stringField, event: { enum: DIRECTOR_EVENTS.map((event) => event.id) }, target: { type: 'integer', minimum: 0, maximum: 4 }, model: stringField }, required: ['expectedRevision', 'kind', 'intervalId', 'timestamp'] } },
   { name: 'catchup_clock', description: 'Realize due six-minute clock intervals through an explicit timestamp. Process at most240 due ticks and inspect remainingTicks. A late scheduler realizes due ticks late.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, timestamp: stringField, commandId: stringField, model: stringField }, required: ['expectedRevision', 'timestamp', 'commandId'] } },
-  { name: 'catchup_strategy', description: 'Realize up to 60 due economy beats through an explicit UTC timestamp, independent of actor participation. Inspect remainingTicks; late wakes realize beats late.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, timestamp: stringField, commandId: stringField, model: stringField }, required: ['expectedRevision', 'timestamp', 'commandId'] } },
+  { name: 'catchup_strategy', description: 'Any enrolled agent can preflight its own action by realizing up to 60 due economy beats through an explicit UTC timestamp. Read remainingTicks, continue bounded batches with fresh revision and unique command IDs until zero, then observe and choose a real action. No other actor or scheduler wake is required; idle worlds may realize beats late.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, timestamp: stringField, commandId: stringField, model: stringField }, required: ['expectedRevision', 'timestamp', 'commandId'] } },
   { name: 'apply_release', description: 'Explicitly apply one registered compatible release to this run. Preserve its clock, turns and history; never select a mutable current release.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, expectedFromReleaseId: stringField, targetReleaseId: stringField, commandId: stringField, model: stringField }, required: ['expectedRevision', 'expectedFromReleaseId', 'targetReleaseId', 'commandId', 'model'] } },
   { name: 'advance_history', description: 'Intentionally add calendar years once for a delivered feature or actual recorded event, preserving normal clock intervals and tactical turns.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, cause: { ...objectSchema, properties: { kind: { enum: ['feature', 'event'] }, id: { ...stringField, maxLength: 128 } }, required: ['kind', 'id'] }, reason: { ...stringField, maxLength: 1000 }, deltaYears: { type: 'integer', minimum: 0 }, timestamp: stringField, commandId: stringField, model: stringField }, required: ['expectedRevision', 'cause', 'reason', 'deltaYears', 'timestamp', 'commandId', 'model'] } },
 ];
@@ -96,20 +99,24 @@ function repository(environment: WorkerEnvironment): WorldRepository {
   return new WorldRepository(environment.DB, environment.WORLD_ID ?? 'main');
 }
 
-async function observation(store: WorldRepository, timestamp: string, seat?: unknown): Promise<unknown> {
+async function observation(store: WorldRepository, timestamp: string, seat?: unknown, observationFormat?: unknown): Promise<unknown> {
+  if (observationFormat !== undefined && observationFormat !== 'compact-trade-v1') throw new RequestFailure(400, 'invalid_observation_format');
   const current = await store.read();
   if (!current) throw new RequestFailure(503, 'world_not_initialized');
   const selected = seat === undefined ? current.state.phase : boundedInteger(seat, 0, 5, 'seat');
-  const view = observe(current.state, selected, timestamp);
-  return { ...view, serverTimestamp: timestamp, releaseId: current.state.releaseId, unlockedFeatures: current.state.unlockedFeatures, calendarMilestones: current.state.calendarMilestones, clockEpoch: current.state.clockEpoch, clockTicks: current.state.clockTicks, choices: view.legalActions.map((option, choice) => ({ choice, ...option })) };
+  const view = observationFormat === undefined ? observe(current.state, selected, timestamp) : observeCompactTrade(current.state, selected, timestamp);
+  const hosted = { ...view, serverTimestamp: timestamp, releaseId: current.state.releaseId, unlockedFeatures: current.state.unlockedFeatures, calendarMilestones: current.state.calendarMilestones, clockEpoch: current.state.clockEpoch, clockTicks: current.state.clockTicks };
+  const indexed = view.legalActions.map((option, choice) => ({ choice, ...option }));
+  return observationFormat === undefined ? { ...hosted, choices: indexed } : { ...hosted, legalActions: indexed };
 }
 
 async function callTool(name: string, args: Record<string, unknown>, request: Request, environment: WorkerEnvironment, timestamp: string): Promise<unknown> {
   if (name === 'whoami') return { userId: identity(request), identityScope: 'site', writerEnrolled: (environment.AGENT_WRITER_USER_IDS ?? '').split(',').map((value) => value.trim()).includes(identity(request)) };
-  if (name === 'observe_world') return observation(repository(environment), timestamp, args.seat);
+  if (name === 'observe_world') return observation(repository(environment), timestamp, args.seat, args.observationFormat);
   const actor = authorize(request, environment);
   const store = repository(environment);
   switch (name) {
+    case 'action_receipt': return store.actionReceipt(args, actor);
     case 'initialize_world': return store.initialize(args, actor, timestamp);
     case 'play_action': return store.mutate('action', args, actor, timestamp);
     case 'director_tick': return store.mutate('director-tick', args, actor, timestamp);
@@ -178,7 +185,10 @@ export function createWorker(assetResponder?: AssetResponder, options: WorkerOpt
                 const value: PublicWorldRead = { ok: true, authoritative: true, ...current };
                 return response(value, 200, { etag: store.worldEtag(current.state.revision) });
               }
-              case '/api/observe': return response(await observation(store, timestamp, url.searchParams.has('seat') ? Number(url.searchParams.get('seat')) : undefined));
+              case '/api/observe': {
+                const formats = url.searchParams.getAll('observationFormat');
+                return response(await observation(store, timestamp, url.searchParams.has('seat') ? Number(url.searchParams.get('seat')) : undefined, formats.length > 1 ? formats : formats[0]));
+              }
               case '/api/history': {
                 const history = await store.history(Number(url.searchParams.get('after') ?? '0'), Number(url.searchParams.get('limit') ?? '50'));
                 return response({ ...history, entries: history.entries.map((entry) => ({ ...entry, provenance: publicProvenance(entry.provenance) })) });

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  ACTION_FEATURES, BUILDINGS, CIVILIZATIONS, CONTENT, DIRECTOR_CLOCK_RULES,
-  DIRECTOR_EVENTS, ERAS, HISTORICAL_MILESTONES, TECHNOLOGIES, TRADE_RECIPES, TRADE_RULES, VICTORY_RULES, validateContent,
+  ACTION_FEATURES, BUILDINGS, CIVILIZATIONS, CONTENT, DIRECTOR_CLOCK_RULES, SETTLEMENT_SITE_OUTPUTS, ECONOMY_RULES,
+  DIRECTOR_EVENTS, ERAS, HISTORICAL_MILESTONES, TECHNOLOGIES, TRADE_RECIPES, TRADE_RULES, LAND_TRANSPORT_RULES, PUBLIC_PROJECT_RECIPES, PUBLIC_PROJECT_RULES, VICTORY_RULES, validateContent,
 } from '../core/content.ts';
 import { CIV_COUNT } from '../core/types.ts';
+import { CURRENT_RELEASE, RELEASES } from '../core/release.ts';
 
 function required<T>(value: T | undefined): T {
   assert.ok(value !== undefined);
@@ -50,7 +51,7 @@ await test('research prerequisites cannot form a cycle or require an undiscovere
 
 await test('construction uses valid discovery gates and real production or world effects', () => {
   assert.ok(BUILDINGS.some(building => Object.keys(building.production).length > 0));
-  assert.ok(BUILDINGS.every(building => building.effects.length > 0));
+  assert.ok(BUILDINGS.every(building => building.effects.length > 0 || Object.values(building.production).some(amount => amount > 0)));
   const launchpad = BUILDINGS.find(building => building.id === VICTORY_RULES.mars.requiredBuilding);
   assert.ok(launchpad);
   assert.ok(launchpad.requires.includes(VICTORY_RULES.mars.requiredTechnology));
@@ -162,4 +163,146 @@ await test('trade recipes and pacing are validated shared content rather than hi
   assert.ok(validateContent(invalidFeature).some(error => error.includes('missing-trade-feature')));
   const invalidLimit = { ...structuredClone(CONTENT), tradeRecipes: structuredClone(TRADE_RECIPES), tradeRules: { ...TRADE_RULES, maxPendingPerPair: 0 } };
   assert.ok(validateContent(invalidLimit).some(error => error.includes('trade')));
+});
+
+await test('prepared production branches require shared operating inputs and explicit release gates', () => {
+  for (const [technologyId, buildingId, resource, amount] of [['water-management', 'irrigation', 'materials', 1], ['kiln-firing', 'kiln', 'energy', 2]] as const) {
+    const technology = required(TECHNOLOGIES.find(item => item.id === technologyId));
+    const building = required(BUILDINGS.find(item => item.id === buildingId));
+    assert.equal(technology.cost, 16);
+    assert.deepEqual(technology.requires, ['agriculture']);
+    assert.ok(building.requires.includes(technologyId));
+    assert.ok(building.requiredFeatures.includes('building-operations'));
+    assert.equal(building.operatingInputs?.[resource], amount);
+    const invalid = structuredClone(CONTENT);
+    required(invalid.buildings.find(item => item.id === buildingId)).operatingInputs = { [resource]: -1 };
+    assert.ok(validateContent(invalid).some(error => error.includes('operating inputs')));
+  }
+  assert.deepEqual(ACTION_FEATURES['set-building-operation'], ['building-operations']);
+});
+
+await test('frontier site yields are shared validated data and founding keeps a populated source', () => {
+  assert.deepEqual(SETTLEMENT_SITE_OUTPUTS.grassland, { food: 2 });
+  assert.deepEqual(SETTLEMENT_SITE_OUTPUTS.forest, { materials: 2 });
+  assert.equal(ECONOMY_RULES.settle.population, 3);
+  assert.equal(ECONOMY_RULES.settle.minimumSourcePopulation, 3);
+  for (const siteOutputs of [{ grassland: { food: -1 } }, { forest: { materials: Infinity } }, { ocean: { food: 2 } }]) {
+    assert.ok(validateContent({ ...structuredClone(CONTENT), siteOutputs }).some(error => error.includes('site output')));
+  }
+});
+
+await test('recoverable disasters use gated effects while preserving historical earthquake data', () => {
+  const earthquake = required(DIRECTOR_EVENTS.find(event => event.id === 'earthquake'));
+  assert.ok(earthquake.effects.some(effect => effect.kind === 'city' && effect.field === 'infrastructure' && effect.amount === -1));
+  const released = required(earthquake.releasedEffects);
+  assert.deepEqual(released.requiredFeatures, ['city-repair']);
+  assert.ok(released.effects.some(effect => effect.kind === 'city' && effect.field === 'damage' && effect.amount === 35));
+  assert.ok(!released.effects.some(effect => effect.kind === 'city' && effect.field === 'infrastructure'));
+  assert.deepEqual(ACTION_FEATURES['repair-city'], ['city-repair']);
+  for (const variant of [
+    { requiredFeatures: [], effects: released.effects },
+    { requiredFeatures: ['unknown-recovery-feature'], effects: released.effects },
+    { requiredFeatures: released.requiredFeatures, effects: [] },
+    { requiredFeatures: released.requiredFeatures, effects: [{ kind: 'city' as const, field: 'damage' as const, amount: Infinity }] },
+  ]) {
+    const invalid = structuredClone(CONTENT);
+    required(invalid.events.find(event => event.id === 'earthquake')).releasedEffects = structuredClone(variant);
+    assert.ok(validateContent(invalid).some(error => error.includes('released effects')));
+  }
+});
+
+await test('the civic branch connects culture-funded learning to a useful fuel commitment behind one explicit release', () => {
+  const learning = required(BUILDINGS.find(building => building.id === 'academy'));
+  assert.deepEqual(learning.operatingInputs, { culture: 2, credits: 1 });
+  assert.deepEqual(learning.production, { science: 3 });
+  assert.ok(learning.requiredFeatures.includes('building-operations'));
+  const fuel = required(TECHNOLOGIES.find(technology => technology.id === 'fuel-management'));
+  assert.equal(fuel.cost, 28);
+  assert.deepEqual(fuel.requires, ['civic-institutions', 'kiln-firing']);
+  const yard = required(BUILDINGS.find(building => building.id === 'fuel-yard'));
+  assert.deepEqual(yard.cost, { materials: 14, credits: 8 });
+  assert.deepEqual(yard.operatingInputs, { materials: 2 });
+  assert.deepEqual(yard.production, { energy: 3 });
+  assert.deepEqual(yard.effects, []);
+  assert.deepEqual(yard.requires, [fuel.id]);
+  const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
+  assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1']);
+  assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
+  assert.deepEqual(validateContent(), []);
+});
+
+await test('exact trade town selection is an additive explicit capability without changing the default world', () => {
+  const charter = required(RELEASES.find(release => release.id === 'settlement-charters-1'));
+  const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
+  assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
+  assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1']);
+  assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
+  assert.deepEqual(validateContent(), []);
+});
+
+await test('public repair promises use validated bounded shared civic terms', () => {
+  const recipe = required(PUBLIC_PROJECT_RECIPES.find(candidate => candidate.id === 'joint-road-repair'));
+  assert.deepEqual(recipe.terms.proposerContribution, { materials: 2, energy: 1 });
+  assert.deepEqual(recipe.terms.recipientContribution, recipe.terms.proposerContribution);
+  assert.equal(recipe.terms.damageReduction, 25);
+  assert.equal(recipe.terms.pendingLifetimeRounds, 4);
+  assert.equal(recipe.terms.completionDelayRounds, 2);
+  assert.equal(recipe.requiredTechnology, 'civic-institutions');
+  assert.equal(recipe.requiredBuilding, 'monument');
+  assert.equal(PUBLIC_PROJECT_RULES.maxActivePerPair, 1);
+  assert.equal(PUBLIC_PROJECT_RULES.maxActiveTotal, CIV_COUNT * (CIV_COUNT - 1) / 2);
+  for (const action of ['propose-public-project', 'respond-public-project', 'cancel-public-project'] as const)
+    assert.deepEqual(ACTION_FEATURES[action], ['public-projects']);
+  assert.ok(!CURRENT_RELEASE.featureIds.includes('public-projects'));
+  const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
+  const charter = required(RELEASES.find(release => release.id === 'settlement-charters-1'));
+  assert.deepEqual(charter.compatibleFrom, [civic.id]);
+  assert.deepEqual(charter.featureIds, [...civic.featureIds, 'public-projects']);
+  assert.deepEqual(validateContent(), []);
+});
+
+await test('public project catalogue rejects empty payments, invalid timing and unknown civic gates', () => {
+  for (const change of [
+    { terms: { proposerContribution: {} } },
+    { terms: { recipientContribution: { energy: -1 } } },
+    { terms: { damageReduction: 101 } },
+    { terms: { completionDelayRounds: 0 } },
+    { terms: { pendingLifetimeRounds: 0.5 } },
+    { terms: { recipeVersion: 99 } },
+    { requiredTechnology: 'missing-discovery' },
+    { requiredBuilding: 'missing-building' },
+    { requiredFeatures: [] },
+  ]) {
+    const invalid = structuredClone(CONTENT);
+    const recipe = required(invalid.publicProjectRecipes[0]);
+    Object.assign(recipe, change, { terms: { ...recipe.terms, ...change.terms } });
+    assert.ok(validateContent(invalid).some(error => error.startsWith('public project')));
+  }
+  const duplicate = structuredClone(CONTENT);
+  duplicate.publicProjectRecipes.push(structuredClone(required(duplicate.publicProjectRecipes[0])));
+  assert.ok(validateContent(duplicate).some(error => error.includes('duplicate identifier')));
+  const invalidLimit = structuredClone(CONTENT);
+  invalidLimit.publicProjectRules.maxActiveTotal = 0;
+  assert.ok(validateContent(invalidLimit).some(error => error.includes('public project rules')));
+});
+
+await test('land transport is versioned shared data behind a compatible explicit release', () => {
+  const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
+  const land = required(RELEASES.find(release => release.id === 'settlement-land-transport-1'));
+  assert.deepEqual(land.compatibleFrom, [endpoints.id]);
+  assert.deepEqual(land.featureIds, [...endpoints.featureIds, 'land-transport']);
+  assert.deepEqual(LAND_TRANSPORT_RULES, { ruleVersion: 1, edgesPerBeat: 2, passable: { grassland: true, forest: true, desert: true, tundra: true, mountain: false, ocean: false } });
+  assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
+  assert.equal(land.featureIds.includes('navigation'), false);
+  for (const pace of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const invalid = structuredClone(CONTENT);
+    invalid.landTransportRules.edgesPerBeat = pace;
+    assert.ok(validateContent(invalid).some(error => error.includes('land transport')));
+  }
+  const missingTerrain = structuredClone(CONTENT);
+  Reflect.deleteProperty(missingTerrain.landTransportRules.passable, 'ocean');
+  assert.ok(validateContent(missingTerrain).some(error => error.includes('passability')));
+  assert.deepEqual(validateContent(), []);
 });

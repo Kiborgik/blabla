@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { verifyBuildProvenance } from './build-provenance.ts';
 
 interface WorkerModule {
   default: { fetch(request: Request, environment: Record<string, unknown>): Promise<Response> };
@@ -12,6 +13,7 @@ function isWorker(value: unknown): value is WorkerModule {
     && typeof value.default.fetch === 'function';
 }
 
+verifyBuildProvenance(process.cwd());
 const source = await readFile(resolve('dist/server/index.js'), 'utf8');
 const module: unknown = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 assert.ok(isWorker(module), 'Artifact must export default.fetch');

@@ -1,3 +1,4 @@
+import { buildingIdentity } from './building-visuals.ts';
 import type { GameEvent } from '../core/types.ts';
 import { METRIC_LABELS } from './visual-language.ts';
 import type { VisualIcon, VisualMetric } from './visual-language.ts';
@@ -6,7 +7,7 @@ export interface VisualDelta {
   icon: VisualMetric;
   label: string;
   value: number;
-  kind: 'delta' | 'rate' | 'total';
+  kind: 'delta' | 'rate' | 'total' | 'production' | 'payment';
   tone: 'positive' | 'negative' | 'neutral';
   qualifier: string;
   subject: string | null;
@@ -19,7 +20,7 @@ export interface VisualEvent {
   target: number | null;
   label: string;
   detail: string;
-  cue: 'dry-wind' | 'construction' | 'growth' | 'production' | 'discovery' | 'warning' | 'delivery';
+  cue: 'dry-wind' | 'construction' | 'growth' | 'production' | 'discovery' | 'warning' | 'delivery' | 'work' | 'status' | 'repair';
   icon: VisualIcon;
   durationMs: number;
   deltas: VisualDelta[];
@@ -34,6 +35,7 @@ const EVENT_MARKS: Record<string, Pick<VisualEvent, 'label' | 'cue' | 'icon'>> =
   'settlement-production': { label: 'Resources produced', cue: 'production', icon: 'food' },
   'research-completed': { label: 'Discovery', cue: 'discovery', icon: 'discovery' },
   'supply-shortage': { label: 'Food shortage', cue: 'warning', icon: 'food' },
+  'city-repaired': { label: 'City repaired', cue: 'repair', icon: 'repair' },
   earthquake: { label: 'Earthquake', cue: 'warning', icon: 'damage' },
   'resource-boom': { label: 'New supplies', cue: 'discovery', icon: 'materials' },
   'trade-delivered': { label: 'Cargo delivered', cue: 'delivery', icon: 'cargo' },
@@ -52,9 +54,9 @@ function metric(value: string | undefined): VisualMetric | null {
 function delta(icon: VisualMetric, value: number, kind: VisualDelta['kind'], subject: string | null = null): VisualDelta | null {
   if (!Number.isFinite(value)) return null;
   const direction = icon === 'damage' ? -value : value;
-  const tone = kind === 'total' || value === 0 ? 'neutral' : direction > 0 ? 'positive' : 'negative';
+  const tone = kind === 'payment' ? 'neutral' : kind === 'total' || value === 0 ? 'neutral' : direction > 0 ? 'positive' : 'negative';
   return { icon, label: METRIC_LABELS[icon], value: Math.round(value * 100) / 100, kind, subject, tone,
-    qualifier: kind === 'rate' ? 'base / season' : icon === 'wellbeing' || icon === 'damage' ? 'points' : '' };
+    qualifier: kind === 'payment' ? 'paid inputs' : kind === 'production' ? 'produced before costs' : kind === 'rate' ? 'base / season' : icon === 'wellbeing' || icon === 'damage' ? 'points' : '' };
 }
 
 function effectDelta(effect: string): VisualDelta | null {
@@ -71,7 +73,12 @@ function effectDelta(effect: string): VisualDelta | null {
   const produced = /^Produced (\d+(?:\.\d+)?) (\w+)$/.exec(effect);
   if (produced) {
     const icon = metric(produced[2]);
-    return icon ? delta(icon, Number(produced[1]), 'delta') : null;
+    return icon ? delta(icon, Number(produced[1]), 'production') : null;
+  }
+  const paid = /^Paid (\d+(?:\.\d+)?) (\w+)$/.exec(effect);
+  if (paid) {
+    const icon = metric(paid[2]);
+    return icon ? delta(icon, Number(paid[1]), 'payment') : null;
   }
   const signed = /^(\w+) ([+-]\d+(?:\.\d+)?)$/.exec(effect);
   if (signed) {
@@ -85,12 +92,21 @@ function effectDelta(effect: string): VisualDelta | null {
 }
 
 export function eventVisual(event: GameEvent): VisualEvent | null {
-  const mark = EVENT_MARKS[event.type];
+  const deltas = event.effects.flatMap((effect) => { const parsed = effectDelta(effect); return parsed ? [parsed] : []; });
+  const made = deltas.some((entry) => entry.kind === 'production' && entry.value > 0);
+  let mark = EVENT_MARKS[event.type];
+  if (event.type === 'building-operation') {
+    const buildingId = /\/([a-z-]+) at strategic round \d+$/.exec(event.detail)?.[1];
+    const icon = (buildingId ? buildingIdentity(buildingId)?.icon : null) ?? 'infrastructure';
+    const label = event.title.endsWith(' blocked') ? 'Building needs supplies' : event.title.endsWith(' paused') ? 'Building paused' : made ? 'Building made supplies' : 'No output recorded';
+    mark = { label, icon, cue: made ? 'work' : 'status' };
+  }
   if (!mark) return null;
+  if (event.type === 'settlement-production' && !made) mark = { ...mark, cue: 'status' };
   return {
     ...mark, eventId: event.id, tileId: event.tileId, actor: event.actor, target: event.target,
     detail: event.detail, importance: event.importance, durationMs: mark.cue === 'dry-wind' ? 3200 : 2600,
-    deltas: event.effects.flatMap((effect) => { const parsed = effectDelta(effect); return parsed ? [parsed] : []; }).slice(0, 4),
+    deltas: deltas.slice(0, 4),
   };
 }
 

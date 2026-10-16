@@ -1,6 +1,10 @@
 import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
-import { type Command, type DirectorTickCommand, type GameAction, type HistoryAdvanceCommand, type ReleaseApplyCommand, type TransitionResult, type WorldState } from '../core/types.ts';
+import { type ActionOutcome, type Command, type DirectorTickCommand, type GameAction, type HistoryAdvanceCommand, type ReleaseApplyCommand, type TransitionResult, type WorldState } from '../core/types.ts';
+import { isGameAction, validateAttachedPlan } from '../core/planning.ts';
 import { isDirectorEvent } from '../core/validation.ts';
+import { decodeHistorySnapshot, HISTORY_SNAPSHOT_PREFIX } from './snapshot-codec.ts';
+import { HistoryOutputBudget, selectHistoryRows } from './history-budget.ts';
+import { type ActionReceiptRead, readActionReceipt } from './action-receipt.ts';
 import type { PublicChronicleEntry, PublicPage, PublicProvenance, PublicTransition } from './public-protocol.ts';
 import { assertWorld, boundedInteger, canonical, isRecord, parseJson, record, RequestFailure, text, utc } from './validation.ts';
 
@@ -12,7 +16,7 @@ export type HostedTransition = PublicTransition;
 export interface HostedProvenance extends PublicProvenance { actorUserId: string }
 export interface HostedChronicleEntry extends PublicChronicleEntry { provenance: HostedProvenance }
 export interface HostedEntry extends HostedChronicleEntry { state: WorldState }
-export interface HostedReply { ok: true; revision: number; acceptedRevision: number; duplicate?: boolean; remainingTicks?: number }
+export interface HostedReply { ok: true; revision: number; acceptedRevision: number; duplicate?: boolean; remainingTicks?: number; actionOutcome?: ActionOutcome }
 export interface HostedWorld { initial: WorldState; state: WorldState }
 
 function assertReply(value: unknown): asserts value is HostedReply {
@@ -21,6 +25,7 @@ function assertReply(value: unknown): asserts value is HostedReply {
 
 function assertChronicleEntry(value: unknown): asserts value is HostedChronicleEntry {
   if (!isRecord(value) || !isRecord(value.transition) || !isRecord(value.provenance) || !Array.isArray(value.events)
+    || value.transition.kind === 'action' && (!isRecord(value.transition.command) || !isGameAction(value.transition.command.action))
     || typeof value.startRevision !== 'number' || !Number.isSafeInteger(value.startRevision) || value.startRevision < 0
     || typeof value.endRevision !== 'number' || !Number.isSafeInteger(value.endRevision) || value.endRevision <= value.startRevision) throw new RequestFailure(503, 'corrupt_history');
 }
@@ -39,6 +44,10 @@ export class WorldRepository {
   constructor(database: D1Database, worldId = 'main') { this.database = database; this.worldId = worldId; }
 
   worldEtag(revision: number): string { return `W/"world-v1-${encodeURIComponent(this.worldId)}-${revision}"`; }
+
+  actionReceipt(input: Record<string, unknown>, actorUserId: string): Promise<ActionReceiptRead> {
+    return readActionReceipt(this.database, this.worldId, input, actorUserId);
+  }
 
   async revision(): Promise<number | null> {
     const result = await this.database.prepare('SELECT revision FROM world_state WHERE world_id = ?').bind(this.worldId).all();
@@ -104,10 +113,12 @@ export class WorldRepository {
     const fingerprint = canonical({ operation, input, actorUserId });
     const prior = await this.receipt(key, fingerprint);
     if (prior) return prior;
+    let actionLifecycle = operation === 'action' && input.plan !== undefined;
     try {
       for (let attempt = 0; attempt < 8; attempt += 1) {
         const current = await this.read();
         if (!current) throw new RequestFailure(503, 'world_not_initialized');
+        actionLifecycle ||= operation === 'action' && current.state.unlockedFeatures.includes('bounded-plans');
         const canRebase = operation === 'action' && current.state.independentTurns !== undefined && input.action !== undefined && input.choice === undefined;
         if (submittedRevision > current.state.revision || (current.state.revision !== submittedRevision && !canRebase)) throw new RequestFailure(409, 'stale_revision');
         const expectedRevision = current.state.revision;
@@ -127,6 +138,12 @@ export class WorldRepository {
           else action = options.find((option) => canonical(option.action) === canonical(input.action))?.action;
           if (!action) throw new RequestFailure(400, 'illegal_action');
           const command: Command = { seat, expectedRevision, action, ...(current.state.independentTurns ? { timestamp } : {}) };
+          if (input.plan !== undefined) {
+            command.observedRevision = submittedRevision;
+            const checked = validateAttachedPlan(current.state, command, input.plan);
+            if (!checked.ok) throw new RequestFailure(400, checked.code, { actionOutcome: { status: 'failed', code: checked.code, reason: checked.error } });
+            command.plan = checked.plan;
+          }
           transition = { kind: 'action', command };
           result = applyCommand(current.state, command);
         } else if (operation === 'release-apply') {
@@ -162,9 +179,9 @@ export class WorldRepository {
             result = applyDirectorTick(current.state, command);
           }
         }
-        if (!result.ok) throw new RequestFailure(400, result.error?.startsWith('strategy_catchup_required:') ? 'strategy_catchup_required' : 'engine_refused_transition', { reason: result.error ?? 'Transition refused', ...(operation === 'action' ? { admission: observe(current.state, seat).admission } : {}) });
+        if (!result.ok) throw new RequestFailure(400, result.actionOutcome?.code ?? (result.error?.startsWith('strategy_catchup_required:') ? 'strategy_catchup_required' : 'engine_refused_transition'), { reason: result.error ?? 'Transition refused', ...(result.actionOutcome ? { actionOutcome: result.actionOutcome } : {}), ...(operation === 'action' ? { admission: observe(current.state, seat).admission } : {}) });
         assertWorld(result.state);
-        const reply: HostedReply = { ok: true, revision: result.state.revision, acceptedRevision: result.state.revision, ...(remainingTicks === undefined ? {} : { remainingTicks }) };
+        const reply: HostedReply = { ok: true, revision: result.state.revision, acceptedRevision: result.state.revision, ...(remainingTicks === undefined ? {} : { remainingTicks }), ...(result.actionOutcome ? { actionOutcome: result.actionOutcome } : {}) };
         const provenance: HostedProvenance = { actorUserId, kind: model === null ? 'clock-service' : 'development-agent', model, seat, commandId, recordedAt: timestamp };
         const unchanged = result.state.revision === expectedRevision;
         const statements = unchanged ? [
@@ -184,33 +201,47 @@ export class WorldRepository {
     } catch (failure) {
       const retry = await this.receipt(key, fingerprint);
       if (retry) return retry;
+      if (actionLifecycle && failure instanceof RequestFailure && failure.details.actionOutcome === undefined)
+        throw new RequestFailure(failure.status, failure.code, { ...failure.details, actionOutcome: { status: 'failed', code: failure.code, reason: failure.code.replaceAll('_', ' ') } });
       throw failure;
     }
   }
 
-  private async transitionPage(after: number, limit: number, snapshots: boolean): Promise<{ rows: unknown[]; hasMore: boolean }> {
+  private async chroniclePage(after: number, limit: number): Promise<{ rows: unknown[]; hasMore: boolean }> {
     boundedInteger(after, 0, Number.MAX_SAFE_INTEGER, 'after');
     boundedInteger(limit, 1, 200, 'limit');
-    const columns = snapshots ? 'start_revision, end_revision, transition_json, provenance_json, state_json, events_json' : 'start_revision, end_revision, transition_json, provenance_json, events_json';
-    const result = await this.database.prepare(`SELECT ${columns} FROM world_transitions WHERE world_id = ? AND end_revision > ? ORDER BY end_revision ASC LIMIT ?`).bind(this.worldId, after, limit + 1).all();
+    const result = await this.database.prepare('SELECT start_revision, end_revision, transition_json, provenance_json, events_json FROM world_transitions WHERE world_id = ? AND end_revision > ? ORDER BY end_revision ASC LIMIT ?').bind(this.worldId, after, limit + 1).all();
     return { rows: result.results.slice(0, limit), hasMore: result.results.length > limit };
   }
 
   async chronicle(after = 0, limit = 50): Promise<PublicPage<HostedChronicleEntry>> {
-    const page = await this.transitionPage(after, limit, false);
+    const page = await this.chroniclePage(after, limit);
     const entries = page.rows.map(chronicleEntry);
     return { entries, hasMore: page.hasMore, nextRevision: page.hasMore ? entries.at(-1)?.endRevision ?? null : null };
   }
 
   async history(after = 0, limit = 50): Promise<PublicPage<HostedEntry>> {
-    const page = await this.transitionPage(after, limit, true);
-    const entries = page.rows.map((value) => {
+    boundedInteger(after, 0, Number.MAX_SAFE_INTEGER, 'after');
+    boundedInteger(limit, 1, 200, 'limit');
+    const metadata = await this.database.prepare('SELECT end_revision, length(CAST(state_json AS BLOB)) AS snapshot_bytes, length(CAST(transition_json AS BLOB)) + length(CAST(provenance_json AS BLOB)) + length(CAST(events_json AS BLOB)) AS detail_bytes, substr(state_json, 1, ?) = ? AS encoded FROM world_transitions WHERE world_id = ? AND end_revision > ? ORDER BY end_revision ASC LIMIT ?').bind(HISTORY_SNAPSHOT_PREFIX.length, HISTORY_SNAPSHOT_PREFIX, this.worldId, after, limit + 1).all();
+    const selected = selectHistoryRows(metadata.results, after, limit);
+    const last = selected.revisions.at(-1);
+    if (last === undefined) return { entries: [], hasMore: false, nextRevision: null };
+    const page = await this.database.prepare('SELECT start_revision, end_revision, transition_json, provenance_json, state_json, events_json FROM world_transitions WHERE world_id = ? AND end_revision > ? AND end_revision <= ? ORDER BY end_revision ASC LIMIT ?').bind(this.worldId, after, last, selected.revisions.length).all();
+    if (page.results.length !== selected.revisions.length || page.results.some((row, index) => !isRecord(row) || row.end_revision !== selected.revisions[index])) throw new RequestFailure(503, 'corrupt_history');
+    const budget = new HistoryOutputBudget();
+    const entries: HostedEntry[] = [];
+    for (const value of page.results) {
+      if (budget.full) break;
       const row = record(value);
       if (typeof row.state_json !== 'string') throw new RequestFailure(503, 'corrupt_history');
-      const state = parseJson(row.state_json);
-      assertWorld(state);
-      return { ...chronicleEntry(row), state };
-    });
-    return { entries, hasMore: page.hasMore, nextRevision: page.hasMore ? entries.at(-1)?.endRevision ?? null : null };
+      const state = await decodeHistorySnapshot(row.state_json);
+      if (state.revision !== row.end_revision) throw new RequestFailure(503, 'corrupt_history');
+      const entry = { ...chronicleEntry(row), state };
+      if (!budget.accept(entry)) break;
+      entries.push(entry);
+    }
+    const hasMore = selected.hasMore || entries.length < page.results.length;
+    return { entries, hasMore, nextRevision: hasMore ? entries.at(-1)?.endRevision ?? null : null };
   }
 }

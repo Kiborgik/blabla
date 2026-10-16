@@ -14,19 +14,23 @@ import {
   CIV_COUNT,
   DIRECTOR_SEAT,
   type Command,
+  type ActionOption,
   type HistoryAdvanceCommand,
   type GameAction,
   type ReleaseApplyCommand,
   type WorldState,
+  type Resources,
 } from '../core/types.ts';
 import { RELEASES } from '../core/release.ts';
 import {
+  BUILDINGS,
   ECONOMY_RULES,
   RESOURCE_IDS,
   TRADE_RECIPES,
   TRADE_RULES,
   TURN_RULES,
 } from '../core/content.ts';
+import { hexDistance } from '../core/simulation/geography.ts';
 import { resolveEconomy } from '../core/simulation/economy.ts';
 import { applyEffects } from '../core/simulation/effects.ts';
 import { milestoneEligible } from '../core/simulation/history.ts';
@@ -1358,4 +1362,954 @@ await test('mixed independent actor and strategic transitions reproduce exact st
   assert.equal(live.independentTurns?.lastActionWindow[0], -1);
   assert.equal(live.independentTurns?.lastActionWindow[2], -1);
   assert.equal(live.independentTurns?.lastActionWindow[DIRECTOR_SEAT], -1);
+});
+
+function plannedFixture(): WorldState {
+  const state = independentFixture();
+  const result = engine.applyRelease(state, {
+    expectedRevision: state.revision,
+    expectedFromReleaseId: state.releaseId,
+    targetReleaseId: 'settlement-plans-1',
+  });
+  assert.equal(result.ok, true, result.error);
+  return result.state;
+}
+
+function plannedCommand(state: WorldState, seat = 0): Command {
+  return {
+    ...independentCommand(state, seat, independentEpoch, { type: 'focus', focus: 'industry' }),
+    observedRevision: 0,
+    plan: [
+      { action: { type: 'focus', focus: 'industry' }, reason: 'Prepare materials for future building' },
+      { action: { type: 'focus', focus: 'growth' }, reason: 'Then review food needs' },
+    ],
+  };
+}
+
+await test('the explicit plans release initializes bounded slots without resetting prior world or timing facts', () => {
+  const state = independentFixture();
+  const original = structuredClone(state);
+  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-plans-1' });
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(result.state.actionPlans, Array.from({ length: DIRECTOR_SEAT + 1 }, () => null));
+  assert.deepEqual(result.state.independentTurns, state.independentTurns);
+  assert.deepEqual(result.state.civilizations, state.civilizations);
+  assert.deepEqual(result.state.cities, state.cities);
+  assert.equal(result.state.clockEpoch, state.clockEpoch);
+  assert.equal(result.state.clockTicks, state.clockTicks);
+  assert.equal(result.state.round, state.round);
+  assert.equal(result.state.year, state.year);
+  assert.equal(result.state.revision, state.revision + 1);
+  assert.deepEqual(state, original);
+  assert.equal(Object.hasOwn(state, 'actionPlans'), false);
+  assert.equal(Object.hasOwn(observe(state, 0), 'actionPlan'), false);
+  assert.equal(observe(result.state, 0).actionPlan, null);
+  assert.ok(isWorldState(result.state));
+});
+
+await test('real accepted commands complete the attached head and retain original context without autoexecuting follow-up', () => {
+  const state = plannedFixture();
+  const command = plannedCommand(state);
+  const result = applyCommand(state, command);
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.actionOutcome?.status, 'completed');
+  assert.equal(result.actionOutcome?.code, 'action_completed');
+  const plan = result.state.actionPlans?.[0];
+  assert.ok(plan);
+  assert.equal(plan.observedRevision, 0);
+  assert.equal(plan.committedRevision, state.revision + 1);
+  assert.deepEqual(plan.items.map((item) => item.status), ['completed', 'needs-review']);
+  assert.equal(result.state.cities.find((city) => city.civId === 0)?.focus, 'industry');
+  assert.equal(result.state.revision, state.revision + 1);
+  assert.ok(isWorldState(result.state));
+  const head = command.plan?.[0];
+  assert.ok(head);
+  head.reason = 'Changed outside the committed world';
+  assert.notEqual(plan.items[0]?.reason, head.reason);
+});
+
+await test('plan observation derives readiness without mutating canonical slots or admitting actions', () => {
+  const result = applyCommand(plannedFixture(), plannedCommand(plannedFixture()));
+  assert.equal(result.ok, true, result.error);
+  const original = structuredClone(result.state);
+  const now = observe(result.state, 0, independentEpoch);
+  assert.equal(now.actionPlan?.items[1]?.status, 'blocked');
+  const later = observe(result.state, 0, '2026-10-16T00:00:10.000Z');
+  assert.equal(later.actionPlan?.items[1]?.status, 'ready');
+  assert.equal(later.actionPlan?.items[0]?.status, 'completed');
+  assert.equal(observe(result.state, 1, '2026-10-16T00:00:10.000Z').actionPlan, null);
+  const observedItem = later.actionPlan?.items[1];
+  assert.ok(observedItem);
+  observedItem.reason = 'External mutation';
+  assert.deepEqual(result.state, original);
+  const caught = engine.catchUpStrategy(result.state, '2026-10-16T00:01:00.000Z');
+  assert.equal(caught.ok, true, caught.error);
+  assert.deepEqual(caught.state.actionPlans, original.actionPlans);
+  assert.equal(caught.state.cities.find((city) => city.civId === 0)?.focus, 'industry');
+});
+
+await test('malformed, mismatched, stale, illegal and budget-blocked plans never alter world or prior intent', () => {
+  const state = plannedFixture();
+  const first = applyCommand(state, plannedCommand(state));
+  assert.equal(first.ok, true, first.error);
+  const current = first.state;
+  const valid = { ...plannedCommand(current), timestamp: '2026-10-16T00:00:10.000Z', action: { type: 'wait' }, plan: [{ action: { type: 'wait' }, reason: 'Wait for circumstances' }] } satisfies Command;
+  const cases: Array<[Command, string, string]> = [
+    [{ ...valid, plan: [{ action: { type: 'wait' }, reason: '' }] }, 'invalid_plan', 'failed'],
+    [{ ...valid, plan: [{ action: { type: 'focus', focus: 'culture' }, reason: 'Mismatch' }] }, 'plan_head_mismatch', 'failed'],
+    [{ ...valid, observedRevision: current.revision + 1 }, 'invalid_plan_context', 'failed'],
+    [{ ...valid, expectedRevision: current.revision - 1 }, 'invalid_command', 'failed'],
+    [{ ...valid, timestamp: independentEpoch }, 'action_admission_blocked', 'blocked'],
+    [{ ...valid, timestamp: '2026-10-16T00:01:00.000Z' }, 'strategy_catchup_required', 'blocked'],
+    [{ ...valid, action: { type: 'build', project: 'missing' }, plan: [{ action: { type: 'build', project: 'missing' }, reason: 'Impossible' }] }, 'illegal_action', 'failed'],
+  ];
+  const original = structuredClone(current);
+  for (const [command, code, status] of cases) {
+    const refused = applyCommand(current, command);
+    assert.equal(refused.ok, false, code);
+    assert.equal(refused.state, current, code);
+    assert.deepEqual(refused.events, []);
+    assert.equal(refused.actionOutcome?.code, code);
+    assert.equal(refused.actionOutcome?.status, status);
+    assert.equal(refused.actionOutcome?.reason, refused.error);
+    assert.deepEqual(current, original);
+  }
+});
+
+await test('old releases reject attached plans but preserve ordinary direct-command result and state shapes', () => {
+  const state = independentFixture();
+  const planned = applyCommand(state, plannedCommand(state));
+  assert.equal(planned.ok, false);
+  assert.equal(planned.state, state);
+  assert.equal(planned.actionOutcome?.code, 'plan_not_released');
+  for (const plan of [undefined, []]) {
+    const command: Command = { ...independentCommand(state, 0), ...(plan === undefined ? {} : { plan }) };
+    const direct = applyCommand(state, command);
+    assert.equal(direct.ok, true, direct.error);
+    assert.equal(Object.hasOwn(direct, 'actionOutcome'), false);
+    assert.equal(Object.hasOwn(direct.state, 'actionPlans'), false);
+  }
+});
+
+await test('accepted direct commands clear only their own prior plan while peer records remain intact', () => {
+  const first = applyCommand(plannedFixture(), plannedCommand(plannedFixture()));
+  assert.equal(first.ok, true, first.error);
+  const peer = applyCommand(first.state, plannedCommand(first.state, 1));
+  assert.equal(peer.ok, true, peer.error);
+  for (const plan of [undefined, []]) {
+    const command: Command = { ...independentCommand(peer.state, 0, '2026-10-16T00:00:10.000Z'), ...(plan === undefined ? {} : { plan }) };
+    const cleared = applyCommand(peer.state, command);
+    assert.equal(cleared.ok, true, cleared.error);
+    assert.equal(cleared.state.actionPlans?.[0], null);
+    assert.deepEqual(cleared.state.actionPlans?.[1], peer.state.actionPlans?.[1]);
+    assert.equal(cleared.state.actionPlans?.length, DIRECTOR_SEAT + 1);
+    assert.equal(cleared.actionOutcome?.status, 'completed');
+    assert.ok(isWorldState(cleared.state));
+  }
+});
+
+await test('explicit plan replacement and clearing reproduce identical engine state across JSON restart', () => {
+  let live = plannedFixture();
+  let replay = restartWorld(live);
+  const commands: Command[] = [plannedCommand(live)];
+  for (let index = 0; index < 3; index += 1) {
+    const command = commands[index];
+    assert.ok(command);
+    const result = applyCommand(live, command);
+    const replayed = applyCommand(replay, structuredClone(command));
+    assert.equal(result.ok, true, result.error);
+    assert.deepEqual(result, replayed);
+    live = result.state;
+    replay = restartWorld(replayed.state);
+    if (index === 0) commands.push({ ...independentCommand(live, 0, '2026-10-16T00:00:10.000Z', { type: 'focus', focus: 'growth' }), observedRevision: live.revision, plan: [{ action: { type: 'focus', focus: 'growth' }, reason: 'Act after reviewing food reserves' }] });
+    if (index === 1) {
+      assert.equal(live.actionPlans?.[0]?.items.length, 1);
+      commands.push(independentCommand(live, 0, '2026-10-16T00:00:20.000Z'));
+    }
+  }
+  assert.equal(live.actionPlans?.[0], null);
+  assert.equal(live.revision, plannedFixture().revision + 3);
+  assert.equal(live.cities.find((city) => city.civId === 0)?.focus, 'growth');
+});
+
+function productionFixture(): WorldState {
+  const state = independentFixture();
+  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-production-1', timestamp: independentEpoch });
+  assert.equal(result.ok, true, result.error);
+  return result.state;
+}
+
+function equippedProduction(): WorldState {
+  const state = productionFixture();
+  const city = state.cities[0];
+  const civilization = state.civilizations[0];
+  assert.ok(city && civilization);
+  city.buildings = ['irrigation', 'kiln'];
+  city.buildingOperations = { irrigation: { enabled: true, lastResult: null }, kiln: { enabled: true, lastResult: null } };
+  civilization.technologies.push('agriculture', 'water-management', 'kiln-firing');
+  return state;
+}
+
+await test('production release is explicit and each research branch unlocks only its paid building', () => {
+  for (const [technology, project, other] of [['water-management', 'irrigation', 'kiln'], ['kiln-firing', 'kiln', 'irrigation']]) {
+    assert.ok(technology && project && other);
+    let state = productionFixture();
+    const civilization = state.civilizations[0];
+    assert.ok(civilization);
+    civilization.technologies.push('agriculture');
+    civilization.resources.science = 16;
+    const selected = applyCommand(state, independentCommand(state, 0, independentEpoch, { type: 'research', technology }));
+    assert.equal(selected.ok, true, selected.error);
+    const worked = engine.catchUpStrategy(selected.state, '2026-10-16T00:01:00.000Z');
+    assert.equal(worked.ok, true, worked.error);
+    state = worked.state;
+    assert.ok(state.civilizations[0]?.technologies.includes(technology));
+    assert.ok(legalActions(state, 0, '2026-10-16T00:01:00.000Z').some(({ action }) => action.type === 'build' && action.project === project));
+    assert.ok(!legalActions(state, 0, '2026-10-16T00:01:00.000Z').some(({ action }) => action.type === 'build' && action.project === other));
+    const built = applyCommand(state, independentCommand(state, 0, '2026-10-16T00:01:00.000Z', { type: 'build', project }));
+    assert.equal(built.ok, true, built.error);
+    assert.deepEqual(built.state.cities[0]?.buildingOperations?.[project], { enabled: true, lastResult: null });
+    assert.ok(isWorldState(built.state));
+  }
+  const old = independentFixture();
+  assert.ok(!legalActions(old, 0, independentEpoch).some(({ action }) => action.type === 'research' && action.technology === 'water-management'));
+  assert.equal(Object.hasOwn(observe(old, 0), 'buildingRecipes'), false);
+});
+
+await test('paid production uses opening stocks and never funds a recipe from same-beat outputs', () => {
+  const state = equippedProduction();
+  const civilization = state.civilizations[0];
+  const city = state.cities[0];
+  assert.ok(civilization && city);
+  civilization.resources.materials = 0;
+  civilization.resources.energy = 2;
+  resolveEconomy(state, []);
+  assert.deepEqual(city.buildingOperations?.irrigation?.lastResult, { round: state.round, status: 'blocked', paid: {}, produced: {}, shortages: [{ resource: 'materials', required: 1, available: 0 }] });
+  assert.equal(city.buildingOperations?.kiln?.lastResult?.status, 'operated');
+  assert.deepEqual(city.buildingOperations?.kiln?.lastResult?.paid, { energy: 2 });
+  assert.ok((city.buildingOperations?.kiln?.lastResult?.produced.materials ?? 0) > 0);
+  resolveEconomy(state, []);
+  assert.equal(city.buildingOperations?.irrigation?.lastResult?.status, 'operated');
+  const empty = equippedProduction();
+  const emptyCivilization = empty.civilizations[0];
+  assert.ok(emptyCivilization);
+  emptyCivilization.resources.energy = 0;
+  empty.cities[0]?.buildings.push('workshop');
+  resolveEconomy(empty, []);
+  assert.equal(empty.cities[0]?.buildingOperations?.kiln?.lastResult?.status, 'blocked');
+  assert.deepEqual(empty.cities[0]?.buildingOperations?.kiln?.lastResult?.paid, {});
+});
+
+await test('recipe allocation is stable by city identity and paused recipes leave opening inputs for peers', () => {
+  const state = equippedProduction();
+  const first = state.cities[0];
+  const civilization = state.civilizations[0];
+  assert.ok(first && civilization);
+  first.id = 'recipe-a';
+  const second = structuredClone(first);
+  second.id = 'recipe-b';
+  state.cities.push(second);
+  civilization.resources.energy = 2;
+  civilization.resources.materials = 1;
+  const reversed = structuredClone(state);
+  reversed.cities.reverse();
+  for (const world of [state, reversed]) resolveEconomy(world, []);
+  for (const city of [first, second]) {
+    assert.deepEqual(city.buildingOperations, reversed.cities.find((candidate) => candidate.id === city.id)?.buildingOperations);
+  }
+  assert.equal(first.buildingOperations?.kiln?.lastResult?.status, 'operated');
+  assert.equal(second.buildingOperations?.kiln?.lastResult?.status, 'blocked');
+  const operation = first.buildingOperations?.kiln;
+  assert.ok(operation);
+  operation.enabled = false;
+  civilization.resources.energy = 2;
+  resolveEconomy(state, []);
+  assert.deepEqual(operation.lastResult, { round: state.round, status: 'paused', paid: {}, produced: {}, shortages: [] });
+  assert.equal(second.buildingOperations?.kiln?.lastResult?.status, 'operated');
+});
+
+await test('pause and resume are exact paid-building actions with preserved history and zero-write refusals', () => {
+  const state = equippedProduction();
+  resolveEconomy(state, []);
+  const city = state.cities[0];
+  assert.ok(city);
+  const action: GameAction = { type: 'set-building-operation', cityId: city.id, buildingId: 'kiln', enabled: false };
+  const stopped = applyCommand(state, independentCommand(state, 0, independentEpoch, action));
+  assert.equal(stopped.ok, true, stopped.error);
+  assert.equal(stopped.state.cities[0]?.buildingOperations?.kiln?.enabled, false);
+  assert.deepEqual(stopped.state.cities[0]?.buildingOperations?.kiln?.lastResult, city.buildingOperations?.kiln?.lastResult);
+  const snapshot = structuredClone(stopped.state);
+  for (const invalid of [action, { ...action, cityId: 'missing' }, { ...action, buildingId: 'farm' }]) {
+    const result = applyCommand(stopped.state, independentCommand(stopped.state, 0, '2026-10-16T00:00:10.000Z', invalid));
+    assert.equal(result.ok, false);
+    assert.equal(result.state, stopped.state);
+    assert.deepEqual(result.state, snapshot);
+  }
+  const foreign = applyCommand(state, independentCommand(state, 1, independentEpoch, action));
+  assert.equal(foreign.ok, false);
+  assert.equal(foreign.state, state);
+  const resumed = applyCommand(stopped.state, independentCommand(stopped.state, 0, '2026-10-16T00:00:10.000Z', { ...action, enabled: true }));
+  assert.equal(resumed.ok, true, resumed.error);
+});
+
+await test('operation observations are detached and mixed action and strategy replay preserves exact receipts', () => {
+  let state = equippedProduction();
+  let replay = restartWorld(state);
+  const city = state.cities[0];
+  assert.ok(city);
+  const observation = observe(state, 0, independentEpoch);
+  assert.deepEqual(observation.buildingRecipes, [
+    { buildingId: 'irrigation', inputs: { materials: 1 }, outputs: { food: 5 } },
+    { buildingId: 'kiln', inputs: { energy: 2 }, outputs: { materials: 4 } },
+  ]);
+  const recipe = observation.buildingRecipes?.[0];
+  assert.ok(recipe);
+  recipe.inputs.materials = 999;
+  assert.equal(observe(state, 0).buildingRecipes?.[0]?.inputs.materials, 1);
+  for (const [index, enabled] of [false, true].entries()) {
+    const time = `2026-10-16T00:0${index}:10.000Z`;
+    const action: GameAction = { type: 'set-building-operation', cityId: city.id, buildingId: 'kiln', enabled };
+    const command = independentCommand(state, 0, time, action);
+    const accepted = applyCommand(state, command);
+    assert.equal(accepted.ok, true, accepted.error);
+    assert.deepEqual(accepted, applyCommand(replay, structuredClone(command)));
+    state = accepted.state;
+    replay = restartWorld(state);
+    const boundary = `2026-10-16T00:0${index + 1}:00.000Z`;
+    const worked = engine.catchUpStrategy(state, boundary);
+    assert.equal(worked.ok, true, worked.error);
+    assert.deepEqual(worked, engine.catchUpStrategy(replay, boundary));
+    state = worked.state;
+    replay = restartWorld(state);
+    assert.deepEqual(engine.catchUpStrategy(state, boundary).state, state);
+  }
+});
+
+await test('generic full-vector input allocation is atomic and a blocked recipe leaves every stock for later recipes', () => {
+  const kiln = BUILDINGS.find((building) => building.id === 'kiln');
+  assert.ok(kiln);
+  const authored = kiln.operatingInputs;
+  try {
+    kiln.operatingInputs = { energy: 2, credits: 3 };
+    const state = equippedProduction();
+    const first = state.cities[0];
+    const civilization = state.civilizations[0];
+    assert.ok(first && civilization);
+    first.id = 'a';
+    civilization.resources.energy = 2;
+    civilization.resources.credits = 2;
+    const baseline = structuredClone(state);
+    const operation = baseline.cities[0]?.buildingOperations?.kiln;
+    assert.ok(operation);
+    operation.enabled = false;
+    resolveEconomy(state, []);
+    resolveEconomy(baseline, []);
+    assert.deepEqual(first.buildingOperations?.kiln?.lastResult, { round: state.round, status: 'blocked', paid: {}, produced: {}, shortages: [{ resource: 'credits', required: 3, available: 2 }] });
+    assert.deepEqual(civilization.resources, baseline.civilizations[0]?.resources);
+    const funded = equippedProduction();
+    const fundedCivilization = funded.civilizations[0];
+    assert.ok(fundedCivilization);
+    fundedCivilization.resources.energy = 2;
+    fundedCivilization.resources.credits = 3;
+    resolveEconomy(funded, []);
+    assert.deepEqual(funded.cities[0]?.buildingOperations?.kiln?.lastResult?.paid, { energy: 2, credits: 3 });
+  } finally {
+    if (authored === undefined) delete kiln.operatingInputs;
+    else kiln.operatingInputs = authored;
+  }
+});
+
+await test('legacy aggregate production rounding survives fractional productivity and paid receipts reconcile exact extra yields', () => {
+  for (const wellbeing of [23, 57.3, 99]) {
+    const state = productionFixture();
+    const city = state.cities[0];
+    const civilization = state.civilizations[0];
+    assert.ok(city && civilization);
+    city.buildings = ['workshop', 'farm'];
+    city.wellbeing = wellbeing;
+    city.damage = 17.7;
+    city.infrastructure = 2.3;
+    civilization.resources.food = 0;
+    const before = structuredClone(civilization.resources);
+    const productivity = (0.5 + wellbeing / 100) * (1 - city.damage / 100) * (1 + city.infrastructure / 10);
+    const site = state.tiles.find((tile) => tile.id === city.tileId);
+    const expected = { ...before };
+    const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[city.focus];
+    for (const resource of RESOURCE_IDS) {
+      const raw = (ECONOMY_RULES.baseProduction[resource] ?? 0) + (focus[resource] ?? 0)
+        + city.buildings.reduce((sum, id) => sum + (BUILDINGS.find((building) => building.id === id)?.production[resource] ?? 0), 0)
+        + (site?.resource === resource ? 1 : 0);
+      expected[resource] = Math.round((before[resource] + Math.round(raw * productivity * 100) / 100) * 100) / 100;
+    }
+    expected.food = Math.round(Math.max(0, expected.food - Math.round(city.population * ECONOMY_RULES.populationFoodUpkeep * 100) / 100) * 100) / 100;
+    const paid = structuredClone(state);
+    const paidCity = paid.cities[0];
+    assert.ok(paidCity);
+    paidCity.buildings.push('kiln');
+    paidCity.buildingOperations = { kiln: { enabled: true, lastResult: null } };
+    resolveEconomy(state, []);
+    resolveEconomy(paid, []);
+    assert.deepEqual(civilization.resources, expected);
+    const receipt = paidCity.buildingOperations.kiln?.lastResult;
+    assert.equal(receipt?.status, 'operated');
+    for (const resource of RESOURCE_IDS) {
+      const actualDifference: number = Math.round(((paid.civilizations[0]?.resources[resource] ?? 0) - civilization.resources[resource]) * 100) / 100;
+      assert.equal(actualDifference, Math.round(((receipt?.produced[resource] ?? 0) - (receipt?.paid[resource] ?? 0)) * 100) / 100);
+    }
+  }
+});
+
+await test('zero-productivity paid recipes still pay complete inputs and report empty actual outputs', () => {
+  const state = equippedProduction();
+  const city = state.cities[0];
+  assert.ok(city);
+  city.damage = 100;
+  resolveEconomy(state, []);
+  assert.deepEqual(city.buildingOperations?.kiln?.lastResult?.produced, {});
+  assert.deepEqual(city.buildingOperations?.kiln?.lastResult?.paid, { energy: 2 });
+  assert.equal(city.buildingOperations?.kiln?.lastResult?.status, 'operated');
+});
+
+await test('an earlier blocked multi-input recipe does not reserve scarce inputs from a later funded recipe', () => {
+  const irrigation = BUILDINGS.find((building) => building.id === 'irrigation');
+  assert.ok(irrigation);
+  const authored = irrigation.operatingInputs;
+  try {
+    irrigation.operatingInputs = { energy: 1, credits: 3 };
+    const state = equippedProduction();
+    const civilization = state.civilizations[0];
+    assert.ok(civilization);
+    civilization.resources.energy = 2;
+    civilization.resources.credits = 2;
+    resolveEconomy(state, []);
+    assert.equal(state.cities[0]?.buildingOperations?.irrigation?.lastResult?.status, 'blocked');
+    assert.deepEqual(state.cities[0]?.buildingOperations?.irrigation?.lastResult?.paid, {});
+    assert.equal(state.cities[0]?.buildingOperations?.kiln?.lastResult?.status, 'operated');
+    assert.deepEqual(state.cities[0]?.buildingOperations?.kiln?.lastResult?.paid, { energy: 2 });
+  } finally {
+    if (authored === undefined) delete irrigation.operatingInputs;
+    else irrigation.operatingInputs = authored;
+  }
+});
+
+function frontierFixture(): WorldState {
+  const state = productionFixture();
+  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-frontiers-1', timestamp: independentEpoch });
+  assert.equal(result.ok, true, result.error);
+  return result.state;
+}
+
+function frontierAction(state: WorldState, seat = 0, timestamp = independentEpoch): Extract<GameAction, { type: 'settle' }> {
+  const choice = legalActions(state, seat, timestamp).find(({ action }) => action.type === 'settle');
+  assert.ok(choice && choice.action.type === 'settle', 'A funded population-six city must offer a nearby frontier');
+  return choice.action;
+}
+
+await test('frontier founding transfers three people from the explicit source and pays exactly once without rewriting the map', () => {
+  const state = frontierFixture();
+  const source = state.cities[0];
+  const civilization = state.civilizations[0];
+  assert.ok(source && civilization);
+  source.focus = 'culture';
+  const action = frontierAction(state);
+  assert.equal(action.sourceCityId, source.id);
+  const before = structuredClone(state);
+  const population = state.cities.reduce((sum, city) => sum + city.population, 0);
+  const result = applyCommand(state, independentCommand(state, 0, independentEpoch, action));
+  assert.equal(result.ok, true, result.error);
+  assert.deepEqual(state, before);
+  assert.equal(result.state.cities.reduce((sum, city) => sum + city.population, 0), population);
+  assert.equal(result.state.cities.find((city) => city.id === source.id)?.population, 3);
+  const founded = result.state.cities.at(-1);
+  assert.ok(founded);
+  assert.equal(founded.id, `city-0-${state.revision + 1}`);
+  assert.equal(founded.population, 3);
+  assert.equal(founded.focus, 'culture');
+  assert.deepEqual(founded.buildings, []);
+  const costs: Partial<Resources> = ECONOMY_RULES.settle.cost;
+  for (const resource of RESOURCE_IDS) {
+    assert.equal(result.state.civilizations[0]?.resources[resource], civilization.resources[resource] - (costs[resource] ?? 0));
+  }
+  assert.deepEqual(result.state.tiles.map((tile) => ({ ...tile, owner: null })), state.tiles.map((tile) => ({ ...tile, owner: null })));
+  assert.equal(result.state.tiles.find((tile) => tile.id === action.tileId)?.owner, 0);
+  assert.ok(isWorldState(result.state));
+  assert.deepEqual(applyCommand(restartWorld(state), structuredClone(independentCommand(state, 0, independentEpoch, action))), result);
+});
+
+await test('missing, foreign, depleted sources and unaffordable or occupied frontiers refuse without any effect', () => {
+  const state = frontierFixture();
+  const action = frontierAction(state);
+  const foreign = state.cities.find((city) => city.civId === 1);
+  assert.ok(foreign);
+  const cases: Array<{ state: WorldState; action: GameAction }> = [
+    { state, action: { type: 'settle', tileId: action.tileId } },
+    { state, action: { ...action, sourceCityId: 'missing' } },
+    { state, action: { ...action, sourceCityId: foreign.id } },
+  ];
+  for (const mutation of ['population', 'cost', 'occupied'] as const) {
+    const altered = structuredClone(state);
+    const source = altered.cities.find((city) => city.id === action.sourceCityId);
+    const civilization = altered.civilizations[0];
+    const site = altered.tiles.find((tile) => tile.id === action.tileId);
+    assert.ok(source && civilization && site);
+    if (mutation === 'population') source.population = 5;
+    if (mutation === 'cost') civilization.resources.materials = 11;
+    if (mutation === 'occupied') site.owner = 1;
+    cases.push({ state: altered, action });
+  }
+  for (const entry of cases) {
+    const before = structuredClone(entry.state);
+    const result = applyCommand(entry.state, independentCommand(entry.state, 0, independentEpoch, entry.action));
+    assert.equal(result.ok, false);
+    assert.equal(result.state, entry.state);
+    assert.deepEqual(result.events, []);
+    assert.deepEqual(entry.state, before);
+  }
+});
+
+await test('settlers inherit the named source rather than first-city focus and a depleted source cannot found twice', () => {
+  const state = frontierFixture();
+  const first = applyCommand(state, independentCommand(state, 0, independentEpoch, frontierAction(state)));
+  assert.equal(first.ok, true, first.error);
+  const capital = first.state.cities[0];
+  const source = first.state.cities.at(-1);
+  assert.ok(capital && source);
+  capital.focus = 'industry';
+  source.population = 6;
+  source.focus = 'diplomacy';
+  const civilization = first.state.civilizations[0];
+  assert.ok(civilization);
+  civilization.resources = { ...civilization.resources, food: 100, materials: 100, credits: 100 };
+  const action = frontierAction(first.state, 0, '2026-10-16T00:00:10.000Z');
+  assert.equal(action.sourceCityId, source.id);
+  const second = applyCommand(first.state, independentCommand(first.state, 0, '2026-10-16T00:00:10.000Z', action));
+  assert.equal(second.ok, true, second.error);
+  assert.equal(second.state.cities.at(-1)?.focus, 'diplomacy');
+  assert.equal(second.state.cities.find((city) => city.id === source.id)?.population, 3);
+  assert.ok(!legalActions(second.state, 0, '2026-10-16T00:00:20.000Z').some(({ action: next }) => next.type === 'settle'));
+});
+
+function roundFrontierAmount(value: number): number { return Math.round(value * 100) / 100; }
+
+await test('terrain production is additive with deposits and productivity only after the explicit frontier release', () => {
+  for (const [terrain, resource] of [['grassland', 'food'], ['forest', 'materials']] as const) {
+    const old = productionFixture();
+    const city = old.cities[0];
+    assert.ok(city);
+    city.wellbeing = 40;
+    city.damage = 20;
+    city.infrastructure = 2;
+    const site = old.tiles.find((tile) => tile.id === city.tileId);
+    assert.ok(site);
+    site.terrain = terrain;
+    site.resource = resource;
+    const released = engine.applyRelease(old, { expectedRevision: old.revision, expectedFromReleaseId: old.releaseId, targetReleaseId: 'settlement-frontiers-1', timestamp: independentEpoch });
+    assert.equal(released.ok, true, released.error);
+    const current = released.state;
+    const noDeposit = structuredClone(current);
+    const plain = noDeposit.tiles.find((tile) => tile.id === city.tileId);
+    assert.ok(plain);
+    plain.resource = null;
+    const productivity = (0.5 + city.wellbeing / 100) * (1 - city.damage / 100) * (1 + city.infrastructure / 10);
+    const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[city.focus];
+    const raw = ECONOMY_RULES.baseProduction[resource] + (focus[resource] ?? 0);
+    resolveEconomy(old, []);
+    resolveEconomy(current, []);
+    resolveEconomy(noDeposit, []);
+    assert.equal(roundFrontierAmount((current.civilizations[0]?.resources[resource] ?? 0) - (old.civilizations[0]?.resources[resource] ?? 0)), roundFrontierAmount(roundFrontierAmount((raw + 3) * productivity) - roundFrontierAmount((raw + 1) * productivity)));
+    assert.equal(roundFrontierAmount((current.civilizations[0]?.resources[resource] ?? 0) - (noDeposit.civilizations[0]?.resources[resource] ?? 0)), roundFrontierAmount(roundFrontierAmount((raw + 3) * productivity) - roundFrontierAmount((raw + 2) * productivity)));
+  }
+  const old = productionFixture();
+  assert.ok(!legalActions(old, 0, independentEpoch).some(({ action }) => action.type === 'settle'));
+});
+
+await test('two civilizations contesting one frontier preserve the losing source, costs and admission ledger', () => {
+  const state = frontierFixture();
+  const first = frontierAction(state);
+  const target = state.tiles.find((tile) => tile.id === first.tileId);
+  assert.ok(target);
+  const approach = state.tiles.find((tile) => tile.owner === null && tile.id !== target.id && hexDistance(tile, target) <= 2 && !state.cities.some((city) => city.tileId === tile.id));
+  assert.ok(approach);
+  approach.owner = 1;
+  const second = legalActions(state, 1, independentEpoch).find(({ action }) => action.type === 'settle' && action.tileId === target.id)?.action;
+  assert.ok(second && second.type === 'settle');
+  const beforePopulation = state.cities.reduce((sum, city) => sum + city.population, 0);
+  const won = applyCommand(state, independentCommand(state, 0, independentEpoch, first));
+  assert.equal(won.ok, true, won.error);
+  const snapshot = structuredClone(won.state);
+  const lost = applyCommand(won.state, independentCommand(won.state, 1, independentEpoch, second));
+  assert.equal(lost.ok, false);
+  assert.equal(lost.state, won.state);
+  assert.deepEqual(lost.state, snapshot);
+  assert.equal(lost.state.cities.reduce((sum, city) => sum + city.population, 0), beforePopulation);
+  assert.equal(lost.state.cities.filter((city) => city.tileId === target.id).length, 1);
+  assert.ok(isWorldState(lost.state));
+});
+
+await test('frontier choices retain territory reach and city spacing without a new source-distance restriction', () => {
+  const state = frontierFixture();
+  const choices = legalActions(state, 0, independentEpoch).filter(({ action }) => action.type === 'settle');
+  assert.ok(choices.length > 0);
+  for (const { action } of choices) {
+    assert.ok(action.type === 'settle');
+    const site = state.tiles.find((tile) => tile.id === action.tileId);
+    assert.ok(site);
+    assert.equal(site.owner, null);
+    assert.ok(site.terrain !== 'ocean' && site.terrain !== 'mountain');
+    assert.ok(state.tiles.some((tile) => tile.owner === 0 && hexDistance(tile, site) <= 2));
+    assert.ok(state.cities.every((city) => {
+      const existing = state.tiles.find((tile) => tile.id === city.tileId);
+      return existing !== undefined && hexDistance(existing, site) >= 2;
+    }));
+  }
+  const source = state.cities.find((city) => city.civId === 0);
+  assert.ok(source);
+  const sourceSite = state.tiles.find((tile) => tile.id === source.tileId);
+  assert.ok(sourceSite);
+  const distant = state.tiles.find((tile) => tile.owner === null && tile.terrain !== 'ocean' && tile.terrain !== 'mountain' && hexDistance(tile, sourceSite) > 2 && state.cities.every((city) => {
+    const existing = state.tiles.find((candidate) => candidate.id === city.tileId);
+    return existing !== undefined && hexDistance(existing, tile) >= 2;
+  }));
+  assert.ok(distant);
+  const approach = state.tiles.find((tile) => tile.owner === null && tile.id !== distant.id && hexDistance(tile, distant) <= 2);
+  assert.ok(approach);
+  approach.owner = 0;
+  assert.ok(legalActions(state, 0, independentEpoch).some(({ action }) => action.type === 'settle' && action.tileId === distant.id && action.sourceCityId === source.id));
+});
+
+await test('new terrain materials cannot retroactively fund an opening-stock recipe', () => {
+  const state = frontierFixture();
+  const city = state.cities[0];
+  const civilization = state.civilizations[0];
+  assert.ok(city && civilization);
+  const site = state.tiles.find((tile) => tile.id === city.tileId);
+  assert.ok(site);
+  site.terrain = 'forest';
+  civilization.resources.materials = 0;
+  city.buildings = ['irrigation'];
+  city.buildingOperations = { irrigation: { enabled: true, lastResult: null } };
+  resolveEconomy(state, []);
+  assert.equal(city.buildingOperations.irrigation?.lastResult?.status, 'blocked');
+  assert.deepEqual(city.buildingOperations.irrigation?.lastResult?.paid, {});
+  assert.ok(civilization.resources.materials > 0);
+});
+
+await test('compact frontier choices expose actual terrain, deposit and base yields from candidate sites', () => {
+  const state = frontierFixture();
+  const candidates = legalActions(state, 0, independentEpoch).filter(({ action }) => action.type === 'settle');
+  const first = candidates[0]?.action;
+  const second = candidates.find(({ action }) => action.type === 'settle' && first?.type === 'settle' && action.tileId !== first.tileId)?.action;
+  assert.ok(first?.type === 'settle' && second?.type === 'settle');
+  const grassland = state.tiles.find((tile) => tile.id === first.tileId);
+  const forest = state.tiles.find((tile) => tile.id === second.tileId);
+  assert.ok(grassland && forest);
+  grassland.terrain = 'grassland';
+  grassland.resource = 'materials';
+  forest.terrain = 'forest';
+  forest.resource = null;
+  const observed = observe(state, 0, independentEpoch);
+  const grassChoice = observed.legalActions.find(({ action }) => action.type === 'settle' && action.tileId === grassland.id);
+  const forestChoice = observed.legalActions.find(({ action }) => action.type === 'settle' && action.tileId === forest.id);
+  assert.ok(grassChoice && forestChoice);
+  assert.match(grassChoice.reason, /Terrain grassland: food \+2/);
+  assert.match(grassChoice.reason, /Deposit materials: materials \+1/);
+  assert.match(grassChoice.reason, /Base yields before focus and productivity: food 6, materials 3, energy 1, credits 2, science 1, culture 1/);
+  assert.match(forestChoice.reason, /Terrain forest: materials \+2/);
+  assert.match(forestChoice.reason, /Deposit none/);
+  assert.match(forestChoice.reason, /Base yields before focus and productivity: food 4, materials 4, energy 1, credits 2, science 1, culture 1/);
+  assert.equal(Object.hasOwn(observed, 'tiles'), false);
+});
+
+function twoFrontierCities(): WorldState {
+  const state = frontierFixture();
+  const civilization = state.civilizations[0];
+  assert.ok(civilization);
+  civilization.technologies.push('agriculture', 'water-management', 'kiln-firing');
+  civilization.resources = { food: 100, materials: 100, energy: 100, credits: 100, science: 0, culture: 0 };
+  const founded = applyCommand(state, independentCommand(state, 0, independentEpoch, frontierAction(state)));
+  assert.equal(founded.ok, true, founded.error);
+  return founded.state;
+}
+
+function specializationFixture(): WorldState {
+  const state = twoFrontierCities();
+  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-specialization-1', timestamp: independentEpoch });
+  assert.equal(result.ok, true, result.error);
+  return result.state;
+}
+
+await test('specialized focus and construction act on the exact owned city and preserve every other city', () => {
+  const state = specializationFixture();
+  const own = state.cities.filter((city) => city.civId === 0);
+  const first = own[0];
+  const second = own[1];
+  assert.ok(first && second);
+  const command = independentCommand(state, 0, '2026-10-16T00:00:10.000Z', { type: 'focus', focus: 'culture', cityId: second.id });
+  const focused = applyCommand(state, command);
+  assert.equal(focused.ok, true, focused.error);
+  assert.equal(focused.state.cities.find((city) => city.id === second.id)?.focus, 'culture');
+  assert.deepEqual(focused.state.cities.filter((city) => city.id !== second.id), state.cities.filter((city) => city.id !== second.id));
+  const before = structuredClone(focused.state);
+  const built = applyCommand(focused.state, independentCommand(focused.state, 0, '2026-10-16T00:00:20.000Z', { type: 'build', project: 'irrigation', cityId: second.id }));
+  assert.equal(built.ok, true, built.error);
+  assert.ok(built.state.cities.find((city) => city.id === second.id)?.buildings.includes('irrigation'));
+  assert.deepEqual(built.state.cities.find((city) => city.id === second.id)?.buildingOperations?.irrigation, { enabled: true, lastResult: null });
+  assert.deepEqual(built.state.cities.filter((city) => city.id !== second.id), before.cities.filter((city) => city.id !== second.id));
+  assert.deepEqual(focused.state, before);
+  assert.equal(built.state.civilizations[0]?.resources.materials, (before.civilizations[0]?.resources.materials ?? 0) - 12);
+  assert.equal(built.state.civilizations[0]?.resources.credits, (before.civilizations[0]?.resources.credits ?? 0) - 8);
+  assert.deepEqual(applyCommand(restartWorld(state), structuredClone(command)), focused);
+  assert.ok(isWorldState(built.state));
+});
+
+await test('city specialization refuses missing, foreign, disappeared and duplicate targets without redirecting', () => {
+  const state = specializationFixture();
+  const own = state.cities.find((city) => city.civId === 0);
+  const foreign = state.cities.find((city) => city.civId === 1);
+  assert.ok(own && foreign);
+  own.buildings.push('farm');
+  own.focus = 'culture';
+  const cases: GameAction[] = [
+    { type: 'focus', focus: 'industry' },
+    { type: 'build', project: 'farm' },
+    { type: 'focus', focus: 'industry', cityId: 'missing' },
+    { type: 'build', project: 'farm', cityId: 'missing' },
+    { type: 'focus', focus: 'industry', cityId: foreign.id },
+    { type: 'build', project: 'farm', cityId: foreign.id },
+    { type: 'focus', focus: 'culture', cityId: own.id },
+    { type: 'build', project: 'farm', cityId: own.id },
+  ];
+  const before = structuredClone(state);
+  for (const action of cases) {
+    const refused = applyCommand(state, independentCommand(state, 0, '2026-10-16T00:00:10.000Z', action));
+    assert.equal(refused.ok, false);
+    assert.equal(refused.state, state);
+    assert.deepEqual(refused.events, []);
+    assert.deepEqual(state, before);
+  }
+  const remaining = state.cities.find((city) => city.civId === 0 && city.id !== own.id);
+  assert.ok(remaining);
+  assert.ok(legalActions(state, 0, '2026-10-16T00:00:10.000Z').some(({ action }) => action.type === 'build' && action.cityId === remaining.id && action.project === 'farm'));
+  const disappeared = structuredClone(state);
+  disappeared.cities = disappeared.cities.filter((city) => city.id !== remaining.id);
+  const queued: GameAction = { type: 'build', project: 'workshop', cityId: remaining.id };
+  const refused = applyCommand(disappeared, independentCommand(disappeared, 0, '2026-10-16T00:00:10.000Z', queued));
+  assert.equal(refused.ok, false);
+  assert.equal(refused.state, disappeared);
+  assert.deepEqual(refused.state.cities.find((city) => city.id === own.id), own);
+});
+
+await test('owned focus and construction choices reveal the exact city geography without dumping the map', () => {
+  const state = specializationFixture();
+  const cities = state.cities.filter((city) => city.civId === 0);
+  const first = cities[0];
+  const second = cities[1];
+  assert.ok(first && second);
+  const grass = state.tiles.find((tile) => tile.id === first.tileId);
+  const forest = state.tiles.find((tile) => tile.id === second.tileId);
+  assert.ok(grass && forest);
+  grass.terrain = 'grassland';
+  grass.resource = 'food';
+  forest.terrain = 'forest';
+  forest.resource = null;
+  const observation = observe(state, 0, '2026-10-16T00:00:10.000Z');
+  for (const type of ['focus', 'build']) {
+    const grassChoice = observation.legalActions.find(({ action }) => (action.type === 'focus' || action.type === 'build') && action.type === type && action.cityId === first.id);
+    const forestChoice = observation.legalActions.find(({ action }) => (action.type === 'focus' || action.type === 'build') && action.type === type && action.cityId === second.id);
+    assert.ok(grassChoice && forestChoice);
+    assert.match(grassChoice.reason, /Terrain grassland: food \+2/);
+    assert.match(grassChoice.reason, /Deposit food: food \+1/);
+    assert.match(forestChoice.reason, /Terrain forest: materials \+2/);
+    assert.match(forestChoice.reason, /Deposit none/);
+  }
+  assert.equal(Object.hasOwn(observation, 'tiles'), false);
+});
+
+await test('older releases retain untargeted focus and first-eligible construction replay behavior', () => {
+  const state = twoFrontierCities();
+  const capital = state.cities.find((city) => city.civId === 0);
+  assert.ok(capital);
+  capital.buildings.push('farm');
+  const focus = independentCommand(state, 0, '2026-10-16T00:00:10.000Z', { type: 'focus', focus: 'diplomacy' });
+  const focused = applyCommand(state, focus);
+  assert.equal(focused.ok, true, focused.error);
+  assert.ok(focused.state.cities.filter((city) => city.civId === 0).every((city) => city.focus === 'diplomacy'));
+  assert.deepEqual(applyCommand(restartWorld(state), focus), focused);
+  const build = independentCommand(focused.state, 0, '2026-10-16T00:00:20.000Z', { type: 'build', project: 'farm' });
+  const built = applyCommand(focused.state, build);
+  assert.equal(built.ok, true, built.error);
+  assert.ok(built.state.cities.filter((city) => city.civId === 0).every((city) => city.buildings.includes('farm')));
+  assert.deepEqual(applyCommand(restartWorld(focused.state), build), built);
+  const targeted = applyCommand(state, { ...focus, action: { type: 'focus', focus: 'culture', cityId: capital.id } });
+  assert.equal(targeted.ok, false);
+  assert.equal(targeted.state, state);
+});
+
+function recoveryFixture(): WorldState {
+  const state = specializationFixture();
+  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-recovery-1', timestamp: independentEpoch });
+  assert.equal(result.ok, true, result.error);
+  return result.state;
+}
+
+await test('released earthquake and exact paid city recovery restore next-beat output without inventing infrastructure', () => {
+  const state = recoveryFixture();
+  const shock = applyCommand(state, independentCommand(state, DIRECTOR_SEAT, '2026-10-16T00:00:10.000Z', { type: 'event', event: 'earthquake', target: 0 }));
+  assert.equal(shock.ok, true, shock.error);
+  const city = shock.state.cities.find((candidate) => candidate.civId === 0);
+  assert.ok(city);
+  assert.equal(city.damage, 35);
+  assert.equal(city.infrastructure, state.cities.find((candidate) => candidate.id === city.id)?.infrastructure);
+  const before = structuredClone(shock.state);
+  const command = independentCommand(shock.state, 0, '2026-10-16T00:00:10.000Z', { type: 'repair-city', cityId: city.id });
+  const repaired = applyCommand(shock.state, command);
+  assert.equal(repaired.ok, true, repaired.error);
+  assert.deepEqual(repaired.events.find((event) => event.type === 'city-repaired')?.effects, ['City damage 35 → 10', 'Paid 5 materials', 'Paid 2 energy']);
+  assert.equal(repaired.state.cities.find((candidate) => candidate.id === city.id)?.damage, 10);
+  assert.deepEqual(repaired.state.cities.filter((candidate) => candidate.id !== city.id), before.cities.filter((candidate) => candidate.id !== city.id));
+  assert.equal(repaired.state.cities.find((candidate) => candidate.id === city.id)?.infrastructure, city.infrastructure);
+  assert.deepEqual(repaired.state.cities.find((candidate) => candidate.id === city.id)?.buildings, city.buildings);
+  assert.equal(repaired.state.civilizations[0]?.resources.materials, (before.civilizations[0]?.resources.materials ?? 0) - 5);
+  assert.equal(repaired.state.civilizations[0]?.resources.energy, (before.civilizations[0]?.resources.energy ?? 0) - 2);
+  assert.deepEqual(shock.state, before);
+  assert.deepEqual(applyCommand(restartWorld(shock.state), command), repaired);
+  const duplicate = applyCommand(repaired.state, command);
+  assert.equal(duplicate.ok, false);
+  assert.equal(duplicate.state, repaired.state);
+  const damagedBeat = engine.catchUpStrategy(shock.state, '2026-10-16T00:01:00.000Z');
+  const repairedBeat = engine.catchUpStrategy(repaired.state, '2026-10-16T00:01:00.000Z');
+  assert.equal(damagedBeat.ok, true, damagedBeat.error);
+  assert.equal(repairedBeat.ok, true, repairedBeat.error);
+  assert.ok((repairedBeat.state.civilizations[0]?.resources.food ?? 0) > (damagedBeat.state.civilizations[0]?.resources.food ?? 0));
+  assert.deepEqual(repairedBeat.state.cities.filter((candidate) => candidate.id !== city.id), damagedBeat.state.cities.filter((candidate) => candidate.id !== city.id));
+  const final = applyCommand(repaired.state, independentCommand(repaired.state, 0, '2026-10-16T00:00:20.000Z', command.action));
+  assert.equal(final.ok, true, final.error);
+  assert.equal(final.state.cities.find((candidate) => candidate.id === city.id)?.damage, 0);
+  assert.equal(final.state.civilizations[0]?.resources.materials, (repaired.state.civilizations[0]?.resources.materials ?? 0) - 5);
+  assert.equal(final.state.civilizations[0]?.resources.energy, (repaired.state.civilizations[0]?.resources.energy ?? 0) - 2);
+  assert.ok(isWorldState(final.state));
+});
+
+await test('city repair rejects foreign, missing, healthy and unaffordable exact targets atomically', () => {
+  const state = recoveryFixture();
+  const own = state.cities.find((city) => city.civId === 0);
+  const foreign = state.cities.find((city) => city.civId === 1);
+  assert.ok(own && foreign);
+  foreign.damage = 35;
+  for (const cityId of [own.id, foreign.id, 'missing']) {
+    const before = structuredClone(state);
+    const result = applyCommand(state, independentCommand(state, 0, '2026-10-16T00:00:10.000Z', { type: 'repair-city', cityId }));
+    assert.equal(result.ok, false);
+    assert.equal(result.state, state);
+    assert.deepEqual(result.events, []);
+    assert.deepEqual(state, before);
+  }
+  own.damage = 35;
+  for (const [resource, amount] of [['materials', 4.99], ['energy', 1.99]] as const) {
+    const poor = structuredClone(state);
+    const civilization = poor.civilizations[0];
+    assert.ok(civilization);
+    civilization.resources[resource] = amount;
+    const before = structuredClone(poor);
+    const result = applyCommand(poor, independentCommand(poor, 0, '2026-10-16T00:00:10.000Z', { type: 'repair-city', cityId: own.id }));
+    assert.equal(result.ok, false);
+    assert.equal(result.state, poor);
+    assert.deepEqual(result.events, []);
+    assert.deepEqual(poor, before);
+  }
+  const legacy = specializationFixture();
+  const city = legacy.cities.find((candidate) => candidate.civId === 0);
+  assert.ok(city);
+  city.damage = 35;
+  assert.equal(applyCommand(legacy, independentCommand(legacy, 0, '2026-10-16T00:00:10.000Z', { type: 'repair-city', cityId: city.id })).ok, false);
+});
+
+await test('direct and scheduled earthquake effects select recovery data while historical infrastructure loss replays unchanged', () => {
+  for (const released of [false, true]) {
+    const state = released ? recoveryFixture() : specializationFixture();
+    if (!released) state.unlockedFeatures.push('disaster-recovery');
+    const before = structuredClone(state);
+    const directCommand = independentCommand(state, DIRECTOR_SEAT, '2026-10-16T00:00:10.000Z', { type: 'event', event: 'earthquake', target: 0 });
+    const direct = applyCommand(state, directCommand);
+    const scheduledCommand = { expectedRevision: state.revision, kind: 'event', intervalId: 'recovery-probe', timestamp: '2026-10-16T00:00:10.000Z', event: 'earthquake', target: 0 } as const;
+    const scheduled = applyDirectorTick(state, scheduledCommand);
+    assert.equal(direct.ok, true, direct.error);
+    assert.equal(scheduled.ok, true, scheduled.error);
+    assert.deepEqual(direct.state.cities, scheduled.state.cities);
+    for (const city of state.cities.filter((candidate) => candidate.civId === 0)) {
+      const after = direct.state.cities.find((candidate) => candidate.id === city.id);
+      assert.equal(after?.damage, 35);
+      assert.equal(after.infrastructure, released ? city.infrastructure : Math.max(0, city.infrastructure - 1));
+    }
+    assert.deepEqual(applyCommand(restartWorld(state), directCommand), direct);
+    assert.deepEqual(applyDirectorTick(restartWorld(state), scheduledCommand), scheduled);
+    assert.deepEqual(state, before);
+  }
+  const old = specializationFixture();
+  assert.equal(legalActions(old, DIRECTOR_SEAT, independentEpoch).some(({ action }) => action.type === 'event' && action.event === 'earthquake'), false);
+});
+
+await test('building choices disclose paid and free construction commitments before spending without changing exact actions', () => {
+  const state = specializationFixture();
+  const city = state.cities.find((candidate) => candidate.civId === 0);
+  assert.ok(city);
+  const before = structuredClone(state);
+  const observation = observe(state, 0, '2026-10-16T00:00:10.000Z');
+  const expectations = [
+    ['irrigation', 'materials 12, credits 8', 'materials 1', 'food 5'],
+    ['kiln', 'materials 10, credits 8', 'energy 2', 'materials 4'],
+    ['farm', 'materials 8, credits 4', 'none', 'food 4'],
+    ['workshop', 'materials 12, credits 8', 'none', 'materials 3, energy 1'],
+  ];
+  for (const [project, cost, inputs, outputs] of expectations) {
+    const option: ActionOption | undefined = observation.legalActions.find(({ action }) => action.type === 'build' && action.project === project && action.cityId === city.id);
+    assert.ok(option);
+    assert.deepEqual(option.action, { type: 'build', project, cityId: city.id });
+    assert.ok(option.reason.includes(`Construction cost from shared supplies: ${cost}.`));
+    assert.ok(option.reason.includes(`Recurring inputs per economy beat: ${inputs}.`));
+    assert.ok(option.reason.includes(`Base building output per economy beat before productivity: ${outputs}; not net stock gain.`));
+  }
+  assert.deepEqual(state, before);
+  const hidden = independentFixture();
+  const civilization = hidden.civilizations[0];
+  assert.ok(civilization);
+  civilization.technologies.push('agriculture', 'water-management', 'kiln-firing');
+  civilization.resources.materials = 100;
+  civilization.resources.credits = 100;
+  const oldOptions = observe(hidden, 0, independentEpoch).legalActions;
+  assert.equal(oldOptions.some(({ action }) => action.type === 'build' && ['irrigation', 'kiln'].includes(action.project)), false);
+  const farm = oldOptions.find(({ action }) => action.type === 'build' && action.project === 'farm');
+  assert.ok(farm);
+  assert.deepEqual(farm.action, { type: 'build', project: 'farm' });
+  assert.match(farm.reason, /Recurring inputs per economy beat: none\./);
+  assert.match(farm.reason, /Base building output per economy beat before productivity: food 4; not net stock gain\./);
+});
+
+await test('construction explanations follow catalogue values in canonical resource order rather than copied tuning', () => {
+  const building = BUILDINGS.find((candidate) => candidate.id === 'irrigation');
+  assert.ok(building);
+  const original = { cost: building.cost, operatingInputs: building.operatingInputs, production: building.production };
+  try {
+    building.cost = { credits: 3.5, materials: 9 };
+    building.operatingInputs = { energy: 0.75, materials: 2.5 };
+    building.production = { culture: 0, materials: 1.25, food: 7.5 };
+    const state = specializationFixture();
+    const option = observe(state, 0, '2026-10-16T00:00:10.000Z').legalActions.find(({ action }) => action.type === 'build' && action.project === 'irrigation');
+    assert.ok(option);
+    assert.match(option.reason, /Construction cost from shared supplies: materials 9, credits 3.5\./);
+    assert.match(option.reason, /Recurring inputs per economy beat: materials 2.5, energy 0.75\./);
+    assert.match(option.reason, /Base building output per economy beat before productivity: food 7.5, materials 1.25; not net stock gain\./);
+    assert.doesNotMatch(option.reason, /culture 0/);
+    building.operatingInputs = {};
+    building.production = {};
+    const empty = observe(state, 0, '2026-10-16T00:00:10.000Z').legalActions.find(({ action }) => action.type === 'build' && action.project === 'irrigation');
+    assert.ok(empty);
+    assert.match(empty.reason, /Recurring inputs per economy beat: none\./);
+    assert.match(empty.reason, /Base building output per economy beat before productivity: none; not net stock gain\./);
+  } finally {
+    building.cost = original.cost;
+    if (original.operatingInputs) building.operatingInputs = original.operatingInputs;
+    else delete building.operatingInputs;
+    building.production = original.production;
+  }
 });

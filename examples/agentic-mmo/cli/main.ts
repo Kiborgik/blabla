@@ -32,7 +32,7 @@ export function main(argv = process.argv.slice(2)): void {
     }
     const options = flags(argv.slice(1));
     const allowed: Record<string, string[]> = {
-      init: ['--seed', '--clock-epoch', '--state'], observe: ['--seat', '--state'], action: ['--seat', '--revision', '--choice', '--action', '--at', '--model', '--id', '--state'], replay: ['--out', '--state'],
+      init: ['--seed', '--clock-epoch', '--state'], observe: ['--seat', '--at', '--state', '--observation-format'], action: ['--seat', '--revision', '--choice', '--action', '--plan', '--at', '--model', '--id', '--state'], replay: ['--out', '--state'],
       tick: ['--revision', '--kind', '--interval', '--at', '--event', '--target', '--model', '--state'],
       catchup: ['--revision', '--at', '--id', '--model', '--state'],
       'strategy-catchup': ['--revision', '--at', '--id', '--model', '--state'],
@@ -47,7 +47,7 @@ export function main(argv = process.argv.slice(2)): void {
       request.seed = numberOption(options, '--seed') ?? 17;
       request.clockEpoch = options.get('--clock-epoch');
     }
-    if (operation === 'observe') request.seat = numberOption(options, '--seat');
+    if (operation === 'observe') { request.seat = numberOption(options, '--seat'); request.timestamp = options.get('--at'); request.observationFormat = options.get('--observation-format'); }
     if (operation === 'action') {
       request.seat = numberOption(options, '--seat');
       request.expectedRevision = numberOption(options, '--revision');
@@ -55,6 +55,12 @@ export function main(argv = process.argv.slice(2)): void {
       request.model = options.get('--model');
       request.commandId = options.get('--id');
       request.timestamp = options.get('--at');
+      const plan = options.get('--plan');
+      if (plan !== undefined) {
+        let value: unknown;
+        try { value = JSON.parse(plan); } catch { throw new ProtocolError('--plan must be valid JSON'); }
+        request.plan = value;
+      }
       const action = options.get('--action');
       if (action !== undefined) {
         let value: unknown;

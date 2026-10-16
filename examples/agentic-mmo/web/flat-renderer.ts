@@ -1,7 +1,11 @@
+import { routeLabelKey, routeLabelPlacement, routeTitle, routeVisual, visibleRoutes } from '../visuals/route-visuals.ts';
+import { damageMapLabel } from '../visuals/damage-visuals.ts';
+import { cityKey, selectedCity } from './city-selection.ts';
 import { hexPosition, TERRAIN_COLORS } from './atlas.ts';
 import type { AtlasWorld } from './atlas.ts';
 import type { AtlasRenderer } from './renderer.ts';
 import type { ViewerPreferences } from './viewer-state.ts';
+import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor } from './inspection-camera.ts';
 import { settlementVisual, VISUAL_PALETTE, visualDetail } from '../visuals/world-visuals.ts';
 import type { DetailLevel } from '../visuals/world-visuals.ts';
@@ -32,17 +36,21 @@ export function createFlatAtlasRenderer(
   container: HTMLElement,
   world: AtlasWorld,
   preferences: ViewerPreferences,
-  onSelect: (id: number) => void,
+  onSelect: (id: string) => void,
+  onRoute: (id: string) => void,
 ): AtlasRenderer {
   const svg = node('svg', { class: 'flat-atlas', role: 'group', 'aria-label': `${world.illustrative ? 'Sample' : 'Committed world'} two dimensional map. Select a city to inspect.` });
   const land = node('g', {});
   const borders = node('g', { 'pointer-events': 'none' });
-  const routes = node('g', { 'pointer-events': 'none' });
+  const routes = node('g', { class: 'flat-routes' });
+  let selectedRoute: string | null = null;
+  let routeLabel: { element: SVGGElement; x: number; z: number; id: string } | null = null;
   const cities = node('g', {});
   const settlements: Array<{ element: SVGGElement; index: number }> = [];
   let detail: DetailLevel | undefined;
-  const cityNodes: Array<{ id: number; element: SVGGElement; hit: SVGCircleElement; ring: SVGCircleElement; marker: SVGTextElement; label: SVGTextElement }> = [];
-  let selected = preferences.selected;
+  const cityNodes: Array<{ id: string; element: SVGGElement; hit: SVGCircleElement; ring: SVGCircleElement; marker: SVGTextElement; label: SVGTextElement }> = [];
+  const initialCity = selectedCity(world, preferences);
+  let selected = initialCity ? cityKey(initialCity) : '';
   let zoom = preferences.zoom;
   let x = preferences.x;
   let z = preferences.z;
@@ -56,17 +64,38 @@ export function createFlatAtlasRenderer(
     const owner = world.cities.find((city) => city.id === tile.owner);
     if (owner) borders.append(node('polygon', { points, fill: owner.color, 'fill-opacity': '0.12', stroke: owner.color, 'stroke-opacity': '0.6', 'stroke-width': '0.055' }));
   }
-  for (const [from, to] of world.routes) {
-    const origin = world.cities[from];
-    const destination = world.cities[to];
-    if (!origin || !destination) continue;
-    const a = hexPosition(origin.q, origin.r);
-    const b = hexPosition(destination.q, destination.r);
-    routes.append(node('line', { x1: String(a.x), y1: String(a.z), x2: String(b.x), y2: String(b.z), stroke: '#fff0b9', 'stroke-width': '0.12', 'stroke-dasharray': '0.3 0.18' }));
-  }
+  const drawRoutes = (): void => {
+    routes.replaceChildren();
+    routeLabel = null;
+    for (const route of visibleRoutes(world.routes, selectedRoute)) {
+      if (!route.fromTown || !route.toTown) continue;
+      const a = hexPosition(route.fromTown.q, route.fromTown.r);
+      const b = hexPosition(route.toTown.q, route.toTown.r);
+      const visual = routeVisual(route);
+      const line = { x1: String(a.x), y1: String(a.z), x2: String(b.x), y2: String(b.z), 'vector-effect': 'non-scaling-stroke' };
+      const group = node('g', { class: 'flat-route', 'data-route-id': route.id, role: 'button', tabindex: '0', 'aria-label': `Inspect ${routeTitle(route)}. ${visual.label}`, 'aria-pressed': String(route.id === selectedRoute) });
+      const choose = (): void => onRoute(route.id);
+      group.addEventListener('click', choose);
+      group.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); } });
+      group.append(node('line', { ...line, stroke: '#173a3c', 'stroke-width': route.id === selectedRoute ? '7' : '5', 'pointer-events': 'none' }));
+      group.append(node('line', { ...line, stroke: visual.color, 'stroke-width': route.id === selectedRoute ? '3' : '2', 'stroke-dasharray': visual.dash.length ? visual.dash.join(' ') : 'none', 'pointer-events': 'none' }));
+      group.append(node('line', { ...line, stroke: 'transparent', 'stroke-width': '14', 'pointer-events': 'stroke' }));
+      if (route.id === selectedRoute) {
+        const label = node('g', { class: 'flat-route-label' });
+        const background = node('rect', { x: '-90', y: '-22', width: '180', height: '44', rx: '5', fill: '#193a3c', stroke: visual.color });
+        const title = node('text', { 'text-anchor': 'middle', y: '4', fill: '#fff5d8', 'font-size': '12', 'font-family': 'Arial, sans-serif' });
+        title.textContent = `${visual.symbol} ${visual.status === 'damaged' ? visual.label : visual.status === 'blocked' ? 'Last attempt blocked' : visual.status === 'agreed' ? 'Agreed trade' : visual.label}`;
+        label.append(background, title);
+        group.append(label);
+        routeLabel = { element: label, x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, id: routeLabelKey(route.id) };
+      }
+      routes.append(group);
+    }
+  };
+  drawRoutes();
   for (const [index, city] of world.cities.entries()) {
     const point = hexPosition(city.q, city.r);
-    const group = node('g', { class: 'flat-city', transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${city.capital}, ${city.name}` });
+    const group = node('g', { class: 'flat-city', 'data-city-id': cityKey(city), transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${damageMapLabel(city.capital, city.settlement?.damage ?? 0)}, ${city.name}` });
     const hit = node('circle', { class: 'city-hit', r: '2.2' });
     const ring = node('circle', { class: 'city-marker', r: '0.85', fill: '#193a3c', stroke: city.color, 'stroke-width': '0.15' });
     const settlement = node('g', { class: 'settlement-parts' });
@@ -76,13 +105,13 @@ export function createFlatAtlasRenderer(
     marker.textContent = city.name.slice(0, 1);
     group.append(marker);
     const label = node('text', { 'text-anchor': 'middle', y: '1.45', fill: '#fff5d8', 'font-size': '0.55', 'font-family': 'Arial, sans-serif', stroke: '#173a3c', 'stroke-width': '0.11', 'paint-order': 'stroke' });
-    label.textContent = city.capital;
+    label.textContent = damageMapLabel(city.capital, city.settlement?.damage ?? 0);
     group.append(label);
-    const choose = (): void => onSelect(city.id);
+    const choose = (): void => onSelect(cityKey(city));
     group.addEventListener('click', choose);
     group.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(); } });
     cities.append(group);
-    cityNodes.push({ id: city.id, element: group, hit, ring, marker, label });
+    cityNodes.push({ id: cityKey(city), element: group, hit, ring, marker, label });
   }
   borders.style.display = preferences.borders ? '' : 'none';
   routes.style.display = preferences.routes ? '' : 'none';
@@ -92,7 +121,7 @@ export function createFlatAtlasRenderer(
     const box = svg.viewBox.baseVal;
     return { x: (px - box.x) / box.width * container.clientWidth, y: (pz - box.y) / box.height * container.clientHeight };
   });
-  cues.setMotion(!preferences.paused && !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  cues.setMotion(resolveAppearance(preferences, false, window.matchMedia('(prefers-reduced-motion: reduce)').matches).motion);
   const resize = (): void => {
     const aspect = container.clientWidth / Math.max(container.clientHeight, 1);
     const halfHeight = (aspect < 1 ? 26 : 16) / zoom;
@@ -132,17 +161,29 @@ export function createFlatAtlasRenderer(
       city.label.setAttribute('y', String(metrics.labelY));
     }
     const box = svg.viewBox.baseVal;
-    const visibility = mapLabelVisibility(world.cities.map((city) => {
+    const labelPositions = world.cities.map((city) => {
       const point = hexPosition(city.q, city.r);
-      return { id: city.id, x: (point.x - box.x) * pixelsPerUnit, y: (point.z - box.y + metrics.labelY) * pixelsPerUnit, width: Math.max(44, city.capital.length * 6.5), height: 14 };
-    }), selected, nextDetail, container.clientWidth, container.clientHeight);
-    cityNodes.forEach((city, index) => { city.label.style.visibility = visibility[index] ? 'visible' : 'hidden'; });
+      return { id: cityKey(city), x: (point.x - box.x) * pixelsPerUnit, y: (point.z - box.y + metrics.labelY) * pixelsPerUnit, width: Math.max(44, damageMapLabel(city.capital, city.settlement?.damage ?? 0).length * 6.5), height: 14 };
+    });
+    const targetTop = Math.max(metrics.targetRadius * pixelsPerUnit, Math.max(1.2 * pixelsPerUnit, 17) + metrics.markerRadius * pixelsPerUnit);
+    const targetBottom = Math.max(metrics.targetRadius * pixelsPerUnit, metrics.labelY * pixelsPerUnit + 6);
+    const townTargets = labelPositions.map((label) => ({ x: label.x, y: label.y - metrics.labelY * pixelsPerUnit - targetTop, width: Math.max(label.width, metrics.targetRadius * pixelsPerUnit * 2), height: targetTop + targetBottom }));
+    const placedRouteLabel = routeLabel && routes.style.display !== 'none'
+      ? routeLabelPlacement({ x: (routeLabel.x - box.x) * pixelsPerUnit, y: (routeLabel.z - box.y) * pixelsPerUnit }, townTargets, container.clientWidth, container.clientHeight) : null;
+    if (routeLabel && placedRouteLabel) {
+      routeLabel.element.setAttribute('transform', `translate(${box.x + placedRouteLabel.x / pixelsPerUnit} ${box.y + (placedRouteLabel.y + 22) / pixelsPerUnit}) scale(${1 / pixelsPerUnit})`);
+      labelPositions.unshift({ id: routeLabel.id, ...placedRouteLabel });
+    }
+    const visibility = mapLabelVisibility(labelPositions, selected, nextDetail, container.clientWidth, container.clientHeight);
+    const routeLabelOffset = placedRouteLabel ? 1 : 0;
+    if (routeLabel) routeLabel.element.style.visibility = routeLabelOffset && visibility[0] ? 'visible' : 'hidden';
+    cityNodes.forEach((city, index) => { city.label.style.visibility = visibility[index + routeLabelOffset] ? 'visible' : 'hidden'; });
     cues.update();
   };
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   resize();
-  const select = (id: number): void => {
+  const select = (id: string): void => {
     selected = id;
     for (const city of cityNodes) {
       city.element.classList.toggle('selected', city.id === id);
@@ -150,10 +191,10 @@ export function createFlatAtlasRenderer(
     }
     resize();
   };
-  select(preferences.selected);
+  select(selected);
   let pointer: { id: number; x: number; y: number; originX: number; originZ: number } | null = null;
   svg.addEventListener('pointerdown', (event) => {
-    if (event.target instanceof Element && event.target.closest('.flat-city')) return;
+    if (event.target instanceof Element && event.target.closest('.flat-city, .flat-route')) return;
     pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, originX: x, originZ: z };
     svg.setPointerCapture(event.pointerId);
   });
@@ -170,8 +211,9 @@ export function createFlatAtlasRenderer(
     zoom: (factor) => { zoom = Math.min(2.2, Math.max(0.65, zoom * factor)); resize(); },
     reset: () => { zoom = 1; x = 0; z = 0; resize(); },
     select,
+    selectRoute: (id) => { if (id !== selectedRoute) { selectedRoute = id; drawRoutes(); resize(); } },
     frameCity: (id, anchor) => {
-      const city = world.cities.find((candidate) => candidate.id === id);
+      const city = world.cities.find((candidate) => cityKey(candidate) === id);
       if (!city) return;
       const point = hexPosition(city.q, city.r);
       const box = svg.viewBox.baseVal;
@@ -184,9 +226,10 @@ export function createFlatAtlasRenderer(
       resize();
     },
     restoreCamera: (camera) => { x = camera.x; z = camera.z; zoom = camera.zoom; resize(); },
-    setLayer: (layer, visible) => { (layer === 'borders' ? borders : routes).style.display = visible ? '' : 'none'; },
+    setLayer: (layer, visible) => { (layer === 'borders' ? borders : routes).style.display = visible ? '' : 'none'; resize(); },
     snapshot: () => ({ zoom, x, z }),
     showEvents: cues.show,
+    clearEvents: cues.clear,
     setMotion: cues.setMotion,
     dispose: () => { observer.disconnect(); cues.dispose(); svg.remove(); },
   };

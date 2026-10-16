@@ -1,0 +1,22 @@
+state endpoints_accepted: bool
+state endpoints_exact: bool
+state endpoints_owned: bool
+state endpoints_refusal_unchanged: bool
+state endpoints_terms_preserved: bool
+state endpoints_legacy_replay_preserved: bool
+
+action endpoints_fixture(kind: int)
+action endpoints_propose()
+action endpoints_consent()
+action endpoints_legacy_replay()
+when endpoints_propose {
+    expect "proposal-binds-exact-owned-towns": not after.endpoints_accepted or after.endpoints_exact and after.endpoints_owned
+    expect "refused-proposal-never-retargets-or-spends": after.endpoints_accepted or after.endpoints_refusal_unchanged
+}
+when endpoints_consent {
+    expect "consent-preserves-promised-town-identities": not after.endpoints_accepted or after.endpoints_exact and after.endpoints_terms_preserved
+    expect "invalid-endpoint-consent-spends-nothing": after.endpoints_accepted or after.endpoints_refusal_unchanged
+}
+when endpoints_legacy_replay {
+    expect "older-release-keeps-first-city-replay": after.endpoints_legacy_replay_preserved
+}

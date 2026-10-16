@@ -11,6 +11,7 @@ export class GameProtocol extends Adapter {
 
   override handle(request: Record<string, unknown>): unknown {
     try {
+      if (request.observationFormat !== undefined && request.op !== 'observe') throw new ProtocolError('observationFormat is supported only for observe');
       switch (request.op) {
         case 'init': {
           const seed = request.seed ?? 17;
@@ -18,7 +19,7 @@ export class GameProtocol extends Adapter {
           if (request.clockEpoch !== undefined && typeof request.clockEpoch !== 'string') throw new ProtocolError('clockEpoch must be an explicit UTC timestamp');
           return this.store.initialize(seed, false, request.clockEpoch);
         }
-        case 'observe': return this.store.observation(request.seat);
+        case 'observe': return this.store.observation(request.seat, request.timestamp, request.observationFormat);
         case 'action': return this.store.submit(request);
         case 'tick': return this.store.directorTick(request);
         case 'strategy-catchup': return this.store.strategyCatchUp(request);

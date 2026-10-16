@@ -1,4 +1,9 @@
+import type { RouteResultCue } from '../visuals/route-cues.ts';
+import type { VisualEvent } from '../visuals/world-visuals.ts';
+import type { RouteView } from '../visuals/route-visuals.ts';
 import type { SettlementFacts } from '../visuals/world-visuals.ts';
+
+export type AtlasCue = VisualEvent | RouteResultCue;
 
 export interface AtlasCivilization {
   id: number;
@@ -29,7 +34,7 @@ export interface AtlasTile {
 export interface AtlasWorld {
   tiles: AtlasTile[];
   cities: AtlasCivilization[];
-  routes: Array<readonly [number, number]>;
+  routes: RouteView[];
   illustrative?: boolean;
 }
 
@@ -109,6 +114,10 @@ function terrainNoise(q: number, r: number): number {
   return Math.abs(Math.sin(q * 127.1 + r * 311.7) * 43758.5453) % 1;
 }
 
+function sampleTown(city: AtlasCivilization) {
+  return { id: `sample:${city.id}`, name: city.capital, civilization: city.name, color: city.color, q: city.q, r: city.r };
+}
+
 export function createPreviewWorld(): AtlasWorld {
   const tiles: AtlasTile[] = [];
   for (let r = -7; r <= 7; r += 1) {
@@ -153,6 +162,12 @@ export function createPreviewWorld(): AtlasWorld {
       [3, 4],
       [4, 0],
       [0, 3],
-    ],
+    ].map(([from, to], index) => {
+      const origin = CIVILIZATIONS[from ?? 0];
+      const destination = CIVILIZATIONS[to ?? 0];
+      if (!origin || !destination) throw new Error('Sample route endpoint missing');
+      return { id: `sample-route:${index}`, from: `sample:${origin.id}`, to: `sample:${destination.id}`, owner: origin.id, partner: destination.id,
+        active: false, damage: 0, volume: 0, ownerName: origin.name, partnerName: destination.name, illustrative: true, fromTown: sampleTown(origin), toTown: sampleTown(destination) };
+    }),
   };
 }
