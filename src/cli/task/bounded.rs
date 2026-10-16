@@ -49,6 +49,7 @@ struct Decision {
     tree: BTreeMap<String, String>,
     revision: task::RelevantRevision,
     task_record: String,
+    delivery_context: Option<String>,
     reviews: BTreeMap<String, task::RelevantRevision>,
     verification: Vec<u8>,
     marker: Option<Vec<u8>>,
@@ -116,6 +117,7 @@ fn inspect(
             json,
         ));
     }
+    let delivery_context = delivery::close_context(&project, &task, json)?;
     let verification = std::fs::read(status::record_path(root)).map_err(|failure| {
         refuse(
             format!("cannot read prior canonical verification: {failure}"),
@@ -201,6 +203,7 @@ fn inspect(
         tree,
         revision,
         task_record,
+        delivery_context,
         reviews,
         verification,
         marker,
@@ -220,7 +223,8 @@ fn record_result(initial: Decision, model: &str, reason: &str, json: bool) -> i3
         Ok(current) => current,
         Err(exit) => return exit,
     };
-    if current.task_record != initial.task_record
+    if current.delivery_context != initial.delivery_context
+        || current.task_record != initial.task_record
         || current.revision != initial.revision
         || current.reviews != initial.reviews
         || current.verification != initial.verification
@@ -267,7 +271,7 @@ pub(super) fn close(project: &Project, name: &str, model: &str, reason: &str, js
 }
 
 #[cfg(test)]
-fn close_with_checkpoint(
+pub(super) fn close_with_checkpoint(
     project: &Project,
     name: &str,
     model: &str,

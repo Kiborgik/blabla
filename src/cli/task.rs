@@ -1,4 +1,5 @@
 mod bounded;
+pub(crate) mod delivery;
 mod ready_receipts;
 
 use super::{emit_error, error, recovery, write_json};
@@ -17,6 +18,8 @@ use std::io::{self, Write};
 
 #[derive(Serialize)]
 struct TaskView<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivery: Option<serde_json::Value>,
     task: &'a Task,
     review_accepted: Option<bool>,
     review_current: Option<bool>,
@@ -359,6 +362,7 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
     };
     let affected_intent = affected_intent(project, task, &tree);
     TaskView {
+        delivery: delivery::task_view(project, task, &tree),
         goal_reflection_state: goal_reflection_state(project, task, &tree),
         intent_disposition_current: task
             .intent_disposition_required
@@ -697,6 +701,7 @@ fn review_identities(project: &Project, task: &Task) -> BTreeMap<String, String>
                 .unwrap_or_else(|| "unresolved".to_owned()),
         );
     }
+    identities.extend(delivery::identities(project, task));
     identities
 }
 
@@ -979,9 +984,32 @@ fn write_result_basis(output: &mut impl Write, task: &Task) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn open(
     project: &Project,
+    opening: Opening,
+    falsify: Vec<String>,
+    require_intent_disposition: bool,
+    require_goal_reflection: bool,
+    json: bool,
+    swallowed: &[String],
+) -> i32 {
+    open_with_delivery(
+        project,
+        opening,
+        Vec::new(),
+        falsify,
+        require_intent_disposition,
+        require_goal_reflection,
+        json,
+        swallowed,
+    )
+}
+
+pub(super) fn open_with_delivery(
+    project: &Project,
     mut opening: Opening,
+    delivery_goals: Vec<String>,
     falsify: Vec<String>,
     require_intent_disposition: bool,
     require_goal_reflection: bool,
@@ -1078,6 +1106,9 @@ pub(super) fn open(
         },
         now_unix(),
     );
+    if let Err(message) = delivery::pin(project, &mut recorded, &delivery_goals) {
+        return emit_error(error("task", message, None), json, 2);
+    }
     let falsify = match falsify_paths(project, &recorded, falsify) {
         Ok(paths) => paths,
         Err(message) => return emit_error(error("task", message, None), json, 2),
@@ -1639,7 +1670,7 @@ fn widen_scope(project: &Project, task: &mut Task, add: &[String]) -> Result<(),
             task.scope.push(path);
         }
     }
-    Ok(())
+    delivery::pin(project, task, &[])
 }
 
 pub(super) fn widen(
@@ -1930,17 +1961,83 @@ pub(super) fn close_bounded(
     bounded::close(project, name, model, reason, json)
 }
 
-pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i32 {
-    let mut task = match mutate(project, name, json) {
-        Ok(task) => task,
+struct CloseDecision {
+    task: Task,
+    model: String,
+    delivery_context: Option<String>,
+}
+
+fn record_close(project: &Project, mut decision: CloseDecision, json: bool) -> i32 {
+    let current = match delivery::recheck_close(
+        project,
+        &decision.task.name,
+        &decision.delivery_context,
+        &decision.model,
+        json,
+    ) {
+        Ok(current) => current,
         Err(exit) => return exit,
     };
+    if let Some(current) = current {
+        let mut refreshed =
+            match inspect_close(&current, &decision.task.name, &decision.model, json) {
+                Ok(refreshed) => refreshed,
+                Err(exit) => return exit,
+            };
+        if refreshed.delivery_context != decision.delivery_context {
+            return emit_error(
+                error(
+                    "task",
+                    "delivery close context changed before result recording",
+                    None,
+                ),
+                json,
+                2,
+            );
+        }
+        return store_and_discard(&current, &mut refreshed.task, json);
+    }
+    store_and_discard(project, &mut decision.task, json)
+}
+
+pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i32 {
+    match inspect_close(project, name, model, json) {
+        Ok(decision) => record_close(project, decision, json),
+        Err(exit) => exit,
+    }
+}
+
+#[cfg(test)]
+fn close_with_checkpoint(
+    project: &Project,
+    name: &str,
+    model: &str,
+    checkpoint: impl FnOnce(),
+) -> i32 {
+    let decision = match inspect_close(project, name, model, true) {
+        Ok(decision) => decision,
+        Err(exit) => return exit,
+    };
+    checkpoint();
+    record_close(project, decision, true)
+}
+
+fn inspect_close(
+    project: &Project,
+    name: &str,
+    model: &str,
+    json: bool,
+) -> Result<CloseDecision, i32> {
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return Err(exit),
+    };
     if let Err(exit) = require_tracking(project, &task, json) {
-        return exit;
+        return Err(exit);
     }
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     if task.state == "ready" && !task::challenge_current(&task, &tree) {
-        return emit_error(
+        return Err(emit_error(
             error(
                 "task",
                 format!(
@@ -1950,8 +2047,26 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
             ),
             json,
             2,
-        );
+        ));
     }
+    if !task.delivery_obligations.is_empty() || !task.delivery_reviews.is_empty() {
+        if model.trim().is_empty() {
+            return Err(emit_error(
+                error(
+                    "task",
+                    "delivery result acceptance requires an owner model",
+                    None,
+                ),
+                json,
+                2,
+            ));
+        }
+        validate_orchestrator_model(project, model, json)?;
+    }
+    let delivery_context = match delivery::close_context(project, &task, json) {
+        Ok(context) => context,
+        Err(exit) => return Err(exit),
+    };
     let evaluation = super::project::evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let status = status_view(project, &evaluation, &structure);
@@ -1974,7 +2089,7 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
         model,
         now_unix(),
     ) {
-        return emit_error(
+        return Err(emit_error(
             error(
                 "task",
                 format!(
@@ -1995,9 +2110,13 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
             ),
             json,
             2,
-        );
+        ));
     }
-    store_and_discard(project, &mut task, json)
+    Ok(CloseDecision {
+        task,
+        model: model.to_owned(),
+        delivery_context,
+    })
 }
 
 fn unconfirmed_guidance(task: &Task) -> String {
@@ -2117,6 +2236,9 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
             task: target,
             revision,
         });
+    }
+    if let Err(message) = delivery::pin(project, &mut task, &[]) {
+        return emit_error(error("task", message, None), json, 2);
     }
     task::record_acceptance(&mut task, &current_tree, &project.ignore, model, now_unix());
     store(project, &mut task, json)
@@ -3184,7 +3306,12 @@ pub(super) fn report_for(
         role: resolution.as_ref(),
         other_tasks: &other_tasks,
     };
-    skeptic::challenge_tracked_against(&evidence, goals, root, &project.ignore)
+    let mut report = skeptic::challenge_tracked_against(&evidence, goals, root, &project.ignore);
+    if selected.is_none() && goals.is_ok() {
+        let unmet = delivery::unmet_done(project);
+        skeptic::add_delivery_goal_challenge(&mut report, &unmet);
+    }
+    report
 }
 
 pub(super) fn standing(project: &Project, status: &StatusView) -> ChallengeReport {
@@ -3359,6 +3486,19 @@ fn write_task(
     };
     writeln!(output, "task::{}   {}", task.name, state_label(task))?;
     write_result_basis(&mut output, task)?;
+    if let Some(delivery) = &view.delivery {
+        writeln!(output, "\nApplicable delivery outcomes:")?;
+        for obligation in delivery["obligations"].as_array().into_iter().flatten() {
+            writeln!(
+                output,
+                "  {}: {} ({}) current {}",
+                obligation["goal"],
+                obligation["statement"],
+                obligation["basis"],
+                obligation["current"]
+            )?;
+        }
+    }
     writeln!(output, "\nStatement:\n  {}", task.statement)?;
     writeln!(output, "\nCarried by:\n  role::{}", task.role)?;
     if let Some(goal) = &task.goal {
@@ -4059,6 +4199,8 @@ pub(super) fn resolved(project: &Project, task: &Task) -> task::Resolution {
     if !task.lenses.is_empty() {
         resolution.lenses.clone_from(&task.lenses);
     }
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    resolution.delivery_claims_pending = delivery::claims_pending(project, task, &tree);
     resolution.knowledge_fingerprints = knowledge_fingerprints(project);
     resolution.review_current = review_freshness(project, task);
     if task.goal_reflection_required {

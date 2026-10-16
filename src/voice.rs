@@ -27,7 +27,15 @@ impl Voice {
     }
 }
 
-pub const BLUNT: [(&str, &str); 23] = [
+pub const BLUNT: [(&str, &str); 25] = [
+    (
+        "goal-delivery-claim-missing",
+        "Passing source checks does not deliver the user outcome. Account for what happened and what remains.",
+    ),
+    (
+        "goal-delivery-unmet",
+        "That outcome is still owed. Keep its owner and next decision visible until delivery is independently accepted.",
+    ),
     (
         "declared-check-failed",
         "This is not fucking ready. Fix the check or record the actual blocker.",

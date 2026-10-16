@@ -248,3 +248,83 @@ A review recorded before 0.11 on a target that had findings goes stale once, bec
 Back up `.blabla/tasks/` first, and never switch versions while one task is in flight. Old records stay readable but give no current credit. To earn it, accept again, rerun the exact check, assess lenses again and challenge before READY. Fix an `unobservable-task-input` with `task check NAME --input TRACKED_PATH --argv …` or `task deliverable NAME --remove`. Old reviews need an explicit `--review-of`. [Breaking notes](../CHANGELOG.md#0100-2026-10-06)
 
 Authoring: `blabla guide bootstrap`, `guide change`, `guide memory`. Optional advice: [Expert](expert.md).
+
+### Required user-outcome delivery
+
+A goal can opt in with `delivery "required"` and `applies-to ["system::viewer"]`.
+Only exact registered system identities are accepted. A task receives required
+primary goals, repeatable `task open --delivery-goal NAME` selections, and goals
+mapped to its **write scope**. Broad check inputs do not select extra outcomes.
+Acceptance shows the pinned statement, selection basis and current expectation
+verdicts. Scope widening adds obligations; removing a declaration never deletes a
+pinned obligation. Dropped required goals do not attach to new work and cannot be
+selected explicitly until the owner restores them. Active and done goals still
+attach. Goals without delivery metadata retain the existing lifecycle.
+
+After the actual declared check, the accepted worker supplies its own account:
+
+```sh
+blabla task delivery source viewer --status partial \
+  --observation "The renderer passed its focused checks; viewport inspection is pending" \
+  --observation-ref '{"kind":"verification","locator":"tests/viewer.test.ts","context":"Source correctness only"}' \
+  --delivered "Checked rendering implementation" --remaining "Inspect the actual viewport" \
+  --owner viewer-reviewer --next "Inspect the recorded event after authorized deployment" \
+  --model worker-model
+```
+
+Statuses are `delivered`, `partial`, `blocked` and `not-applicable`. Partial needs
+what arrived, what remains, an owner and next decision/trigger. Blocked needs
+`--blocker`, `--owner` and `--unblock-when`. Initial Not-applicable needs `--reason`.
+Delivered requires a reference typed `artifact`, `runtime` or `viewport`; references
+are repeatable JSON objects with `kind`, `locator` and `context`. Verification-only
+references cannot claim Delivered. Local paths are tracked by content; external
+references remain inspection claims, not authenticated observations or URL hashes.
+
+Current claims are needed for READY. Independent delivery review comes afterward,
+so author hand-back does not wait for an already-closed review. A separately assigned
+`--review-of source` task records what its reviewer actually inspected:
+
+```sh
+blabla task delivery-review outcome-review viewer --verdict accept \
+  --reason "Inspected the stated source boundary and the remaining viewport work" \
+  --observation-ref '{"kind":"artifact","locator":"reviews/viewer.md","context":"Independent inspection and explicit limits"}' \
+  --model reviewer-model
+```
+
+The review follows its ordinary check, challenge, READY and owner close. Both source
+close modes then require current independently accepted verdicts for every pinned
+claim. All existing check, finding, model, target and integration blockers remain.
+A goal-less report-only review acquires no delivery obligation through `review_of`
+alone; production write scopes still acquire mapped outcomes.
+
+Reviewed Partial or Blocked source can close. Its exact origin remains visible in
+`status`, Next, `task show` and `explain goal::NAME`, including after another GREEN
+run. Status shows at most 50 residual rows and reports total/omitted counts; goal
+explanation gives the complete filtered list. Unreadable records remain unavailable
+notices. Owner retirement is retained as retirement, never described as delivery.
+
+A later review of the closed source can resolve only the named historical residual:
+
+```sh
+blabla task delivery-review live-review viewer --verdict accept \
+  --resolve-origin '{"task":"source","goal":"goal::viewer","claim_digest":"EXACT_DIGEST_FROM_TASK_SHOW"}' \
+  --resolution delivered --reason "Inspected the actual delivered outcome" \
+  --observation-ref '{"kind":"viewport","locator":"https://example.test/observation","context":"Exact inspected viewport, version and remaining limits"}' \
+  --model reviewer-model
+```
+
+The resolution takes effect after that review's owner-accepted close, preserves the
+closed source record and affects no other origin. Accepting Partial or a later initial
+Not-applicable claim cannot clear an earlier applicable residual. An already-open
+successor is not required. Delivery records never mark a goal done or manufacture
+canonical GREEN; independent inspection still judges whether the observation supports
+its claim. Final writes reread current authority, tracked inputs and recursive targets;
+this detects the tested decision-boundary races, not arbitrary filesystem atomicity.
+
+Delivery-bearing close decisions, including a review task carrying delivery verdicts,
+require the currently declared orchestrator model. The supplied model is an
+attestation, not authentication. Legacy ordinary closes without delivery records
+keep their existing behavior. Both delivery close paths reload current authority,
+claims and recursive reviews before recording; ordinary delivery close also reruns
+its existing project/check/challenge eligibility. These checks detect the tested
+intervening mutations, not arbitrary filesystem races after the final read.

@@ -117,3 +117,10 @@ goal "declared-task-roles-retain-authority" {
     expect ["task-role-resolution::configured-project-refuses-unknown-role", "task-role-resolution::broken-registered-process-never-becomes-bootstrap", "task-role-resolution::registered-role-remains-usable", "task-role-resolution::explicit-role-free-bootstrap-remains-supported"]
     state "active"
 }
+
+goal "applicable-user-outcomes-survive-source-closure" {
+    serves ["truthful-over-convenient", "steering-cost-over-token-cost", "bounded-workers-free-planners"]
+    statement "Owner-declared required delivery goals resurface through exact task write-system mappings. Current accountable outcome claims and independent reviews distinguish delivered, partial, blocked and not-applicable results. Source may close while a reviewed residual remains visible with its owner and trigger; tests, GREEN, reflection and another completed task cannot erase it. Later reviewed evidence resolves an exact origin without rewriting history. Existing goal and contract completion authority remains unchanged; reference presence is not proof of user benefit."
+    expect ["goal-delivery::required-goals-follow-declared-write-systems", "goal-delivery::ready-needs-every-current-applicable-claim", "goal-delivery::both-close-modes-need-accepted-current-reviews", "goal-delivery::eligible-partial-source-can-close-with-visible-residual", "goal-delivery::unresolved-origins-survive-close-restart-and-green", "goal-delivery::accepted-exact-resolution-preserves-other-origins", "goal-delivery::source-close-never-invents-goal-or-contract-completion"]
+    state "active"
+}

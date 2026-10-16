@@ -16,7 +16,7 @@ pub const LIMITS: [&str; 3] = [
     include_str!("cli/text/skeptic-limit-source.md"),
 ];
 
-pub const CLASSES: [&str; 22] = [
+pub const CLASSES: [&str; 23] = [
     "unresolved-finding",
     "deliverable-unchanged",
     "scope-breach",
@@ -39,6 +39,7 @@ pub const CLASSES: [&str; 22] = [
     "check-not-falsified",
     "intent-disposition-missing",
     "goal-reflection-missing",
+    "goal-delivery-claim-missing",
 ];
 
 pub const OUTSIDE_THE_ASSIGNMENT: [&str; 4] = [
@@ -48,7 +49,7 @@ pub const OUTSIDE_THE_ASSIGNMENT: [&str; 4] = [
     "withdrawal-residue",
 ];
 
-pub const GOAL_CLASSES: [&str; 1] = ["goal-outcome-unmet"];
+pub const GOAL_CLASSES: [&str; 2] = ["goal-outcome-unmet", "goal-delivery-unmet"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -76,6 +77,8 @@ pub enum Class {
     CheckNotFalsified,
     IntentDispositionMissing,
     GoalReflectionMissing,
+    GoalDeliveryClaimMissing,
+    GoalDeliveryUnmet,
 }
 
 impl Class {
@@ -104,6 +107,8 @@ impl Class {
             Class::CheckNotFalsified => CLASSES[19],
             Class::IntentDispositionMissing => CLASSES[20],
             Class::GoalReflectionMissing => CLASSES[21],
+            Class::GoalDeliveryClaimMissing => CLASSES[22],
+            Class::GoalDeliveryUnmet => GOAL_CLASSES[1],
         }
     }
 }
@@ -298,12 +303,13 @@ fn challenge_against_tracking(
         ));
     }
     type RoleGrounding = fn(&Task, Option<&Resolution>) -> Result<Challenge, &'static str>;
-    let against_the_role: [(&'static str, RoleGrounding); 5] = [
+    let against_the_role: [(&'static str, RoleGrounding); 6] = [
         (CLASSES[6], model_outside_role_policy),
         (CLASSES[8], lens_unassessed),
         (CLASSES[17], review_target_stale),
         (CLASSES[20], intent_disposition_missing),
         (CLASSES[21], goal_reflection_missing),
+        (CLASSES[22], goal_delivery_claim_missing),
     ];
     for (class, grounding) in against_the_role {
         outcomes.push((
@@ -1196,4 +1202,29 @@ fn goal_outcome_unmet(
             first.goal
         ),
     })
+}
+
+fn goal_delivery_claim_missing(
+    task: &Task,
+    role: Option<&Resolution>,
+) -> Result<Challenge, &'static str> {
+    let Some(role) = role else {
+        return Err("no delivery resolution was supplied");
+    };
+    if role.delivery_claims_pending.is_empty() {
+        return Err("all pinned delivery claims are current or no delivery was required");
+    }
+    Ok(Challenge { class: Class::GoalDeliveryClaimMissing, statement: format!("Task {} has applicable user outcomes without current explicit delivery claims.", task.name), evidence: role.delivery_claims_pending.clone(), reconcile: "Record each Delivered, Partial, Blocked or NotApplicable account with current observation references; source checks do not supply delivery claims.".into() })
+}
+
+pub fn add_delivery_goal_challenge(report: &mut ChallengeReport, goals: &[String]) {
+    if goals.is_empty() {
+        return;
+    }
+    let challenge = Challenge { class: Class::GoalDeliveryUnmet, statement: "An owner-declared done goal still has unresolved or unavailable required delivery outcomes.".into(), evidence: goals.to_vec(), reconcile: "Inspect retained origins and independently accept exact Delivered resolutions, or retain an explicit owner retirement notice; contract GREEN does not erase outcomes.".into() };
+    report.grounded.push(GOAL_CLASSES[1]);
+    report.assignment_blockers.push(GOAL_CLASSES[1]);
+    if report.challenge.is_none() {
+        report.challenge = Some(challenge);
+    }
 }

@@ -143,6 +143,8 @@ pub(super) fn evaluate_with_run_state(project: &Project) -> blabla::project::sta
 
 #[derive(Serialize)]
 struct StatusWithMemory<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivery: Option<serde_json::Value>,
     #[serde(flatten)]
     project: &'a StatusView,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -364,6 +366,8 @@ pub(super) fn undeclared_goal(project: &Project, name: &str) -> Option<String> {
 
 #[derive(Serialize)]
 struct GoalCoverageView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivery: Option<serde_json::Value>,
     #[serde(flatten)]
     goal: GoalExplainView,
     coverage: Vec<GoalExpectationView>,
@@ -487,6 +491,7 @@ fn explain_goal(
         })
         .collect();
     Some(GoalCoverageView {
+        delivery: super::task::delivery::project_view(project, Some(id)),
         coverage: goal
             .outcome
             .expectations
@@ -511,6 +516,7 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
     let capabilities = CapabilityReport::of(&project.manifest.root);
     let result = if json {
         write_json(&StatusWithMemory {
+            delivery: super::task::delivery::project_view(project, None),
             project: &view,
             mission_memory: views.mission,
             system_memory: views.system,
@@ -531,6 +537,7 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             &capabilities,
             &project.shared_state,
         ).and_then(|()| {
+            super::task::delivery::write_projection(&mut io::stdout().lock(), super::task::delivery::project_view(project, None).as_ref())?;
             if let Some(runtime) = blabla::expert::trace::status(project) {
                 let mut output = io::stdout().lock();
                 writeln!(output, "EXPERT RUNTIME {:?}  trace retention {} days  payload limit {} bytes  unresolved limit {}/task  retained {:?} bytes  unknown deliveries {:?}  error {:?}", runtime.mode, runtime.trace_limits.retention_days, runtime.trace_limits.payload_bytes, runtime.trace_limits.unresolved_per_task, runtime.payload_bytes, runtime.unknown_deliveries, runtime.error)?;
@@ -1035,6 +1042,7 @@ fn write_mission_explain(view: &MissionExplainView) -> io::Result<()> {
 }
 
 fn write_goal_explain(coverage: &GoalCoverageView) -> io::Result<()> {
+    super::task::delivery::write_projection(&mut io::stdout().lock(), coverage.delivery.as_ref())?;
     let view = &coverage.goal;
     let mut output = io::stdout().lock();
     writeln!(

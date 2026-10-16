@@ -112,6 +112,8 @@ impl Goals {
 
 fn declared(expect: &[&str]) -> Goal {
     Goal {
+        delivery: None,
+        applies_to: Vec::new(),
         name: "ship-goals".to_owned(),
         serves: Vec::new(),
         statement: "Goals are executable objectives.".to_owned(),

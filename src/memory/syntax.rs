@@ -168,8 +168,18 @@ impl Parser<'_> {
         let TokenKind::Identifier(name) = &start.kind else {
             return Err(self.error(start.span, "E_MEMORY_SYNTAX", "expected a field name"));
         };
-        let name = name.clone();
+        let mut name = name.clone();
         self.position += 1;
+        if name == "applies"
+            && self.current().kind == TokenKind::Minus
+            && self
+                .tokens
+                .get(self.position + 1)
+                .is_some_and(|token| token.kind == TokenKind::Identifier("to".to_owned()))
+        {
+            name = "applies-to".to_owned();
+            self.position += 2;
+        }
         let value = self.current().clone();
         match &value.kind {
             TokenKind::String(text) => {

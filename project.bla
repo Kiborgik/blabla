@@ -51,3 +51,4 @@ verify behavior {
 }
 
 draft behavior "contracts/ready-receipts.bla"
+draft behavior "contracts/goal-delivery.bla"

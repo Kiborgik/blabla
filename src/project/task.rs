@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+pub mod delivery;
 pub mod revision;
 pub mod store;
 
@@ -597,6 +598,15 @@ pub fn review_revision(
         );
         revision.task_digest = fingerprint.finish();
     }
+    if !reviewed.delivery_obligations.is_empty() || !reviewed.delivery_reviews.is_empty() {
+        let mut fingerprint = super::Fnv::new();
+        fingerprint.write_str(&revision.task_digest);
+        fingerprint.write_str(
+            &serde_json::to_string(&(&reviewed.delivery_obligations, &reviewed.delivery_reviews))
+                .expect("delivery records serialize"),
+        );
+        revision.task_digest = fingerprint.finish();
+    }
     for input in &review.check_inputs {
         revision
             .paths
@@ -977,6 +987,7 @@ pub struct Attribution {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Resolution {
+    pub delivery_claims_pending: Vec<String>,
     pub knowledge_fingerprints: BTreeMap<String, String>,
     pub review_current: Option<bool>,
     pub intent_disposition_pending: Option<Vec<String>>,
@@ -1004,6 +1015,7 @@ pub fn resolve(
         .map(|(identity, _)| identity.clone())
         .collect();
     Resolution {
+        delivery_claims_pending: Vec::new(),
         knowledge_fingerprints: BTreeMap::new(),
         review_current: None,
         intent_disposition_pending: None,
@@ -1768,6 +1780,10 @@ pub enum ResultBasis {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub delivery_obligations: BTreeMap<String, delivery::Obligation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delivery_reviews: Vec<delivery::Review>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub goal_reflection_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1855,6 +1871,8 @@ fn open_state() -> String {
 impl Default for Task {
     fn default() -> Task {
         Task {
+            delivery_obligations: BTreeMap::new(),
+            delivery_reviews: Vec::new(),
             goal_reflection_required: false,
             goal_reflection: None,
             intent_disposition_required: false,

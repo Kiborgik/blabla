@@ -95,6 +95,7 @@ impl Assignment {
             },
             tree: BTreeMap::new(),
             resolution: task::Resolution {
+                delivery_claims_pending: Vec::new(),
                 knowledge_fingerprints: BTreeMap::new(),
                 review_current: None,
                 intent_disposition_pending: None,

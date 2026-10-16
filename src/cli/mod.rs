@@ -248,6 +248,11 @@ enum TaskAction {
         goal: Option<String>,
         #[arg(
             long,
+            help = "An additional required delivery goal; repeat for several"
+        )]
+        delivery_goal: Vec<String>,
+        #[arg(
+            long,
             help = "Require current updated-or-confirmed-unchanged reasons for affected intent before hand-back and closure"
         )]
         require_intent_disposition: bool,
@@ -275,6 +280,50 @@ enum TaskAction {
             help = "A file in the write scope whose opened contents the check must fail on; repeat or list several"
         )]
         falsify: Vec<String>,
+    },
+    #[command(about = "Record a current explicit delivery outcome for a pinned goal")]
+    Delivery {
+        name: String,
+        goal: String,
+        #[arg(long)]
+        status: String,
+        #[arg(long)]
+        observation: String,
+        #[arg(long)]
+        observation_ref: Vec<String>,
+        #[arg(long)]
+        delivered: Option<String>,
+        #[arg(long)]
+        remaining: Option<String>,
+        #[arg(long)]
+        owner: Option<String>,
+        #[arg(long)]
+        next: Option<String>,
+        #[arg(long)]
+        blocker: Option<String>,
+        #[arg(long)]
+        unblock_when: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long)]
+        model: String,
+    },
+    #[command(about = "Independently review a delivery claim or resolve an exact closed residual")]
+    DeliveryReview {
+        name: String,
+        goal: String,
+        #[arg(long)]
+        verdict: String,
+        #[arg(long)]
+        observation_ref: Vec<String>,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        model: String,
+        #[arg(long)]
+        resolve_origin: Option<String>,
+        #[arg(long)]
+        resolution: Option<String>,
     },
     #[command(about = "Record something discovered during the task that is not yet settled")]
     Finding { name: String, statement: String },
@@ -1156,6 +1205,17 @@ fn execute(cli: Cli) -> i32 {
                 {
                     return exit;
                 }
+                if let TaskAction::Open {
+                    goal,
+                    delivery_goal,
+                    scope,
+                    ..
+                } = &action
+                    && let Err(message) =
+                        task::delivery::select(&loaded, goal.as_deref(), delivery_goal, scope)
+                {
+                    return emit_error(error("task", message, None), json, 2);
+                }
                 let swallowed = swallowed_options(&action);
                 if !swallowed.is_empty() {
                     eprintln!(
@@ -1186,12 +1246,13 @@ fn execute(cli: Cli) -> i32 {
                         check_argv,
                         input,
                         goal,
+                        delivery_goal,
                         require_intent_disposition,
                         require_goal_reflection,
                         review_of,
                         lens,
                         falsify,
-                    } => task::open(
+                    } => task::open_with_delivery(
                         &loaded,
                         blabla::project::task::Opening {
                             name,
@@ -1210,11 +1271,68 @@ fn execute(cli: Cli) -> i32 {
                             review_of,
                             lenses: lens,
                         },
+                        delivery_goal,
                         falsify,
                         require_intent_disposition,
                         require_goal_reflection,
                         json,
                         &swallowed,
+                    ),
+                    TaskAction::Delivery {
+                        name,
+                        goal,
+                        status,
+                        observation,
+                        observation_ref,
+                        delivered,
+                        remaining,
+                        owner,
+                        next,
+                        blocker,
+                        unblock_when,
+                        reason,
+                        model,
+                    } => task::delivery::write(
+                        &loaded,
+                        &name,
+                        task::delivery::Request::Claim(task::delivery::ClaimInput {
+                            goal,
+                            status,
+                            observation,
+                            refs: observation_ref,
+                            delivered,
+                            remaining,
+                            owner,
+                            next,
+                            blocker,
+                            unblock_when,
+                            reason,
+                            model,
+                        }),
+                        json,
+                    ),
+                    TaskAction::DeliveryReview {
+                        name,
+                        goal,
+                        verdict,
+                        observation_ref,
+                        reason,
+                        model,
+                        resolve_origin,
+                        resolution,
+                    } => task::delivery::write(
+                        &loaded,
+                        &name,
+                        task::delivery::Request::Review(task::delivery::ReviewInput {
+                            goal,
+                            verdict,
+                            refs: observation_ref,
+                            reason,
+                            model,
+                            resolve_origin,
+                            resolution,
+                        }),
+                        json,
                     ),
                     TaskAction::Finding { name, statement } => {
                         task::finding(&loaded, &name, &statement, json)
