@@ -12,7 +12,7 @@ PYTHON = sys.executable
 STEPS = (
     ("fmt", ("cargo", "fmt", "--all", "--", "--check")),
     ("clippy", ("cargo", "clippy", "@cargo", "--all-targets", "--", "-D", "warnings")),
-    ("rust-tests", ("cargo", "test", "@cargo", "--no-fail-fast")),
+    ("rust-tests", ("cargo", "nextest", "run", "@cargo", "--no-fail-fast")),
     ("gate-schedule", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_gate*.py")),
     ("systemone-provider", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_systemone_provider.py")),
     ("native-expert", ("@python", "-m", "unittest", "discover", "-s", "experiments", "-p", "test_native_expert.py")),
@@ -85,10 +85,14 @@ def run(command, timeout=1800):
     return completed.returncode, completed.stdout + completed.stderr, time.perf_counter() - started
 
 
+FAILED_STATUSES = ("FAIL", "TIMEOUT", "SIGSEGV", "SIGABRT", "SIGBUS", "SIGILL", "ABORT", "LEAK-FAIL")
+
+
 def rust_tests_are_clean(log):
-    summaries = [line for line in log.splitlines() if line.startswith("test result:")]
-    failed_titles = [line for line in log.splitlines() if line.startswith("test ") and line.rstrip().endswith("FAILED")]
-    counted = all(" 0 failed;" in line for line in summaries)
+    lines = [line.strip() for line in log.splitlines()]
+    summaries = [line for line in lines if line.startswith("Summary [")]
+    failed_titles = list(dict.fromkeys(line for line in lines if line.split(" [", 1)[0] in FAILED_STATUSES))
+    counted = all(" failed" not in line for line in summaries)
     return summaries, failed_titles, bool(summaries) and counted and not failed_titles
 
 

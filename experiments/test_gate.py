@@ -2,7 +2,7 @@ import unittest
 import sys
 from pathlib import Path
 
-from gate import REQUIRED_ORDER, STEPS, checks, ordered, steps_of
+from gate import REQUIRED_ORDER, STEPS, checks, ordered, rust_tests_are_clean, steps_of
 
 PLACEHOLDERS = {"@cargo", "@python", "@out", "@blabla"}
 
@@ -94,6 +94,34 @@ class RunnerUsesTheSchedule(unittest.TestCase):
         online = dict(checks(Path("."), False))
         self.assertIn("--offline", offline["rust-tests"])
         self.assertNotIn("--offline", online["rust-tests"])
+
+
+FAILED_LINE = "FAIL [   0.142s] (2/3) blabla::cli a_check_fails"
+TIMED_OUT_LINE = "TIMEOUT [   2.001s] (3/3) blabla::cli a_check_hangs"
+
+
+class RustTestLog(unittest.TestCase):
+    def test_every_failed_or_timed_out_test_is_listed_once_and_the_run_is_not_clean(self):
+        log = "\n".join([
+            "        PASS [   0.011s] (1/3) blabla::cli a_check_passes",
+            "        " + FAILED_LINE,
+            "     " + TIMED_OUT_LINE,
+            "────────────",
+            "     Summary [   2.002s] 3 tests run: 1 passed, 2 failed, 0 skipped",
+            "        " + FAILED_LINE,
+            "     " + TIMED_OUT_LINE,
+        ])
+        summaries, failed_titles, clean = rust_tests_are_clean(log)
+        self.assertEqual(failed_titles, [FAILED_LINE, TIMED_OUT_LINE])
+        self.assertEqual(len(summaries), 1)
+        self.assertFalse(clean)
+
+    def test_a_run_with_a_passing_summary_and_no_failure_is_clean(self):
+        log = "        PASS [   0.011s] (1/1) blabla::cli a_check_passes\n     Summary [   0.012s] 1 test run: 1 passed, 2 skipped"
+        self.assertEqual(rust_tests_are_clean(log)[1:], ([], True))
+
+    def test_a_run_without_a_summary_is_not_clean(self):
+        self.assertFalse(rust_tests_are_clean("error: could not compile `blabla`")[2])
 
 
 if __name__ == "__main__":

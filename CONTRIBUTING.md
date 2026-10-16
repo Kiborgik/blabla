@@ -4,7 +4,7 @@ BlaBla is pre-1.0. Syntax, CLI, JSON and exit-code changes go in a minor release
 
 ## Setup
 
-Stable Rust (edition 2024) with `rustfmt` and `clippy`, and Python 3.10+. Full example runs also need Node.js, Go, a JDK and C/C++ compilers. Diagrams need Node/npx and a browser.
+Stable Rust (edition 2024) with `rustfmt` and `clippy`, [cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`), and Python 3.10+. The gate runs every Rust test in parallel through nextest, which does not run doc tests; the crate has none. Full example runs also need Node.js, Go, a JDK and C/C++ compilers. Diagrams need Node/npx and a browser.
 
 ```sh
 git clone https://github.com/Kiborgik/blabla.git
@@ -21,7 +21,7 @@ Run the focused checks for what you changed. The full gate belongs to the orches
 ```sh
 cargo fmt --all -- --check
 cargo clippy --release --all-targets -- -D warnings
-cargo test --release --test TEST_NAME
+cargo nextest run --test TEST_NAME
 python -m unittest discover -s experiments -p 'test_CHANGED_BOUNDARY.py'
 python experiments/render_diagrams.py --check
 ```

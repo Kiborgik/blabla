@@ -5,6 +5,10 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+#[path = "support/process.rs"]
+mod process;
+use process::assert_process_stopped;
+
 fn request(kind: &str) -> EvaluationRequest {
     let output = match kind {
         "choice" => json!({"kind":"choice","alternatives":["aligned","drift","unclear"]}),
@@ -280,33 +284,32 @@ fn unknown_answer_and_request_identity_are_failures() {
 }
 
 #[test]
-fn timeout_kills_descendants() {
+fn cancellation_kills_descendants() {
     let dir = tempfile::tempdir().unwrap();
-    let marker = dir.path().join("late-child");
     let pid = dir.path().join("child.pid");
-    let mut provider = command(
-        "descendant",
-        &[marker.display().to_string(), pid.display().to_string()],
-        ExpertLimits::default(),
-    );
-    let result = provider.evaluate(
-        &request("choice"),
-        Instant::now() + Duration::from_millis(150),
-        &AtomicBool::new(false),
-    );
-    assert_eq!(result.outcome.unwrap_err(), ProviderFailure::Timeout);
-    std::thread::sleep(Duration::from_millis(600));
-    assert!(!marker.exists(), "descendant survived timeout");
+    let cancelled = AtomicBool::new(false);
+    let result = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let limit = Instant::now() + Duration::from_secs(10);
+            while !pid.exists() && Instant::now() < limit {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            cancelled.store(true, Ordering::Release);
+        });
+        command(
+            "descendant",
+            &[pid.display().to_string()],
+            ExpertLimits::default(),
+        )
+        .evaluate(
+            &request("choice"),
+            Instant::now() + Duration::from_secs(20),
+            &cancelled,
+        )
+    });
     assert!(pid.exists(), "fixture never spawned descendant");
-    #[cfg(unix)]
-    {
-        let pid: i32 = std::fs::read_to_string(pid).unwrap().parse().unwrap();
-        assert_ne!(
-            unsafe { libc::kill(pid, 0) },
-            0,
-            "descendant PID survived cleanup"
-        );
-    }
+    assert_eq!(result.outcome.unwrap_err(), ProviderFailure::Cancelled);
+    assert_process_stopped(std::fs::read_to_string(&pid).unwrap().parse().unwrap());
 }
 
 #[test]

@@ -30,6 +30,9 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
+      - uses: taiki-e/install-action@nextest
       - name: Product gate
         run: python experiments/gate.py --tag ci --out ci-artifacts/gate
       - name: Hello contract check
