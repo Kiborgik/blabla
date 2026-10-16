@@ -1,3 +1,6 @@
+mod bounded;
+mod ready_receipts;
+
 use super::{emit_error, error, recovery, write_json};
 use blabla::memory::goal::Outcome;
 use blabla::memory::{self, goal, knowledge, mission, process, system};
@@ -17,6 +20,9 @@ struct TaskView<'a> {
     task: &'a Task,
     review_accepted: Option<bool>,
     review_current: Option<bool>,
+    intent_disposition_current: Option<bool>,
+    goal_reflection_state: Option<&'static str>,
+    affected_intent: Vec<IntentView>,
     approval_current: Option<bool>,
     decisions: Vec<DecisionStateView<'a>>,
     assessment_current: Vec<bool>,
@@ -34,6 +40,284 @@ struct TaskView<'a> {
     on_disk: BTreeMap<String, String>,
     routes: Vec<&'static str>,
     authority: &'static str,
+}
+
+#[derive(Serialize)]
+struct IntentView {
+    identity: String,
+    state: &'static str,
+    disposition: Option<String>,
+    reason: Option<String>,
+    freshness: Option<IntentFreshness>,
+}
+
+#[derive(Serialize)]
+struct IntentFreshness {
+    acceptance_epoch: Option<EpochChange>,
+    assignment_digest_changed: bool,
+    changed_paths: Vec<PathFingerprintChange>,
+    changed_identities: Vec<IdentityFingerprintChange>,
+    own_identity_fingerprint_changed: bool,
+    claim_problems: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct EpochChange {
+    recorded: u64,
+    current: u64,
+}
+
+#[derive(Serialize)]
+struct FingerprintChange {
+    change: &'static str,
+    recorded: Option<String>,
+    current: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PathFingerprintChange {
+    path: String,
+    #[serde(flatten)]
+    difference: FingerprintChange,
+}
+
+#[derive(Serialize)]
+struct IdentityFingerprintChange {
+    identity: String,
+    #[serde(flatten)]
+    difference: FingerprintChange,
+}
+
+fn fingerprint_change(
+    recorded: Option<Option<&str>>,
+    current: Option<Option<&str>>,
+) -> Option<FingerprintChange> {
+    if recorded == current {
+        return None;
+    }
+    Some(FingerprintChange {
+        change: match (recorded, current) {
+            (None, Some(_)) => "added",
+            (Some(_), None) => "removed",
+            _ => "changed",
+        },
+        recorded: recorded.flatten().map(str::to_owned),
+        current: current.flatten().map(str::to_owned),
+    })
+}
+
+fn intent_freshness(
+    task: &Task,
+    identity: &str,
+    receipt: &task::IntentDisposition,
+    current: &task::RelevantRevision,
+) -> IntentFreshness {
+    let recorded = &receipt.revision;
+    let changed_paths = recorded
+        .paths
+        .keys()
+        .chain(current.paths.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|path| {
+            fingerprint_change(
+                recorded.paths.get(path).map(|value| value.as_deref()),
+                current.paths.get(path).map(|value| value.as_deref()),
+            )
+            .map(|difference| PathFingerprintChange {
+                path: path.clone(),
+                difference,
+            })
+        })
+        .collect();
+    let changed_identities = recorded
+        .identities
+        .keys()
+        .chain(current.identities.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|identity| {
+            fingerprint_change(
+                recorded
+                    .identities
+                    .get(identity)
+                    .map(|value| Some(value.as_str())),
+                current
+                    .identities
+                    .get(identity)
+                    .map(|value| Some(value.as_str())),
+            )
+            .map(|difference| IdentityFingerprintChange {
+                identity: identity.clone(),
+                difference,
+            })
+        })
+        .collect();
+    let mut claim_problems = Vec::new();
+    match &task.accepted {
+        None => claim_problems.push("acceptance-missing"),
+        Some(accepted) if accepted.model != receipt.model => {
+            claim_problems.push("accepted-model-mismatch")
+        }
+        Some(_) => {}
+    }
+    if !task::INTENT_DISPOSITIONS.contains(&receipt.status.as_str()) {
+        claim_problems.push("invalid-status");
+    }
+    if receipt.reason.trim().is_empty() {
+        claim_problems.push("blank-reason");
+    }
+    claim_problems.sort_unstable();
+    IntentFreshness {
+        acceptance_epoch: (recorded.acceptance_epoch != current.acceptance_epoch).then_some(
+            EpochChange {
+                recorded: recorded.acceptance_epoch,
+                current: current.acceptance_epoch,
+            },
+        ),
+        assignment_digest_changed: recorded.task_digest != current.task_digest,
+        changed_paths,
+        changed_identities,
+        own_identity_fingerprint_changed: recorded.identities.get(identity)
+            != current.identities.get(identity),
+        claim_problems,
+    }
+}
+
+fn write_intent_freshness(output: &mut impl Write, freshness: &IntentFreshness) -> io::Result<()> {
+    writeln!(output, "    Shared input changes:")?;
+    if let Some(epoch) = &freshness.acceptance_epoch {
+        writeln!(
+            output,
+            "      acceptance epoch: {} -> {}",
+            epoch.recorded, epoch.current
+        )?;
+    }
+    if freshness.assignment_digest_changed {
+        writeln!(
+            output,
+            "      assignment digest changed (includes the acceptance epoch)"
+        )?;
+    }
+    for entry in &freshness.changed_paths {
+        writeln!(
+            output,
+            "      path: {} ({})",
+            entry.path, entry.difference.change
+        )?;
+    }
+    for entry in &freshness.changed_identities {
+        writeln!(
+            output,
+            "      identity: {} ({})",
+            entry.identity, entry.difference.change
+        )?;
+    }
+    if freshness.acceptance_epoch.is_none()
+        && !freshness.assignment_digest_changed
+        && freshness.changed_paths.is_empty()
+        && freshness.changed_identities.is_empty()
+    {
+        writeln!(output, "      none")?;
+    }
+    writeln!(
+        output,
+        "    Own identity fingerprint: {}",
+        if freshness.own_identity_fingerprint_changed {
+            "changed"
+        } else {
+            "unchanged"
+        }
+    )?;
+    if !freshness.claim_problems.is_empty() {
+        writeln!(
+            output,
+            "    Claim problems: {}",
+            freshness.claim_problems.join(", ")
+        )?;
+    }
+    Ok(())
+}
+
+fn intent_revision(
+    project: &Project,
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> task::RelevantRevision {
+    let mut identities = review_identities(project, task);
+    for identity in task
+        .intent_identities
+        .iter()
+        .chain(task.intent_dispositions.iter().map(|entry| &entry.identity))
+    {
+        identities
+            .entry(identity.clone())
+            .or_insert_with(|| "absent".to_owned());
+    }
+    task::intent_revision(task, tree, identities)
+}
+
+fn goal_reflection_revision(
+    project: &Project,
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> task::RelevantRevision {
+    let identities = intent_revision(project, task, tree).identities;
+    task::goal_reflection_revision(task, tree, identities)
+}
+
+fn goal_reflection_state(
+    project: &Project,
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Option<&'static str> {
+    task.goal_reflection_required.then(|| {
+        if task.goal_reflection.is_none() {
+            "missing"
+        } else if task::goal_reflection_current(
+            task,
+            &goal_reflection_revision(project, task, tree),
+        ) {
+            "current"
+        } else {
+            "stale"
+        }
+    })
+}
+
+fn affected_intent(
+    project: &Project,
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Vec<IntentView> {
+    if !task.intent_disposition_required {
+        return Vec::new();
+    }
+    let revision = intent_revision(project, task, tree);
+    revision
+        .identities
+        .keys()
+        .map(|identity| {
+            let latest = task
+                .intent_dispositions
+                .iter()
+                .rev()
+                .find(|entry| &entry.identity == identity);
+            IntentView {
+                identity: identity.clone(),
+                state: if latest.is_none() {
+                    "missing"
+                } else if task::disposition_current(task, identity, &revision) {
+                    "current"
+                } else {
+                    "stale"
+                },
+                disposition: latest.map(|entry| entry.status.clone()),
+                reason: latest.map(|entry| entry.reason.clone()),
+                freshness: latest.map(|entry| intent_freshness(task, identity, entry, &revision)),
+            }
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -73,7 +357,13 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
         }
         _ => (Vec::new(), 0),
     };
+    let affected_intent = affected_intent(project, task, &tree);
     TaskView {
+        goal_reflection_state: goal_reflection_state(project, task, &tree),
+        intent_disposition_current: task
+            .intent_disposition_required
+            .then(|| affected_intent.iter().all(|entry| entry.state == "current")),
+        affected_intent,
         review_accepted: task.review_of.as_ref().map(|_| task.accepted.is_some()),
         review_current,
         approval_current: review_current.map(|current| {
@@ -434,6 +724,60 @@ fn declared_role(project: &Project, role_name: &str) -> Option<blabla::memory::p
         })
 }
 
+pub(super) fn validate_open_role(
+    project: &Project,
+    role_name: &str,
+    json: bool,
+) -> Result<(), i32> {
+    let Some(entry) = &project.manifest.process else {
+        return Ok(());
+    };
+    let memory = memory::read(
+        &entry.path,
+        &entry.display,
+        process::build,
+        process::validate,
+    );
+    let Some(process) = memory.present() else {
+        return Err(emit_error(
+            error(
+                "task",
+                format!(
+                    "cannot resolve task role {role_name:?}: registered process {} is {}: {}; repair the registered process before opening a task",
+                    entry.display,
+                    memory.state(),
+                    memory.problems().join("; ")
+                ),
+                None,
+            ),
+            json,
+            2,
+        ));
+    };
+    if !process.roles.is_empty() && !process.roles.iter().any(|role| role.name == role_name) {
+        let mut names = process
+            .roles
+            .iter()
+            .map(|role| role.name.as_str())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        return Err(emit_error(
+            error(
+                "task",
+                format!(
+                    "task role {role_name:?} is not declared in {}; declared roles: {}; choose a declared role or ask the owner to declare the intended role",
+                    entry.display,
+                    names.join(", ")
+                ),
+                None,
+            ),
+            json,
+            2,
+        ));
+    }
+    Ok(())
+}
+
 fn unconsulted_lens(project: &Project, role_name: &str, lenses: &[String]) -> Option<String> {
     let consulted = declared_role(project, role_name)
         .map(|role| role.consult)
@@ -615,17 +959,50 @@ fn write_task_line(task: &Task) -> io::Result<()> {
         task.name,
         state_label(task),
         task.name
-    )
+    )?;
+    write_result_basis(&mut output, task)
+}
+
+fn write_result_basis(output: &mut impl Write, task: &Task) -> io::Result<()> {
+    if let Some(task::ResultBasis::Bounded {
+        reason,
+        prior_run_id,
+        implementation_fingerprint,
+        ..
+    }) = &task.result_basis
+    {
+        writeln!(
+            output,
+            "Bounded result accepted; project verification pending at acceptance.\n  Reason: {reason}\n  Prior canonical GREEN run: {prior_run_id}\n  Prior implementation fingerprint: {implementation_fingerprint}\n  This historical receipt does not replace current blabla status."
+        )?;
+    }
+    Ok(())
 }
 
 pub(super) fn open(
     project: &Project,
     mut opening: Opening,
     falsify: Vec<String>,
+    require_intent_disposition: bool,
+    require_goal_reflection: bool,
     json: bool,
     swallowed: &[String],
 ) -> i32 {
+    if let Err(exit) = validate_open_role(project, &opening.role, json) {
+        return exit;
+    }
     let name = &opening.name;
+    if require_goal_reflection && opening.goal.is_none() {
+        return emit_error(
+            error(
+                "task",
+                "required goal reflection needs a named --goal",
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     if !blabla::memory::syntax::is_identity_safe(name) {
         return emit_error(
             error(
@@ -706,6 +1083,11 @@ pub(super) fn open(
         Err(message) => return emit_error(error("task", message, None), json, 2),
     };
     recorded.falsify = falsify;
+    recorded.goal_reflection_required = require_goal_reflection;
+    recorded.intent_disposition_required = require_intent_disposition;
+    if require_intent_disposition {
+        recorded.intent_identities = review_identities(project, &recorded).into_keys().collect();
+    }
     if let Err(exit) = require_tracking(project, &recorded, json) {
         return exit;
     }
@@ -1538,6 +1920,16 @@ pub(super) fn declare_check(
     store_with(project, &mut task, json, swallowed)
 }
 
+pub(super) fn close_bounded(
+    project: &Project,
+    name: &str,
+    model: &str,
+    reason: &str,
+    json: bool,
+) -> i32 {
+    bounded::close(project, name, model, reason, json)
+}
+
 pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i32 {
     let mut task = match mutate(project, name, json) {
         Ok(task) => task,
@@ -1905,6 +2297,108 @@ pub(super) fn lens(
         statement: statement.to_owned(),
         unix: now_unix(),
     });
+    store(project, &mut task, json)
+}
+
+pub(super) fn disposition(
+    project: &Project,
+    name: &str,
+    identity: &str,
+    status: &str,
+    reason: &str,
+    model: &str,
+    refresh_ready: bool,
+    json: bool,
+) -> i32 {
+    if refresh_ready {
+        return ready_receipts::refresh(
+            project,
+            name,
+            ready_receipts::Claim::Disposition {
+                identity: identity.to_owned(),
+                status: status.to_owned(),
+                reason: reason.to_owned(),
+                model: model.to_owned(),
+            },
+            json,
+        );
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    let revision = intent_revision(project, &task, &tree);
+    let record = task::IntentDisposition {
+        identity: identity.to_owned(),
+        status: status.to_owned(),
+        reason: reason.to_owned(),
+        model: model.to_owned(),
+        unix: now_unix(),
+        revision,
+    };
+    if let Err(message) = task::record_disposition(&mut task, record) {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    store(project, &mut task, json)
+}
+
+pub(super) fn reflect(
+    project: &Project,
+    name: &str,
+    decision: String,
+    observation: String,
+    evidence_refs: Vec<String>,
+    reason: String,
+    outcome: task::GoalReflectionOutcome,
+    model: String,
+    refresh_ready: bool,
+    json: bool,
+) -> i32 {
+    if refresh_ready {
+        return ready_receipts::refresh(
+            project,
+            name,
+            ready_receipts::Claim::Reflection {
+                decision,
+                observation,
+                evidence_refs,
+                reason,
+                outcome,
+                model,
+            },
+            json,
+        );
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
+    if let Some(goal) = &task.goal
+        && let Some(message) = super::project::undeclared_goal(project, goal)
+    {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    let reflection = task::GoalReflection {
+        decision,
+        observation,
+        evidence_refs,
+        reason,
+        outcome,
+        model,
+        unix: now_unix(),
+        revision: goal_reflection_revision(project, &task, &tree),
+    };
+    if let Err(message) = task::record_goal_reflection(&mut task, reflection) {
+        return emit_error(error("task", message, None), json, 2);
+    }
     store(project, &mut task, json)
 }
 
@@ -2590,7 +3084,17 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
     let blockers = report.assignment_blockers();
     let mut assignment_clear = None;
     if let Some(task) = selected.as_mut() {
-        if task.state == "accepted" {
+        if task.state == "ready"
+            && blockers.is_empty()
+            && task::tracked_readiness(task, root, &project.ignore, &tree).supported
+            && task::challenge_current(task, &tree)
+        {
+            assignment_clear = Some(true);
+        } else if task.state == "accepted"
+            || (task.state == "ready"
+                && task.challenged.is_none()
+                && (task.intent_disposition_required || task.goal_reflection_required))
+        {
             let recorded = task::record_challenge(task, &tree, blockers.len(), now_unix());
             if let Some(identity) = recovery::running() {
                 if let Some(message) = recovery::refuse_write(identity, task.build.as_deref()) {
@@ -2854,6 +3358,7 @@ fn write_task(
             .map_or_else(|| path.clone(), Clone::clone)
     };
     writeln!(output, "task::{}   {}", task.name, state_label(task))?;
+    write_result_basis(&mut output, task)?;
     writeln!(output, "\nStatement:\n  {}", task.statement)?;
     writeln!(output, "\nCarried by:\n  role::{}", task.role)?;
     if let Some(goal) = &task.goal {
@@ -2992,6 +3497,120 @@ fn write_task(
                 "  Reaccept an open review to inspect the changed target; a CLOSED review remains historical and new work needs a new review task"
             )?;
         }
+    }
+    if task.state == "ready" && (task.intent_disposition_required || task.goal_reflection_required)
+    {
+        writeln!(
+            output,
+            "  Explicit --refresh-ready may renew one manual disposition/reflection with the same still-permitted model when check and recursive targets remain current; then run blabla challenge {}. Changed work requires reacceptance and evidence",
+            task.name
+        )?;
+    }
+    if task.intent_disposition_required {
+        writeln!(
+            output,
+            "\nAffected intent disposition: REQUIRED ({})",
+            if view.intent_disposition_current == Some(true) {
+                "CURRENT"
+            } else {
+                "INCOMPLETE"
+            }
+        )?;
+        for entry in &view.affected_intent {
+            writeln!(
+                output,
+                "  {}  {}",
+                entry.identity,
+                entry.state.to_uppercase()
+            )?;
+            if let Some(reason) = &entry.reason {
+                writeln!(
+                    output,
+                    "    {}: {reason}",
+                    entry.disposition.as_deref().unwrap_or("unrecorded")
+                )?;
+            }
+            if entry.state == "stale"
+                && let Some(freshness) = &entry.freshness
+            {
+                write_intent_freshness(&mut output, freshness)?;
+            }
+        }
+        writeln!(
+            output,
+            "  Assignment digests do not identify changed fields; directory fingerprints do not identify changed child files. Shared input changes do not establish a semantic change to each identity."
+        )?;
+        writeln!(
+            output,
+            "  blabla task disposition {} IDENTITY --status updated|confirmed-unchanged --reason TEXT --model MODEL",
+            task.name
+        )?;
+        writeln!(
+            output,
+            "  Reasons are accountable review claims; they never mark goals done or replace evidence, scope or contract authority."
+        )?;
+    }
+    if let Some(state) = view.goal_reflection_state {
+        writeln!(
+            output,
+            "\nGoal reflection: REQUIRED ({})",
+            state.to_uppercase()
+        )?;
+        if let Some(reflection) = &task.goal_reflection {
+            writeln!(
+                output,
+                "  {} by {}: {}",
+                reflection.outcome.word(),
+                reflection.model,
+                reflection.decision
+            )?;
+            writeln!(output, "  Observed: {}", reflection.observation)?;
+            writeln!(
+                output,
+                "  Evidence references: {}",
+                reflection.evidence_refs.join("; ")
+            )?;
+            writeln!(output, "  Why this follows now: {}", reflection.reason)?;
+            match &reflection.outcome {
+                task::GoalReflectionOutcome::Successor {
+                    recommendation,
+                    owner,
+                    dependencies,
+                    observable_outcome,
+                } => {
+                    writeln!(
+                        output,
+                        "  Recommended successor: {recommendation}\n  Proposed owner: {owner}\n  Dependencies: {}\n  Observable outcome: {observable_outcome}",
+                        if dependencies.is_empty() {
+                            "none stated".to_owned()
+                        } else {
+                            dependencies.join("; ")
+                        }
+                    )?;
+                }
+                task::GoalReflectionOutcome::Blocked {
+                    blocker,
+                    owner,
+                    unblock_when,
+                } => {
+                    writeln!(
+                        output,
+                        "  Blocker: {blocker}\n  Proposed owner: {owner}\n  Unblock when: {unblock_when}"
+                    )?;
+                }
+                task::GoalReflectionOutcome::CompletionRecommended
+                | task::GoalReflectionOutcome::NoUsefulSuccessor => {}
+            }
+        }
+        writeln!(
+            output,
+            "  blabla task reflect {} --outcome successor|blocked|completion-recommended|no-useful-successor --decision TEXT --observation TEXT --evidence-ref TEXT --reason TEXT --model MODEL",
+            task.name
+        )?;
+        writeln!(
+            output,
+            "  Recommendations and evidence references are accountable claims, not authenticated authority or semantic proof. Reflection never creates work, changes a goal or decides project completion."
+        )?;
     }
     write_questions(&mut output, task)?;
     write_decisions(&mut output, task, floor)?;
@@ -3442,6 +4061,21 @@ pub(super) fn resolved(project: &Project, task: &Task) -> task::Resolution {
     }
     resolution.knowledge_fingerprints = knowledge_fingerprints(project);
     resolution.review_current = review_freshness(project, task);
+    if task.goal_reflection_required {
+        let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+        resolution.goal_reflection_current =
+            Some(goal_reflection_state(project, task, &tree) == Some("current"));
+    }
+    if task.intent_disposition_required {
+        let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+        resolution.intent_disposition_pending = Some(
+            affected_intent(project, task, &tree)
+                .into_iter()
+                .filter(|entry| entry.state != "current")
+                .map(|entry| entry.identity)
+                .collect(),
+        );
+    }
     resolution
 }
 

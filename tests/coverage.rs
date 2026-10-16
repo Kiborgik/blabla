@@ -473,6 +473,7 @@ mod composed_bridge {
         attestation: attestation::Attestation,
         questions: questions::Questions,
         expert: expert::Expert,
+        task_roles: task_roles::TaskRoles,
     }
 
     impl App {
@@ -487,6 +488,7 @@ mod composed_bridge {
                 attestation: attestation::Attestation::new(),
                 questions: questions::Questions::new(),
                 expert: expert::Expert::new(),
+                task_roles: task_roles::TaskRoles::new(),
             }
         }
     }
@@ -502,6 +504,10 @@ mod composed_bridge {
             &mut self,
             call: &blabla::report::Call,
         ) -> Result<(), blabla::diagnostic::AppError> {
+            if let Some(result) = self.task_roles.call(&call.action, &json!(call.args)) {
+                return result
+                    .map_err(|error| blabla::diagnostic::AppError::new("E_ACTION", error));
+            }
             if let Some(scenario) = Scenario::from_action(&call.action) {
                 self.scenario = scenario;
             } else if !(self.assignment.call(&call.action)
@@ -535,6 +541,7 @@ mod composed_bridge {
                 self.attestation.observe(),
                 self.questions.observe(),
                 self.expert.observe(),
+                self.task_roles.observe(),
             ] {
                 state
                     .as_object_mut()
@@ -578,6 +585,11 @@ fn reordered_composed_contract() -> blabla::ir::Contract {
         .collect();
     assert!(sources.iter().any(|(group, _, _)| group == "questions"));
     assert!(sources.iter().any(|(group, _, _)| group == "expert"));
+    assert!(
+        sources
+            .iter()
+            .any(|(group, _, _)| group == "task-role-resolution")
+    );
     let unrelated = sources
         .iter()
         .position(|(group, _, _)| group == "goals")

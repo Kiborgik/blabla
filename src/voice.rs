@@ -27,7 +27,7 @@ impl Voice {
     }
 }
 
-pub const BLUNT: [(&str, &str); 21] = [
+pub const BLUNT: [(&str, &str); 23] = [
     (
         "declared-check-failed",
         "This is not fucking ready. Fix the check or record the actual blocker.",
@@ -107,6 +107,14 @@ pub const BLUNT: [(&str, &str); 21] = [
     (
         "goal-outcome-unmet",
         "That goal is marked done, but the expectations it carries are not all held. Set it back to active or make every one GREEN.",
+    ),
+    (
+        "goal-reflection-missing",
+        "That required reflection is not current. Record the observed result and justify the next decision or stop; a recommendation does not mark the goal done.",
+    ),
+    (
+        "intent-disposition-missing",
+        "Affected intent still lacks a current account. Reassess each missing or stale identity and record a concrete reason before handing back.",
     ),
     (
         "check-not-falsified",

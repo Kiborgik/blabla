@@ -16,7 +16,7 @@ pub const LIMITS: [&str; 3] = [
     include_str!("cli/text/skeptic-limit-source.md"),
 ];
 
-pub const CLASSES: [&str; 20] = [
+pub const CLASSES: [&str; 22] = [
     "unresolved-finding",
     "deliverable-unchanged",
     "scope-breach",
@@ -37,6 +37,8 @@ pub const CLASSES: [&str; 20] = [
     "review-target-stale",
     "unobservable-task-input",
     "check-not-falsified",
+    "intent-disposition-missing",
+    "goal-reflection-missing",
 ];
 
 pub const OUTSIDE_THE_ASSIGNMENT: [&str; 4] = [
@@ -72,6 +74,8 @@ pub enum Class {
     ReviewTargetStale,
     UnobservableTaskInput,
     CheckNotFalsified,
+    IntentDispositionMissing,
+    GoalReflectionMissing,
 }
 
 impl Class {
@@ -98,6 +102,8 @@ impl Class {
             Class::ReviewTargetStale => CLASSES[17],
             Class::UnobservableTaskInput => CLASSES[18],
             Class::CheckNotFalsified => CLASSES[19],
+            Class::IntentDispositionMissing => CLASSES[20],
+            Class::GoalReflectionMissing => CLASSES[21],
         }
     }
 }
@@ -292,10 +298,12 @@ fn challenge_against_tracking(
         ));
     }
     type RoleGrounding = fn(&Task, Option<&Resolution>) -> Result<Challenge, &'static str>;
-    let against_the_role: [(&'static str, RoleGrounding); 3] = [
+    let against_the_role: [(&'static str, RoleGrounding); 5] = [
         (CLASSES[6], model_outside_role_policy),
         (CLASSES[8], lens_unassessed),
         (CLASSES[17], review_target_stale),
+        (CLASSES[20], intent_disposition_missing),
+        (CLASSES[21], goal_reflection_missing),
     ];
     for (class, grounding) in against_the_role {
         outcomes.push((
@@ -1061,6 +1069,59 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
             format!("assessments recorded: {}", task.assessments.len()),
         ],
         reconcile: include_str!("cli/text/skeptic-lens-unassessed.md").to_owned(),
+    })
+}
+
+fn goal_reflection_missing(
+    task: &Task,
+    role: Option<&Resolution>,
+) -> Result<Challenge, &'static str> {
+    if !task.goal_reflection_required {
+        return Err("the task did not opt into required goal reflection");
+    }
+    if !task.open() {
+        return Err("the closed task keeps its goal reflection as a historical claim");
+    }
+    if role.is_some_and(|role| role.goal_reflection_current == Some(true)) {
+        return Err(
+            "a current bounded goal reflection records the next decision or justified stop",
+        );
+    }
+    Ok(Challenge {
+        class: Class::GoalReflectionMissing,
+        statement: "The feature's next goal decision has no current reflection against its evidence and relevant intent".to_owned(),
+        evidence: vec![format!("task::{} serves goal::{}", task.name, task.goal.as_deref().unwrap_or("missing")),
+            if task.goal_reflection.is_some() { "the recorded reflection is stale or invalid" } else { "no reflection is recorded" }.to_owned()],
+        reconcile: format!("Read task show {}. While ACCEPTED, record task reflect; on READY with current check and recursive targets, the same still-permitted accepted model may explicitly use task reflect --refresh-ready. Supply the new decision, observed result, evidence references and why a bounded successor, concrete blocker, completion recommendation or no useful successor follows. Recommendations never grant scope, create tasks or mark goals done. Recheck and challenge before hand-back", task.name),
+    })
+}
+
+fn intent_disposition_missing(
+    task: &Task,
+    role: Option<&Resolution>,
+) -> Result<Challenge, &'static str> {
+    if !task.intent_disposition_required {
+        return Err("the task did not opt into required affected-intent disposition");
+    }
+    if !task.open() {
+        return Err("the closed task keeps its intent dispositions as historical claims");
+    }
+    let pending = role.and_then(|role| role.intent_disposition_pending.as_ref());
+    if pending.is_some_and(|pending| pending.is_empty()) {
+        return Err("every affected intent identity has a current disposition and reason");
+    }
+    Ok(Challenge {
+        class: Class::IntentDispositionMissing,
+        statement:
+            "Affected intent has not been accounted for against the current relevant revision"
+                .to_owned(),
+        evidence: pending
+            .cloned()
+            .unwrap_or_else(|| vec!["affected intent could not be resolved".to_owned()]),
+        reconcile: format!(
+            "Read blabla task show {}. For each missing or stale identity record task disposition {} IDENTITY --status updated|confirmed-unchanged --reason TEXT --model MODEL while accepted, citing concrete implementation or evidence. On READY with current check and recursive targets, the same still-permitted accepted model may explicitly add --refresh-ready. Recheck and challenge before hand-back. A disposition never changes goals, scope, contract authority or GREEN",
+            task.name, task.name
+        ),
     })
 }
 

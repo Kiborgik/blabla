@@ -7,6 +7,7 @@ use crate::runtime::primitives::{self, Fact};
 use crate::structure::{LayerStatus, RuleResult, RuleStatus, StructureReport};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,6 +23,8 @@ pub struct Record {
     pub manifest: String,
     pub project_identity: String,
     pub implementation_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation_inputs: Option<Vec<super::FingerprintedInput>>,
     pub fingerprinted_files: Vec<String>,
     pub application: Vec<String>,
     pub timeout_ms: u64,
@@ -268,6 +271,84 @@ pub struct RecordedView {
     pub recorded_at: String,
     pub stale: Vec<&'static str>,
     pub canonical: bool,
+    pub input_drift: InputDrift,
+}
+
+pub const INPUT_DRIFT_LIMIT: usize = 50;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct InputChange {
+    pub source: String,
+    pub path: String,
+    pub change: &'static str,
+    pub recorded: Option<super::InputFingerprint>,
+    pub current: Option<super::InputFingerprint>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct InputDrift {
+    pub availability: &'static str,
+    pub changes: Vec<InputChange>,
+    pub total_changes: Option<usize>,
+    pub omitted_changes: usize,
+    pub limit: usize,
+}
+
+fn input_drift(
+    recorded: Option<&[super::FingerprintedInput]>,
+    current: &[super::FingerprintedInput],
+) -> InputDrift {
+    let Some(recorded) = recorded else {
+        return InputDrift {
+            availability: "legacy-unavailable",
+            changes: Vec::new(),
+            total_changes: None,
+            omitted_changes: 0,
+            limit: INPUT_DRIFT_LIMIT,
+        };
+    };
+    let mut pairs = BTreeMap::new();
+    for input in recorded {
+        pairs
+            .entry((&input.source, &input.path))
+            .or_insert((None, None))
+            .0 = Some(&input.value);
+    }
+    for input in current {
+        pairs
+            .entry((&input.source, &input.path))
+            .or_insert((None, None))
+            .1 = Some(&input.value);
+    }
+    let mut changes = Vec::new();
+    let mut total = 0;
+    for ((source, path), (recorded, current)) in pairs {
+        if recorded == current {
+            continue;
+        }
+        total += 1;
+        if changes.len() == INPUT_DRIFT_LIMIT {
+            continue;
+        }
+        changes.push(InputChange {
+            source: source.clone(),
+            path: path.clone(),
+            change: match (recorded, current) {
+                (None, Some(_)) => "added",
+                (Some(_), None) => "removed",
+                _ => "changed",
+            },
+            recorded: recorded.cloned(),
+            current: current.cloned(),
+        });
+    }
+    InputDrift {
+        availability: "available",
+        omitted_changes: total - changes.len(),
+        total_changes: Some(total),
+        changes,
+        limit: INPUT_DRIFT_LIMIT,
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -481,7 +562,8 @@ pub fn evaluate(project: &Project, record: Result<Option<Record>, String>) -> Ev
     if record.project_identity != project.identity {
         stale.push("contracts");
     }
-    if record.implementation_fingerprint != project.fingerprint(&files) {
+    let observed = project.fingerprint_observation(&files);
+    if record.implementation_fingerprint != observed.fingerprint {
         stale.push("implementation");
     }
     if record.profile != project.manifest.profile {
@@ -510,6 +592,7 @@ pub fn evaluate(project: &Project, record: Result<Option<Record>, String>) -> Ev
         recorded_at: format_unix(record.recorded_unix),
         stale: stale.clone(),
         canonical,
+        input_drift: input_drift(record.implementation_inputs.as_deref(), &observed.inputs),
     };
     Evaluation {
         report: Some(report),

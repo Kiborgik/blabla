@@ -1,0 +1,36 @@
+state ready_receipt_fixture_initialized: bool
+state ready_receipt_eligible: bool
+state ready_receipt_succeeded: bool
+state ready_receipt_record_unchanged: bool
+state ready_receipt_epoch_preserved: bool
+state ready_receipt_evidence_preserved: bool
+state ready_receipt_scope_preserved: bool
+state ready_receipt_target_preserved: bool
+state ready_receipt_explicit_claim_only: bool
+state ready_receipt_writer_provenance_current: bool
+state ready_receipt_observed_identities_retained: bool
+state ready_receipt_challenge_cleared: bool
+state ready_receipt_close_blockers_preserved: bool
+
+action ready_receipt_fixture(kind: int)
+action refresh_ready_disposition()
+action refresh_ready_reflection()
+action check_refreshed_closure()
+
+when ready_receipt_fixture {
+    expect "explicit-fixture-is-observed": after.ready_receipt_fixture_initialized
+}
+
+when refresh_ready_disposition {
+    expect "eligible-manual-disposition-refresh-succeeds": not before.ready_receipt_eligible or after.ready_receipt_succeeded
+    expect "ineligible-disposition-refresh-has-no-effects": not before.ready_receipt_fixture_initialized or before.ready_receipt_eligible or (not after.ready_receipt_succeeded and after.ready_receipt_record_unchanged)
+    expect "disposition-refresh-preserves-evidence-and-authority": not after.ready_receipt_succeeded or (after.ready_receipt_epoch_preserved and after.ready_receipt_evidence_preserved and after.ready_receipt_scope_preserved and after.ready_receipt_target_preserved and after.ready_receipt_explicit_claim_only and after.ready_receipt_writer_provenance_current and after.ready_receipt_observed_identities_retained and after.ready_receipt_challenge_cleared)
+}
+when refresh_ready_reflection {
+    expect "eligible-manual-reflection-refresh-succeeds": not before.ready_receipt_eligible or after.ready_receipt_succeeded
+    expect "ineligible-reflection-refresh-has-no-effects": not before.ready_receipt_fixture_initialized or before.ready_receipt_eligible or (not after.ready_receipt_succeeded and after.ready_receipt_record_unchanged)
+    expect "reflection-refresh-preserves-evidence-and-authority": not after.ready_receipt_succeeded or (after.ready_receipt_epoch_preserved and after.ready_receipt_evidence_preserved and after.ready_receipt_scope_preserved and after.ready_receipt_target_preserved and after.ready_receipt_explicit_claim_only and after.ready_receipt_writer_provenance_current and after.ready_receipt_observed_identities_retained and after.ready_receipt_challenge_cleared)
+}
+when check_refreshed_closure {
+    expect "manual-receipt-refresh-never-accepts-work": after.ready_receipt_close_blockers_preserved
+}

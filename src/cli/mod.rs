@@ -129,6 +129,13 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
     )]
     Status,
     #[command(
+        about = "List registered files and discover unregistered .bla files without loading or verifying them"
+    )]
+    Inventory {
+        #[arg(long, default_value_t = blabla::project::inventory::DEFAULT_MAX_ENTRIES as u32, value_parser = clap::value_parser!(u32).range(1..=100_000), help = "Directory-entry budget including skipped entries, plus one probe to detect overflow; incomplete discovery exits 1")]
+        max_entries: u32,
+    },
+    #[command(
         about = "Explain one rule: owning contract, rule text, required witnesses and counterexample, or the observed structural fact; also resolves a system, responsibility or seam from the project's architectural memory"
     )]
     Explain {
@@ -239,6 +246,16 @@ enum TaskAction {
         input: Vec<String>,
         #[arg(long, help = "The declared goal this task serves")]
         goal: Option<String>,
+        #[arg(
+            long,
+            help = "Require current updated-or-confirmed-unchanged reasons for affected intent before hand-back and closure"
+        )]
+        require_intent_disposition: bool,
+        #[arg(
+            long,
+            help = "Require one current bounded reflection on the named goal before hand-back and closure"
+        )]
+        require_goal_reflection: bool,
         #[arg(
             long,
             value_name = "NAME",
@@ -423,6 +440,17 @@ enum TaskAction {
         name: String,
         #[arg(long, help = "The model recording the acceptance of the result")]
         model: String,
+        #[arg(
+            long,
+            help = "Accept only the current bounded result after qualified implementation-only verification drift"
+        )]
+        bounded: bool,
+        #[arg(
+            long,
+            requires = "bounded",
+            help = "Why this bounded result is accepted while project verification remains pending"
+        )]
+        reason: Option<String>,
     },
     #[command(about = "Withdraw an assignment, release ownership and retain unresolved changes")]
     Withdraw {
@@ -468,6 +496,65 @@ enum TaskAction {
             help = "The accepted model recording this assessment; refused when it is not the accepted model"
         )]
         model: Option<String>,
+    },
+    #[command(
+        about = "Account for one affected intent identity against the current relevant revision"
+    )]
+    Disposition {
+        name: String,
+        #[arg(
+            long,
+            help = "Explicitly refresh this manual claim on a READY task with current evidence and review targets"
+        )]
+        refresh_ready: bool,
+        identity: String,
+        #[arg(long, help = "updated or confirmed-unchanged")]
+        status: String,
+        #[arg(
+            long,
+            help = "Concrete implementation or evidence supporting this disposition"
+        )]
+        reason: String,
+        #[arg(
+            long,
+            help = "The accepted model recording this accountable review claim"
+        )]
+        model: String,
+    },
+    #[command(
+        about = "Record the next bounded goal decision or justified stop after a meaningful feature iteration"
+    )]
+    Reflect {
+        name: String,
+        #[arg(
+            long,
+            help = "Explicitly refresh this manual claim on a READY task with current evidence and review targets"
+        )]
+        refresh_ready: bool,
+        #[arg(long, value_parser = ["successor", "blocked", "completion-recommended", "no-useful-successor"])]
+        outcome: String,
+        #[arg(long)]
+        decision: String,
+        #[arg(long)]
+        observation: String,
+        #[arg(long = "evidence-ref", required = true, action = clap::ArgAction::Append)]
+        evidence_refs: Vec<String>,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        model: String,
+        #[arg(long)]
+        recommendation: Option<String>,
+        #[arg(long)]
+        owner: Option<String>,
+        #[arg(long = "dependency", action = clap::ArgAction::Append)]
+        dependencies: Vec<String>,
+        #[arg(long)]
+        observable_outcome: Option<String>,
+        #[arg(long)]
+        blocker: Option<String>,
+        #[arg(long)]
+        unblock_when: Option<String>,
     },
     #[command(about = "Propose an alternative model with a reason")]
     ProposeModel {
@@ -987,6 +1074,7 @@ fn verb(command: &Command) -> &'static str {
         Command::Run { .. } => "run",
         Command::Finish => "finish",
         Command::Status => "status",
+        Command::Inventory { .. } => "inventory",
         Command::Explain { .. } => "explain",
         Command::Guide { .. } => "guide",
         Command::Init { .. } => "init",
@@ -1054,12 +1142,20 @@ fn execute(cli: Cli) -> i32 {
             Ok(project) => project::status(&project, json),
             Err(exit) => exit,
         },
+        Command::Inventory { max_entries } => {
+            project::inventory(explicit, &cwd, json, max_entries as usize)
+        }
         Command::Finish => match project::load(explicit, &cwd, json, None) {
             Ok(project) => project::finish(&project, json, cli.verbose),
             Err(exit) => exit,
         },
         Command::Task { action } => match project::load(explicit, &cwd, json, None) {
             Ok(loaded) => {
+                if let TaskAction::Open { role, .. } = &action
+                    && let Err(exit) = task::validate_open_role(&loaded, role, json)
+                {
+                    return exit;
+                }
                 let swallowed = swallowed_options(&action);
                 if !swallowed.is_empty() {
                     eprintln!(
@@ -1090,6 +1186,8 @@ fn execute(cli: Cli) -> i32 {
                         check_argv,
                         input,
                         goal,
+                        require_intent_disposition,
+                        require_goal_reflection,
                         review_of,
                         lens,
                         falsify,
@@ -1113,6 +1211,8 @@ fn execute(cli: Cli) -> i32 {
                             lenses: lens,
                         },
                         falsify,
+                        require_intent_disposition,
+                        require_goal_reflection,
                         json,
                         &swallowed,
                     ),
@@ -1198,7 +1298,24 @@ fn execute(cli: Cli) -> i32 {
                     TaskAction::Statement { name, text, model } => {
                         task::restate(&loaded, &name, &text, model.as_deref(), json)
                     }
-                    TaskAction::Close { name, model } => task::close(&loaded, &name, &model, json),
+                    TaskAction::Close {
+                        name,
+                        model,
+                        bounded,
+                        reason,
+                    } => {
+                        if bounded {
+                            task::close_bounded(
+                                &loaded,
+                                &name,
+                                &model,
+                                reason.as_deref().unwrap_or(""),
+                                json,
+                            )
+                        } else {
+                            task::close(&loaded, &name, &model, json)
+                        }
+                    }
                     TaskAction::Withdraw {
                         name,
                         reason,
@@ -1226,6 +1343,117 @@ fn execute(cli: Cli) -> i32 {
                         statement,
                         model,
                     } => task::lens(&loaded, &name, &lens, &statement, model.as_deref(), json),
+                    TaskAction::Disposition {
+                        name,
+                        refresh_ready,
+                        identity,
+                        status,
+                        reason,
+                        model,
+                    } => task::disposition(
+                        &loaded,
+                        &name,
+                        &identity,
+                        &status,
+                        &reason,
+                        &model,
+                        refresh_ready,
+                        json,
+                    ),
+                    TaskAction::Reflect {
+                        name,
+                        refresh_ready,
+                        outcome,
+                        decision,
+                        observation,
+                        evidence_refs,
+                        reason,
+                        model,
+                        recommendation,
+                        owner,
+                        dependencies,
+                        observable_outcome,
+                        blocker,
+                        unblock_when,
+                    } => {
+                        use blabla::project::task::GoalReflectionOutcome;
+                        let outcome = match (
+                            outcome.as_str(),
+                            recommendation,
+                            owner,
+                            dependencies,
+                            observable_outcome,
+                            blocker,
+                            unblock_when,
+                        ) {
+                            (
+                                "successor",
+                                Some(recommendation),
+                                Some(owner),
+                                dependencies,
+                                Some(observable_outcome),
+                                None,
+                                None,
+                            ) => GoalReflectionOutcome::Successor {
+                                recommendation,
+                                owner,
+                                dependencies,
+                                observable_outcome,
+                            },
+                            (
+                                "blocked",
+                                None,
+                                Some(owner),
+                                dependencies,
+                                None,
+                                Some(blocker),
+                                Some(unblock_when),
+                            ) if dependencies.is_empty() => GoalReflectionOutcome::Blocked {
+                                blocker,
+                                owner,
+                                unblock_when,
+                            },
+                            (
+                                "completion-recommended",
+                                None,
+                                None,
+                                dependencies,
+                                None,
+                                None,
+                                None,
+                            ) if dependencies.is_empty() => {
+                                GoalReflectionOutcome::CompletionRecommended
+                            }
+                            ("no-useful-successor", None, None, dependencies, None, None, None)
+                                if dependencies.is_empty() =>
+                            {
+                                GoalReflectionOutcome::NoUsefulSuccessor
+                            }
+                            _ => {
+                                return emit_error(
+                                    error(
+                                        "task",
+                                        "successor requires --recommendation, --owner and --observable-outcome, with optional --dependency; blocked requires --blocker, --owner and --unblock-when; completion-recommended and no-useful-successor take none of those outcome-specific fields",
+                                        None,
+                                    ),
+                                    json,
+                                    2,
+                                );
+                            }
+                        };
+                        task::reflect(
+                            &loaded,
+                            &name,
+                            decision,
+                            observation,
+                            evidence_refs,
+                            reason,
+                            outcome,
+                            model,
+                            refresh_ready,
+                            json,
+                        )
+                    }
                     TaskAction::ProposeModel {
                         name,
                         model,

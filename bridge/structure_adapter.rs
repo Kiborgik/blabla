@@ -199,16 +199,20 @@ fn observe(scenario: Scenario) -> Value {
 
 mod assignment;
 mod attestation;
+mod bounded_results;
 mod decisions;
 mod expert;
 mod goals;
 mod lifecycle;
 mod questions;
+mod task_roles;
 mod voice;
 
 fn main() {
     let mut scenario = Scenario::CollectionHit;
     let mut assignment = assignment::Assignment::new();
+    let mut bounded = bounded_results::BoundedResults::new();
+    let mut task_roles = task_roles::TaskRoles::new();
     let mut tone = voice::Tone::new();
     let mut app = lifecycle::Lifecycle::new();
     let mut objectives = goals::Goals::new();
@@ -239,6 +243,8 @@ fn main() {
             "reset" => {
                 scenario = Scenario::CollectionHit;
                 assignment = assignment::Assignment::new();
+                bounded = bounded_results::BoundedResults::new();
+                task_roles = task_roles::TaskRoles::new();
                 tone = voice::Tone::new();
                 app.reset();
                 objectives = goals::Goals::new();
@@ -253,20 +259,30 @@ fn main() {
                     .get("name")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                match Scenario::from_action(name) {
-                    Some(chosen) => {
-                        scenario = chosen;
-                        json!({ "ok": true })
+                if let Some(result) = task_roles
+                    .call(name, request.get("args").unwrap_or(&Value::Null))
+                    .or_else(|| bounded.call(name, request.get("args").unwrap_or(&Value::Null)))
+                {
+                    match result {
+                        Ok(()) => json!({ "ok": true }),
+                        Err(error) => json!({ "ok": false, "error": error }),
                     }
-                    None if assignment.call(name) => json!({ "ok": true }),
-                    None if tone.call(name) => json!({ "ok": true }),
-                    None if app.call(name) => json!({ "ok": true }),
-                    None if objectives.call(name) => json!({ "ok": true }),
-                    None if ledger.call(name) => json!({ "ok": true }),
-                    None if attested.call(name) => json!({ "ok": true }),
-                    None if asked.call(name) => json!({ "ok": true }),
-                    None if expert.call(name) => json!({ "ok": true }),
-                    None => json!({ "ok": false, "error": format!("unknown action: {name}") }),
+                } else {
+                    match Scenario::from_action(name) {
+                        Some(chosen) => {
+                            scenario = chosen;
+                            json!({ "ok": true })
+                        }
+                        None if assignment.call(name) => json!({ "ok": true }),
+                        None if tone.call(name) => json!({ "ok": true }),
+                        None if app.call(name) => json!({ "ok": true }),
+                        None if objectives.call(name) => json!({ "ok": true }),
+                        None if ledger.call(name) => json!({ "ok": true }),
+                        None if attested.call(name) => json!({ "ok": true }),
+                        None if asked.call(name) => json!({ "ok": true }),
+                        None if expert.call(name) => json!({ "ok": true }),
+                        None => json!({ "ok": false, "error": format!("unknown action: {name}") }),
+                    }
                 }
             }
             "observe" => {
@@ -274,6 +290,8 @@ fn main() {
                 let voiced = tone.observe(&assignment.report());
                 for source in [
                     assignment.observe(),
+                    bounded.observe(),
+                    task_roles.observe(),
                     voiced,
                     app.observe(),
                     objectives.observe(),

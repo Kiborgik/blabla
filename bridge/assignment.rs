@@ -97,6 +97,8 @@ impl Assignment {
             resolution: task::Resolution {
                 knowledge_fingerprints: BTreeMap::new(),
                 review_current: None,
+                intent_disposition_pending: None,
+                goal_reflection_current: None,
                 models: Vec::new(),
                 lenses: Vec::new(),
                 requirements: Vec::new(),

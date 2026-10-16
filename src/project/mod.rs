@@ -14,6 +14,7 @@ use std::path::{Component, Path, PathBuf};
 
 pub mod expert;
 pub mod ignore;
+pub mod inventory;
 pub mod runstate;
 pub mod status;
 pub mod task;
@@ -1511,27 +1512,80 @@ impl Default for Fnv {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct InputFingerprint {
+    pub fingerprint: String,
+    pub observation: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FingerprintedInput {
+    pub source: String,
+    pub path: String,
+    pub value: InputFingerprint,
+}
+
+pub struct FingerprintObservation {
+    pub fingerprint: String,
+    pub inputs: Vec<FingerprintedInput>,
+}
+
 pub fn fingerprint(
     root: &Path,
     extra_files: &[PathBuf],
     excluded: &[PathBuf],
     ignore: &Ignore,
 ) -> String {
+    fingerprint_observation(root, extra_files, excluded, ignore).fingerprint
+}
+
+pub fn fingerprint_observation(
+    root: &Path,
+    extra_files: &[PathBuf],
+    excluded: &[PathBuf],
+    ignore: &Ignore,
+) -> FingerprintObservation {
     let mut hasher = Fnv::new();
+    let mut inputs = BTreeMap::new();
     let excluded: Vec<PathBuf> = excluded.iter().map(|path| normalize(path)).collect();
-    walk(root, root, &excluded, ignore, &mut |visit| match visit {
-        Visit::UnreadableDirectory(name) => {
-            hasher.write_str("unreadable-directory");
-            hasher.write_str(name);
-        }
-        Visit::File(name, path) => hash_file(name, path, &mut hasher),
+    walk(root, root, &excluded, ignore, &mut |visit| {
+        let (source, name, value) = match visit {
+            Visit::UnreadableDirectory(name) => {
+                let mut input = InputHasher::new(&mut hasher);
+                input.write_str("unreadable-directory");
+                input.write_str(name);
+                (
+                    "unreadable-directory",
+                    name,
+                    input.finish("unreadable-directory"),
+                )
+            }
+            Visit::File(name, path) => (
+                "tree-file",
+                name,
+                hash_file_observation(name, path, &mut hasher),
+            ),
+        };
+        inputs.insert((source.to_owned(), name.to_owned()), value);
     });
     for file in extra_files {
         if file.is_file() {
-            hash_file(&file.display().to_string(), file, &mut hasher);
+            let name = file.display().to_string();
+            let value = hash_file_observation(&name, file, &mut hasher);
+            inputs.insert(("command-file".to_owned(), name), value);
         }
     }
-    hasher.finish()
+    FingerprintObservation {
+        fingerprint: hasher.finish(),
+        inputs: inputs
+            .into_iter()
+            .map(|((source, path), value)| FingerprintedInput {
+                source,
+                path,
+                value,
+            })
+            .collect(),
+    }
 }
 
 fn executable_form(candidate: &Path) -> Option<PathBuf> {
@@ -1629,7 +1683,11 @@ impl Project {
     }
 
     pub fn fingerprint(&self, extra_files: &[PathBuf]) -> String {
-        fingerprint(
+        self.fingerprint_observation(extra_files).fingerprint
+    }
+
+    pub fn fingerprint_observation(&self, extra_files: &[PathBuf]) -> FingerprintObservation {
+        fingerprint_observation(
             &self.manifest.root,
             extra_files,
             &self.contract_files(),
@@ -1720,23 +1778,69 @@ fn relative_with_case(root: &Path, path: &Path, case_insensitive: bool) -> Strin
     )
 }
 
+struct InputHasher<'a> {
+    aggregate: &'a mut Fnv,
+    input: Fnv,
+}
+
+impl<'a> InputHasher<'a> {
+    fn new(aggregate: &'a mut Fnv) -> Self {
+        Self {
+            aggregate,
+            input: Fnv::new(),
+        }
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.aggregate.write(bytes);
+        self.input.write(bytes);
+    }
+
+    fn write_str(&mut self, text: &str) {
+        self.write(text.as_bytes());
+        self.write(&[0]);
+    }
+
+    fn finish(self, observation: &str) -> InputFingerprint {
+        InputFingerprint {
+            fingerprint: self.input.finish(),
+            observation: observation.to_owned(),
+        }
+    }
+}
+
 fn hash_file(name: &str, path: &Path, hasher: &mut Fnv) {
+    hash_file_observation(name, path, hasher);
+}
+
+fn hash_file_observation(name: &str, path: &Path, aggregate: &mut Fnv) -> InputFingerprint {
+    let mut hasher = InputHasher::new(aggregate);
     hasher.write_str(name);
     let Ok(metadata) = std::fs::metadata(path) else {
         hasher.write_str("unreadable-metadata");
-        return;
+        return hasher.finish("unreadable-metadata");
     };
     hasher.write(&metadata.len().to_le_bytes());
-    if metadata.len() <= CONTENT_HASH_LIMIT {
+    let observation = if metadata.len() <= CONTENT_HASH_LIMIT {
         match std::fs::read(path) {
-            Ok(content) => hasher.write(&content),
-            Err(failure) => hasher.write_str(&format!("unreadable-file:{}", failure.kind())),
+            Ok(content) => {
+                hasher.write(&content);
+                "content"
+            }
+            Err(failure) => {
+                hasher.write_str(&format!("unreadable-file:{}", failure.kind()));
+                "unreadable-file"
+            }
         }
     } else if let Ok(modified) = metadata.modified()
         && let Ok(since_epoch) = modified.duration_since(std::time::UNIX_EPOCH)
     {
         hasher.write(&since_epoch.as_nanos().to_le_bytes());
-    }
+        "modified-time"
+    } else {
+        "length-only"
+    };
+    hasher.finish(observation)
 }
 
 #[cfg(test)]

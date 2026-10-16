@@ -109,3 +109,43 @@ OVERALL    GREEN only when every active layer is GREEN and at least one is activ
 `finish` never trusts a cached result: it runs the canonical profile, checks structure live and records `.blabla/status.json`. A GREEN under other settings is not canonical. Behavior goes STALE when a contract, the implementation tree, a command-line input, the profile or the verifier changes; code loaded implicitly from outside the project tree, and not named on the command line, is not tracked. A run in progress is VERIFYING and a dead one is INTERRUPTED; both block done.
 
 Exit codes of `status` and `finish`: **0** OVERALL GREEN; **1** a RED layer; **2** contract or manifest error; **3** structure provider or application failure; **4** internal error; **5** any other blocked state. Read JSON fields instead of English: `status --json` has `state`, `structure`, `overall` and `completion`; `finish --json` nests that view under `project`, beside its run and completion data. `check` and `check --falsify` help authoring and never decide done.
+
+### Explain changed verification inputs
+
+`status` adds a read-only input-difference diagnostic when a recorded run is available. In BlaBla's checkout, inspect the current source:
+
+```sh
+cargo run --locked --quiet --bin blabla -- status
+cargo run --locked --quiet --bin blabla -- status --json
+```
+
+Installed users can run `blabla status --json`. Read `recorded.input_drift`; a new recorded run with unchanged inputs has this shape:
+
+```json
+{
+  "availability": "available",
+  "changes": [],
+  "total_changes": 0,
+  "omitted_changes": 0,
+  "limit": 50
+}
+```
+
+Each change has `source`, `path`, `change` (`added`, `removed`, `changed`), and `recorded`/`current` values. A value contains `fingerprint` and `observation`; an absent side is null. Sources are `tree-file` (project-relative path), `command-file` (the explicitly fingerprinted executable/argument path), and `unreadable-directory` (a traversal marker). Rows are sorted by source then path. One physical file may appear as both a tree input and a command input, so counts describe observations, not unique files.
+
+Both human and JSON output show at most 50 changed observations. `total_changes` counts all differences, `changes.length` is the shown count, and `omitted_changes` is the remainder. The saved baseline is not truncated to 50. Human output names the changed paths and observation kinds; JSON also includes the fingerprints. No differences means this input projection found none, not that every other verification condition is satisfied.
+
+Observation kinds preserve existing hashing limits:
+
+- `content`: file length and contents were hashed, up to and including 4 MiB.
+- `modified-time`: a larger file used length and modification time, not a content digest.
+- `length-only`: a larger file's usable modification time was unavailable.
+- `unreadable-file`, `unreadable-metadata`, `unreadable-directory`: the existing failure marker was observed; unreadability is not evidence of absent contents.
+
+A removed row means the prior observation no longer appears in the same walk, not a proven filesystem deletion. For example, an extra command path that is no longer observed as a file is omitted by the existing fingerprint rule. Ignore rules, exclusions and symlink handling remain unchanged; this is not a separate filesystem audit.
+
+Older records without a per-input baseline report `availability: "legacy-unavailable"`, empty `changes`, `total_changes: null` and `omitted_changes: 0`. Their aggregate freshness check still runs. No historical filenames can be recovered from that old aggregate. With no readable recorded run, `recorded` remains null and the existing diagnostics apply. A later verification run records its own new baseline; `status` neither invents one nor rewrites the old record.
+
+A nested `project.bla` does not grant verification independence. Nonignored child files remain parent inputs, and a parent application or provider may really read them. A child-only change can leave a bounded task's evidence current while preventing closure through stale project verification. Use a coordinated integration checkpoint when necessary; do not hide relevant child source to obtain GREEN. [Reproduction and unsafe-exclusion counterexample](../reviews/nested-verification-drift.md), [implementation and test limits](../reviews/project-input-drift.md).
+
+These diagnostics do not change the aggregate fingerprint, staleness, exit codes, closure rules or completion authority. They explain observed input changes; they never establish semantic dependencies, weaken verification or complete work. Only `finish` runs the canonical completion check.
