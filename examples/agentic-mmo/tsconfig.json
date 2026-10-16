@@ -4,12 +4,13 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": [
-      "ES2022",
+      "ES2023",
       "DOM",
       "DOM.Iterable"
     ],
     "types": [
-      "node"
+      "node",
+      "vite-plus/client"
     ],
     "strict": true,
     "noEmit": true,
@@ -29,6 +30,7 @@
   "include": [
     "core/**/*.ts",
     "cli/**/*.ts",
+    "server/**/*.ts",
     "web/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",

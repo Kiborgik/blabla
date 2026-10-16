@@ -1,0 +1,13 @@
+state maximum_era: int
+state mars_population: int
+state finished: bool
+state outcome: string
+action play(seat: int, choice: int)
+action restart()
+always "colonies-need-spaceflight" { mars_population == 0 or maximum_era == 5 }
+when play {
+    expect "outcome-is-final": not before.finished or after.outcome == before.outcome
+}
+when restart {
+    expect "restart-preserves-outcome": after.outcome == before.outcome
+}

@@ -9,5 +9,15 @@ knowledge "../../knowledge/reviewing.bla"
 knowledge "../../knowledge/design.bla"
 use structure "contracts/bootstrap.bla"
 use structure "contracts/spectator-preview.bla"
-draft behavior "contracts/campaign.bla"
+use structure "contracts/architecture.bla"
+use behavior "contracts/campaign.bla"
+draft behavior "contracts/future-outcomes.bla"
+verify behavior {
+  command ["node", "cli/adapter.ts"]
+  seed 1701
+  cases 2
+  steps 256
+  timeout_ms 2000
+  shrink_budget 128
+}
 ignore from ".gitignore"
