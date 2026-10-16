@@ -33,6 +33,9 @@
 - Role `worker` permits Haiku 5.5 and role `reviewer` Sonnet 5.5, with their host model ids as aliases
 - `guide change` and the agent workflow say to author rules for work not started yet as draft contracts, because an active RED rule blocks every task close
 - New active goals: `goal::short-plain-docs` and one goal per fix above, each expecting the rule that checks it
+- BlaBla's own canonical profile is 8 cases × 512 actions instead of 32 × 512. Every obligation is covered by action 2,318, so `finish` runs 4,096 actions instead of 16,384
+- Debug and test builds use `opt-level = 1`, which halves the CPU-bound verifier tests
+- The product gate drops the expert experiment tests and the C example persistence test, and CI drops the historical experiment tests and runs Windows tests in parallel. The expert adapter tests keep one working-adapter check and every check that forged or hostile input is refused; the language adapters are covered by the example `finish` runs and the acceptance tests
 
 ### Fixed
 

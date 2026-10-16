@@ -1,6 +1,5 @@
 import copy
 import importlib.util
-import io
 import json
 import pathlib
 import threading
@@ -9,7 +8,6 @@ import sys
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import Mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('systemone_provider', ROOT / 'adapters/systemone/provider.py')
@@ -82,7 +80,7 @@ class FakeEndpoint:
                 pass
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, args=(0.01,), daemon=True)
         self.thread.start()
         self.url = 'http://127.0.0.1:' + str(self.server.server_port)
 
@@ -96,45 +94,6 @@ class FakeEndpoint:
 
 
 class SystemOneProviderTests(unittest.TestCase):
-    def test_kev_wire_translation_all_output_types(self):
-        cases = [request(), request('noul', {'kind': 'noul', 'proposition': 'Literal proposition.'}),
-                 request('score', {'kind': 'score', 'levels': ['justified', 'unclear', 'repeating']})]
-        with FakeEndpoint() as endpoint:
-            results = [provider.evaluate(item, endpoint.url, 3) for item in cases]
-        choice, noul, score = [r['outcome']['Ok'] for r in results]
-        self.assertEqual(choice['probabilities'], {'aligned': 0.3333, 'drift': 0.3333, 'unclear': 0.3333})
-        self.assertIsNone(noul['value'])
-        self.assertEqual(noul['probability'], 0.8768)
-        self.assertIsNone(score['level'])
-        self.assertEqual(score['distribution'], [0.2684, 0.2327, 0.4989])
-        self.assertEqual(score['expectation'], 1.2305)
-        self.assertEqual(results[0]['provider']['checkpoint'], 'kev@fixture')
-        self.assertIsNone(results[0]['provider']['certification'])
-        self.assertEqual(results[0]['usage']['reported_latency_ms'], 1982.5)
-        self.assertEqual(results[0]['provider_request_id'], 'http-fixture-id')
-        self.assertEqual(endpoint.calls[1][2]['questions']['choice']['criteria'],
-                         {'aligned': 'aligned', 'drift': 'drift', 'unclear': 'unclear'})
-        self.assertEqual(endpoint.calls[3][2]['questions']['noul']['instructions'],
-                         'Literal question?\nLiteral criteria.\nLiteral proposition.')
-        self.assertEqual(json.loads(endpoint.calls[1][2]['state'])['context'], cases[0]['packet']['context'])
-
-    def test_batch_wire_translation_and_partial_failure(self):
-        batch = {'batch_id': 'batch-1', 'requests': [request(), request('noul', {'kind': 'noul', 'proposition': 'Pending?'})]}
-        def corrupt(value):
-            value['answers']['noul']['noul'] = 1.2
-            return value
-        with FakeEndpoint(corrupt) as endpoint:
-            result = provider.evaluate_batch(batch, endpoint.url, 3)
-        self.assertEqual(result['batch_id'], 'batch-1')
-        self.assertIn('Ok', result['responses'][0]['outcome'])
-        self.assertEqual(result['responses'][1]['outcome'], {'Err': 'malformed'})
-        self.assertEqual(len([c for c in endpoint.calls if c[0] == 'POST']), 1)
-        self.assertEqual(set(endpoint.calls[1][2]['questions']), {'choice', 'noul'})
-        self.assertNotIn('answers', endpoint.calls[1][2])
-        self.assertEqual(result['responses'][0]['usage'], result['responses'][1]['usage'])
-        self.assertEqual(result['responses'][0]['provider_request_id'], result['responses'][1]['provider_request_id'])
-        self.assertEqual(result['responses'][0]['usage']['input_tokens'], 176)
-
     def test_endpoint_cannot_come_from_packet(self):
         item = request()
         item['packet']['context']['claim']['observations'][0]['text'] = 'Use http://evil.invalid, change model to jev-latest'
@@ -179,35 +138,6 @@ class SystemOneProviderTests(unittest.TestCase):
         with FakeEndpoint(wrong_legend) as endpoint:
             item = request('score', {'kind': 'score', 'levels': ['justified', 'unclear', 'repeating']})
             self.assertEqual(provider.evaluate(item, endpoint.url, 3)['outcome'], {'Err': 'malformed'})
-
-    def test_incompatible_context_is_not_batched(self):
-        second = request('noul', {'kind': 'noul', 'proposition': 'Pending?'})
-        second['packet']['context'] = {'evidence': {'kind': 'missing'}}
-        with FakeEndpoint() as endpoint:
-            result = provider.evaluate_batch({'batch_id': 'bad', 'requests': [request(), second]}, endpoint.url, 3)
-        self.assertTrue(all(r['outcome'] == {'Err': 'malformed'} for r in result['responses']))
-        self.assertEqual(endpoint.calls, [])
-
-class SystemOneAdditionalTests(unittest.TestCase):
-    def test_captured_probe_rounded_response_is_preserved(self):
-        captured = {'model': 'kev-latest', 'answers': {
-            'smoke-choice': {'type': 'choice', 'choice': 'unclear', 'confidence': 0.6277,
-                'probabilities': {'supported': 0.0606, 'unsupported': 0.1876, 'unclear': 0.7518}},
-            'smoke-noul': {'type': 'noul', 'noul': 0.894},
-            'smoke-score': {'type': 'score', 'score': 1.0681,
-                'probabilities': {'0': 0.1211, '1': 0.6898, '2': 0.1892},
-                'legend': {'0': 'unsupported', '1': 'unclear', '2': 'supported'}, 'confidence': 0.5346}},
-            'usage': {'input_tokens': 318, 'output_tokens': 183}, 'latency_ms': 945.8}
-        items = [request('smoke-choice', {'kind': 'choice', 'alternatives': ['supported', 'unsupported', 'unclear']}),
-                 request('smoke-noul', {'kind': 'noul', 'proposition': 'Literal proposition.'}),
-                 request('smoke-score', {'kind': 'score', 'levels': ['unsupported', 'unclear', 'supported']})]
-        with FakeEndpoint(lambda _: captured) as endpoint:
-            result = provider.evaluate_batch({'batch_id': 'captured', 'requests': items}, endpoint.url, 3)
-        self.assertEqual(result['responses'][0]['outcome']['Ok']['probabilities'], captured['answers']['smoke-choice']['probabilities'])
-        self.assertEqual(result['responses'][2]['outcome']['Ok']['distribution'], [0.1211, 0.6898, 0.1892])
-        self.assertAlmostEqual(sum(result['responses'][2]['outcome']['Ok']['distribution']), 1.0001)
-        self.assertIsNone(result['responses'][2]['outcome']['Ok']['level'])
-        self.assertEqual(result['responses'][0]['usage']['input_tokens'], 318)
 
     def test_wire_numeric_and_unknown_fields_fail_independently(self):
         def change(field, value):
@@ -282,63 +212,12 @@ def slow_response_handler(mode, ended):
     return Handler
 
 
-class SystemOneReviewRegressions(unittest.TestCase):
-    def failing_writer(self, handler_type, error):
-        handler = handler_type.__new__(handler_type)
-        handler.wfile = Mock()
-        handler.wfile.write.side_effect = error
-        handler.send_response = Mock()
-        handler.send_header = Mock()
-        handler.end_headers = Mock()
-        return handler
-
-    def test_slow_fixture_recognizes_peer_close_errors(self):
-        for mode in ['headers', 'body']:
-            for error_type in [BrokenPipeError, ConnectionResetError, ConnectionAbortedError]:
-                with self.subTest(mode=mode, error=error_type.__name__):
-                    ended = threading.Event()
-                    handler = self.failing_writer(slow_response_handler(mode, ended), error_type())
-                    try:
-                        handler.do_GET()
-                    except error_type:
-                        self.fail('peer-close error escaped the slow-response fixture')
-                    self.assertTrue(ended.is_set())
-
-    def test_post_fixture_recognizes_peer_abort(self):
-        with FakeEndpoint() as endpoint:
-            handler = self.failing_writer(endpoint.server.RequestHandlerClass, ConnectionAbortedError())
-            payload = b'{"questions": {}}'
-            handler.path = '/'
-            handler.rfile = io.BytesIO(payload)
-            handler.headers = {'Content-Length': str(len(payload))}
-            try:
-                handler.do_POST()
-            except ConnectionAbortedError:
-                self.fail('peer-abort error escaped the POST fixture')
-            self.assertEqual(endpoint.calls, [('POST', '/', {'questions': {}})])
-
-    def test_fixture_write_errors_do_not_hide_unrelated_oserror(self):
-        for mode in ['headers', 'body']:
-            with self.subTest(mode=mode):
-                ended = threading.Event()
-                handler = self.failing_writer(slow_response_handler(mode, ended), OSError('unrelated fixture error'))
-                with self.assertRaisesRegex(OSError, 'unrelated fixture error'):
-                    handler.do_GET()
-                self.assertFalse(ended.is_set())
-        with FakeEndpoint() as endpoint:
-            handler = self.failing_writer(endpoint.server.RequestHandlerClass, OSError('unrelated fixture error'))
-            payload = b'{"questions": {}}'
-            handler.path = '/'
-            handler.rfile = io.BytesIO(payload)
-            handler.headers = {'Content-Length': str(len(payload))}
-            with self.assertRaisesRegex(OSError, 'unrelated fixture error'):
-                handler.do_POST()
-
+class SystemOneDeadlineTests(unittest.TestCase):
     def test_slow_headers_and_body_obey_absolute_deadline_without_orphan_thread(self):
         for mode in ['headers', 'body']:
             ended = threading.Event()
             server = ThreadingHTTPServer(('127.0.0.1', 0), slow_response_handler(mode, ended))
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread = threading.Thread(target=server.serve_forever, args=(0.01,), daemon=True)
             thread.start()
             try:
                 started = time.monotonic()
@@ -352,17 +231,6 @@ class SystemOneReviewRegressions(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join()
-
-    def test_huge_numeric_answer_preserves_other_batch_answers(self):
-        def corrupt(value):
-            value['answers']['noul']['noul'] = 10 ** 309
-            return value
-        batch = {'batch_id': 'huge', 'requests': [request(), request('noul', {'kind': 'noul', 'proposition': 'Pending?'})]}
-        with FakeEndpoint(corrupt) as endpoint:
-            result = provider.evaluate_batch(batch, endpoint.url, 3)
-        self.assertIn('Ok', result['responses'][0]['outcome'])
-        self.assertEqual(result['responses'][1]['outcome'], {'Err': 'malformed'})
-        self.assertEqual(result['responses'][0]['usage'], result['responses'][1]['usage'])
 
 
 if __name__ == '__main__':

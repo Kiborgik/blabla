@@ -20,6 +20,7 @@ Small coding models drift from the goal and say "done" too early. BlaBla catches
 - The native host schema is replaced by a short wire-contract section in `adapters/native/README.md`; the Rust types are the schema
 - Test ownership moved into `CONTRIBUTING.md`
 - The text printed after every `task` command is shorter
+- Tests run faster: BlaBla's own `finish` runs 4,096 actions instead of 16,384 (every obligation is covered by action 2,318), debug builds use `opt-level = 1`, experiment-only tests are gone, and Windows CI runs tests in parallel
 - Project memory states the drift and overconfidence problem; its prose is shorter and its existing identities are unchanged
 - Systems own whole directories in project memory, so new files are never unowned
 - New goals: `goal::short-plain-docs` and one per fix, each expecting the rule that checks it

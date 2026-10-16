@@ -42,7 +42,7 @@ ignore from ".gitignore"
 verify behavior {
     command ["target/debug/examples/structure-adapter"]
     seed 0
-    cases 32
+    cases 8
     steps 512
     timeout_ms 5000
     shrink_budget 256

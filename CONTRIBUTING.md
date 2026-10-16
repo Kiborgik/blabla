@@ -29,18 +29,17 @@ python experiments/render_diagrams.py --check
 | Gate | Runs |
 | --- | --- |
 | `python experiments/gate.py --tag local` | the product gate: lint, tests, adapters, current-source bridge, composed `finish`, examples, public-tree audit, markdown links, version agreement, diagram hashes |
-| `python experiments/run_historical_tests.py` | the experiment tests the product gate does not run |
 | `python experiments/research_gate.py` | opt-in stress tests and frozen research reproductions |
 | `experiments/gate_v04.py`, `gate_v05.py` | frozen old releases; never retarget them |
 
-[CI](.github/workflows/ci.yml) runs the historical tests, the product gate and the Hello check on Linux and Windows. A GREEN from an earlier commit does not cover later edits; report any stage you did not run.
+[CI](.github/workflows/ci.yml) runs the product gate and the Hello check on Linux and Windows. A GREEN from an earlier commit does not cover later edits; report any stage you did not run.
 
 ## Who tests what
 
 - **Rust tests**: language semantics, authority, policy and task states. Behavior in `src/syntax`, `src/semantics`, `src/ir`, `src/verify`, end-to-end in `tests/`. Structure verdicts in `src/structure/tests.rs`, providers in `tests/structure*.rs`: cover GREEN, RED and ERROR, and prove no project code runs
-- **Python tests**: adapters and harnesses
+- **Python tests**: the expert adapters; language adapters are proven by the example `finish` runs
 - **Bridge tests**: the bridge's translation to Rust
-- **Product gate**: runs the composed self-hosted campaign once. To diagnose one contract alone, build `cargo build --release --quiet --example structure-adapter`, then `cargo run --release --quiet --bin blabla -- run contracts/questions.bla --cases 32 --steps 512 --timeout-ms 5000 -- target/release/examples/structure-adapter`
+- **Product gate**: runs the composed self-hosted campaign once. To diagnose one contract alone, build `cargo build --release --quiet --example structure-adapter`, then `cargo run --release --quiet --bin blabla -- run contracts/questions.bla --cases 8 --steps 512 --timeout-ms 5000 -- target/release/examples/structure-adapter`
 
 ## Rules
 
