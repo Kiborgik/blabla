@@ -1,6 +1,6 @@
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
 import { createCapabilityTreeSheet, type CapabilityTreeInput } from './capability-tree.ts';
-import { renderEventLog } from './event-log.ts';
+import { eventLogEntries, latestStoryEvent, renderEventLog } from './event-log.ts';
 import { routeInspectionCity } from '../visuals/route-visuals.ts';
 import { renderRouteCard, renderRouteList, retainedRoutePathInspection, routeInspectionIdentity } from './route-inspection.ts';
 import { cityKey, resolveCitySelection, retainedReceiptBuilding } from './city-selection.ts';
@@ -20,7 +20,7 @@ import { createViewerUpdates, preferencesAfterUpdate } from './viewer-updates.ts
 import { createInspectionSession, inspectionAnchor } from './inspection-camera.ts';
 import { eventVisual } from '../visuals/world-visuals.ts';
 import type { RouteResultCue } from '../visuals/route-cues.ts';
-import { createCueStream, latestCueEvent, renderDeltas, routeResultPresentation, visualIcon } from './world-cues.ts';
+import { createCueStream, renderDeltas, routeResultPresentation, visualIcon } from './world-cues.ts';
 import { resourceGuide } from './viewer-appearance.ts';
 import { mountViewerSettings } from './viewer-settings.ts';
 import type { Resource } from '../core/types.ts';
@@ -52,7 +52,7 @@ if (!app) throw new Error('The spectator application mount is missing.');
 app.innerHTML = `
   <header class="masthead">
     <a class="brand" href="#" aria-label="Civitas home"><span class="brand-mark" aria-hidden="true">C</span><span>CIVITAS<small>A WORLD OF ITS OWN</small></span></a>
-    <nav class="top-nav" aria-label="World information"><span class="nav-active">The world</span><button class="text-button about-button" type="button">About</button><button id="settings-open" class="text-button" type="button" aria-label="Viewer settings">Settings</button></nav>
+    <nav class="top-nav" aria-label="World information"><span class="nav-active">The world</span><button id="events-nav" class="events-nav" data-open-events type="button">Events</button><button class="text-button about-button" type="button">About</button><button id="settings-open" class="text-button" type="button" aria-label="Viewer settings">Settings</button></nav>
     <div class="mode"><span class="status-dot"></span><span id="connection-label">CONNECTING</span><span class="mode-detail">Humans watch. Agents decide.</span></div>
   </header>
   <main class="observatory live-observatory">
@@ -63,16 +63,16 @@ app.innerHTML = `
     <aside class="inspection panel" aria-label="Civilization inspection" hidden></aside>
     <div class="map-tools" role="group" aria-label="Map camera"><button id="zoom-in" type="button" aria-label="Zoom in">+</button><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="reset-camera" type="button" aria-label="Reset camera">Home</button></div>
     <div class="layer-controls" role="group" aria-label="Map layers"><button data-layer="borders" type="button" aria-pressed="${preferences.borders}">Borders</button><button data-layer="routes" type="button" aria-pressed="${preferences.routes}">Routes</button></div>
-    <section class="chronicle panel" aria-label="Latest world event"><div><span id="chronicle-label" class="eyebrow">WORLD CONNECTION</span><strong id="event-title">A shared story is taking shape.</strong><p id="event-detail">This page reads the world. It cannot issue orders.</p><div id="event-deltas" class="story-deltas"></div><button id="events-open" class="text-button" type="button" hidden>Recent events</button></div></section>
+    <section class="chronicle panel" aria-label="Latest world event"><div><span id="chronicle-label" class="eyebrow">WORLD CONNECTION</span><strong id="event-title">A shared story is taking shape.</strong><p id="event-detail">This page reads the world. It cannot issue orders.</p><div id="event-deltas" class="story-deltas" tabindex="0" aria-label="Latest event amounts; scroll for all recorded amounts"></div><button id="events-open" class="text-button" data-open-events type="button" hidden>Recent events</button></div></section>
     <div class="map-hint" id="map-hint">Drag to explore · Use + and − to zoom · Tap a city or route</div>
     <div id="connection-actions" class="connection-actions"><button id="sample-open" type="button" hidden>View sample atlas</button><button id="live-open" type="button" hidden>Return to live world</button><span id="render-mode"></span></div>
   </main>
   <footer class="footer"><span class="footer-status">A shared world. An open future.</span><div class="release-links"><button id="world-info-open" type="button" aria-label="About this world and viewer version">v${currentRelease.version}</button><button id="changelog-open" type="button">Changelog</button><a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">Built with <strong>BlaBla</strong></a></div></footer>
   <dialog id="history-dialog" aria-labelledby="history-title"><div class="dialog-top"><span class="eyebrow">THE WORLD KEEPS GROWING</span><button class="dialog-close" type="button" aria-label="Close update history">×</button></div><h2 id="history-title">What changed</h2><div class="release-history">${changelog.map((entry, index) => `<details class="release-entry" ${index === 0 ? 'open' : ''}><summary><span class="release-version">v${escapeText(entry.version)}</span> <strong>${escapeText(entry.title)}</strong></summary><time datetime="${escapeText(entry.date)}">${escapeText(entry.date)}</time><ul>${entry.changes.map((change) => `<li>${escapeText(change)}</li>`).join('')}</ul></details>`).join('')}</div></dialog>
   <dialog id="about-dialog" aria-labelledby="about-title"><div class="dialog-top"><span class="eyebrow">A WORLD THAT KEEPS GROWING</span><button class="dialog-close" type="button" aria-label="Close world information">×</button></div><h2 id="about-title">The world, without us.</h2><p class="dialog-intro">Five AI civilizations. A sixth AI World Director. Humans watch the story unfold.</p><div class="about-body"><p>Small settlements are the beginning. New features will bring trade, culture, politics, industry and, eventually, life beyond Earth.</p><h3>Many ways forward</h3><p>The horizon includes scientific, cultural, economic, political and military success. Their systems arrive through future expansions; they are not all available today.</p><p>Fast choices shape slower projects and lasting commitments. The calendar has its own regular rhythm, with deliberate turning points as the world grows.</p><p>Viewer version ${currentRelease.version}. A connected view shows committed server state. It does not claim the agents are acting continuously. Sample mode is clearly labeled and never changes the shared world.</p><p>Development is organized with <a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">BlaBla</a>.</p></div></dialog>
-  <dialog id="events-dialog" aria-labelledby="events-title"><div class="dialog-top"><span class="eyebrow">COMMITTED WORLD HISTORY</span><button class="dialog-close" type="button" aria-label="Close recent events">×</button></div><h2 id="events-title">Recent events</h2><p class="dialog-intro">The latest recorded changes. Open again to refresh this list.</p><ol id="event-list"></ol></dialog>
+  <dialog id="events-dialog" aria-labelledby="events-title"><div class="dialog-top"><span class="eyebrow">THE WORLD STORY</span><button class="dialog-close" type="button" aria-label="Close recent events">×</button></div><h2 id="events-title">What changed</h2><p class="dialog-intro">Decisions and changes first. Routine seasons are grouped below.</p><ol id="event-list"></ol></dialog>
   <dialog id="capability-dialog"></dialog>
-  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-top"><span class="eyebrow">YOUR VIEW</span><button class="dialog-close" type="button" aria-label="Close viewer settings">×</button></div><h2 id="settings-title">Viewer settings</h2><p class="dialog-intro">Changes only how you see the world.</p><div class="viewer-options"><label for="viewer-theme">Theme</label><select id="viewer-theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select><p>System follows your device theme.</p><label for="viewer-effects">Effects</label><select id="viewer-effects" aria-describedby="effects-explanation system-motion-note"><option value="calm">Calm</option><option value="rich">Rich</option><option value="cinematic">Cinematic</option></select><p id="effects-explanation"></p><p id="system-motion-note" role="status" hidden>Your device requests reduced motion. Calm is active.</p></div><p class="settings-note">Saved on this browser. No change to agent choices or world speed.</p></dialog>
+  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-top"><span class="eyebrow">YOUR VIEW</span><button class="dialog-close" type="button" aria-label="Close viewer settings">×</button></div><h2 id="settings-title">Viewer settings</h2><p class="dialog-intro">Changes only how you see the world.</p><div class="viewer-options"><label for="viewer-theme">Theme</label><select id="viewer-theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select><p>System follows your device theme.</p><label for="viewer-effects">Effects</label><select id="viewer-effects" aria-describedby="effects-explanation system-motion-note"><option value="calm">Calm</option><option value="rich">Rich</option><option value="cinematic">Cinematic</option></select><p id="effects-explanation"></p><p id="system-motion-note" role="status" hidden>Your device requests reduced motion. Calm is active.</p></div><fieldset class="settings-layers"><legend>Map layers</legend><button data-layer="borders" type="button" aria-pressed="${preferences.borders}">Borders</button><button data-layer="routes" type="button" aria-pressed="${preferences.routes}">Routes</button></fieldset><p class="settings-note">Saved on this browser. No change to agent choices or world speed.</p></dialog>
   <dialog id="resource-dialog" aria-labelledby="resource-title"><div class="dialog-top"><span class="eyebrow">RESOURCE GUIDE</span><button class="dialog-close" type="button" aria-label="Close resource guide">×</button></div><h2 id="resource-title">Resources</h2><p id="resource-explanation" class="dialog-intro">Select a resource in city details to learn more.</p><p class="resource-reading">The city panel shows the amount stored by the civilization. <strong>Made</strong> is production before food use and other costs. <strong>+</strong> and <strong>−</strong> show recorded gains and losses. <strong>Base / season</strong> is production capacity, not goods already made.</p></dialog>
   <div id="update-notice" class="update-notice panel" hidden><p id="update-status" role="status"></p><button id="update-action" type="button" hidden>Update view</button></div>
 `;
@@ -188,7 +188,9 @@ function renderInspection(): void {
   inspectionFingerprint = fingerprint;
   inspectedCivilization = civ.id;
   inspectedCity = preferences.selectedCity;
-  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION IN FOCUS</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'live' ? 'COMMITTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${escapeText(civ.symbol)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(civ.character)}</p></div></div><p class="ambition">${escapeText(civ.ambition)}</p>${actual ? `<dl class="resources">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="Explain ${resourceGuide(resource).label}">${resourceGuide(resource).label}</button></dt><dd>${actual.resources[resource].toLocaleString('en-US', { maximumFractionDigits: 1 })}</dd></div>`).join('')}</dl><p class="research-detail"><strong>Research:</strong> ${escapeText(TECHNOLOGIES.find((technology) => technology.id === actual.researchTarget)?.name ?? 'No active project')} · ${actual.researchProgress} progress</p><button class="capability-open" data-open-capabilities type="button" aria-haspopup="dialog">Research &amp; buildings <span>Full tree · Options now</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
+  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION IN FOCUS</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'live' ? 'COMMITTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${escapeText(civ.symbol)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(cities.find(city => city.id === preferences.selectedCity)?.name ?? civ.character)}</p></div></div><p class="ambition">${escapeText(civ.ambition)}</p>${actual ? `<dl class="resources">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="Explain ${resourceGuide(resource).label}">${resourceGuide(resource).label}</button></dt><dd>${actual.resources[resource].toLocaleString('en-US', { maximumFractionDigits: 1 })}</dd></div>`).join('')}</dl><p class="research-detail"><strong>Research:</strong> ${escapeText(TECHNOLOGIES.find((technology) => technology.id === actual.researchTarget)?.name ?? 'No active project')} · ${actual.researchProgress} progress</p><button class="capability-open" data-open-capabilities type="button" aria-haspopup="dialog">Research &amp; buildings <span>Full tree · Options now</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
+  const capabilityOpener = panel.querySelector('[data-open-capabilities]');
+  if (capabilityOpener) panel.insertBefore(capabilityOpener, panel.querySelector('.ambition'));
   for (const resource of RESOURCE_IDS) {
     const entry = panel.querySelector<HTMLButtonElement>(`[data-resource="${resource}"]`);
     entry?.prepend(visualIcon(resource));
@@ -341,17 +343,18 @@ function renderConnection(): void {
   element('#world-detail').title = lastRead ? `Last verified read ${lastRead}` : '';
   element('#era-name').textContent = state ? capabilityName(Math.max(...state.civilizations.map((civ) => civ.era))) : 'Early settlements';
   element('#era-detail').textContent = state ? state.releaseId : mode === 'sample' ? 'SAMPLE CAPABILITIES' : 'A GROWING WORLD';
-  const event = state ? latestCueEvent(state.events) : undefined;
+  const event = state ? latestStoryEvent(state.events) : undefined;
+  const story = event && state ? eventLogEntries([event], { civilizations: state.civilizations, receipts: observedRouteResults })[0] : undefined;
   const receipt = observedRouteResults.find((cue) => cue.eventId === event?.id);
   const routeResult = receipt ? routeResultPresentation(receipt) : null;
   const visual = event ? eventVisual(event) : null;
-  element('#chronicle-label').textContent = receipt ? receipt.kind === 'delivery' ? 'RECORDED DELIVERY' : 'RECORDED JOINT REPAIR' : visual?.cue === 'production' ? 'PRODUCED · BEFORE COSTS' : visual?.cue === 'repair' ? 'CITY REPAIR · INPUTS PAID' : event ? 'LATEST WORLD CHANGE' : mode === 'sample' ? 'SAMPLE VIEW' : 'WORLD CONNECTION';
-  element('#event-title').textContent = routeResult?.label ?? event?.title ?? (mode === 'sample' ? 'A sample, not a simulation.' : 'The story will appear here.');
-  element('#event-detail').textContent = routeResult?.summary ?? (event ? `${event.cause}. ${event.effects.join(' · ')}` : mode === 'sample' ? 'These cities and routes illustrate the atlas. Return to live world to watch committed changes.' : 'This page only reads. Agent actions, discoveries and world events will be shown after they are committed.');
-  const icon = routeResult?.icon ?? visual?.icon;
+  element('#chronicle-label').textContent = story ? `${story.category} · ${story.deltas.some(delta => delta.kind === 'production') ? 'Before costs' : `Round ${story.round}`}` : mode === 'sample' ? 'SAMPLE VIEW' : 'WORLD CONNECTION';
+  element('#event-title').textContent = story?.title ?? (mode === 'sample' ? 'A sample, not a simulation.' : 'The story will appear here.');
+  element('#event-detail').textContent = story?.summary ?? (mode === 'sample' ? 'These cities and routes illustrate the atlas. Return to live world to watch committed changes.' : 'This page only reads. Agent actions, discoveries and world events will be shown after they are committed.');
+  const icon = story?.icon ?? routeResult?.icon ?? visual?.icon;
   if (icon) element('#event-title').prepend(visualIcon(icon));
-  renderDeltas(element('#event-deltas'), routeResult?.deltas ?? visual?.deltas ?? []);
-  element('#event-detail').hidden = routeResult === null && !!visual?.deltas.length;
+  renderDeltas(element('#event-deltas'), story?.deltas ?? routeResult?.deltas ?? visual?.deltas ?? []);
+  element('#event-detail').hidden = !story?.summary || !!story.deltas.length;
   element('#events-open').hidden = !state?.events.length;
   element('#sample-open').hidden = snapshot !== null || mode === 'sample' || mode === 'loading';
   element('#live-open').hidden = mode !== 'sample';
@@ -401,7 +404,7 @@ async function readWorld(): Promise<void> {
   finally { reading = false; renderConnection(); }
 }
 
-for (const [id, factor] of [['#zoom-in', 1.2], ['#zoom-out', 1 / 1.2]] as const) element(id).addEventListener('click', () => { inspectionCamera.release(); atlas?.zoom(factor); savePreferences(); });
+for (const [id, factor] of [['#zoom-in', 1.2], ['#zoom-out', 1 / 1.2]] as const) element(id).addEventListener('click', () => { atlas?.zoom(factor); frameInspection(); savePreferences(); });
 element('#reset-camera').addEventListener('click', () => { inspectionCamera.release(); atlas?.reset(); savePreferences(); });
 let mapPointer: { id: number; x: number; y: number } | null = null;
 element('#map').addEventListener('pointerdown', (event) => {
@@ -429,7 +432,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('[data-layer]'
   const layer = button.dataset['layer'];
   if (layer !== 'borders' && layer !== 'routes') return;
   const visible = button.getAttribute('aria-pressed') !== 'true';
-  button.setAttribute('aria-pressed', String(visible));
+  for (const control of document.querySelectorAll<HTMLButtonElement>(`[data-layer="${layer}"]`)) control.setAttribute('aria-pressed', String(visible));
   atlas?.setLayer(layer, visible);
   preferences = { ...preferences, [layer]: visible };
   savePreferences();
@@ -452,7 +455,7 @@ function renderEventHistory(): void {
   const events = snapshot?.state.events;
   eventHistoryCaptured = events !== undefined;
   element('#events-dialog .dialog-intro').textContent = snapshot
-    ? `Captured revision ${snapshot.state.revision} · Round ${snapshot.state.round}. Open again to refresh these recorded changes.`
+    ? `Revision ${snapshot.state.revision} · Reopen to refresh. Routine seasons below.`
     : 'Waiting for committed world history.';
   if (events && snapshot) renderEventLog(element('#event-list'), events, {
     civilizations: snapshot.state.civilizations, receipts: observedRouteResults,
@@ -473,9 +476,12 @@ function syncDialog(): void {
   }
 }
 let helpResource: Resource | null = null;
+let eventHistoryOpener: HTMLButtonElement | null = null;
 function closeDialog(): void {
-  const dialog = dialogs.get(window.location.hash.slice(1));
+  const name = window.location.hash.slice(1);
+  const dialog = dialogs.get(name);
   dialog?.close();
+  if (name === 'events') { eventHistoryCaptured = false; eventHistoryOpener?.focus({ preventScroll: true }); }
   history.replaceState(history.state as unknown, '', `${location.pathname}${location.search}`);
   if (helpResource) document.querySelector<HTMLButtonElement>(`[data-resource="${helpResource}"]`)?.focus({ preventScroll: true });
   helpResource = null;
@@ -504,7 +510,7 @@ window.addEventListener('keydown', (event) => {
 element('#world-info-open').addEventListener('click', () => { window.location.hash = 'about'; });
 element('#changelog-open').addEventListener('click', () => { window.location.hash = 'changelog'; });
 for (const button of document.querySelectorAll<HTMLButtonElement>('.about-button')) button.addEventListener('click', () => { window.location.hash = 'about'; });
-element('#events-open').addEventListener('click', () => { window.location.hash = 'events'; });
+for (const button of document.querySelectorAll<HTMLButtonElement>('[data-open-events]')) button.addEventListener('click', () => { eventHistoryOpener = button; window.location.hash = 'events'; });
 element('#settings-open').addEventListener('click', () => { window.location.hash = 'settings'; });
 for (const dialog of dialogs.values()) {
   dialog.querySelector('button')?.addEventListener('click', closeDialog);

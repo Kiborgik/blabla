@@ -525,7 +525,8 @@ await test('damage labels retain readable screen metrics and real repair cues an
 
 await test('compact desktop story is height-scoped and retains scrolling numbers and a large history target', () => {
   const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
-  const compact = css.slice(css.lastIndexOf('@media (min-width: 1001px) and (max-height: 850px)'));
+  const compactStart = css.lastIndexOf('@media (min-width: 1001px) and (max-height: 850px)');
+  const compact = css.slice(compactStart, css.indexOf('\n}', compactStart) + 2);
   const declarations = (selector: string): Map<string, string> => {
     const start = compact.indexOf(`${selector} {`);
     assert.ok(start >= 0);
@@ -564,4 +565,33 @@ await test('the committed inspector wires canonical exact-town capability projec
   assert.match(main, /const quiet = document\.hidden \|\| dialogs\.get\('events'\)\?\.open \|\| capabilityDialog\?\.open/);
   assert.match(html, /web\/event-log\.css/);
   assert.match(html, /web\/capability-tree\.css/);
+});
+
+await test('Events remains a primary navigation control and returns focus to its actual opener', () => {
+  const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
+  const navigation = main.slice(main.indexOf('<nav class="top-nav"'), main.indexOf('</nav>'));
+  assert.match(navigation, /id="events-nav"[^>]*data-open-events[^>]*>Events</);
+  assert.match(main, /querySelectorAll<HTMLButtonElement>\('\[data-open-events\]'\)/);
+  assert.match(main, /eventHistoryOpener = button/);
+  assert.match(main, /eventHistoryOpener\?\.focus\(\{ preventScroll: true \}\)/);
+});
+
+await test('small spectator layout keeps named dock and all story facts reachable without vertical clipping', () => {
+  const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
+  const responsive = css.slice(css.lastIndexOf('@media (max-width: 1000px)'));
+  assert.match(responsive, /\.civilization-row\s*\{[^}]*flex-direction: column/);
+  assert.match(responsive, /\.civilization-row strong\s*\{[^}]*white-space: nowrap/);
+  assert.match(responsive, /\.chronicle \.story-deltas\s*\{[^}]*flex-wrap: nowrap[^}]*overflow-x: auto/);
+  assert.match(responsive, /\.map-tools\s*\{[^}]*flex-direction: row/);
+  assert.match(responsive, /\.layer-controls\s*\{[^}]*display: none/);
+  const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /class="settings-layers"[\s\S]*?data-layer="borders"[\s\S]*?data-layer="routes"/);
+});
+
+await test('explicit selected-town zoom reuses inspection framing while direct pan remains manual', () => {
+  const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
+  const zoom = main.slice(main.indexOf("for (const [id, factor]"), main.indexOf("element('#reset-camera')"));
+  assert.match(zoom, /atlas\?\.zoom\(factor\); frameInspection\(\);/);
+  assert.doesNotMatch(zoom, /inspectionCamera\.release/);
+  assert.match(main, /Math\.hypot[\s\S]*?inspectionCamera\.release\(\)/);
 });

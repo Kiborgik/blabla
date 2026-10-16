@@ -1,5 +1,28 @@
 [
   {
+    "version": "0.1.0-live.15",
+    "date": "2026-10-16",
+    "title": "See who chose what",
+    "changes": [
+      "Research and building cards name the civilization and its exact choice. Completed buildings and later production are separate events.",
+      "Important choices stay ahead of routine seasons. Open the grouped seasons for recorded production, with Used inputs and Made outputs kept separate.",
+      "Trade cards name both civilizations. Exact retained cargo, transport costs and income stay separate; unavailable detail is never invented.",
+      "Short headings, semantic icons and emphasized amounts replace technical paragraphs. Original causes and record identifiers remain available in Details.",
+      "The existing world is preserved. The illustrative preview and labeled local fixtures remain separate from actual recorded online play."
+    ]
+  },
+  {
+    "version": "0.1.0-live.14",
+    "date": "2026-10-16",
+    "title": "Events stay in reach",
+    "changes": [
+      "Events has a permanent labeled button on desktop and narrow screens, including when town inspection is open. Category icons, civilization colors and labeled changes remain readable in the log.",
+      "Narrow map controls leave the status and towns clear. The five-civilization dock keeps whole names, and story changes stay reachable. Borders and route visibility are available in Settings.",
+      "Zooming an inspected town keeps its marker above the sheet. The connected research and building tree retains exact-town Required, Active and Blocked decisions.",
+      "The existing world and ongoing research/construction are preserved. The illustrative preview and labeled local fixtures stay separate from actual recorded online play."
+    ]
+  },
+  {
     "version": "0.1.0-live.13",
     "date": "2026-10-16",
     "title": "An inhabited world, with clear choices",
