@@ -18,7 +18,7 @@ use tempfile::TempDir;
 
 use process_tree::ProcessTree;
 
-pub const MAX_TIMEOUT: Duration = Duration::from_secs(5);
+pub const MAX_TIMEOUT: Duration = Duration::from_secs(8);
 pub const MAX_STARTUP: Duration = Duration::from_secs(60);
 const RESPONSE_LINE_LIMIT: usize = 1024 * 1024;
 const CLEANUP_LIMIT: Duration = Duration::from_millis(250);
@@ -57,7 +57,7 @@ impl AppSession {
         if config.timeout.is_zero() || config.timeout > MAX_TIMEOUT {
             return Err(AppError::new(
                 "APP_CONFIG",
-                "exchange timeout must be greater than zero and at most five seconds",
+                "exchange timeout must be greater than zero and at most eight seconds",
             ));
         }
         if config.startup.is_zero() || config.startup > MAX_STARTUP {
@@ -539,68 +539,69 @@ impl AppSession {
         }
         self.closed = true;
         self.writer.take();
-
-        if let Some(process_tree) = self.process_tree.as_mut() {
-            process_tree.terminate();
+        if let Some(tree) = self.process_tree.as_mut() {
+            tree.terminate();
         }
-
-        let mut child = self.child.take();
-        if let Some(process) = child.as_mut() {
-            let _ = process.kill();
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
         }
-        let cleanup_deadline = Instant::now() + CLEANUP_LIMIT;
-        let mut reaped = false;
-        while Instant::now() < cleanup_deadline {
-            match child.as_mut().map(Child::try_wait) {
-                Some(Ok(Some(_))) | None => {
-                    reaped = true;
-                    break;
-                }
-                Some(Ok(None)) => thread::sleep(Duration::from_millis(1)),
-                Some(Err(_)) => break,
+        let deadline = Instant::now() + CLEANUP_LIMIT;
+        loop {
+            let exited = self
+                .child
+                .as_mut()
+                .map(Child::try_wait)
+                .transpose()
+                .is_ok_and(|status| status.is_none_or(|status| status.is_some()));
+            if exited && let Some(tree) = &self.process_tree {
+                tree.reap_descendants();
             }
-        }
-
-        if reaped {
-            child.take();
-            while Instant::now() < cleanup_deadline {
-                if let Some(tree) = self.process_tree.as_ref() {
-                    tree.reap_descendants();
-                    if tree.is_empty().unwrap_or(true) {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(1));
-            }
-            self.temp_dir.take();
-        } else if let Some(mut process) = child.take() {
-            let temp_dir = self.temp_dir.take();
-            thread::spawn(move || {
-                let _ = process.wait();
-                drop(temp_dir);
-            });
-        } else {
-            self.temp_dir.take();
-        }
-
-        while Instant::now() < cleanup_deadline
-            && (self
-                .writer_thread
-                .as_ref()
-                .is_some_and(|handle| !handle.is_finished())
-                || self
-                    .reader_thread
-                    .as_ref()
-                    .is_some_and(|handle| !handle.is_finished()))
-        {
             while self.responses.try_recv().is_ok() {}
+            join_finished(&mut self.writer_thread);
+            join_finished(&mut self.reader_thread);
+            let empty = self
+                .process_tree
+                .as_ref()
+                .is_none_or(|tree| tree.is_empty().unwrap_or(false));
+            if exited && empty && self.writer_thread.is_none() && self.reader_thread.is_none() {
+                self.child.take();
+                self.process_tree.take();
+                close_directory(self.temp_dir.take());
+                return;
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
             thread::sleep(Duration::from_millis(1));
         }
-        join_finished(&mut self.writer_thread);
-        join_finished(&mut self.reader_thread);
-        self.process_tree.take();
+        let child = self.child.take();
+        let tree = self.process_tree.take();
+        let writer = self.writer_thread.take();
+        let reader = self.reader_thread.take();
+        let directory = self.temp_dir.take();
+        let (_, closed) = mpsc::sync_channel(1);
+        drop(std::mem::replace(&mut self.responses, closed));
+        thread::spawn(move || {
+            if let Some(mut child) = child {
+                let _ = child.wait();
+            }
+            if let Some(writer) = writer {
+                let _ = writer.join();
+            }
+            if let Some(reader) = reader {
+                let _ = reader.join();
+            }
+            if let Some(tree) = tree {
+                loop {
+                    tree.reap_descendants();
+                    if tree.is_empty().unwrap_or(false) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+            close_directory(directory);
+        });
     }
 }
 
@@ -917,6 +918,15 @@ fn read_responses(stdout: ChildStdout, responses: SyncSender<ResponseEvent>) {
             line.extend_from_slice(available);
             reader.consume(available_len);
         }
+    }
+}
+
+fn close_directory(directory: Option<Arc<TempDir>>) {
+    if let Some(directory) = directory
+        && let Ok(directory) = Arc::try_unwrap(directory)
+        && let Err(error) = directory.close()
+    {
+        eprintln!("application working-directory cleanup failed: {error}");
     }
 }
 

@@ -89,7 +89,6 @@ impl Drop for Running {
         let child = self.child.take();
         let events = self.events.take();
         let pending = self.pending;
-        #[cfg(unix)]
         let tree = self.tree.take();
         std::thread::spawn(move || {
             if let Some(mut child) = child {
@@ -102,7 +101,6 @@ impl Drop for Running {
                     }
                 }
             }
-            #[cfg(unix)]
             if let Some(tree) = tree {
                 loop {
                     tree.reap_descendants();
@@ -156,7 +154,35 @@ fn reader(
         .map_err(|e| e.to_string())
 }
 
+fn measured<T>(
+    timings: &mut Vec<(&'static str, Duration)>,
+    stage: &'static str,
+    action: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let started = Instant::now();
+    let result = action();
+    timings.push((stage, started.elapsed()));
+    result.map_err(|error| format!("{error}; process stage: {stage}"))
+}
+
 pub fn run(command: &mut Command, deadline: Instant, limit: usize) -> Result<Output, String> {
+    let mut timings = Vec::with_capacity(8);
+    run_inner(command, deadline, limit, &mut timings).map_err(|error| {
+        let timings = timings
+            .into_iter()
+            .map(|(stage, duration)| format!("{stage}={}ms", duration.as_millis()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{error}; process timings: {timings}")
+    })
+}
+
+fn run_inner(
+    command: &mut Command,
+    deadline: Instant,
+    limit: usize,
+    timings: &mut Vec<(&'static str, Duration)>,
+) -> Result<Output, String> {
     time_left(deadline)?;
     command
         .stdin(Stdio::null())
@@ -164,7 +190,9 @@ pub fn run(command: &mut Command, deadline: Instant, limit: usize) -> Result<Out
         .stderr(Stdio::piped());
     process_tree::configure(command);
     time_left(deadline)?;
-    let child = command.spawn().map_err(|e| e.to_string())?;
+    let child = measured(timings, "spawn", || {
+        command.spawn().map_err(|e| e.to_string())
+    })?;
     let (sender, events) = mpsc::channel();
     let mut running = Running {
         child: Some(child),
@@ -172,63 +200,81 @@ pub fn run(command: &mut Command, deadline: Instant, limit: usize) -> Result<Out
         events: Some(events),
         pending: 0,
     };
-    running.tree =
-        Some(ProcessTree::attach(running.child.as_mut().unwrap()).map_err(|e| e.message)?);
-    let stdout = running
-        .child
-        .as_mut()
-        .unwrap()
-        .stdout
-        .take()
-        .ok_or("source CLI stdout unavailable")?;
-    let stderr = running
-        .child
-        .as_mut()
-        .unwrap()
-        .stderr
-        .take()
-        .ok_or("source CLI stderr unavailable")?;
-    let remaining = Arc::new(AtomicUsize::new(limit));
-    reader(stdout, false, remaining.clone(), sender.clone())?;
-    running.pending += 1;
-    reader(stderr, true, remaining, sender.clone())?;
-    running.pending += 1;
-    let (transfer, owned) = mpsc::channel::<Child>();
-    std::thread::Builder::new()
-        .name("blabla-command-exit".into())
-        .spawn(move || {
-            if let Ok(mut child) = owned.recv() {
-                let _ = sender.send(Event::Exit(child.wait().map_err(|e| e.to_string())));
-            }
-        })
-        .map_err(|e| e.to_string())?;
-    if let Err(error) = transfer.send(running.child.take().unwrap()) {
-        running.child = Some(error.0);
-        return Err("source CLI could not transfer child to exit waiter".into());
-    }
-    running.pending += 1;
-    let mut status = None;
-    let mut stdout = None;
-    let mut stderr = None;
-    while running.pending > 0 {
-        match running.receive(deadline)? {
-            Event::Exit(result) => {
-                status = Some(result?);
-                running.terminate();
-            }
-            Event::Read(false, result) => stdout = Some(result?),
-            Event::Read(true, result) => stderr = Some(result?),
+    let result = (|| {
+        time_left(deadline).map_err(|error| format!("{error}; process stage: spawn"))?;
+        running.tree = Some(measured(timings, "attach/resume", || {
+            ProcessTree::attach(running.child.as_mut().unwrap()).map_err(|e| e.message)
+        })?);
+        time_left(deadline).map_err(|error| format!("{error}; process stage: attach/resume"))?;
+        let stdout = running
+            .child
+            .as_mut()
+            .unwrap()
+            .stdout
+            .take()
+            .ok_or("source CLI stdout unavailable")?;
+        let stderr = running
+            .child
+            .as_mut()
+            .unwrap()
+            .stderr
+            .take()
+            .ok_or("source CLI stderr unavailable")?;
+        let remaining = Arc::new(AtomicUsize::new(limit));
+        reader(stdout, false, remaining.clone(), sender.clone())?;
+        running.pending += 1;
+        reader(stderr, true, remaining, sender.clone())?;
+        running.pending += 1;
+        let (transfer, owned) = mpsc::channel::<Child>();
+        std::thread::Builder::new()
+            .name("blabla-command-exit".into())
+            .spawn(move || {
+                if let Ok(mut child) = owned.recv() {
+                    let _ = sender.send(Event::Exit(child.wait().map_err(|e| e.to_string())));
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        if let Err(error) = transfer.send(running.child.take().unwrap()) {
+            running.child = Some(error.0);
+            return Err("source CLI could not transfer child to exit waiter".into());
         }
-    }
-    while !running.released()? {
+        running.pending += 1;
+        let mut status = None;
+        let mut stdout = None;
+        let mut stderr = None;
+        while running.pending > 0 {
+            match measured(timings, "completion event", || running.receive(deadline))? {
+                Event::Exit(result) => {
+                    status = Some(result?);
+                    measured(timings, "terminate descendants", || {
+                        running.terminate();
+                        Ok(())
+                    })?;
+                }
+                Event::Read(false, result) => stdout = Some(result?),
+                Event::Read(true, result) => stderr = Some(result?),
+            }
+        }
+        measured(timings, "tree release", || {
+            while !running.released()? {
+                time_left(deadline)?;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            time_left(deadline)
+        })?;
+        running.tree.take();
+        Ok(Output {
+            status: status.ok_or("source CLI exit event missing")?,
+            stdout: stdout.ok_or("source CLI stdout event missing")?,
+            stderr: stderr.ok_or("source CLI stderr event missing")?,
+        })
+    })();
+    measured(timings, "cleanup", || {
+        drop(running);
+        Ok(())
+    })?;
+    result.and_then(|output| {
         time_left(deadline)?;
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    time_left(deadline)?;
-    running.tree.take();
-    Ok(Output {
-        status: status.ok_or("source CLI exit event missing")?,
-        stdout: stdout.ok_or("source CLI stdout event missing")?,
-        stderr: stderr.ok_or("source CLI stderr event missing")?,
+        Ok(output)
     })
 }

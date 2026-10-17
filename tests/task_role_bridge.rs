@@ -304,7 +304,7 @@ fn unused_role_probe_launches_no_cargo_and_invocation_failures_remain_adapter_er
 }
 
 #[test]
-fn actual_runtime_uses_existing_five_second_request_budget() {
+fn actual_runtime_uses_configured_eight_second_request_budget() {
     use blabla::application::{AppConfig, Application};
     use blabla::report::Call;
     use blabla::runtime::AppSession;
@@ -324,7 +324,7 @@ fn actual_runtime_uses_existing_five_second_request_budget() {
         .into_iter()
         .map(Into::into)
         .collect(),
-        Duration::from_millis(5000),
+        Duration::from_millis(8000),
     );
     let mut session = AppSession::spawn(&config).unwrap();
     let start = Instant::now();

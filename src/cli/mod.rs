@@ -107,7 +107,7 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
         shrink_budget: usize,
         #[arg(
             long,
-            value_parser = clap::value_parser!(u64).range(1..=5000),
+            value_parser = clap::value_parser!(u64).range(1..=runtime::MAX_TIMEOUT.as_millis() as u64),
             help = "Allowance for one request and its response; defaults to 1000 ms, or the project profile's timeout_ms if given a contract FILE inside a project"
         )]
         timeout_ms: Option<u64>,

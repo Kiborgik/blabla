@@ -108,9 +108,13 @@ fn exchanges_jsonl_with_a_real_process_in_an_isolated_directory() {
 
 #[test]
 fn rejects_invalid_timeout_configuration_before_spawning() {
+    let mut maximum =
+        AppSession::spawn(&python_config(&fixture(), "normal", Duration::from_secs(8))).unwrap();
+    maximum.reset().unwrap();
+    maximum.finish().unwrap();
     for timeout in [
         Duration::ZERO,
-        Duration::from_secs(5) + Duration::from_nanos(1),
+        Duration::from_secs(8) + Duration::from_nanos(1),
     ] {
         let error = match AppSession::spawn(&python_config(&fixture(), "normal", timeout)) {
             Ok(_) => panic!("invalid timeout started a session"),

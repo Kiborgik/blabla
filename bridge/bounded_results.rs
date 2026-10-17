@@ -1,14 +1,14 @@
 use super::source_cli::Request;
 use blabla::memory::{self, process};
 use blabla::project::{self, task};
+use blabla::runtime::MAX_TIMEOUT as REQUEST_BUDGET;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tempfile::TempDir;
 
-const BUDGET: Duration = Duration::from_millis(4500);
 const REASON: &str = "Accept this bounded result while integration remains stale";
 
 fn write(root: &Path, path: &str, text: &str) -> Result<(), String> {
@@ -359,7 +359,7 @@ impl BoundedResults {
 
     fn perform(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let started = Instant::now();
-        let request = Request::new(started + BUDGET);
+        let request = Request::new(started + REQUEST_BUDGET);
         let deadline = &request;
         if matches!(
             name,

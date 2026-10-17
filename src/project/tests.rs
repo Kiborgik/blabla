@@ -917,6 +917,12 @@ fn manifest_parses_one_verification_profile_with_defaults_and_rejects_bad_ones()
         })
     );
     assert_eq!(minimal.entries[0].group, "a");
+    let maximum = parse_manifest(
+        path,
+        "project X\nverify behavior { command [\"a\"] timeout_ms 8000 }",
+    )
+    .unwrap();
+    assert_eq!(maximum.profile.unwrap().timeout_ms, 8000);
     let none = parse_manifest(path, "project X\nuse behavior \"a.bla\"").unwrap();
     assert!(none.profile.is_none());
     for (source, code) in [
@@ -953,7 +959,7 @@ fn manifest_parses_one_verification_profile_with_defaults_and_rejects_bad_ones()
             "E_PROFILE_FIELD",
         ),
         (
-            "project X\nverify behavior { command [\"a\"] timeout_ms 5001 }",
+            "project X\nverify behavior { command [\"a\"] timeout_ms 8001 }",
             "E_PROFILE_FIELD",
         ),
         (

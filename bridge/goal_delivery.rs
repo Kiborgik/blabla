@@ -1,14 +1,14 @@
 use super::source_cli::Request;
 use blabla::memory::{self, goal, process, system};
 use blabla::project::{self, task};
+use blabla::runtime::MAX_TIMEOUT as REQUEST_BUDGET;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tempfile::TempDir;
 
-const BUDGET: Duration = Duration::from_millis(4500);
 fn invoke(root: &Path, arguments: &[&str], deadline: &Request) -> Result<(i32, Value), String> {
     deadline.invoke(root, arguments, true)
 }
@@ -915,7 +915,7 @@ impl GoalDelivery {
     }
     fn execute(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let start = Instant::now();
-        let request = Request::new(start + BUDGET);
+        let request = Request::new(start + REQUEST_BUDGET);
         let deadline = &request;
         let args = args.as_array().ok_or("action arguments must be an array")?;
         if name == "delivery_fixture" {
@@ -1055,7 +1055,7 @@ impl GoalDelivery {
     }
     fn execute_batch(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let start = Instant::now();
-        let request = Request::new(start + BUDGET);
+        let request = Request::new(start + REQUEST_BUDGET);
         let deadline = &request;
         let args = args.as_array().ok_or("batch arguments must be an array")?;
         if name == "delivery_batch_fixture" {

@@ -34,7 +34,7 @@ The current published `bridge/goal_delivery.rs`, `bridge/bounded_results.rs` and
 
 ### One pre-spawn Windows filesystem failure
 
-`expert_memory::status_and_role_navigation_expose_canonical_binding_ids` fails at `tests/support/cli.rs:16:39`: `NamedTempFile::new().unwrap()` receives Windows error 5, `PermissionDenied`, for `C:\Users\RUNNER~1\AppData\Local\Temp\.tmp2H6GuA`. This is the first stdout capture-file allocation, before command construction/spawn. No binding-ID assertion or CLI operation was reached by that invocation.
+`expert_memory::status_and_role_navigation_expose_canonical_binding_ids` fails at `tests/support/cli.rs:16:39`: `NamedTempFile::new().unwrap()` receives Windows error 5, `PermissionDenied`, for `%LOCALAPPDATA%\Temp\.tmp2H6GuA`. This is the first stdout capture-file allocation, before command construction/spawn. No binding-ID assertion or CLI operation was reached by that invocation.
 
 Inspection of the locked tempfile 3.27.0 implementation shows named creation uses read/write `create_new(true)` with `FILE_ATTRIBUTE_TEMPORARY`; its retry helper retries `AlreadyExists` and `AddrInUse`, not `PermissionDenied`. The archive contains no failed-path metadata or OS trace establishing why Windows denied creation. A collision, deletion race, scanner or directory-policy cause would be speculation. Changing retries, disabling security controls, replacing the temp directory or altering expert assertions is not an evidence-supported repair at this point.
 

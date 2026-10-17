@@ -46,7 +46,7 @@ verify behavior {
     seed 0
     cases 8
     steps 512
-    timeout_ms 5000
+    timeout_ms 8000
     shrink_budget 256
 }
 

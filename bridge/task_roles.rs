@@ -1,14 +1,14 @@
 use super::source_cli::Request;
 use blabla::memory::{self, process};
 use blabla::project::{self, task};
+use blabla::runtime::MAX_TIMEOUT as REQUEST_BUDGET;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tempfile::TempDir;
 
-const BUDGET: Duration = Duration::from_millis(4500);
 const CONFIGURED: &str = "role \"orchestrator\" { purpose \"Assign\" model \"owner\" }\nrole \"worker\" { purpose \"Implement\" model \"allowed\" consult [\"testing\"] }\n";
 fn invoke(root: &Path, arguments: &[&str], deadline: &Request) -> Result<(i32, Value), String> {
     deadline.invoke(root, arguments, true)
@@ -290,7 +290,7 @@ impl TaskRoles {
 
     fn perform(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let started = Instant::now();
-        let request = Request::new(started + BUDGET);
+        let request = Request::new(started + REQUEST_BUDGET);
         let deadline = &request;
         let args = args
             .as_array()

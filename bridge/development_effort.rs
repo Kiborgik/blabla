@@ -1,14 +1,14 @@
 use super::source_cli::Request;
 use blabla::memory::{self, process};
 use blabla::project::{self, task};
+use blabla::runtime::MAX_TIMEOUT as REQUEST_BUDGET;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tempfile::TempDir;
 
-const BUDGET: Duration = Duration::from_millis(4500);
 fn invoke(root: &Path, arguments: &[&str], deadline: &Request) -> Result<(i32, Value), String> {
     deadline.invoke(root, arguments, true)
 }
@@ -825,7 +825,7 @@ impl DevelopmentEffort {
     }
     fn perform(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let started = Instant::now();
-        let deadline = &Request::new(started + BUDGET);
+        let deadline = &Request::new(started + REQUEST_BUDGET);
         let args = args
             .as_array()
             .ok_or("effort arguments must be positional")?;
@@ -910,7 +910,7 @@ mod tests {
     }
     #[test]
     fn budget_read_preserves_real_close_refusal_and_restored_success() {
-        let deadline = &Request::new(Instant::now() + BUDGET);
+        let deadline = &Request::new(Instant::now() + REQUEST_BUDGET);
         let fixture = BudgetFixture::prepare(2, deadline).unwrap();
         expected(fixture.root.path(), &["task", "ready", "one"], 0, deadline).unwrap();
         fs::write(

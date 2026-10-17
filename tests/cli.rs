@@ -69,10 +69,22 @@ fn invalid_source_is_located_and_machine_readable() {
 
 #[test]
 fn invalid_budgets_fail_without_launching_an_application() {
+    let maximum = run(&args(&[
+        "run",
+        "examples/hello.bla",
+        "--timeout-ms",
+        "8000",
+        "--json",
+        "--",
+        "blabla-nonexistent-test-app",
+    ]));
+    assert_eq!(maximum.status.code(), Some(3), "{maximum:?}");
+    let report: Value = serde_json::from_slice(&maximum.stdout).unwrap();
+    assert_eq!(report["category"], "application");
     for (flag, value) in [
         ("--cases", "0"),
         ("--steps", "0"),
-        ("--timeout-ms", "5001"),
+        ("--timeout-ms", "8001"),
         ("--timeout-ms", "0"),
         ("--shrink-budget", "257"),
     ] {
