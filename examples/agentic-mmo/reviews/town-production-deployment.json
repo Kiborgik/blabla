@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "git_commit": "10bfce31f07555726a8485398ad063fab1513a92",
+  "site_project_id": "appgprj_6ad1d0db5a9081919042ef2c1bf794e9",
+  "source_commit": "748aae401d751a13088d0d35c0c4656ff2d6e50e",
+  "saved_source_commit": "748aae401d751a13088d0d35c0c4656ff2d6e50e",
+  "saved_version": 33,
+  "saved_version_id": "appgprj_6ad1d0db5a9081919042ef2c1bf794e9~appgver_aeecfe94980081919b79e1bbad0ec8cd",
+  "deployment_id": "appgdep_6ad3d206876c8191b04d0a87a2c60db0",
+  "deployment_status": "succeeded",
+  "deployed_at": "2026-10-17T19:52:45.181655+00:00",
+  "public_url": "https://agentic-civilizations.kibgames.chatgpt.site",
+  "env_set_revision": 1,
+  "public_version": "0.1.0-live.29",
+  "public_version_evidence": "Supported cloud-browser visible footer and actual desktop screenshot at revision2147; direct shell HTTP read returned403 and is not claimed successful.",
+  "public_desktop": {
+    "observed_revision": 2147,
+    "foundry_output": "18 Materials",
+    "paid": "2 Energy + 1 Iron",
+    "allocated_residents": 3,
+    "last_recorded_round": 1688,
+    "current_state": "On now",
+    "work_navigation": "Actual Foundry row selects foundry in existing Work picker and focuses it; exact receipt agrees.",
+    "disclosure": "Five hidden rows retained with truthful paused state.",
+    "evidence": "reviews/town-production-public-qa.md; actual screenshot retained in the public QA task scratch"
+  },
+  "archive": {
+    "local_gzip_sha256": "a7ec23220a36e706e964ff6aefeab85c25bf9d09c20cf1ea9b9a51cd0f66b168",
+    "local_tar_sha256": "37f289a01be5e21b705e1cc72bb34040f060e0c27b833b839d479b86a7089d78",
+    "sites_content_hash": "sha256:c6df3a28261d1498d9b020ecd221a42e2a822c26a4befb9714c93945c2f8fe66",
+    "sites_file_count": 6,
+    "sites_tar_bytes": 1720320
+  },
+  "worker_sha256": "cb294ef800ef4ebeab355be302ff1618ae44bdb8a7d78ec22e37ba73fddc7698",
+  "source_verification": {
+    "selected_blobs": 10,
+    "unrelated_blobs_preserved": 1326,
+    "focused_ui_cases": 12,
+    "independent_production_and_provenance_cases": 22,
+    "hosted_build": "passed",
+    "nested_canonical_verification": "GREEN before civic source work"
+  },
+  "outcome": "Partial",
+  "remaining": [
+    {
+      "requirement": "390px/mobile rendering",
+      "owner": "art-director",
+      "blocker": "Supported cloud browser has no viewport resize; no mobile pass claimed."
+    },
+    {
+      "requirement": "Physical touch and WebGL hardware behavior",
+      "owner": "art-director",
+      "blocker": "Not observed by supported desktop cloud-browser QA."
+    },
+    {
+      "requirement": "Substantive civic and industrial successor",
+      "owner": "core/server/art/creative roles",
+      "next": "Complete accepted civic choose-complete-adopt-use loop; this UI update does not activate gameplay."
+    }
+  ]
+}
