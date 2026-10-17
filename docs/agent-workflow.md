@@ -207,7 +207,7 @@ The example records the historical MMO observation, not today's live state or pe
 
 Blank required fields and fields belonging to another outcome are rejected. References, owners, dependencies and reasoning remain reviewable claims, not authenticated sources or semantic scores. No outcome opens tasks, grants scope or changes goal state.
 
-`task show` exposes `goal_reflection_state` as missing/current/stale (null without opt-in). Reflection binds the existing relevant revision, all scoped paths, latest matching evidence and disposition values. Refresh it after those change; writing it does not stale itself or dispositions, but does invalidate the challenge and review receipt. Required missing/stale reflection blocks READY and CLOSE through `goal-reflection-missing`. Legacy tasks remain unchanged. [Design and regression limits](../reviews/goal-reflection.md); [combined workflow and dogfooding evidence](../reviews/goal-workflow.md).
+`task show` exposes `goal_reflection_state` as missing/current/stale (null without opt-in). Reflection binds the existing relevant revision, all scoped paths, latest matching evidence and disposition values. Refresh it after those change; writing it does not stale itself or dispositions, but does invalidate the challenge and review receipt. Required missing/stale reflection blocks READY and CLOSE through `goal-reflection-missing`. Legacy tasks remain unchanged.
 
 ## Ask, don't guess
 
@@ -287,7 +287,7 @@ so author hand-back does not wait for an already-closed review. A separately ass
 ```sh
 blabla task delivery-review outcome-review viewer --verdict accept \
   --reason "Inspected the stated source boundary and the remaining viewport work" \
-  --observation-ref '{"kind":"artifact","locator":"reviews/viewer.md","context":"Independent inspection and explicit limits"}' \
+  --observation-ref '{"kind":"artifact","locator":"tests/fixtures/viewer.ts","context":"Inspected source fixture; actual device limits remain explicit in the task"}' \
   --model reviewer-model
 ```
 
@@ -416,10 +416,10 @@ existing explicit disposition/reflect/evidence routes after inspecting the cause
 Declare each source explicitly when opening the review:
 
 ```sh
-blabla task open combined-review --role reviewer --statement "Inspect Core and Server delivery" --scope reviews/combined.md --review-of core-task --delivery-review-of server-task --input core server --check-argv node --test tests/combined.test.ts
+blabla task open combined-review --role reviewer --statement "Inspect Core and Server delivery" --review-of core-task --delivery-review-of server-task --input core server tests/combined.test.ts --check-argv node --test tests/combined.test.ts
 blabla task accept combined-review --model REVIEWER_MODEL
 blabla task evidence combined-review --run
-blabla task delivery-review combined-review GOAL --source server-task --verdict accept --reason "Inspected this source's exact outcome and remaining limits" --observation-ref '{"kind":"artifact","locator":"reviews/combined.md","context":"Independent source inspection"}' --model REVIEWER_MODEL
+blabla task delivery-review combined-review GOAL --source server-task --verdict accept --reason "Inspected this source's exact outcome and remaining limits" --observation-ref '{"kind":"artifact","locator":"tests/combined.test.ts","context":"Inspected focused check; actual outcome and remaining limits are recorded in the task"}' --model REVIEWER_MODEL
 ```
 
 Repeat `--delivery-review-of` for additional distinct tasks. Omitted `--source` selects only the primary `--review-of`; same-goal verdicts for different sources remain separate. Acceptance pins every declared source and recursive review dependency. Changed claims, source inputs or inspection artifacts require current inspection and explicit receipts. A shared review must still reach its own independently accepted close before each source can close separately. Neither source closure nor accepting a Partial claim completes its residual. Existing records without additional targets or verdict source fields retain primary-only behavior. Additional targets cannot be inferred or added to an existing assignment in this slice.
