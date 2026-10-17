@@ -1,3 +1,4 @@
+mod source_cli;
 use blabla::structure::{
     CollectionFact, ImportFact, Literal, ModuleDecl, ModuleFacts, Provider, ProviderFailure,
     RuleStatus, SymbolFact, UnreadableImport, syntax::parse, verify,

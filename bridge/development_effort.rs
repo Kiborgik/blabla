@@ -1,88 +1,19 @@
+use super::source_cli::Request;
 use blabla::memory::{self, process};
 use blabla::project::{self, task};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::TempDir;
 
 const BUDGET: Duration = Duration::from_millis(4500);
-const OUTPUT_LIMIT: u64 = 2 * 1024 * 1024;
-fn stop(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-(child.id() as i32), libc::SIGKILL);
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+fn invoke(root: &Path, arguments: &[&str], deadline: &Request) -> Result<(i32, Value), String> {
+    deadline.invoke(root, arguments, true)
 }
 
-fn invoke(root: &Path, arguments: &[&str], deadline: Instant) -> Result<(i32, Value), String> {
-    let stdout = NamedTempFile::new().map_err(|e| e.to_string())?;
-    let stderr = NamedTempFile::new().map_err(|e| e.to_string())?;
-    let mut command = Command::new("cargo");
-    command
-        .args(["run", "--locked", "--quiet", "--manifest-path"])
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
-        .args(["--bin", "blabla", "--", "--project"])
-        .arg(root)
-        .arg("--json")
-        .args(arguments)
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .stdin(Stdio::null())
-        .stdout(stdout.reopen().map_err(|e| e.to_string())?)
-        .stderr(stderr.reopen().map_err(|e| e.to_string())?);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    if Instant::now() >= deadline {
-        return Err("effort probe request budget exhausted before invocation".into());
-    }
-    let mut child = command.spawn().map_err(|e| e.to_string())?;
-    let status = loop {
-        let size = stdout
-            .as_file()
-            .metadata()
-            .map_err(|e| e.to_string())?
-            .len()
-            + stderr
-                .as_file()
-                .metadata()
-                .map_err(|e| e.to_string())?
-                .len();
-        if size > OUTPUT_LIMIT || Instant::now() >= deadline {
-            stop(&mut child);
-            return Err(format!(
-                "source CLI exceeded request time/output budget: {arguments:?}"
-            ));
-        }
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            break status;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    };
-    let out = fs::read(stdout.path()).map_err(|e| e.to_string())?;
-    let err = fs::read(stderr.path()).map_err(|e| e.to_string())?;
-    if out.len() as u64 + err.len() as u64 > OUTPUT_LIMIT {
-        return Err("source CLI exceeded request output budget".into());
-    }
-    let value = serde_json::from_slice(&out).map_err(|e| {
-        format!(
-            "source CLI returned non-JSON: {e}; {}",
-            String::from_utf8_lossy(&err)
-        )
-    })?;
-    Ok((
-        status.code().ok_or("source CLI terminated by signal")?,
-        value,
-    ))
-}
-
-fn expected(root: &Path, args: &[&str], exit: i32, deadline: Instant) -> Result<Value, String> {
+fn expected(root: &Path, args: &[&str], exit: i32, deadline: &Request) -> Result<Value, String> {
     let (actual, value) = invoke(root, args, deadline)?;
     if actual != exit {
         return Err(format!(
@@ -123,7 +54,7 @@ fn tree(root: &Path) -> Result<BTreeMap<String, Option<Vec<u8>>>, String> {
 
 const PROCESS: &str = "role \"orchestrator\" { purpose \"Own\" model \"owner\" }\nrole \"worker\" { purpose \"Work\" model \"worker-model\" }\n";
 
-fn setup(deadline: Instant) -> Result<TempDir, String> {
+fn setup(deadline: &Request) -> Result<TempDir, String> {
     let root = TempDir::new().map_err(|e| e.to_string())?;
     for (path, contents) in [
         (
@@ -215,7 +146,7 @@ struct PhaseFixture {
     reason: Option<String>,
 }
 impl PhaseFixture {
-    fn prepare(kind: i64, deadline: Instant) -> Result<Self, String> {
+    fn prepare(kind: i64, deadline: &Request) -> Result<Self, String> {
         let kind = kind.rem_euclid(12);
         let root = setup(deadline)?;
         let mut f = Self {
@@ -362,7 +293,7 @@ impl PhaseFixture {
             json!({"phase_fixture_initialized":true,"eligible":eligible,"phase_interval_count":task.work_intervals.len(),"phase_request":self.requested,"phase_worker":self.worker,"phase_model":self.model,"phase_task_state":task.state,"phase_model_permitted":permitted,"phase_pending_count":pending.len()}),
         )
     }
-    fn switch(&self, deadline: Instant) -> Result<Value, String> {
+    fn switch(&self, deadline: &Request) -> Result<Value, String> {
         let before_tree = tree(self.root.path())?;
         let before = record(self.root.path(), "one")?;
         let project = loaded(self.root.path())?;
@@ -602,7 +533,7 @@ struct BudgetFixture {
     window: bool,
 }
 impl BudgetFixture {
-    fn prepare(kind: i64, deadline: Instant) -> Result<Self, String> {
+    fn prepare(kind: i64, deadline: &Request) -> Result<Self, String> {
         let kind = kind.rem_euclid(11);
         let root = setup(deadline)?;
         let mut f = Self {
@@ -716,7 +647,7 @@ impl BudgetFixture {
             json!({"budget_fixture_initialized":true,"budget_fixture_qualified":rows==exact && self.other.is_none() && !self.window,"budget_fixture_provenance":"synthetic interval arithmetic; task lifecycle/checks are real","budget_input_intervals":rows.len()}),
         )
     }
-    fn inspect(&self, deadline: Instant) -> Result<Value, String> {
+    fn inspect(&self, deadline: &Request) -> Result<Value, String> {
         let before = tree(self.root.path())?;
         let before_other = self.other.as_ref().map(|r| tree(r.path())).transpose()?;
         let additional = self
@@ -894,7 +825,7 @@ impl DevelopmentEffort {
     }
     fn perform(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let started = Instant::now();
-        let deadline = started + BUDGET;
+        let deadline = &Request::new(started + BUDGET);
         let args = args
             .as_array()
             .ok_or("effort arguments must be positional")?;
@@ -955,9 +886,7 @@ impl DevelopmentEffort {
             }
             _ => unreachable!(),
         }
-        if Instant::now() > deadline {
-            return Err("effort request exceeded deadline".into());
-        }
+        deadline.finish()?;
         eprintln!("effort {name}: {} ms", started.elapsed().as_millis());
         Ok(())
     }
@@ -981,7 +910,7 @@ mod tests {
     }
     #[test]
     fn budget_read_preserves_real_close_refusal_and_restored_success() {
-        let deadline = Instant::now() + BUDGET;
+        let deadline = &Request::new(Instant::now() + BUDGET);
         let fixture = BudgetFixture::prepare(2, deadline).unwrap();
         expected(fixture.root.path(), &["task", "ready", "one"], 0, deadline).unwrap();
         fs::write(

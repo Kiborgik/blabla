@@ -1,3 +1,5 @@
+#[path = "../bridge/source_cli.rs"]
+mod source_cli;
 use serde_json::{Value, json};
 #[path = "../bridge/goal_delivery.rs"]
 mod goal_delivery;

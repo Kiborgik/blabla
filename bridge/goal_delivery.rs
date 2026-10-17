@@ -1,101 +1,28 @@
+use super::source_cli::Request;
 use blabla::memory::{self, goal, process, system};
 use blabla::project::{self, task};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::TempDir;
 
 const BUDGET: Duration = Duration::from_millis(4500);
-const OUTPUT_LIMIT: u64 = 2 * 1024 * 1024;
-fn stop(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-(child.id() as i32), libc::SIGKILL);
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-fn invoke(root: &Path, arguments: &[&str], deadline: Instant) -> Result<(i32, Value), String> {
-    invoke_format(root, arguments, deadline, true)
+fn invoke(root: &Path, arguments: &[&str], deadline: &Request) -> Result<(i32, Value), String> {
+    deadline.invoke(root, arguments, true)
 }
 
 fn invoke_format(
     root: &Path,
     arguments: &[&str],
-    deadline: Instant,
+    deadline: &Request,
     json_output: bool,
 ) -> Result<(i32, Value), String> {
-    let stdout = NamedTempFile::new().map_err(|e| e.to_string())?;
-    let stderr = NamedTempFile::new().map_err(|e| e.to_string())?;
-    let mut command = Command::new("cargo");
-    command
-        .args(["run", "--locked", "--quiet", "--manifest-path"])
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
-        .args(["--bin", "blabla", "--", "--project"])
-        .arg(root)
-        .args(if json_output { vec!["--json"] } else { vec![] })
-        .args(arguments)
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .stdin(Stdio::null())
-        .stdout(stdout.reopen().map_err(|e| e.to_string())?)
-        .stderr(stderr.reopen().map_err(|e| e.to_string())?);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    if Instant::now() >= deadline {
-        return Err("delivery probe request budget exhausted before invocation".into());
-    }
-    let mut child = command.spawn().map_err(|e| e.to_string())?;
-    let status = loop {
-        let size = stdout
-            .as_file()
-            .metadata()
-            .map_err(|e| e.to_string())?
-            .len()
-            + stderr
-                .as_file()
-                .metadata()
-                .map_err(|e| e.to_string())?
-                .len();
-        if size > OUTPUT_LIMIT || Instant::now() >= deadline {
-            stop(&mut child);
-            return Err(format!(
-                "source CLI exceeded request time/output budget: {arguments:?}"
-            ));
-        }
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            break status;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    };
-    let out = fs::read(stdout.path()).map_err(|e| e.to_string())?;
-    let err = fs::read(stderr.path()).map_err(|e| e.to_string())?;
-    if out.len() as u64 + err.len() as u64 > OUTPUT_LIMIT {
-        return Err("source CLI exceeded request output budget".into());
-    }
-    let value = if json_output {
-        serde_json::from_slice(&out).map_err(|e| {
-            format!(
-                "source CLI returned non-JSON: {e}; {}",
-                String::from_utf8_lossy(&err)
-            )
-        })?
-    } else {
-        Value::String(String::from_utf8(out).map_err(|e| e.to_string())?)
-    };
-    Ok((
-        status.code().ok_or("source CLI terminated by signal")?,
-        value,
-    ))
+    deadline.invoke(root, arguments, json_output)
 }
 
-fn expected(root: &Path, args: &[&str], exit: i32, deadline: Instant) -> Result<Value, String> {
+fn expected(root: &Path, args: &[&str], exit: i32, deadline: &Request) -> Result<Value, String> {
     let (actual, value) = invoke(root, args, deadline)?;
     if actual != exit {
         return Err(format!(
@@ -181,7 +108,7 @@ fn source_args(name: &str, scope: &str) -> Vec<String> {
     .collect()
 }
 
-fn owned(root: &Path, args: &[String], deadline: Instant) -> Result<Value, String> {
+fn owned(root: &Path, args: &[String], deadline: &Request) -> Result<Value, String> {
     expected(
         root,
         &args.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -190,7 +117,7 @@ fn owned(root: &Path, args: &[String], deadline: Instant) -> Result<Value, Strin
     )
 }
 
-fn checked(root: &Path, name: &str, deadline: Instant) -> Result<(), String> {
+fn checked(root: &Path, name: &str, deadline: &Request) -> Result<(), String> {
     let value = expected(root, &["task", "evidence", name, "--run"], 0, deadline)?;
     let record: task::Task = serde_json::from_value(value["task"].clone())
         .map_err(|error| format!("fixture evidence returned an invalid task: {error}"))?;
@@ -204,7 +131,7 @@ fn checked(root: &Path, name: &str, deadline: Instant) -> Result<(), String> {
     Ok(())
 }
 
-fn handback(root: &Path, name: &str, deadline: Instant) -> Result<(), String> {
+fn handback(root: &Path, name: &str, deadline: &Request) -> Result<(), String> {
     let value = expected(root, &["challenge", name], 0, deadline)?;
     if value["assignment_clear"] != true {
         return Err(format!("fixture challenge not clear: {value}"));
@@ -285,7 +212,7 @@ fn review_args(name: &str, model: &str, origin: Option<&str>) -> Vec<String> {
     args
 }
 
-fn open_review(root: &Path, name: &str, target: &str, deadline: Instant) -> Result<(), String> {
+fn open_review(root: &Path, name: &str, target: &str, deadline: &Request) -> Result<(), String> {
     let path = format!("reviews/{name}.md");
     expected(
         root,
@@ -321,7 +248,7 @@ fn open_review(root: &Path, name: &str, target: &str, deadline: Instant) -> Resu
     checked(root, name, deadline)
 }
 
-fn project_status(root: &Path, deadline: Instant) -> Result<Value, String> {
+fn project_status(root: &Path, deadline: &Request) -> Result<Value, String> {
     let (exit, value) = invoke(root, &["status"], deadline)?;
     if ![0, 1, 5].contains(&exit) || !value["completion"].is_object() {
         return Err(format!("status unavailable: {exit}: {value}"));
@@ -341,14 +268,14 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn prepare(kind: i64, deadline: Instant) -> Result<Self, String> {
+    fn prepare(kind: i64, deadline: &Request) -> Result<Self, String> {
         Self::prepare_with_review(kind, true, deadline)
     }
 
     fn prepare_with_review(
         kind: i64,
         singular_review: bool,
-        deadline: Instant,
+        deadline: &Request,
     ) -> Result<Self, String> {
         let kind = kind.rem_euclid(15);
         let root = TempDir::new().map_err(|e| e.to_string())?;
@@ -525,7 +452,7 @@ impl Fixture {
         })
     }
 
-    fn view(&self, deadline: Instant) -> Result<Value, String> {
+    fn view(&self, deadline: &Request) -> Result<Value, String> {
         let root = self.root.path();
         let project = project::read_manifest(&root.join("project.bla"))
             .and_then(project::load)
@@ -715,7 +642,7 @@ struct BatchFixture {
 }
 
 impl BatchFixture {
-    fn prepare(kind: i64, deadline: Instant) -> Result<Self, String> {
+    fn prepare(kind: i64, deadline: &Request) -> Result<Self, String> {
         let kind = kind.rem_euclid(8);
         let base = Fixture::prepare_with_review(5, false, deadline)?;
         let root = base.root.path();
@@ -839,7 +766,7 @@ impl BatchFixture {
         })
     }
 
-    fn view(&self, deadline: Instant) -> Result<Value, String> {
+    fn view(&self, deadline: &Request) -> Result<Value, String> {
         let root = self.base.root.path();
         let project = project::read_manifest(&root.join("project.bla"))
             .and_then(project::load)
@@ -988,7 +915,8 @@ impl GoalDelivery {
     }
     fn execute(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let start = Instant::now();
-        let deadline = start + BUDGET;
+        let request = Request::new(start + BUDGET);
+        let deadline = &request;
         let args = args.as_array().ok_or("action arguments must be an array")?;
         if name == "delivery_fixture" {
             if args.len() != 1 {
@@ -1011,7 +939,7 @@ impl GoalDelivery {
             }
             if self.fixture.is_none() && name == "inspect_delivery_reminders" {
                 self.clear_terminal();
-                return Ok(());
+                return deadline.finish();
             }
             let initialized_now = self.fixture.is_none();
             if initialized_now {
@@ -1116,9 +1044,7 @@ impl GoalDelivery {
             );
         }
         self.observation["delivery_request_millis"] = json!(start.elapsed().as_millis());
-        if Instant::now() > deadline {
-            return Err("delivery request exceeded budget".into());
-        }
+        deadline.finish()?;
         Ok(())
     }
     fn merge(&mut self, view: Value) {
@@ -1129,7 +1055,8 @@ impl GoalDelivery {
     }
     fn execute_batch(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let start = Instant::now();
-        let deadline = start + BUDGET;
+        let request = Request::new(start + BUDGET);
+        let deadline = &request;
         let args = args.as_array().ok_or("batch arguments must be an array")?;
         if name == "delivery_batch_fixture" {
             if args.len() != 1 {
@@ -1198,9 +1125,7 @@ impl GoalDelivery {
             self.observation["delivery_source_records_unchanged"] = json!(sources);
         }
         self.observation["delivery_request_millis"] = json!(start.elapsed().as_millis());
-        if Instant::now() > deadline {
-            return Err("batch request exceeded budget".into());
-        }
+        deadline.finish()?;
         Ok(())
     }
     fn clear_terminal(&mut self) {

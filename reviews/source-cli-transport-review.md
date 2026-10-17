@@ -1,0 +1,27 @@
+# Independent current-source transport review
+
+17 October 2026. Reviewer: gpt-6-astra. Actual assignment: `review-source-cli-transport`, reviewing `reconstruct-source-cli-transport`. The frozen sixteen-path change was read against the seven conditions in `reviews/windows-ci-recovery.md`, including all new code, every integration hunk, the existing process-tree implementation, and the nineteen transport tests.
+
+## Finding
+
+No blocking implementation defect found in this bounded change. This is a source-review finding, not a claim that Windows is repaired or that the author's final matrix has passed. The report records that matrix as pending at review time.
+
+## Required behavior accounted for
+
+1. Implemented: each of the four helper families still uses the original 4500 ms request allowance. Lazy acquisition, both Cargo verifications, inventories, hashing/copying, real CLI operations, parsing and final validation share that deadline. Reset and non-CLI paths do not acquire an artifact. Task-role configuration/open paths and early goal-delivery completion retain final validation.
+2. Implemented: successful locked Cargo JSON selects the exact canonical manifest, binary name/kind, source and executable, with a successful final build record. Malformed, missing, conflicting and failed records refuse acquisition. There is no installed executable, guessed target path or caller executable override.
+3. Implemented: request-owned copies preserve filename and mtime. SHA-256, size and mtime are compared across copying and a second bounded Cargo build selecting the same artifact. The owned artifact cannot be replaced by later modification of the original, and its owner is request-scoped.
+4. Implemented: byte inventories cover source and embedded files, manifests/lockfile/toolchain, build-script presence, ancestor manifests and Cargo configuration locations. Before another CLI invocation and before success, known inventory must still match. Computed/external includes, nested conditional module paths, symlinks and opaque input contexts decline direct reuse.
+5. Implemented: unsupported Cargo configurations, environment/compiler/profile/runner settings, workspaces, build scripts and runtime/dependency linkage select the original source Cargo transport before any lifecycle operation. Windows environment keys receive case-insensitive matching. Known fallback inputs remain guarded; genuinely opaque inputs do not acquire a closed-world guarantee. No operation is replayed.
+6. Implemented: bounded command execution reuses the unchanged private ProcessTree. The guard owns child and capture files immediately after spawn; errors and unwind retain cleanup. Success also terminates descendants. Existing Windows suspended-start Job Object attachment and Unix containment remain. Exceptional cleanup has a bounded foreground wait and an ownership-retaining reaper.
+7. Implemented: 2 MiB combined stdout/stderr limits apply to each process, including Cargo, and final reads are capped before parsing. Original exit codes, text mode and non-JSON failures remain. Fixture operations, byte assertions and five-second AppSession assertions are unchanged. Earlier fixture effects are not described as rolled back by a later transport error.
+
+The five integration-test files contain only module registration additions. The nextest change only adds the transport suite to the existing single-thread group. No deadline increase, dependency change, contract change, test exclusion, assertion weakening or speculative tempfile workaround is present. Existing ProcessTree was deliberately reused rather than reimplemented. Shared acquisition policy covers four real consumers, while platform containment and fixture lifecycle decisions remain separately owned.
+
+## Evidence and limits
+
+The independent declared check completed with exit 0 on the reviewed source at approximately 19:40 UTC. Each exact test passed with eighteen others filtered: `changed_artifact_before_reverification_is_refused_even_with_same_size_and_mtime`, `successful_parent_exit_still_cleans_its_descendants`, and `external_and_computed_embedded_inputs_decline_reuse`. These falsify concerns about metadata-preserving artifact replacement, child escape after successful parent exit, and incomplete embedded-source closure. Their complete output was read before this report was written.
+
+The author's fresh `transport-guards.log` and its separate exit marker were independently read in full: nineteen passed, zero failed, exit 0, 4.01 seconds. Actual Cargo-built drift and configuration-fallback fixtures supplement synthetic record-selection cases. This is Linux evidence. The independent review does not repeat the author's seven-suite matrix, targeted coverage witness, clippy or formatting run.
+
+The original published Windows pre-spawn `NamedTempFile` PermissionDenied has no established cause or repair here. A newer published-head Windows run, 39061816111, is reported by the tooling owner as fourteen request-budget failures, including `bridge/development_effort.rs:985` in `BudgetFixture::prepare`. That fifth old helper is outside this frozen scope and requires its separately owned follow-on; its artifact was not independently inspected for this review. Neither published-head run exercises this uncommitted candidate. Pending obligations remain the author's complete terminal declared check, orchestrator integration/canonical verification, the fifth-helper follow-on and exact-head Ubuntu/Windows CI. No merge, release or completed Windows repair is asserted.

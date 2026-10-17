@@ -1,0 +1,27 @@
+# Transport speed delta review
+
+Independent review by gpt-6-astra/xhigh, actual task `review-transport-speed-delta`,17 October2026. Scope is the four-path delta in `bridge/source_cli.rs`, `src/runtime/command.rs`, `tests/source_cli_transport.rs` and `Cargo.toml`, relative to the previously reviewed19:41 checkpoint. The original16-path implementation review and its three independent discriminating controls are retained, not rerun or represented as new results.
+
+## Finding and repair
+
+Finding1 identified a real exceptional cleanup gap in the first event-driven implementation: `Running.child.take()` preceded exit-waiter thread creation. If thread creation failed, dropping the closure dropped the Child without waiting. Linux process-group reaping could recover it, but the non-Linux Unix reaper is a no-op. Process termination alone did not preserve child reaping.
+
+The corrected `src/runtime/command.rs` creates the waiter while Running still owns Child, transfers it only after successful thread creation, and restores the Child on transfer failure. The receiver waits for ownership rather than capturing it before spawn succeeds. This repairs the identified error path without a mutex or new persistent framework. Exact reviewed command hash: `40f76f8e7cf1420f38094612f32550540cc3d82017db0d74e075e28e4fe007b6`. Deliberate OS thread-exhaustion fault injection was not performed.
+
+## Retained guarantees
+
+- Copying and the first original SHA-256 calculation share one bounded streaming read. Handle and selected-path length/mtime checks remain. The owned copy is independently hashed; a second successful Cargo provenance build still selects the same original artifact; that original is independently hashed and compared again. Source inventory checks and final deadline validation remain. This removes redundant I/O, not an identity comparison.
+- Command completion and stdout/stderr EOF/error events replace the ordinary polling/file-capture loop. A single atomic remaining-byte count enforces the combined2MiB output allowance before bytes are retained. The event queue has one terminal result per reader and waiter. Deadline expiry and output failure still terminate the process tree; successful parent exit also terminates descendants before successful return. Existing bounded exceptional cleanup remains.
+- The4500ms total request allowance is unchanged. No cross-request executable cache, arbitrary executable override, new environment fallback, skipped Cargo provenance or detached success condition was introduced. Existing unsupported/external-source fallback conditions remain.
+- `[profile.dev] debug = "line-tables-only"` changes development debug information only. Existing optimization and assertion settings remain; full type/variable debugging is intentionally reduced while line information remains. The author measured187,528,608→74,141,768 executable bytes and one identical role case6.05→4.30 seconds. These are local measurements, not Windows performance or general throughput guarantees.
+- The two transport-test edits adapt the owned-artifact tuple destructuring. They do not loosen an assertion or budget.
+
+## Evidence and result
+
+All four current files match the author's frozen `transfer-owned-source.sha256`. The full corrected guard log and terminal exit were read: all19 existing transport guards pass, exit0,3.80 seconds. This includes combined output overflow, successful-exit descendant cleanup, timeout containment, source drift, same-size/restored-mtime artifact drift, fallback behavior and original stream/exit preservation.
+
+The original independent controls remain evidence for their unchanged boundaries: same-size/restored-mtime artifact rejection, descendants after successful parent exit, and external/computed embedded-source fallback. No broad matrix was rerun by this reviewer. The current declared coherent author matrix ran20:16:12–20:38:48 and exited0: all60 cases in seven suites passed, followed by the exact reordered composed witness in1003.42 seconds, strict all-target clippy and formatting. The retained terminal marker, suite/witness results and complete final author report were inspected. Its interrupted predecessor exited130 and is not a pass. Final report SHA-256 is `1a129cf077787e2cc0d93c0133a0dbb30494b3b03dc364e7273a070af78160be`; terminal log SHA-256 is `caeb522051ebab5d9a9ed038286b8f39bb94b4ef6814998179c7becdd3a474c8`. All16 implementation/configuration source hashes still match the final freeze.
+
+Verdict: ACCEPT the corrected four-path delta and its bounded local evidence. Source delta finding1 is addressed by the inspected ownership transfer. No other blocking source defect was identified in this bounded review. Final project acceptance remains orchestrator-owned. The report-presence check proves only this report exists.
+
+The author's measured seven-suite total313.37 seconds plus1003.42-second witness consumes1316.79 seconds against the existing whole Rust-stage1800-second cap, leaving483.21 seconds before other tests, compilation and platform differences. This is a concrete aggregate-gate risk, not proof of failure or permission to raise the timeout. Linux executable-size gains do not establish MSVC/PDB performance. Exact-head terminal Ubuntu/Windows CI, the separate fifth development-effort helper, and the unknown historical pre-spawn tempfile-denial cause remain explicit residuals. No canonical completion or Windows repair success is claimed.

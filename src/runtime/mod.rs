@@ -1,3 +1,4 @@
+pub mod command;
 pub mod primitives;
 pub(crate) mod process_tree;
 pub(crate) mod strict_json;

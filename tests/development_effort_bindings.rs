@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 #[path = "../bridge/development_effort.rs"]
 mod development_effort;
+#[path = "../bridge/source_cli.rs"]
+mod source_cli;
 
 fn serial() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

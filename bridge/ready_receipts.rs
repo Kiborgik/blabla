@@ -1,88 +1,19 @@
+use super::source_cli::Request;
 use blabla::memory::{self, goal, process};
 use blabla::project::{self, task};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-use tempfile::{NamedTempFile, TempDir};
+use tempfile::TempDir;
 
 const BUDGET: Duration = Duration::from_millis(4500);
-const OUTPUT_LIMIT: u64 = 2 * 1024 * 1024;
-fn stop(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(-(child.id() as i32), libc::SIGKILL);
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+fn invoke(root: &Path, arguments: &[&str], deadline: &Request) -> Result<(i32, Value), String> {
+    deadline.invoke(root, arguments, true)
 }
 
-fn invoke(root: &Path, arguments: &[&str], deadline: Instant) -> Result<(i32, Value), String> {
-    let stdout = NamedTempFile::new().map_err(|e| e.to_string())?;
-    let stderr = NamedTempFile::new().map_err(|e| e.to_string())?;
-    let mut command = Command::new("cargo");
-    command
-        .args(["run", "--locked", "--quiet", "--manifest-path"])
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
-        .args(["--bin", "blabla", "--", "--project"])
-        .arg(root)
-        .arg("--json")
-        .args(arguments)
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .stdin(Stdio::null())
-        .stdout(stdout.reopen().map_err(|e| e.to_string())?)
-        .stderr(stderr.reopen().map_err(|e| e.to_string())?);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    if Instant::now() >= deadline {
-        return Err("receipt probe request budget exhausted before invocation".into());
-    }
-    let mut child = command.spawn().map_err(|e| e.to_string())?;
-    let status = loop {
-        let size = stdout
-            .as_file()
-            .metadata()
-            .map_err(|e| e.to_string())?
-            .len()
-            + stderr
-                .as_file()
-                .metadata()
-                .map_err(|e| e.to_string())?
-                .len();
-        if size > OUTPUT_LIMIT || Instant::now() >= deadline {
-            stop(&mut child);
-            return Err(format!(
-                "source CLI exceeded request time/output budget: {arguments:?}"
-            ));
-        }
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            break status;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    };
-    let out = fs::read(stdout.path()).map_err(|e| e.to_string())?;
-    let err = fs::read(stderr.path()).map_err(|e| e.to_string())?;
-    if out.len() as u64 + err.len() as u64 > OUTPUT_LIMIT {
-        return Err("source CLI exceeded request output budget".into());
-    }
-    let value = serde_json::from_slice(&out).map_err(|e| {
-        format!(
-            "source CLI returned non-JSON: {e}; {}",
-            String::from_utf8_lossy(&err)
-        )
-    })?;
-    Ok((
-        status.code().ok_or("source CLI terminated by signal")?,
-        value,
-    ))
-}
-
-fn expected(root: &Path, args: &[&str], exit: i32, deadline: Instant) -> Result<Value, String> {
+fn expected(root: &Path, args: &[&str], exit: i32, deadline: &Request) -> Result<Value, String> {
     let (actual, value) = invoke(root, args, deadline)?;
     if actual != exit {
         return Err(format!(
@@ -199,7 +130,7 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn ready(root: &Path, name: &str, review: bool, deadline: Instant) -> Result<(), String> {
+    fn ready(root: &Path, name: &str, review: bool, deadline: &Request) -> Result<(), String> {
         let model = if review { "reviewer" } else { "worker" };
         let scope = if review { "report.md" } else { "src" };
         let mut args = vec![
@@ -269,7 +200,7 @@ impl Fixture {
         Ok(())
     }
 
-    fn prepare(kind: i64, deadline: Instant) -> Result<Self, String> {
+    fn prepare(kind: i64, deadline: &Request) -> Result<Self, String> {
         let kind = kind.rem_euclid(12);
         let root = TempDir::new().map_err(|e| e.to_string())?;
         let path = root.path();
@@ -377,7 +308,7 @@ impl Fixture {
         })
     }
 
-    fn snapshot(&self, deadline: Instant) -> Result<Snapshot, String> {
+    fn snapshot(&self, deadline: &Request) -> Result<Snapshot, String> {
         let root = self.root.path();
         let project = project::read_manifest(&root.join("project.bla"))
             .and_then(project::load)
@@ -454,7 +385,7 @@ impl Fixture {
         value
     }
 
-    fn refresh(&self, reflection: bool, deadline: Instant) -> Result<Value, String> {
+    fn refresh(&self, reflection: bool, deadline: &Request) -> Result<Value, String> {
         let before = self.snapshot(deadline)?;
         let (exit, response) = invoke(
             self.root.path(),
@@ -545,7 +476,7 @@ impl Fixture {
         Ok(value)
     }
 
-    fn close(&self, deadline: Instant) -> Result<Value, String> {
+    fn close(&self, deadline: &Request) -> Result<Value, String> {
         let before = self.snapshot(deadline)?;
         if before
             .record
@@ -622,7 +553,8 @@ impl ReadyReceipts {
     }
     fn perform(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let start = Instant::now();
-        let deadline = start + BUDGET;
+        let request = Request::new(start + BUDGET);
+        let deadline = &request;
         let args = args
             .as_array()
             .ok_or("receipt arguments must be a positional array")?;
@@ -650,6 +582,7 @@ impl ReadyReceipts {
                 fixture.refresh(name == "refresh_ready_reflection", deadline)?
             };
         }
+        deadline.finish()?;
         eprintln!(
             "ready receipt probe {name}: {} ms",
             start.elapsed().as_millis()
