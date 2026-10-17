@@ -102,7 +102,8 @@ use std::path::Path;
 
 #[test]
 fn ordinary_current_source_request_reuses_one_owned_artifact() {
-    let request = source_cli::Request::new(Instant::now() + Duration::from_millis(4500));
+    let campaign = source_cli::Campaign::new();
+    let request = campaign.request(Instant::now() + Duration::from_millis(4500));
     let root = tempfile::TempDir::new().unwrap();
     let (exit, help) = request.invoke(root.path(), &["--help"], false).unwrap();
     assert_eq!(exit, 0);
@@ -116,6 +117,57 @@ fn ordinary_current_source_request_reuses_one_owned_artifact() {
     assert_eq!(request.artifact_path(), Some(artifact.clone()));
     request.finish().unwrap();
     drop(request);
+    assert!(artifact.exists());
+    let clone = campaign.clone();
+    drop(campaign);
+    let request = clone.request(Instant::now() + Duration::from_millis(4500));
+    let (exit, _) = request.invoke(root.path(), &["--version"], false).unwrap();
+    assert_eq!(exit, 0);
+    assert_eq!(request.artifact_path(), Some(artifact.clone()));
+    request.finish().unwrap();
+    drop(request);
+    let request = clone.request(Instant::now() + Duration::from_millis(4500));
+    assert_eq!(
+        request
+            .invoke(root.path(), &["--version"], false)
+            .unwrap()
+            .0,
+        0
+    );
+    let original = std::fs::read(&artifact).unwrap();
+    let modified = std::fs::metadata(&artifact).unwrap().modified().unwrap();
+    let mut changed = original.clone();
+    changed[0] ^= 1;
+    std::fs::write(&artifact, changed).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&artifact)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    assert!(
+        request
+            .invoke(root.path(), &["--version"], false)
+            .unwrap_err()
+            .contains("artifact changed")
+    );
+    drop(request);
+    std::fs::write(&artifact, original).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&artifact)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    let request = clone.request(Instant::now() + Duration::from_millis(4500));
+    assert!(
+        request
+            .invoke(root.path(), &["--version"], false)
+            .unwrap_err()
+            .contains("artifact changed")
+    );
+    drop(request);
+    drop(clone);
     assert!(!artifact.exists());
 }
 
@@ -318,10 +370,8 @@ fn real_cargo_request_refuses_embedded_drift_before_another_child_or_success() {
     let dir = locked_source();
     std::fs::write(dir.path().join("src/help.md"), "first").unwrap();
     std::fs::write(dir.path().join("src/main.rs"), r#"fn main() { println!("{}", include_str!("help.md")); std::fs::write("ran", "once").unwrap(); }"#).unwrap();
-    let request = source_cli::Request::from_source(
-        dir.path().to_owned(),
-        Instant::now() + Duration::from_millis(4500),
-    );
+    let campaign = source_cli::Campaign::from_source(dir.path().to_owned());
+    let request = campaign.request(Instant::now() + Duration::from_millis(4500));
     assert_eq!(request.invoke(dir.path(), &[], false).unwrap().1, "first\n");
     let artifact = request.artifact_path().unwrap();
     std::fs::write(dir.path().join("ran"), "must remain").unwrap();
@@ -338,6 +388,20 @@ fn real_cargo_request_refuses_embedded_drift_before_another_child_or_success() {
         "must remain"
     );
     drop(request);
+    std::fs::write(dir.path().join("src/help.md"), "first").unwrap();
+    let request = campaign.request(Instant::now() + Duration::from_millis(4500));
+    assert!(
+        request
+            .invoke(dir.path(), &[], false)
+            .unwrap_err()
+            .contains("inputs changed")
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("ran")).unwrap(),
+        "must remain"
+    );
+    drop(request);
+    drop(campaign);
     assert!(!artifact.exists());
 }
 
@@ -453,10 +517,16 @@ fn original_cargo_fallback_honors_configuration_and_guards_observable_drift() {
     let config = dir.path().join(".cargo/config.toml");
     std::fs::write(&config, "[env]\nSOURCE_CLI_CONTEXT='configured'\n").unwrap();
     std::fs::write(dir.path().join("src/main.rs"), r#"fn main() { println!("{}", std::env::var("SOURCE_CLI_CONTEXT").unwrap()); std::fs::write("ran", "once").unwrap(); }"#).unwrap();
-    let request = source_cli::Request::from_source(
-        dir.path().to_owned(),
-        Instant::now() + Duration::from_millis(4500),
+    let campaign = source_cli::Campaign::from_source(dir.path().to_owned());
+    let request = campaign.request(Instant::now() + Duration::from_millis(4500));
+    assert_eq!(
+        request.invoke(dir.path(), &[], false).unwrap().1,
+        "configured\n"
     );
+    assert!(request.artifact_path().is_none());
+    request.finish().unwrap();
+    drop(request);
+    let request = campaign.request(Instant::now() + Duration::from_millis(4500));
     assert_eq!(
         request.invoke(dir.path(), &[], false).unwrap().1,
         "configured\n"

@@ -1,12 +1,13 @@
 use blabla::runtime::command;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::rc::Rc;
 use std::time::{Instant, SystemTime};
 use tempfile::TempDir;
 
@@ -22,14 +23,47 @@ enum Transport {
     Artifact {
         inputs: Inventory,
         executable: PathBuf,
+        identity: ArtifactIdentity,
+        environment: BTreeMap<std::ffi::OsString, std::ffi::OsString>,
         _owner: TempDir,
     },
 }
 
-pub(crate) struct Request {
+struct Source {
     source: PathBuf,
-    deadline: Instant,
     transport: RefCell<Option<Transport>>,
+    failure: RefCell<Option<String>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct Campaign(Rc<Source>);
+
+impl Campaign {
+    pub(crate) fn new() -> Self {
+        Self::from_source(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+    }
+
+    pub(crate) fn from_source(source: PathBuf) -> Self {
+        Self(Rc::new(Source {
+            source,
+            transport: RefCell::new(None),
+            failure: RefCell::new(None),
+        }))
+    }
+
+    pub(crate) fn request(&self, deadline: Instant) -> Request {
+        Request {
+            campaign: self.clone(),
+            deadline,
+            verified: Cell::new(false),
+        }
+    }
+}
+
+pub(crate) struct Request {
+    campaign: Campaign,
+    deadline: Instant,
+    verified: Cell<bool>,
 }
 
 fn check_time(deadline: Instant) -> Result<(), String> {
@@ -486,22 +520,20 @@ pub(crate) fn owned_artifact(
 }
 
 impl Request {
+    #[allow(dead_code)]
     pub(crate) fn new(deadline: Instant) -> Self {
-        Self::from_source(PathBuf::from(env!("CARGO_MANIFEST_DIR")), deadline)
+        Campaign::new().request(deadline)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn from_source(source: PathBuf, deadline: Instant) -> Self {
-        Self {
-            source,
-            deadline,
-            transport: RefCell::new(None),
-        }
+        Campaign::from_source(source).request(deadline)
     }
 
     #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn artifact_path(&self) -> Option<PathBuf> {
-        match self.transport.borrow().as_ref() {
+        match self.campaign.0.transport.borrow().as_ref() {
             Some(Transport::Artifact { executable, .. }) => Some(executable.clone()),
             _ => None,
         }
@@ -509,14 +541,17 @@ impl Request {
 
     fn acquire(&self) -> Result<Transport, String> {
         check_time(self.deadline)?;
-        let inputs = match inventory(&self.source, self.deadline) {
+        let environment = std::env::vars_os().collect();
+        let inputs = match inventory(&self.campaign.0.source, self.deadline) {
             Ok(inputs) => inputs,
             Err(_) => {
                 check_time(self.deadline)?;
                 return Ok(Transport::Cargo { inputs: None });
             }
         };
-        if !configuration_allows_reuse(&self.source) || !closed_inputs(&inputs, &self.source) {
+        if !configuration_allows_reuse(&self.campaign.0.source)
+            || !closed_inputs(&inputs, &self.campaign.0.source)
+        {
             return Ok(Transport::Cargo {
                 inputs: Some(inputs),
             });
@@ -531,13 +566,13 @@ impl Request {
                 "--message-format=json",
                 "--manifest-path",
             ])
-            .arg(self.source.join("Cargo.toml"))
-            .current_dir(&self.source);
+            .arg(self.campaign.0.source.join("Cargo.toml"))
+            .current_dir(&self.campaign.0.source);
         let output = during("first Cargo provenance build", || {
             command::run(&mut build, self.deadline, OUTPUT_LIMIT)
         })?;
-        let executable = successful_artifact(&output, &self.source)?;
-        if inventory(&self.source, self.deadline)? != inputs {
+        let executable = successful_artifact(&output, &self.campaign.0.source)?;
+        if inventory(&self.campaign.0.source, self.deadline)? != inputs {
             return Err("source CLI inputs changed during Cargo build".into());
         }
         let Some(original) = executable else {
@@ -555,35 +590,92 @@ impl Request {
         let verified = during("second Cargo provenance build", || {
             command::run(&mut build, self.deadline, OUTPUT_LIMIT)
         })?;
-        if successful_artifact(&verified, &self.source)?.as_ref() != Some(&original) {
+        if successful_artifact(&verified, &self.campaign.0.source)?.as_ref() != Some(&original) {
             return Err("source Cargo artifact changed during verification".into());
         }
         during("reverified artifact SHA-256", || {
             verify_artifact(&original, &identity, self.deadline)
         })?;
-        if inventory(&self.source, self.deadline)? != inputs {
+        if inventory(&self.campaign.0.source, self.deadline)? != inputs {
             return Err("source CLI inputs changed during artifact acquisition".into());
         }
         Ok(Transport::Artifact {
             inputs,
             executable,
+            identity,
+            environment,
             _owner: owner,
         })
     }
 
+    fn retain_failure<T>(&self, result: Result<T, String>) -> Result<T, String> {
+        if let Err(error) = &result {
+            self.campaign
+                .0
+                .failure
+                .borrow_mut()
+                .get_or_insert_with(|| error.clone());
+        }
+        result
+    }
+
+    fn check_inputs(&self) -> Result<(), String> {
+        check_time(self.deadline)?;
+        if let Some(error) = self.campaign.0.failure.borrow().as_ref() {
+            return Err(error.clone());
+        }
+        self.retain_failure((|| {
+            let transport = self.campaign.0.transport.borrow();
+            let inputs = match transport.as_ref() {
+                Some(Transport::Artifact {
+                    inputs,
+                    environment,
+                    ..
+                }) => {
+                    if !configuration_allows_reuse(&self.campaign.0.source)
+                        || *environment != std::env::vars_os().collect()
+                    {
+                        return Err(
+                            "source CLI build environment or configuration changed during campaign"
+                                .into(),
+                        );
+                    }
+                    Some(inputs)
+                }
+                Some(Transport::Cargo { inputs }) => inputs.as_ref(),
+                None => None,
+            };
+            if let Some(inputs) = inputs
+                && &inventory(&self.campaign.0.source, self.deadline)? != inputs
+            {
+                return Err("source CLI inputs changed during request".into());
+            }
+            check_time(self.deadline)
+        })())
+    }
+
+    fn check_artifact(&self) -> Result<(), String> {
+        check_time(self.deadline)?;
+        self.retain_failure((|| {
+            if let Some(Transport::Artifact {
+                executable,
+                identity,
+                ..
+            }) = self.campaign.0.transport.borrow().as_ref()
+            {
+                verify_artifact(executable, identity, self.deadline)?;
+            }
+            check_time(self.deadline)
+        })())
+    }
+
     pub(crate) fn finish(&self) -> Result<(), String> {
         check_time(self.deadline)?;
-        let transport = self.transport.borrow();
-        let inputs = match transport.as_ref() {
-            Some(Transport::Artifact { inputs, .. }) => Some(inputs),
-            Some(Transport::Cargo { inputs }) => inputs.as_ref(),
-            None => None,
-        };
-        if let Some(inputs) = inputs
-            && &inventory(&self.source, self.deadline)? != inputs
-        {
-            return Err("source CLI inputs changed during request".into());
+        if !self.verified.get() {
+            return Ok(());
         }
+        self.check_inputs()?;
+        self.check_artifact()?;
         check_time(self.deadline)
     }
 
@@ -593,24 +685,31 @@ impl Request {
         arguments: &[&str],
         json: bool,
     ) -> Result<(i32, Value), String> {
-        if self.transport.borrow().is_none() {
-            *self.transport.borrow_mut() =
-                Some(during("transport acquisition", || self.acquire())?);
+        self.check_inputs()?;
+        if self.campaign.0.transport.borrow().is_none() {
+            let acquired =
+                self.retain_failure(during("transport acquisition", || self.acquire()))?;
+            *self.campaign.0.transport.borrow_mut() = Some(acquired);
         }
-        during("before CLI invocation", || self.finish())?;
-        let transport = self.transport.borrow();
+        during("pre-launch artifact validation", || self.check_artifact())?;
+        self.verified.set(true);
+        during("before CLI invocation", || self.check_inputs())?;
+        let transport = self.campaign.0.transport.borrow();
         let mut child = match transport.as_ref().unwrap() {
             Transport::Cargo { .. } => {
                 let mut child = Command::new("cargo");
                 child
                     .args(["run", "--locked", "--quiet", "--manifest-path"])
-                    .arg(self.source.join("Cargo.toml"))
+                    .arg(self.campaign.0.source.join("Cargo.toml"))
                     .args(["--bin", "blabla", "--"]);
                 child
             }
             Transport::Artifact { executable, .. } => Command::new(executable),
         };
-        child.current_dir(&self.source).arg("--project").arg(root);
+        child
+            .current_dir(&self.campaign.0.source)
+            .arg("--project")
+            .arg(root);
         if json {
             child.arg("--json");
         }
@@ -628,7 +727,7 @@ impl Request {
         } else {
             Value::String(String::from_utf8(output.stdout).map_err(|e| e.to_string())?)
         };
-        during("after CLI invocation", || self.finish())?;
+        during("after CLI invocation", || self.check_inputs())?;
         Ok((
             output
                 .status

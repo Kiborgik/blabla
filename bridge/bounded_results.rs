@@ -1,4 +1,4 @@
-use super::source_cli::Request;
+use super::source_cli::{Campaign, Request};
 use blabla::memory::{self, process};
 use blabla::project::{self, task};
 use blabla::runtime::MAX_TIMEOUT as REQUEST_BUDGET;
@@ -306,12 +306,18 @@ impl Fixture {
 }
 
 pub struct BoundedResults {
+    campaign: Campaign,
     fixture: Option<Fixture>,
     observation: Value,
 }
 
 impl BoundedResults {
+    #[allow(dead_code)]
     pub fn new() -> Self {
+        Self::with_campaign(Campaign::new())
+    }
+
+    pub(crate) fn with_campaign(campaign: Campaign) -> Self {
         let keys = [
             "bounded_accepted",
             "ordinary_close_accepted",
@@ -334,6 +340,7 @@ impl BoundedResults {
             observation[key] = json!(false);
         }
         Self {
+            campaign,
             fixture: None,
             observation,
         }
@@ -359,7 +366,7 @@ impl BoundedResults {
 
     fn perform(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let started = Instant::now();
-        let request = Request::new(started + REQUEST_BUDGET);
+        let request = self.campaign.request(started + REQUEST_BUDGET);
         let deadline = &request;
         if matches!(
             name,

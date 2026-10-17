@@ -1,4 +1,4 @@
-use super::source_cli::Request;
+use super::source_cli::{Campaign, Request};
 use blabla::memory::{self, goal, process, system};
 use blabla::project::{self, task};
 use blabla::runtime::MAX_TIMEOUT as REQUEST_BUDGET;
@@ -828,13 +828,19 @@ impl BatchFixture {
 }
 
 pub struct GoalDelivery {
+    campaign: Campaign,
     batch: Option<BatchFixture>,
     fixture: Option<Fixture>,
     observation: Value,
 }
 
 impl GoalDelivery {
+    #[allow(dead_code)]
     pub fn new() -> Self {
+        Self::with_campaign(Campaign::new())
+    }
+
+    pub(crate) fn with_campaign(campaign: Campaign) -> Self {
         let mut observation = json!({"delivery_exit":null,"delivery_result":null});
         for key in [
             "batch_initialized",
@@ -874,13 +880,14 @@ impl GoalDelivery {
             observation[format!("delivery_{key}")] = json!(true);
         }
         Self {
+            campaign,
             batch: None,
             fixture: None,
             observation,
         }
     }
     pub fn reset(&mut self) {
-        *self = Self::new();
+        *self = Self::with_campaign(self.campaign.clone());
     }
     pub fn observe(&self) -> Value {
         self.observation.clone()
@@ -915,7 +922,7 @@ impl GoalDelivery {
     }
     fn execute(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let start = Instant::now();
-        let request = Request::new(start + REQUEST_BUDGET);
+        let request = self.campaign.request(start + REQUEST_BUDGET);
         let deadline = &request;
         let args = args.as_array().ok_or("action arguments must be an array")?;
         if name == "delivery_fixture" {
@@ -1055,7 +1062,7 @@ impl GoalDelivery {
     }
     fn execute_batch(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let start = Instant::now();
-        let request = Request::new(start + REQUEST_BUDGET);
+        let request = self.campaign.request(start + REQUEST_BUDGET);
         let deadline = &request;
         let args = args.as_array().ok_or("batch arguments must be an array")?;
         if name == "delivery_batch_fixture" {

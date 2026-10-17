@@ -1,4 +1,4 @@
-use super::source_cli::Request;
+use super::source_cli::{Campaign, Request};
 use blabla::memory::{self, goal, process};
 use blabla::project::{self, task};
 use blabla::runtime::MAX_TIMEOUT as REQUEST_BUDGET;
@@ -525,13 +525,20 @@ fn empty(initialized: bool) -> Value {
 }
 
 pub struct ReadyReceipts {
+    campaign: Campaign,
     fixture: Option<Fixture>,
     observation: Value,
 }
 
 impl ReadyReceipts {
+    #[allow(dead_code)]
     pub fn new() -> Self {
+        Self::with_campaign(Campaign::new())
+    }
+
+    pub(crate) fn with_campaign(campaign: Campaign) -> Self {
         Self {
+            campaign,
             fixture: None,
             observation: empty(false),
         }
@@ -553,7 +560,7 @@ impl ReadyReceipts {
     }
     fn perform(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let start = Instant::now();
-        let request = Request::new(start + REQUEST_BUDGET);
+        let request = self.campaign.request(start + REQUEST_BUDGET);
         let deadline = &request;
         let args = args
             .as_array()

@@ -462,8 +462,10 @@ fn absent_binding_context_does_not_retain_disjunctive_numeric_atoms() {
 #[allow(dead_code)]
 mod composed_bridge {
     include!("../bridge/structure_adapter.rs");
+    pub(super) use source_cli::Campaign;
 
     pub(super) struct App {
+        campaign: Campaign,
         scenario: Scenario,
         assignment: assignment::Assignment,
         tone: voice::Tone,
@@ -480,6 +482,10 @@ mod composed_bridge {
 
     impl App {
         pub(super) fn new() -> Self {
+            Self::with_campaign(Campaign::new())
+        }
+
+        pub(super) fn with_campaign(campaign: Campaign) -> Self {
             Self {
                 scenario: Scenario::CollectionHit,
                 assignment: assignment::Assignment::new(),
@@ -490,9 +496,10 @@ mod composed_bridge {
                 attestation: attestation::Attestation::new(),
                 questions: questions::Questions::new(),
                 expert: expert::Expert::new(),
-                task_roles: task_roles::TaskRoles::new(),
-                effort: development_effort::DevelopmentEffort::new(),
-                delivery: goal_delivery::GoalDelivery::new(),
+                task_roles: task_roles::TaskRoles::with_campaign(campaign.clone()),
+                effort: development_effort::DevelopmentEffort::with_campaign(campaign.clone()),
+                delivery: goal_delivery::GoalDelivery::with_campaign(campaign.clone()),
+                campaign,
             }
         }
     }
@@ -500,7 +507,7 @@ mod composed_bridge {
     impl blabla::application::Application for App {
         fn reset(&mut self) -> Result<(), blabla::diagnostic::AppError> {
             self.lifecycle.reset();
-            *self = Self::new();
+            *self = Self::with_campaign(self.campaign.clone());
             Ok(())
         }
 
@@ -702,7 +709,11 @@ fn reordered_composed_contract_preserves_targeted_witness() {
         shrink_budget: 256,
     };
     let contract = reordered_composed_contract();
-    let report = run(&contract, &options, || Ok(composed_bridge::App::new())).unwrap();
+    let campaign = composed_bridge::Campaign::new();
+    let report = run(&contract, &options, || {
+        Ok(composed_bridge::App::with_campaign(campaign.clone()))
+    })
+    .unwrap();
     let missed: Vec<_> = report
         .coverage_summary
         .coverage

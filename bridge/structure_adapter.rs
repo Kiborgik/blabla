@@ -213,13 +213,14 @@ mod task_roles;
 mod voice;
 
 fn main() {
+    let campaign = source_cli::Campaign::new();
     let mut scenario = Scenario::CollectionHit;
     let mut assignment = assignment::Assignment::new();
-    let mut bounded = bounded_results::BoundedResults::new();
-    let mut task_roles = task_roles::TaskRoles::new();
-    let mut ready_receipts = ready_receipts::ReadyReceipts::new();
-    let mut effort = development_effort::DevelopmentEffort::new();
-    let mut delivery = goal_delivery::GoalDelivery::new();
+    let mut bounded = bounded_results::BoundedResults::with_campaign(campaign.clone());
+    let mut task_roles = task_roles::TaskRoles::with_campaign(campaign.clone());
+    let mut ready_receipts = ready_receipts::ReadyReceipts::with_campaign(campaign.clone());
+    let mut effort = development_effort::DevelopmentEffort::with_campaign(campaign.clone());
+    let mut delivery = goal_delivery::GoalDelivery::with_campaign(campaign.clone());
     let mut tone = voice::Tone::new();
     let mut app = lifecycle::Lifecycle::new();
     let mut objectives = goals::Goals::new();
@@ -250,9 +251,9 @@ fn main() {
             "reset" => {
                 scenario = Scenario::CollectionHit;
                 assignment = assignment::Assignment::new();
-                bounded = bounded_results::BoundedResults::new();
-                task_roles = task_roles::TaskRoles::new();
-                ready_receipts = ready_receipts::ReadyReceipts::new();
+                bounded = bounded_results::BoundedResults::with_campaign(campaign.clone());
+                task_roles = task_roles::TaskRoles::with_campaign(campaign.clone());
+                ready_receipts = ready_receipts::ReadyReceipts::with_campaign(campaign.clone());
                 effort.reset();
                 delivery.reset();
                 tone = voice::Tone::new();

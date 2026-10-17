@@ -1,4 +1,4 @@
-use super::source_cli::Request;
+use super::source_cli::{Campaign, Request};
 use blabla::memory::{self, process};
 use blabla::project::{self, task};
 use blabla::runtime::MAX_TIMEOUT as REQUEST_BUDGET;
@@ -784,20 +784,27 @@ impl BudgetFixture {
 }
 
 pub struct DevelopmentEffort {
+    campaign: Campaign,
     phase: Option<PhaseFixture>,
     budget: Option<BudgetFixture>,
     observation: Value,
 }
 impl DevelopmentEffort {
+    #[allow(dead_code)]
     pub fn new() -> Self {
+        Self::with_campaign(Campaign::new())
+    }
+
+    pub(crate) fn with_campaign(campaign: Campaign) -> Self {
         Self {
+            campaign,
             phase: None,
             budget: None,
             observation: json!({"phase_fixture_initialized":false,"budget_fixture_initialized":false,"budget_fixture_qualified":false,"eligible":false,"succeeded":false,"records_unchanged":true,"intervals_nonoverlapping":false,"exact_active_totals":false,"blocked_excluded":false,"pending_unknown_excluded":false,"denominator_positive":false,"ratio_defined":false,"target_arithmetic_exact":false,"incomplete_coverage_visible":false,"freshness_preserved":false,"authority_preserved":true,"view_read_only":false,"phase_exit":null,"phase_interval_count":0,"budget":null}),
         }
     }
     pub fn reset(&mut self) {
-        *self = Self::new();
+        *self = Self::with_campaign(self.campaign.clone());
     }
     pub fn observe(&self) -> Value {
         self.observation.clone()
@@ -825,7 +832,7 @@ impl DevelopmentEffort {
     }
     fn perform(&mut self, name: &str, args: &Value) -> Result<(), String> {
         let started = Instant::now();
-        let deadline = &Request::new(started + REQUEST_BUDGET);
+        let deadline = &self.campaign.request(started + REQUEST_BUDGET);
         let args = args
             .as_array()
             .ok_or("effort arguments must be positional")?;
