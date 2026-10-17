@@ -1,5 +1,10 @@
 import {
   BUILDINGS,
+  CIVICS,
+  CIVIC_RULES,
+  GOVERNMENTS,
+  POLICIES,
+  POLICY_SLOT_TYPES,
   IMPROVEMENTS,
   IMPROVEMENT_RULES,
   ERAS,
@@ -27,6 +32,8 @@ import {
   GAME_VERSION,
   SCHEMA_VERSION,
   type City,
+  type CivicState,
+  type GovernmentState,
   type ConstructionCompletion,
   type ImprovementConstructionCompletion,
   type CoastalFoundingReceipt,
@@ -133,6 +140,100 @@ function civilization(value: unknown): value is Civilization {
     ) &&
     finite(value.legitimacy, 0, 100)
   );
+}
+
+function civicDefinitionAvailable(definition: { requiredFeatures: readonly string[]; requires: string[] }, features: string[], completed: string[]): boolean {
+  return definition.requiredFeatures.every(feature => features.includes(feature)) && definition.requires.every(id => completed.includes(id));
+}
+
+function retainedCivicCompletion(events: GameEvent[], eventId: string, actor: number, completedRound?: number, civicId?: string): boolean {
+  const event = events.find(candidate => candidate.id === eventId);
+  return !event || event.type === 'civic-completed' && event.actor === actor && event.target === actor && event.tileId === null
+    && (completedRound === undefined || event.round === completedRound)
+    && (civicId === undefined || event.effects.includes(`Completed civic ${civicId}`));
+}
+
+function civicState(value: unknown, features: string[], round: number, revision: number, actor: number, events: GameEvent[]): value is CivicState {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'completedCivicIds', 'active', 'lastCompleted', 'reformEntitlement'])
+    || value.ruleVersion !== 1 || !knownStrings(value.completedCivicIds, CIVICS.map(definition => definition.id))) return false;
+  const completed = value.completedCivicIds;
+  if (!completed.every(id => { const definition = CIVICS.find(candidate => candidate.id === id)!; return civicDefinitionAvailable(definition, features, completed); })) return false;
+  if (value.active !== null) {
+    const active = value.active;
+    if (!record(active) || !exactKeys(active, ['civicId', 'startedRound', 'progress', 'requiredCulture'])
+      || !text(active.civicId) || completed.includes(active.civicId) || !integer(active.startedRound, 0, round)
+      || !finite(active.requiredCulture) || active.requiredCulture <= 0 || !finite(active.progress) || active.progress >= active.requiredCulture) return false;
+    const definition = CIVICS.find(candidate => candidate.id === active.civicId);
+    if (!definition || !civicDefinitionAvailable(definition, features, completed)) return false;
+  }
+  const last = value.lastCompleted;
+  if (last === null) return completed.length === 0 && value.reformEntitlement === null;
+  if (!record(last) || !exactKeys(last, ['civicId', 'completedRound', 'eventId'])
+    || last.civicId !== completed.at(-1) || !text(last.civicId) || !integer(last.completedRound, 0, round)
+    || completionRevision(last.eventId, revision) === null || !text(last.eventId)
+    || !retainedCivicCompletion(events, last.eventId, actor, last.completedRound, last.civicId)) return false;
+  if (record(value.active) && integer(value.active.startedRound) && value.active.startedRound < last.completedRound) return false;
+  const entitlement = value.reformEntitlement;
+  return entitlement === null || record(entitlement) && exactKeys(entitlement, ['civicId', 'completedRound', 'completionEventId'])
+    && entitlement.civicId === last.civicId && entitlement.completedRound === last.completedRound && entitlement.completionEventId === last.eventId;
+}
+
+function governmentAssignments(value: unknown, governmentId: unknown, features: string[], completed: string[]): boolean {
+  const definition = GOVERNMENTS.find(candidate => candidate.id === governmentId);
+  if (!definition || !civicDefinitionAvailable(definition, features, completed) || !Array.isArray(value)) return false;
+  const occupied = new Set<string>(); const policies = new Set<string>(); let previous = -1;
+  for (const assignment of value) {
+    if (!record(assignment) || !exactKeys(assignment, ['slotType', 'slotIndex', 'policyId'])) return false;
+    const slotType = POLICY_SLOT_TYPES.find(type => type === assignment.slotType);
+    if (!slotType || !integer(assignment.slotIndex, 0, definition.slots[slotType] - 1) || !text(assignment.policyId)) return false;
+    const key = `${slotType}:${assignment.slotIndex}`;
+    const policy = POLICIES.find(candidate => candidate.id === assignment.policyId);
+    const position = POLICY_SLOT_TYPES.slice(0, POLICY_SLOT_TYPES.indexOf(slotType)).reduce((sum, type) => sum + definition.slots[type], 0) + assignment.slotIndex;
+    if (!policy || !civicDefinitionAvailable(policy, features, completed) || slotType !== 'wildcard' && policy.slotType !== slotType
+      || occupied.has(key) || policies.has(policy.id) || position <= previous) return false;
+    previous = position; occupied.add(key); policies.add(policy.id);
+  }
+  return true;
+}
+
+function governmentState(value: unknown, civics: CivicState, features: string[], round: number, revision: number, actor: number, events: GameEvent[]): value is GovernmentState {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'active', 'pending', 'lastSpentReformCompletionEventId']) || value.ruleVersion !== 1) return false;
+  const spent = value.lastSpentReformCompletionEventId;
+  const last = civics.lastCompleted;
+  if (spent !== null && (!text(spent) || completionRevision(spent, revision) === null || !last
+    || completionRevision(spent, revision)! > completionRevision(last.eventId, revision)!
+    || !retainedCivicCompletion(events, spent, actor))) return false;
+  if (last && (civics.reformEntitlement === null) !== (spent === last.eventId)) return false;
+  if (!last && spent !== null) return false;
+  const active = value.active;
+  if (active === null) return value.pending === null && spent === null;
+  if (!record(active) || !exactKeys(active, ['governmentId', 'assignments', 'effectiveRound', 'governmentLockUntilRound', 'policyLockUntilRound'])
+    || !governmentAssignments(active.assignments, active.governmentId, features, civics.completedCivicIds)
+    || !integer(active.effectiveRound, 0, round) || !integer(active.governmentLockUntilRound, CIVIC_RULES.commitmentBeats, active.effectiveRound + CIVIC_RULES.commitmentBeats)
+    || !integer(active.policyLockUntilRound) || active.policyLockUntilRound !== active.effectiveRound + CIVIC_RULES.commitmentBeats) return false;
+  if (value.pending === null) return true;
+  const pending = value.pending;
+  if (!record(pending) || !exactKeys(pending, ['targetGovernmentId', 'targetAssignments', 'acceptedRound', 'completionRound', 'paidCredits', 'spentCompletionEventId'])
+    || pending.targetGovernmentId === active.governmentId || !governmentAssignments(pending.targetAssignments, pending.targetGovernmentId, features, civics.completedCivicIds)
+    || !integer(pending.acceptedRound, Math.max(active.policyLockUntilRound, active.governmentLockUntilRound), round)
+    || !integer(pending.completionRound) || pending.completionRound !== pending.acceptedRound + CIVIC_RULES.transitionBeats || pending.completionRound <= round) return false;
+  if (pending.spentCompletionEventId === null) return pending.paidCredits === CIVIC_RULES.governmentCredits;
+  if (pending.paidCredits !== 0 || pending.spentCompletionEventId !== spent || !last || !text(spent)
+    || last.eventId === spent && last.completedRound > pending.acceptedRound) return false;
+  const event = events.find(candidate => candidate.id === spent);
+  return !event || event.round <= pending.acceptedRound;
+}
+
+function civicRecords(civilizations: Civilization[], events: GameEvent[], features: string[], round: number, revision: number): boolean {
+  const enabled = features.includes(CIVIC_RULES.featureId);
+  if (!enabled && events.some(event => ['civic-started', 'civic-completed', 'arrangement-accepted', 'transition-completed'].includes(event.type))) return false;
+  for (const actor of civilizations) {
+    if (Object.hasOwn(actor, 'civics') !== enabled || Object.hasOwn(actor, 'government') !== enabled) return false;
+    if (!enabled) continue;
+    if (!civicState(actor.civics, features, round, revision, actor.id, events)
+      || !governmentState(actor.government, actor.civics, features, round, revision, actor.id, events)) return false;
+  }
+  return true;
 }
 
 function city(value: unknown): value is City {
@@ -1242,6 +1343,7 @@ export function isWorldState(
     !cities.every((item) => buildingOperations(item, round, features)) ||
     !growthRecords(cities, value.events, features, round, value.revision) ||
     !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
+    !civicRecords(value.civilizations, value.events, features, round, value.revision) ||
     !districtRecords(cities, tiles, value.events, features) ||
     !observatoryRecords(cities, tiles, value.events, features) ||
     !improvementRecords(cities, tiles, value.events, features, round, value.revision) ||

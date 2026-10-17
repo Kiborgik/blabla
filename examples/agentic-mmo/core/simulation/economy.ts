@@ -1,3 +1,5 @@
+import { governmentModifiers, resolveGovernmentTransitions } from './government.ts';
+import { resolveCivics } from './civics.ts';
 import { cityGrowthFacts } from './growth.ts';
 import { wonderBaseProduction } from './wonders.ts';
 import { completeResearch } from './research.ts';
@@ -26,6 +28,7 @@ function produceCity(
   const civilization = civilizationById(state, city.civId);
   const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[city.focus];
   const site = state.tiles.find((tile) => tile.id === city.tileId);
+  const government = governmentModifiers(state, city.civId);
   const productivity = cityProductivity(city);
   const siteOutputs = site ? siteProduction(state, site) : {};
   const produced = { food: 0, science: 0, culture: 0 };
@@ -36,12 +39,12 @@ function produceCity(
   const freeOutputs = [...free.map(building => buildingBaseProduction(state, city, building)), wonderBaseProduction(state, city)];
   for (const resource of RESOURCE_IDS) {
     const terrain = siteOutputs[resource] ?? 0;
-    let raw = (ECONOMY_RULES.baseProduction[resource] ?? 0) + (focus[resource] ?? 0)
+    let raw = (ECONOMY_RULES.baseProduction[resource] ?? 0) + (government.baseProduction[resource] ?? 0) + (focus[resource] ?? 0)
       + freeOutputs.reduce((total, output) => total + (output[resource] ?? 0), 0) + terrain;
-    let amount = quantize(raw * productivity);
+    let amount = quantize(raw * productivity * government.ordinaryOutputMultiplier);
     for (const building of paid) {
       raw += building.production[resource] ?? 0;
-      const next = quantize(raw * productivity);
+      const next = quantize(raw * productivity * government.ordinaryOutputMultiplier);
       const result = city.buildingOperations?.[building.id]?.lastResult;
       const contribution = quantize(next - amount);
       if (result?.status === 'operated' && contribution > 0) result.produced[resource] = contribution;
@@ -50,7 +53,7 @@ function produceCity(
     for (const improvement of improvements) {
       const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
       raw += definition?.production[resource] ?? 0;
-      const next = quantize(raw * productivity);
+      const next = quantize(raw * productivity * government.ordinaryOutputMultiplier);
       const contribution = quantize(next - amount);
       if (improvement.operation.lastResult && contribution > 0) improvement.operation.lastResult.produced[resource] = contribution;
       amount = next;
@@ -151,6 +154,7 @@ function resolveResearch(state: WorldState, civilizationId: number, producedScie
 export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   const openingWork = openingConstructionWork(state);
   const researchBudgets = new Map<number, number>();
+  const civicBudgets = new Map<number, number>();
   allocateOperations(state);
   for (const city of state.cities.toSorted((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)) extractCityMetals(state, city);
   for (const civilization of state.civilizations) {
@@ -169,6 +173,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
       if (supplyCity(state, city, events)) suppliedCities += 1;
     }
     researchBudgets.set(civilization.id, quantize(science));
+    civicBudgets.set(civilization.id, quantize(culture));
     civilization.influence = quantize(clamp(civilization.influence + culture, 0));
     if (suppliedCities === cities.length)
       civilization.legitimacy = quantize(clamp(civilization.legitimacy + culture / 20, 0, 100));
@@ -197,5 +202,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   resolveTrade(state, events);
   resolvePublicProjects(state, events);
   for (const civilization of state.civilizations) resolveResearch(state, civilization.id, researchBudgets.get(civilization.id) ?? 0, events);
+  for (const civilization of state.civilizations) resolveCivics(state, civilization.id, civicBudgets.get(civilization.id) ?? 0, events);
   resolveConstruction(state, openingWork, events);
+  resolveGovernmentTransitions(state, events);
 }

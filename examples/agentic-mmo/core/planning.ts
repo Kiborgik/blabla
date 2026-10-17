@@ -1,3 +1,5 @@
+import { governmentActionBlock } from './simulation/government.ts';
+import { civicActionBlock } from './simulation/civics.ts';
 import { createTerritoryPlanner } from './simulation/territory.ts';
 import { researchBoostFacts, wonderSiteBlock } from './simulation/wonders.ts';
 import { improvementSiteBlock } from './simulation/improvements.ts';
@@ -7,6 +9,7 @@ import { publicProjectActionFailure } from './simulation/public-projects.ts';
 import { paidRecipe } from './simulation/operations.ts';
 import {
   ACTION_FEATURES,
+  POLICY_SLOT_TYPES,
   BUILDINGS,
   IMPROVEMENTS,
   WONDERS,
@@ -62,6 +65,10 @@ function integer(value: unknown, maximum = Number.MAX_SAFE_INTEGER): value is nu
 export function isGameAction(value: unknown): value is GameAction {
   if (!record(value)) return false;
   switch (value.type) {
+    case 'adopt-government':
+      return fields(value, ['type', 'governmentId', 'assignments']) && text(value.governmentId, 128) && Array.isArray(value.assignments) && value.assignments.length <= 16 && Array.from(value.assignments).every(assignment => record(assignment) && fields(assignment, ['slotType', 'slotIndex', 'policyId']) && POLICY_SLOT_TYPES.some(slot => slot === assignment.slotType) && integer(assignment.slotIndex, 15) && text(assignment.policyId, 128));
+    case 'choose-civic':
+      return fields(value, ['type', 'civicId']) && text(value.civicId, 128);
     case 'acquire-tile':
       return fields(value, ['type', 'cityId', 'tileId']) && text(value.cityId, 128) && integer(value.tileId);
     case 'focus':
@@ -177,6 +184,10 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
   if (specialized && (action.type === 'focus' || action.type === 'build') && !cities.some((city) => city.id === action.cityId))
     return invalidated('This release requires an explicit existing owned city target; review and choose the exact city');
   switch (action.type) {
+    case 'adopt-government':
+      return null;
+    case 'choose-civic':
+      return civilization?.civics?.completedCivicIds.includes(action.civicId) ? invalidated('The civic is already completed') : null;
     case 'acquire-tile': {
       if (!cities.some(city => city.id === action.cityId)) return invalidated('The exact owned acquisition town is missing');
       const tile = state.tiles.find(candidate => candidate.id === action.tileId);
@@ -301,6 +312,8 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
 }
 
 function unavailableReason(state: WorldState, seat: number, action: GameAction): string {
+  if (action.type === 'adopt-government') return governmentActionBlock(state, seat, action.governmentId, action.assignments) ?? 'Review current arrangement admission';
+  if (action.type === 'choose-civic') return civicActionBlock(state, seat, action.civicId) ?? 'Review current civic admission';
   if (action.type === 'acquire-tile') return createTerritoryPlanner(state).assess(seat, action.cityId, action.tileId).blocker ?? 'Review the current acquisition context';
   if (action.type === 'apply-research-boost') {
     const facts = researchBoostFacts(state, seat, action.wonderId);

@@ -1,3 +1,4 @@
+import { observedGovernment } from './simulation/government.ts';
 import { observedTerritory } from './simulation/territory.ts';
 import { cityGrowthFacts } from './simulation/growth.ts';
 import { observedWonders } from './simulation/wonders.ts';
@@ -176,6 +177,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
     ...(hasFeatures(state, ['resident-capacity']) ? { residentCapacity: observedResidentCapacity(director ? state.cities : citiesOf(state, seat)) } : {}),
     ...(hasFeatures(state, [LOCAL_GROWTH_RULES.featureId]) ? { growth: (director ? state.cities : citiesOf(state, seat)).map(city => cityGrowthFacts(state, city)) } : {}),
     civilization,
+    ...(!director && civilization && hasFeatures(state, ['civic-bootstrap']) ? { governance: observedGovernment(state, seat) } : {}),
     ...observedStrategicResources(state, seat),
     ...observedPastoralSites(state, seat),
     ...(hasFeatures(state, ['owned-territory']) ? { territory: observedTerritory(state, seat) } : {}),

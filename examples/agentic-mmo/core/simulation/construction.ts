@@ -1,3 +1,4 @@
+import { governmentModifiers } from './government.ts';
 import { isWonderOrder, resolveWonderConstruction } from './wonders.ts';
 import { installImprovement, isImprovementOrder } from './improvements.ts';
 import { buildingBaseProduction, describeDistrictProduction } from './districts.ts';
@@ -9,8 +10,8 @@ import { hasFeatures } from './history.ts';
 import { paidRecipe } from './operations.ts';
 import { cityProductivity } from './world.ts';
 
-export function constructionWork(city: City): number {
-  return Math.round((city.focus === 'industry' ? CONSTRUCTION_RULES.industryWork : CONSTRUCTION_RULES.baseWork) * cityProductivity(city) * 100) / 100;
+export function constructionWork(state: WorldState, city: City): number {
+  return Math.round(((city.focus === 'industry' ? CONSTRUCTION_RULES.industryWork : CONSTRUCTION_RULES.baseWork) + governmentModifiers(state, city.civId).constructionWork) * cityProductivity(city) * 100) / 100;
 }
 
 export function requiredConstructionWork(buildingId: string): number {
@@ -66,7 +67,7 @@ export function installBuilding(state: WorldState, city: City, definition: Build
 
 export function openingConstructionWork(state: WorldState): Map<string, number> {
   if (!hasFeatures(state, ['recurring-decisions'])) return new Map();
-  return new Map(state.cities.filter(city => city.construction?.active).map(city => [city.id, constructionWork(city)]));
+  return new Map(state.cities.filter(city => city.construction?.active).map(city => [city.id, constructionWork(state, city)]));
 }
 
 export function resolveConstruction(state: WorldState, opening: ReadonlyMap<string, number>, events: GameEvent[]): void {

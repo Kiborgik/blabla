@@ -1,9 +1,21 @@
 import { CIV_COUNT } from './types.ts';
 import type {
-  BuildingCapability, BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
+  CivicDefinition, GovernmentDefinition, PolicyDefinition, BuildingCapability, BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
   EraDefinition, FeatureDefinition, Focus, GameAction, HistoricalMilestone, Resource,
   Resources, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe, ImprovementDefinition, WonderDefinition,
 } from './types.ts';
+
+export const CIVIC_RULES = { ruleVersion: 1, featureId: 'civic-bootstrap', governmentCredits: 10, reslotCredits: 8, commitmentBeats: 4, transitionBeats: 2, transitionOutput: 0.75 } as const;
+export const POLICY_SLOT_TYPES = ['military', 'economic', 'diplomatic', 'wildcard'] as const;
+export const CIVICS: CivicDefinition[] = [
+  { id: 'code-of-laws', name: 'Code of laws', requiredFeatures: ['civic-bootstrap'], requires: [], cost: 16, capability: 'Choose Chiefdom and explicitly assign Urban planning to fund additional local construction work.' },
+];
+export const GOVERNMENTS: GovernmentDefinition[] = [
+  { id: 'chiefdom', name: 'Chiefdom', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slots: { military: 1, economic: 1, diplomatic: 0, wildcard: 0 }, baseProduction: { food: 1 } },
+];
+export const POLICIES: PolicyDefinition[] = [
+  { id: 'urban-planning', name: 'Urban planning', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slotType: 'economic', constructionWork: 1 },
+];
 
 export const RESOURCE_IDS: readonly Resource[] = ['food', 'materials', 'energy', 'credits', 'science', 'culture'];
 export const FOCUS_IDS: readonly Focus[] = ['growth', 'industry', 'research', 'culture', 'diplomacy'];
@@ -50,6 +62,7 @@ export const METAL_RULES = { ruleVersion: 1, featureId: 'finite-metals', resourc
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'civic-bootstrap', name: 'Culture shapes government', description: 'Actual current Culture funds explicitly chosen civics. Chiefdom and a chosen Urban planning policy improve the next working season.' },
   { id: 'observatory-learning', name: 'Learning from the sky', description: 'Sailing and Celestial navigation connect Mathematics to Astronomy and a locally staffed Observatory beside its own completed high-ground Campus. Harbor, fishing, ships and great-person systems remain planned.' },
   { id: 'foundry-production', name: 'Iron supports local industry', description: 'Military engineering, Gunpowder and Metal casting connect existing discoveries to a locally staffed Foundry that consumes actual iron and energy. Niter, forts and military units remain planned.' },
   { id: 'culture-production', name: 'Culture in inhabited places', description: 'Construction and Printing connect exact Theater sites near completed wonders to locally staffed Printing houses. Tourism, civic Amphitheaters and great-person systems remain planned.' },
@@ -105,6 +118,8 @@ export const FEATURES: FeatureDefinition[] = [
 ];
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  'choose-civic': ['civic-bootstrap'],
+  'adopt-government': ['civic-bootstrap'],
   'acquire-tile': ['owned-territory'],
   'build-wonder': ['unique-wonders', 'recurring-decisions'],
   'apply-research-boost': ['unique-wonders', 'settlement-research'],
@@ -268,6 +283,10 @@ export const HISTORICAL_MILESTONES: HistoricalMilestone[] = [
 ];
 
 export interface ContentCatalog {
+  civics: CivicDefinition[];
+  governments: GovernmentDefinition[];
+  policies: PolicyDefinition[];
+  civicRules: typeof CIVIC_RULES;
   civilizations: CivilizationDefinition[];
   features: FeatureDefinition[];
   technologies: TechnologyDefinition[];
@@ -294,6 +313,7 @@ export interface ContentCatalog {
 }
 
 export const CONTENT: ContentCatalog = {
+  civics: CIVICS, governments: GOVERNMENTS, policies: POLICIES, civicRules: CIVIC_RULES,
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
   wonders: WONDERS, wonderRules: WONDER_RULES,
   buildings: BUILDINGS, improvements: IMPROVEMENTS, improvementRules: IMPROVEMENT_RULES, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
@@ -356,6 +376,28 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     }
     if (![[terms.proposerCargo, terms.strategicCargo?.proposer], [terms.recipientCargo, terms.strategicCargo?.recipient]].every(vectors => vectors.some(cargo => Object.values(cargo ?? {}).some(positive)))) errors.push(`${label}: both partners require meaningful cargo`);
   }
+  const civicRules = catalog.civicRules;
+  if (civicRules.ruleVersion !== 1 || civicRules.featureId !== 'civic-bootstrap' || !features.has(civicRules.featureId) || civicRules.governmentCredits !== 10 || civicRules.reslotCredits !== 8 || civicRules.commitmentBeats !== 4 || civicRules.transitionBeats !== 2 || civicRules.transitionOutput !== 0.75) errors.push('civics: invalid versioned reform rules');
+  const civics = new Map(catalog.civics.map(civic => [civic.id, civic]));
+  for (const [label, definitions] of [['civics', catalog.civics], ['governments', catalog.governments], ['policies', catalog.policies]] as const) {
+    unique(label, definitions.map(definition => definition.id));
+    for (const definition of definitions) {
+      requireFeatures(`${label} ${definition.id}`, definition.requiredFeatures);
+      if (!definition.requiredFeatures.includes(civicRules.featureId)) errors.push(`${label} ${definition.id}: missing civic feature`);
+      if (new Set(definition.requires).size !== definition.requires.length) errors.push(`${label} ${definition.id}: duplicate civic prerequisites`);
+      for (const id of definition.requires) if (!civics.has(id)) errors.push(`${label} ${definition.id}: missing civic prerequisite ${id}`);
+    }
+  }
+  for (const civic of catalog.civics) {
+    if (!positive(civic.cost) || civic.cost > Number.MAX_SAFE_INTEGER) errors.push(`civic ${civic.id}: invalid Culture cost`);
+    const visits = (id: string, path: Set<string>): boolean => path.has(id) || (civics.get(id)?.requires.some(required => visits(required, new Set([...path, id]))) ?? false);
+    if (visits(civic.id, new Set())) errors.push(`civic ${civic.id}: prerequisite cycle`);
+  }
+  for (const government of catalog.governments) {
+    if (Object.keys(government.slots).length !== POLICY_SLOT_TYPES.length || POLICY_SLOT_TYPES.some(slot => !Number.isSafeInteger(government.slots[slot]) || government.slots[slot] < 0) || Object.values(government.slots).reduce((sum, count) => sum + count, 0) > 16) errors.push(`government ${government.id}: invalid bounded slots`);
+    resources(`government ${government.id}`, government.baseProduction);
+  }
+  for (const policy of catalog.policies) if (!['military', 'economic', 'diplomatic'].includes(policy.slotType) || !positive(policy.constructionWork)) errors.push(`policy ${policy.id}: invalid slot or productive modifier`);
   const technologies = new Map(catalog.technologies.map(technology => [technology.id, technology]));
   const buildings = new Map(catalog.buildings.map(building => [building.id, building]));
   const wonderRules = catalog.wonderRules;

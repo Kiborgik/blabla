@@ -1440,3 +1440,15 @@ dialog h2 {
 .town-production-link { grid-column: 2; color: var(--ink); font-size: 11px; line-height: 1.4; align-self: end; }
 .town-production-more > summary { display: list-item; min-height: 44px; padding: 10px 2px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .town-production-more > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.civic-progress { margin: 12px 0; padding: 12px 0; border-block: 1px solid var(--border); min-width: 0; }
+.civic-progress > h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.civic-progress > h4:not(:first-child) { margin-top: 12px; }
+.civic-progress .visual-icon { width: 18px; height: 18px; flex: 0 0 18px; }
+.civic-progress p { margin: 6px 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.civic-current { display: block; font-size: 14px; }
+.civic-progress .civic-amount, .civic-progress .civic-effect, .civic-slot { font-weight: 600; }
+.civic-progress .civic-note { color: var(--muted); font-size: 12px; }
+.civic-record > summary { min-height: 44px; padding-block: 10px; cursor: pointer; overflow-wrap: anywhere; }
+.civic-record > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.civic-pending { padding-inline-start: 10px; border-inline-start: 2px solid var(--gold); }

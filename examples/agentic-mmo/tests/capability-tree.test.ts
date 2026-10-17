@@ -55,13 +55,17 @@ await test('the learning tree shows captured exact sites and potential base outp
   assert.ok(facts?.some(fact => fact.label === 'Available site 56' && fact.value === '1 Science base before town productivity'));
 });
 
-await test('complete tree retains every canonical node and both incoming fuel prerequisites', () => {
+await test('research and construction tree retains every owned edge and leaves civic edges separate', () => {
   const input = fixture();
   const before = structuredClone(input);
   const nodes = capabilityTreeNodes(input);
   assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length + input.catalogue.wonders.length);
   assert.equal(new Set(nodes.map(node => node.id)).size, nodes.length);
-  assert.equal(nodes.reduce((count, node) => count + node.requires.length, 0), input.catalogue.edges.length);
+  const ids = new Set(nodes.map(node => node.id));
+  const treeEdges = input.catalogue.edges.filter(edge => ids.has(edge.from) && ids.has(edge.to));
+  const edgeKey = (edge: { from: string; to: string }): string => `${edge.from}->${edge.to}`;
+  assert.deepEqual(nodes.flatMap(node => node.requires.map(from => ({ from, to: node.id }))).map(edgeKey).toSorted(), treeEdges.map(edgeKey).toSorted());
+  assert.deepEqual(input.catalogue.edges.filter(edge => !ids.has(edge.from) || !ids.has(edge.to)).map(edgeKey).toSorted(), ['civic:code-of-laws->government:chiefdom', 'civic:code-of-laws->policy:urban-planning']);
   const fuel = nodes.find(node => node.id === 'technology:fuel-management');
   assert.ok(fuel);
   assert.deepEqual(fuel.requires.toSorted(), ['technology:civic-institutions', 'technology:kiln-firing']);

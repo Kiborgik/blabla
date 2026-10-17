@@ -1,0 +1,205 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
+import type { WorldState } from '../core/types.ts';
+import { civicBootstrapJourney } from './fixtures/civic-bootstrap-journey.ts';
+import { civicProgressPresentation, createCivicProgress, type CivicProgressInput } from '../web/civic-progress.ts';
+
+const journey = civicBootstrapJourney();
+const catalogue = capabilityCatalogue();
+
+function input(state: WorldState, cityId: string | null = journey.cityId): CivicProgressInput {
+  const city = state.cities.find(candidate => candidate.id === cityId);
+  return { catalogue, projection: projectCapabilities(state, journey.seat, cityId, journey.time()), ...(city ? { city } : {}), events: state.events };
+}
+
+await test('a legacy world has no invented civic surface', () => {
+  assert.equal(civicProgressPresentation(input(journey.beforeRelease)), null);
+  assert.equal(createCivicProgress(input(journey.beforeRelease)), null);
+});
+
+await test('the released empty lane asks for a civic without adopting a government', () => {
+  const view = civicProgressPresentation(input(journey.adopted));
+  assert.ok(view);
+  assert.equal(view.status, 'required');
+  assert.equal(view.heading, 'Choose a civic');
+  assert.equal(view.progress, null);
+  assert.deepEqual(view.choices, ['Code of laws · 16 Culture']);
+  assert.equal(view.government.heading, 'No government adopted');
+  assert.deepEqual(view.government.slots, []);
+  assert.deepEqual(view.effects, []);
+  assert.match(view.explanation, /Culture made by towns/);
+  assert.match(view.explanation, /Science/);
+});
+
+await test('explicit selection uses the snapshotted Culture requirement and exact progress', () => {
+  const source = input(journey.selected);
+  const view = civicProgressPresentation(source);
+  assert.ok(view);
+  assert.equal(view.heading, 'Developing Code of laws');
+  assert.equal(view.progress, '0 / 16 Culture');
+  assert.equal(view.completion, null);
+  const fractional = structuredClone(source);
+  assert.ok(fractional.projection.governance?.civics?.active);
+  fractional.projection.governance.civics.active.progress = 6.25;
+  fractional.projection.governance.civics.active.requiredCulture = 17.5;
+  assert.equal(civicProgressPresentation(fractional)?.progress, '6.25 / 17.5 Culture');
+});
+
+await test('actual completion remains separate from unchosen government and its unused reform', () => {
+  const source = input(journey.completed);
+  const view = civicProgressPresentation(source);
+  const last = source.projection.governance?.civics?.lastCompleted;
+  assert.ok(view && last);
+  assert.equal(view.heading, 'Code of laws completed');
+  assert.equal(view.progress, null);
+  assert.equal(view.status, 'blocked');
+  assert.match(view.completion ?? '', new RegExp(`Round ${last.completedRound}`));
+  assert.match(view.completion ?? '', new RegExp(last.eventId));
+  assert.equal(view.government.heading, 'No government adopted');
+  assert.match(view.government.reform, /Unused reform · Code of laws/);
+  assert.deepEqual(view.effects, []);
+  assert.ok(view.blockers.includes('No further civic is available in this release.'));
+});
+
+await test('explicit adoption shows exact empty slots and base contributions without claiming credited output', () => {
+  const source = input(journey.arranged);
+  const before = structuredClone(source);
+  const view = civicProgressPresentation(source);
+  assert.ok(view);
+  assert.equal(view.government.heading, 'Chiefdom');
+  assert.deepEqual(view.government.slots, ['Military slot 1 · Empty', 'Economic slot 1 · Urban planning']);
+  assert.equal(view.government.reform, 'No unused reform recorded.');
+  assert.deepEqual(view.effects, ['+1 base Food', '+1 base construction work']);
+  assert.equal(view.constructionCapacity, `${source.projection.governance?.cityConstructionWork} work · Current town capacity`);
+  assert.match(view.effectExplanation, /not credited work or goods/);
+  assert.ok(view.government.records.some(line => line.includes('Recorded effective round')));
+  assert.ok(view.government.records.some(line => line.includes('Government commitment until round')));
+  assert.ok(view.government.records.some(line => line.includes('Policy commitment until round')));
+  assert.ok(view.government.events.some(line => line.includes('chooses Chiefdom')));
+  assert.deepEqual(source, before);
+});
+
+await test('later legal construction progress and completion stay separate from current modifiers', () => {
+  const started = input(journey.started);
+  const active = started.city?.construction?.active;
+  const working = civicProgressPresentation(started);
+  assert.ok(active && working);
+  assert.match(working.constructionRecord ?? '', new RegExp(`${active.workDone} / ${active.workRequired} work recorded`));
+  const built = input(journey.built);
+  const finished = civicProgressPresentation(built);
+  assert.ok(finished && built.city?.construction?.lastCompleted);
+  assert.match(finished.constructionRecord ?? '', /Last completed · Granary/);
+  assert.ok(finished.constructionRecord?.includes(built.city.construction.lastCompleted.eventId));
+  assert.deepEqual(finished.effects, working.effects);
+  assert.notEqual(finished.constructionRecord, working.constructionRecord);
+});
+
+await test('a later real opening presents the credited construction progress rather than its base bonus', () => {
+  const step = journey.steps.find(candidate => {
+    const before = candidate.before.cities.find(city => city.id === journey.cityId)?.construction?.active;
+    const after = candidate.result.state.cities.find(city => city.id === journey.cityId)?.construction?.active;
+    return candidate.before.revision >= journey.started.revision && before && after && after.workDone > before.workDone;
+  });
+  assert.ok(step);
+  const source = input(step.result.state);
+  const work = source.city?.construction?.active;
+  const view = civicProgressPresentation(source);
+  assert.ok(view && work);
+  assert.ok(work.workDone > 1);
+  assert.ok(view.effects.includes('+1 base construction work'));
+  assert.ok(view.constructionRecord?.includes(`${work.workDone} / ${work.workRequired} work recorded`));
+});
+
+await test('a synthetic pending read model retains exact transition rounds and the supplied current output factor', () => {
+  const source = structuredClone(input(journey.arranged));
+  const governance = source.projection.governance;
+  assert.ok(governance?.government?.active);
+  governance.government.pending = { targetGovernmentId: 'chiefdom', targetAssignments: [], acceptedRound: 70, completionRound: 72, paidCredits: 10, spentCompletionEventId: null };
+  governance.modifiers.ordinaryOutputMultiplier = 0.75;
+  const view = civicProgressPresentation(source);
+  assert.ok(view);
+  assert.match(view.government.pending.join(' '), /Accepted round 70 · Recorded transition end 72/);
+  assert.ok(view.government.pending.includes('Paid 10 Credits'));
+  assert.ok(view.government.pending.includes('Economic slot 1 · Empty'));
+  assert.equal(view.outputFactor, 'Current ordinary output factor · 0.75');
+  assert.deepEqual(view.effects, ['+1 base Food', '+1 base construction work']);
+});
+
+await test('prerequisite eligibility does not imply legal adoption and missing town facts do not become zero', () => {
+  const source = input(journey.completed, null);
+  const view = civicProgressPresentation(source);
+  assert.ok(view);
+  assert.equal(view.constructionCapacity, null);
+  assert.equal(view.constructionRecord, null);
+  assert.ok(view.government.targets.some(line => line.includes('Chiefdom · Prerequisites met · Quote 0 Credits')));
+  assert.match(view.government.choiceExplanation, /not permission/);
+  assert.match(view.government.choiceExplanation, /explicit agent choice/);
+});
+
+await test('unknown civic records and canonical locked blockers remain honest', () => {
+  const source = structuredClone(input(journey.adopted));
+  assert.ok(source.projection.governance);
+  source.projection.governance.civics = undefined;
+  source.projection.governance.government = undefined;
+  if (source.projection.decisions?.civic) {
+    source.projection.decisions.civic.status = 'blocked';
+    source.projection.decisions.civic.availableIds = [];
+    source.projection.decisions.civic.blockers = [{ capabilityId: 'code-of-laws', reason: { kind: 'civic-prerequisite', civicId: 'missing-civic' } }];
+  }
+  const view = civicProgressPresentation(source);
+  assert.ok(view);
+  assert.equal(view.heading, 'Civic record unavailable');
+  assert.equal(view.government.heading, 'Government record unavailable');
+  assert.ok(view.blockers.includes('Complete civic: missing-civic.'));
+  assert.deepEqual(view.effects, []);
+});
+
+class ElementRecord {
+  tag: string;
+  textContent = '';
+  className = '';
+  dataset: Record<string, string> = {};
+  children: ElementRecord[] = [];
+  attributes = new Map<string, string>();
+  constructor(tag: string) { this.tag = tag; }
+  append(...children: ElementRecord[]): void { this.children.push(...children); }
+  prepend(...children: ElementRecord[]): void { this.children.unshift(...children); }
+  setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
+  content(): string { return [this.textContent, ...this.children.map(child => child.content())].join(' '); }
+  all(): ElementRecord[] { return [this, ...this.children.flatMap(child => child.all())]; }
+}
+
+function render(source: CivicProgressInput): ElementRecord | null {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const createElement = (tag: string): ElementRecord => new ElementRecord(tag);
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement, createElementNS: (_namespace: string, tag: string) => createElement(tag) } });
+  try { return createCivicProgress(source) as unknown as ElementRecord | null; }
+  finally { if (previous) Object.defineProperty(globalThis, 'document', previous); else Reflect.deleteProperty(globalThis, 'document'); }
+}
+
+await test('the read-only renderer separates Culture, Government and current effects with retained native disclosures', () => {
+  const section = render(input(journey.started));
+  assert.ok(section);
+  assert.equal(section.dataset['inspectionSection'], 'overview');
+  assert.match(section.content(), /Culture · Civics/);
+  assert.match(section.content(), /Government · Chiefdom/);
+  assert.match(section.content(), /Urban planning/);
+  assert.match(section.content(), /Current opening effects/);
+  assert.match(section.content(), /work recorded/);
+  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civics', 'government']);
+  assert.ok(section.all().filter(node => node.tag === 'details').every(node => node.children[0]?.tag === 'summary'));
+  assert.equal(section.all().filter(node => ['button', 'input', 'select', 'form'].includes(node.tag)).length, 0);
+  assert.ok(section.all().some(node => node.tag === 'svg'));
+});
+
+await test('catalogue and event text stays text, with no fabricated HTML controls', () => {
+  const source = structuredClone(input(journey.arranged));
+  const definition = source.catalogue.governments.find(item => item.id === 'chiefdom');
+  assert.ok(definition);
+  definition.name = '<button>Adopt now</button>';
+  const section = render(source);
+  assert.ok(section);
+  assert.match(section.content(), /<button>Adopt now<\/button>/);
+  assert.equal(section.all().some(node => node.tag === 'button'), false);
+});

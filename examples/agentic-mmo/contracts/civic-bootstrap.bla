@@ -1,0 +1,61 @@
+state migrated_empty: bool
+state legacy_preserved: bool
+state selected_explicitly: bool
+state cost_snapshotted: bool
+state current_culture_only: bool
+state culture_conserved: bool
+state science_independent: bool
+state completed_once: bool
+state entitlement_exact: bool
+state successor_unselected: bool
+state target_prerequisites: bool
+state assignments_valid: bool
+state payment_exact: bool
+state commitment_enforced: bool
+state opening_food_exact: bool
+state opening_work_exact: bool
+state completion_before_output: bool
+state transition_timing_exact: bool
+state transition_outputs_exact: bool
+state fixed_transfers_preserved: bool
+state refused: bool
+state no_effects: bool
+state replay_exact: bool
+
+action adopt_civic_release()
+action start_civic()
+action invest_culture()
+action complete_civic()
+action adopt_arrangement()
+action work_with_arrangement()
+action resolve_government_transition()
+action refuse_civic_action()
+action replay_civic_history()
+
+when adopt_civic_release {
+    expect "empty-civic-migration-preserves-existing-world": after.migrated_empty and after.legacy_preserved
+}
+when start_civic {
+    expect "explicit-civic-snapshots-cost-without-science-replacement": after.selected_explicitly and after.cost_snapshotted and after.science_independent
+}
+when invest_culture {
+    expect "only-actual-culture-output-funds-civic-work": after.current_culture_only and after.culture_conserved and after.science_independent
+}
+when complete_civic {
+    expect "civic-completion-grants-one-entitlement-not-a-successor": after.completed_once and after.entitlement_exact and after.successor_unselected
+}
+when adopt_arrangement {
+    expect "explicit-arrangement-validates-target-slots-and-payment-together": after.target_prerequisites and after.assignments_valid and after.payment_exact and after.commitment_enforced
+}
+when work_with_arrangement {
+    expect "government-and-policy-change-later-opening-food-and-work": after.opening_food_exact and after.opening_work_exact and after.completion_before_output
+}
+when resolve_government_transition {
+    expect "government-change-retains-two-opening-beats-and-exact-yields": after.transition_timing_exact and after.transition_outputs_exact and after.fixed_transfers_preserved and after.commitment_enforced
+}
+when refuse_civic_action {
+    expect "invalid-civic-and-arrangement-actions-preserve-state": after.refused and after.no_effects
+}
+when replay_civic_history {
+    expect "civic-history-replays-with-legacy-state-preserved": after.replay_exact and after.legacy_preserved
+}

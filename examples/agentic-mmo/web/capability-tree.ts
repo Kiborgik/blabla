@@ -86,6 +86,7 @@ function blockerText(blocker: CapabilityBlocker, input: CapabilityTreeInput): st
 }
 
 function decisionReason(reason: DecisionBlocker, input: CapabilityTreeInput): string {
+  if (reason.kind === 'civic-prerequisite') return `Complete civic: ${input.catalogue.civics.find(civic => civic.id === reason.civicId)?.name ?? reason.civicId}`;
   if (reason.kind === 'no-available-choice') return 'No available choice in the released pool';
   if (reason.kind === 'zero-work') return 'No work can be done with the current town condition';
   return blockerText(reason, input);

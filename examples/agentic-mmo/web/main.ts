@@ -5,6 +5,7 @@ import { exactNumber, numberPresentation } from './number-format.ts';
 import { observedStrategicResources } from '../core/simulation/metals.ts';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
 import { createCapabilityTreeSheet, restoreCapabilityOpener, type CapabilityTreeInput } from './capability-tree.ts';
+import { createCivicProgress } from './civic-progress.ts';
 import { eventLogEntries, latestStoryEvent, renderEventLog } from './event-log.ts';
 import { routeInspectionCity } from '../visuals/route-visuals.ts';
 import { renderRouteCard, renderRouteList, retainedRoutePathInspection, routeInspectionIdentity } from './route-inspection.ts';
@@ -192,8 +193,9 @@ function renderInspection(): void {
   panel.style.setProperty('--civ-color', civ.color);
   const development = snapshot && preferences.selectedCity ? townDevelopmentFacts(snapshot.state, preferences.selectedCity) : undefined;
   const pastoral = snapshot && actual ? observedPastoralSites(snapshot.state, actual.id) : undefined;
-  const territory = state && actual && observedAt ? projectTownTerritory(state, projectCapabilities(state, actual.id, preferences.selectedCity, observedAt)) : undefined;
-  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, territory, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
+  const capabilities = state && actual && observedAt ? projectCapabilities(state, actual.id, preferences.selectedCity, observedAt) : null;
+  const territory = state && capabilities ? projectTownTerritory(state, capabilities) : undefined;
+  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, territory, capabilities?.governance, capabilities?.decisions?.civic, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
   if (fingerprint === inspectionFingerprint) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
   const previousScroll = sameCity && !pendingInspectionWork ? panel.scrollTop : 0;
@@ -258,6 +260,11 @@ function renderInspection(): void {
       details.append(output, qualifier);
     }
     researchSection.append(details);
+  }
+  if (capabilities && state) {
+    const city = cities.find(candidate => candidate.id === preferences.selectedCity);
+    const civic = createCivicProgress({ catalogue, projection: capabilities, ...(city ? { city } : {}), events: state.events });
+    if (civic) panel.insertBefore(civic, capabilityOpener);
   }
   if (pastoral) renderPastoralInspection(panel, pastoral);
   if (snapshot && actual) renderStrategicInspection(panel, observedStrategicResources(snapshot.state, actual.id));

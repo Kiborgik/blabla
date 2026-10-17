@@ -1,3 +1,4 @@
+import { civicActionBlock, civicDecision } from './civics.ts';
 import { wonderEligibility } from './wonders.ts';
 import { constructionTarget } from './improvements.ts';
 import { BUILDINGS, IMPROVEMENTS, TECHNOLOGIES, WONDERS } from '../content.ts';
@@ -29,7 +30,7 @@ export function decisionObligations(state: WorldState, civilizationId: number): 
     const lane: DecisionObligation = { kind: 'construction', cityId: city.id, status: 'blocked', targetId: null, progress: null, availableIds: [], blockers: [] };
     const active = city.construction?.active;
     if (active) {
-      lane.status = constructionWork(city) > 0 ? 'active' : 'blocked';
+      lane.status = constructionWork(state, city) > 0 ? 'active' : 'blocked';
       lane.targetId = constructionTarget(active);
       lane.progress = { done: active.workDone, required: active.workRequired };
       if (lane.status === 'blocked') lane.blockers.push({ capabilityId: constructionTarget(active), reason: { kind: 'zero-work' } });
@@ -58,12 +59,13 @@ export function decisionObligations(state: WorldState, civilizationId: number): 
     }
     return lane;
   });
-  return { research, construction };
+  return { research, construction, ...(hasFeatures(state, ['civic-bootstrap']) ? { civic: civicDecision(state, civilizationId) } : {}) };
 }
 
 export function decisionActionBlock(state: WorldState, seat: number, action: GameAction): string | null {
   if (seat === DIRECTOR_SEAT || !hasFeatures(state, ['recurring-decisions'])) return null;
   const civilization = civilizationById(state, seat);
+  if (action.type === 'choose-civic') return civicActionBlock(state, seat, action.civicId);
   if (action.type === 'research' && civilization.researchTarget)
     return `Active research ${civilization.researchTarget} must finish before another research commitment`;
   if (action.type === 'build' || action.type === 'improve' || action.type === 'build-wonder') {
@@ -72,13 +74,13 @@ export function decisionActionBlock(state: WorldState, seat: number, action: Gam
   }
   if (action.type === 'wait') {
     const decisions = decisionObligations(state, seat);
-    const required = [decisions.research, ...decisions.construction].filter(lane => lane.status === 'required');
-    if (required.length) return `Required decisions remain: ${required.map(lane => lane.kind === 'research' ? 'research' : `construction in ${lane.cityId}`).join(', ')}`;
+    const required = [decisions.research, ...decisions.construction, ...(decisions.civic ? [decisions.civic] : [])].filter(lane => lane.status === 'required');
+    if (required.length) return `Required decisions remain: ${required.map(lane => lane.cityId ? `construction in ${lane.cityId}` : lane.kind).join(', ')}`;
   }
   return null;
 }
 
 export function decisionHoldFacts(state: WorldState, seat: number): string[] {
   const decisions = decisionObligations(state, seat);
-  return [decisions.research, ...decisions.construction].map(lane => `${lane.kind}${lane.cityId ? ` ${lane.cityId}` : ''}: ${lane.status}${lane.targetId ? ` ${lane.targetId}` : ''}; ${lane.availableIds.length} available choices${lane.status === 'blocked' ? `; ${JSON.stringify(lane.blockers)}` : ''}`);
+  return [decisions.research, ...decisions.construction, ...(decisions.civic ? [decisions.civic] : [])].map(lane => `${lane.kind}${lane.cityId ? ` ${lane.cityId}` : ''}: ${lane.status}${lane.targetId ? ` ${lane.targetId}` : ''}; ${lane.availableIds.length} available choices${lane.status === 'blocked' ? `; ${JSON.stringify(lane.blockers)}` : ''}`);
 }

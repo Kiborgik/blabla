@@ -1,10 +1,12 @@
+import { observedGovernment } from './simulation/government.ts';
+import { constructionWork } from './simulation/construction.ts';
 import { availableCampusHighGround } from './simulation/observatory.ts';
 import { observedTerritory } from './simulation/territory.ts';
 import { cityGrowthFacts } from './simulation/growth.ts';
 import { availableWonderSites, isWonderOrder, observedWonders, wonderEligibility } from './simulation/wonders.ts';
 import { availableImprovementSites, isImprovementOrder, orderedImprovements } from './simulation/improvements.ts';
 import { availableDistrictSites, buildingBaseProduction, districtCapacity, districtCount, districtAdjacencyFacts, type DistrictAdjacencyFacts } from './simulation/districts.ts';
-import { BUILDINGS, LOCAL_GROWTH_RULES, IMPROVEMENTS, WONDERS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
+import { CIVICS, GOVERNMENTS, POLICIES, BUILDINGS, LOCAL_GROWTH_RULES, IMPROVEMENTS, WONDERS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
 import { RELEASES } from './release.ts';
 import type { ActionPlan } from './planning.ts';
 import type { CampusHighGroundSite, ActionOption, CityGrowthFacts, CityImprovement, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, Resources, WonderObservation, WorldState } from './types.ts';
@@ -52,6 +54,7 @@ export interface CapabilityChoiceContext {
 }
 
 export interface CapabilityProjection {
+  governance?: ReturnType<typeof observedGovernment> & { cityConstructionWork: number | null };
   territory?: ReturnType<typeof observedTerritory>;
   growth?: CityGrowthFacts | null;
   strategic?: ReturnType<typeof observedStrategicResources>;
@@ -79,10 +82,16 @@ export interface CapabilityProjection {
 export function capabilityCatalogue() {
   return structuredClone({
     technologies: TECHNOLOGIES,
+    civics: CIVICS,
+    governments: GOVERNMENTS,
+    policies: POLICIES,
     buildings: BUILDINGS,
     improvements: IMPROVEMENTS,
     wonders: WONDERS,
     edges: [
+      ...CIVICS.flatMap(civic => civic.requires.map(id => ({ from: `civic:${id}`, to: `civic:${civic.id}` }))),
+      ...GOVERNMENTS.flatMap(government => government.requires.map(id => ({ from: `civic:${id}`, to: `government:${government.id}` }))),
+      ...POLICIES.flatMap(policy => policy.requires.map(id => ({ from: `civic:${id}`, to: `policy:${policy.id}` }))),
       ...WONDERS.flatMap(wonder => wonder.requires.map(id => ({ from: `technology:${id}`, to: `wonder:${wonder.id}` }))),
       ...IMPROVEMENTS.flatMap(improvement => improvement.requires.map(id => ({ from: `technology:${id}`, to: `improvement:${improvement.id}` }))),
       ...TECHNOLOGIES.flatMap(technology => technology.requires.map(id => ({ from: `technology:${id}`, to: `technology:${technology.id}` }))),
@@ -151,6 +160,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     return { ...row(`wonder:${definition.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), availableSites: city && !eligibility.blockers.length ? availableWonderSites(state, city, definition).map(tileId => ({ tileId, baseProduction: { ...definition.production } })) : [], facts };
   });
   return structuredClone({
+    ...(hasFeatures(state, ['civic-bootstrap']) ? { governance: { ...observedGovernment(state, civilizationId), cityConstructionWork: city ? constructionWork(state, city) : null } } : {}),
     choiceReferenceState: choices ? 'provided' : 'not-provided',
     revision: state.revision,
     observedAt: timestamp,

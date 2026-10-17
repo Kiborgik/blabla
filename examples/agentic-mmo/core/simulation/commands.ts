@@ -1,3 +1,5 @@
+import { adoptGovernment } from './government.ts';
+import { chooseCivic } from './civics.ts';
 import { selectedCampusHighGround } from './observatory.ts';
 import { executeTerritoryAcquisition } from './territory.ts';
 import { executeWonderAction } from './wonders.ts';
@@ -72,6 +74,12 @@ export function executeAction(
   const firstCity = cities[0];
   const location = firstCity?.tileId ?? null;
   switch (action.type) {
+    case 'adopt-government':
+      adoptGovernment(state, seat, action.governmentId, action.assignments, events);
+      return;
+    case 'choose-civic':
+      chooseCivic(state, seat, action.civicId, events);
+      return;
     case 'acquire-tile':
       executeTerritoryAcquisition(state, seat, action.cityId, action.tileId, events);
       return;

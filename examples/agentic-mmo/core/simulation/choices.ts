@@ -1,3 +1,5 @@
+import { availableGovernmentActions } from './government.ts';
+import { availableCivicActions } from './civics.ts';
 import { selectedCampusHighGround } from './observatory.ts';
 import { availableTerritoryActions } from './territory.ts';
 import { availableWonderActions } from './wonders.ts';
@@ -74,6 +76,8 @@ export function availableActions(
   const civilization = state.civilizations.find((candidate) => candidate.id === seat);
   if (!civilization) return [];
   const cities = citiesOf(state, seat);
+  choices.push(...availableCivicActions(state, seat));
+  choices.push(...availableGovernmentActions(state, seat));
   choices.push(...availableWonderActions(state, seat));
   choices.push(...availableTerritoryActions(state, seat));
   const specialized = hasFeatures(state, ['city-specialization']);
@@ -253,6 +257,10 @@ export function sameAction(left: GameAction, right: unknown): boolean {
   )
     return false;
   switch (left.type) {
+    case 'adopt-government':
+      return 'governmentId' in right && left.governmentId === right.governmentId && 'assignments' in right && Array.isArray(right.assignments) && right.assignments.length === left.assignments.length && right.assignments.every((assignment: unknown) => typeof assignment === 'object' && assignment !== null && Object.keys(assignment).length === 3 && 'slotType' in assignment && 'slotIndex' in assignment && 'policyId' in assignment && left.assignments.some(expected => assignment.slotType === expected.slotType && assignment.slotIndex === expected.slotIndex && assignment.policyId === expected.policyId)) && new Set(right.assignments.map((assignment: { slotType: string; slotIndex: number }) => `${assignment.slotType}:${assignment.slotIndex}`)).size === right.assignments.length;
+    case 'choose-civic':
+      return 'civicId' in right && left.civicId === right.civicId;
     case 'acquire-tile':
       return 'cityId' in right && 'tileId' in right && left.cityId === right.cityId && left.tileId === right.tileId;
     case 'focus':
