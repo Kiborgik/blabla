@@ -4,12 +4,10 @@ import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
 import { isHillSite, orderedImprovements } from './improvements.ts';
 import { citiesOf, civilizationById } from './world.ts';
+import { sitePlacementRank } from './site-placement.ts';
 
 function placementRank(seed: number, tileId: number): number {
-  let value = (seed ^ Math.imul(tileId + 1, METAL_RULES.placement.seedMultiplier)) >>> 0;
-  value = Math.imul(value ^ (value >>> 16), METAL_RULES.placement.mixMultipliers[0]) >>> 0;
-  value = Math.imul(value ^ (value >>> 15), METAL_RULES.placement.mixMultipliers[1]) >>> 0;
-  return (value ^ (value >>> 16)) >>> 0;
+  return sitePlacementRank(seed, tileId, METAL_RULES.placement.seedMultiplier, METAL_RULES.placement.mixMultipliers);
 }
 
 export function createStrategicDeposits(state: WorldState): StrategicDepositLayer {

@@ -1,0 +1,53 @@
+state retained_exact_sites: bool
+state world_preserved: bool
+state revealed_to_researched_civilization: bool
+state pasture_completed: bool
+state pasture_staffed: bool
+state pasture_food_produced: bool
+state exact_local_resident: bool
+state complete_payment_once: bool
+state no_completion_output: bool
+state shared_allocation_priority: bool
+state own_completed_irrigation: bool
+state mill_completed: bool
+state later_mill_output: bool
+state exact_adjacent_catchment: bool
+state source_retained: bool
+state housing_added: bool
+state population_unchanged_on_completion: bool
+state refused: bool
+state no_effects: bool
+
+action apply_water_land()
+action reveal_horse_sites()
+action complete_pasture()
+action work_pasture()
+action complete_water_mill()
+action operate_water_mill()
+action complete_aqueduct()
+action refuse_water_land_action()
+
+when apply_water_land {
+    expect "retained-sites-preserve-existing-world": after.retained_exact_sites and after.world_preserved
+}
+when reveal_horse_sites {
+    expect "horse-reveal-follows-actual-discovery": after.revealed_to_researched_civilization
+}
+when complete_pasture {
+    expect "paid-pasture-completes-without-early-output": after.pasture_completed and after.complete_payment_once and after.no_completion_output
+}
+when work_pasture {
+    expect "staffed-pasture-makes-useful-food": after.pasture_staffed and after.pasture_food_produced and after.exact_local_resident and after.shared_allocation_priority
+}
+when complete_water_mill {
+    expect "mill-needs-own-completed-irrigation": after.mill_completed and after.own_completed_irrigation and after.complete_payment_once and after.no_completion_output
+}
+when operate_water_mill {
+    expect "completed-mill-produces-on-later-beat": after.later_mill_output
+}
+when complete_aqueduct {
+    expect "aqueduct-retains-real-source-and-adds-only-housing": after.exact_adjacent_catchment and after.source_retained and after.housing_added and after.population_unchanged_on_completion
+}
+when refuse_water_land_action {
+    expect "invalid-water-land-action-has-no-effects": not after.refused or after.no_effects
+}

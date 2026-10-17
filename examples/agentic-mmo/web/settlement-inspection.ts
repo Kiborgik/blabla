@@ -1,3 +1,5 @@
+import type { observedPastoralSites } from '../core/simulation/pastoral.ts';
+import { pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
 import { wonderWorkRows, type TownDevelopmentFacts, type WonderWorkRow } from '../visuals/wonder-visuals.ts';
 import { exactNumber, numberElement } from './number-format.ts';
 import { extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
@@ -149,7 +151,10 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     const definition = BUILDINGS.find(item => item.id === activeDistrict.buildingId);
     const parent = definition?.district ? definition : BUILDINGS.find(item => item.district && definition?.requiresBuildings?.includes(item.id));
     const site = text('section', '', 'building-card');
+    site.dataset['workId'] = `active:${activeDistrict.id}`;
     site.append(text('h4', `${definition?.name ?? activeDistrict.buildingId} · Under construction`));
+    if (activeDistrict.catchmentTileId !== undefined) site.append(text('p', `Retained mountain source · Tile ${activeDistrict.catchmentTileId}`, 'building-summary'));
+    if (definition?.housing) site.append(text('p', `After completion: +${definition.housing} housing. No residents are added immediately.`, 'building-summary'));
     if (parent) {
       const tileId = definition?.district ? activeDistrict.tileId : city.districtSites?.[parent.id];
       site.append(text('p', `${definition?.district ? 'Reserved site' : `At this town’s ${parent.name}`}: ${tileId === undefined ? 'Unavailable' : `Tile ${tileId}`}`, 'building-current'));
@@ -161,8 +166,9 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
   if (activeDistrict && 'kind' in activeDistrict && activeDistrict.kind === 'improvement') {
     const definition = IMPROVEMENTS.find(item => item.id === activeDistrict.improvementId);
     const card = text('section', '', 'building-card worked-site-card');
+    card.dataset['workId'] = `active:${activeDistrict.id}`;
     const siteHeading = text('h4', `${definition?.name ?? activeDistrict.improvementId} · Under construction`);
-    siteHeading.prepend(visualIcon('materials'));
+    siteHeading.prepend(visualIcon(definition?.production.food ? 'food' : 'materials'));
     card.append(siteHeading, text('p', `Reserved site · Tile ${activeDistrict.tileId}`, 'building-current'),
       text('p', `${activeDistrict.workDone} / ${activeDistrict.workRequired} work · Not built yet`, 'building-summary'),
       amountLine('Paid once for this order', RESOURCE_IDS.flatMap(resource => { const amount = activeDistrict.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
@@ -174,7 +180,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     const card = text('section', '', 'building-card worked-site-card');
     card.dataset['improvementTile'] = String(site.tileId);
     const siteHeading = text('h4', `${definition?.name ?? site.improvementId} · Tile ${site.tileId}`);
-    siteHeading.prepend(visualIcon('materials'));
+    siteHeading.prepend(visualIcon(definition?.production.food ? 'food' : 'materials'));
     card.append(siteHeading, text('p', `Built · ${site.operation.enabled ? 'On' : 'Paused'} now`, 'building-current'));
     if (definition) card.append(text('p', `Needs ${definition.residentsRequired} local resident each operating season. People stay in this town.`, 'building-summary'),
       amountLine('Base before town productivity', RESOURCE_IDS.flatMap(resource => { const amount = definition.production[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
@@ -214,6 +220,11 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     }
     if (!definition?.operatingInputs) {
       card.append(text('p', 'Built', 'building-current'));
+      if (definition?.housing) card.append(text('p', `Adds ${definition.housing} housing capacity. Population grows only in a later eligible season with food.`, 'building-summary'));
+      const source = city.buildingCatchments?.[id];
+      if (source !== undefined) card.append(text('p', `Retained mountain source · Tile ${source}. This is a source, not an occupied district or a pipe route.`, 'building-summary'));
+      if (definition?.requiresBuildings?.length) card.append(text('p', `Built with this town’s ${definition.requiresBuildings.map(required => BUILDINGS.find(item => item.id === required)?.name ?? required).join(' and ')}.`, 'building-summary'));
+      if (definition && Object.values(definition.production).some(amount => amount > 0)) card.append(amountLine('Base before town productivity', RESOURCE_IDS.flatMap(resource => { const amount = definition.production[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })), text('p', 'Later town production includes this contribution. No separate per-building output receipt is recorded.', 'building-summary'));
       if (definition?.capabilities?.includes('coastal-departure')) card.append(text('p', 'Coastal departure site. With Navigation, existing residents can found a new coastal town. This building has no operating output.', 'building-summary'));
       host.append(card);
       continue;
@@ -268,6 +279,8 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     if (wonder) preview.append(wonderPreview(wonder));
     else if (key?.startsWith('active:') && activeDistrict) {
       preview.append(text('strong', 'Under construction'), text('p', `${exactNumber(activeDistrict.workDone)} / ${exactNumber(activeDistrict.workRequired)} work · Not built yet`));
+      if ('buildingId' in activeDistrict && activeDistrict.catchmentTileId !== undefined) preview.append(text('p', `Mountain source · Tile ${activeDistrict.catchmentTileId}`));
+      if ('kind' in activeDistrict && activeDistrict.kind === 'improvement') preview.append(text('p', `Reserved Tile ${activeDistrict.tileId} · No food or materials made yet`));
     } else {
       preview.append(text('strong', operation || worked ? `Built · ${(operation ?? worked?.operation)?.enabled ? 'On' : 'Paused'} now` : 'Built'));
       const last = operation?.lastResult ?? worked?.operation.lastResult;
@@ -278,7 +291,14 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
           amountLine('Used', RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
         preview.append(results);
         if (last.status !== 'operated') preview.append(text('span', last.status === 'paused' ? 'Paused in that season' : 'Could not operate in that season', 'work-record-round'));
-      } else preview.append(text('span', operation || worked ? 'No operating result recorded yet' : 'Production records are separate from construction.', 'work-record-round'));
+      } else {
+        const definition = BUILDINGS.find(item => item.id === key);
+        if (definition?.housing) preview.append(text('p', `+${definition.housing} housing capacity · Growth still needs food`));
+        if (key && city.buildingCatchments?.[key] !== undefined) preview.append(text('p', `Mountain source · Tile ${city.buildingCatchments[key]}`));
+        if (key === 'water-mill' && definition) {
+          preview.append(amountLine('Base each season', RESOURCE_IDS.flatMap(resource => { const amount = definition.production[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })), text('p', 'Own-town Irrigation · Before productivity; actual town output is in Events.', 'work-record-round'));
+        } else preview.append(text('span', operation || worked ? 'No operating result recorded yet' : 'Production records are separate from construction.', 'work-record-round'));
+      }
     }
     const full = townDisclosure(`work:${key ?? ''}`, 'Site & full record'); full.className += ' work-full-record'; full.append(selected);
     detail.replaceChildren(preview, full);
@@ -300,4 +320,14 @@ export function renderStrategicInspection(host: HTMLElement, facts: ReturnType<t
   if (!facts.revealedDeposits?.length) deposits.append(text('p', 'No deposits are revealed to this civilization.'));
   for (const deposit of facts.revealedDeposits ?? []) deposits.append(text('p', depositLabel(deposit)));
   section.append(deposits); host.append(section);
+}
+
+export function renderPastoralInspection(host: HTMLElement, facts: ReturnType<typeof observedPastoralSites>): void {
+  if (!facts.revealedPastoralSites) return;
+  const section = text('section', '', 'pastoral-sites'); section.dataset['inspectionSection'] = 'overview';
+  const details = townDisclosure('known-horse-sites', `Known horse sites · ${facts.revealedPastoralSites.length}`);
+  details.append(text('p', 'Known to this civilization. These are sites, not stored horses. A completed Pasture can make food when a local resident works it.'));
+  if (!facts.revealedPastoralSites.length) details.append(text('p', 'No horse sites are revealed to this civilization.'));
+  for (const site of facts.revealedPastoralSites) details.append(text('p', pastoralSiteLabel(site.tileId)));
+  section.append(details); host.append(section);
 }

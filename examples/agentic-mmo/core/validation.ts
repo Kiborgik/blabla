@@ -49,6 +49,7 @@ import {
   type WonderLossReceipt,
   type ResearchBoostReceipt,
   type PopulationGrowthReceipt,
+  type PastoralSiteLayer,
   type WorldState,
 } from './types.ts';
 
@@ -241,6 +242,65 @@ function metalRecords(hasLayer: boolean, layer: unknown, civilizations: Civiliza
     if (!connection || !agreement || !cargo || agreement.offerId !== shipment.offerId || connection.owner !== shipment.proposer || connection.partner !== shipment.recipient
       || !sameStrategicResources(cargo.proposer, shipment.proposerSent) || !sameStrategicResources(cargo.recipient, shipment.recipientSent)
       || event.round <= agreement.acceptedRound || (event.round - (agreement.terms.transport ? agreement.acceptedRound : 0)) % agreement.terms.cadenceRounds !== 0) return false;
+  }
+  return true;
+}
+
+function pastoralLayer(value: unknown, seed: number, tiles: HexTile[], iron: StrategicDepositLayer | undefined): value is PastoralSiteLayer {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'placementId', 'seed', 'tileIds', 'sites'])
+    || value.ruleVersion !== 1 || value.placementId !== 'pastoral-sites-1' || value.seed !== seed
+    || !Array.isArray(value.tileIds) || value.tileIds.length > Math.min(10, tiles.length) || !unique(value.tileIds)
+    || !Array.from(value.tileIds).every((id: unknown) => integer(id) && tiles.some(site => site.id === id) && !iron?.tileIds.includes(id))
+    || !record(value.sites) || !exactKeys(value.sites, value.tileIds.map(String))) return false;
+  return Object.entries(value.sites).every(([key, site]) => record(site) && exactKeys(site, ['tileId', 'resource'])
+    && integer(site.tileId) && key === String(site.tileId) && site.resource === 'horses');
+}
+
+function waterLandRecords(hasLayer: boolean, layer: unknown, cities: City[], tiles: HexTile[], events: GameEvent[], features: string[], seed: number, iron: unknown): boolean {
+  const enabled = features.includes('water-land');
+  const deposits = strategicLayer(iron, seed, tiles) ? iron : undefined;
+  const pastoral = enabled && pastoralLayer(layer, seed, tiles, deposits) ? layer : null;
+  if (hasLayer !== enabled || enabled && !pastoral) return false;
+  const sourceValid = (settlement: City, source: unknown): boolean => {
+    if (!enabled || !integer(source) || source === settlement.tileId) return false;
+    const center = tiles.find(site => site.id === settlement.tileId);
+    const catchment = tiles.find(site => site.id === source);
+    return center !== undefined && catchment !== undefined && hexDistance(center, catchment) === 1;
+  };
+  for (const settlement of cities) {
+    const installed = settlement.buildings.includes('aqueduct');
+    const mapping: unknown = settlement.buildingCatchments;
+    if (Object.hasOwn(settlement, 'buildingCatchments')) {
+      if (!enabled || !record(mapping) || !exactKeys(mapping, installed ? ['aqueduct'] : [])
+        || installed && !sourceValid(settlement, mapping.aqueduct)) return false;
+    } else if (installed) return false;
+    if (!enabled && settlement.buildings.includes('water-mill')) return false;
+    const active = settlement.construction?.active;
+    const completed = settlement.construction?.lastCompleted;
+    for (const entry of [active, completed]) {
+      if (!entry) continue;
+      if ('kind' in entry) {
+        if (entry.kind === 'improvement' && entry.improvementId === 'pasture'
+          && (!pastoral || !Object.hasOwn(pastoral.sites, String(entry.tileId)))) return false;
+        continue;
+      }
+      if (entry.buildingId === 'water-mill' && !enabled) return false;
+      const aqueduct = entry.buildingId === 'aqueduct';
+      if (aqueduct !== Object.hasOwn(entry, 'catchmentTileId')) return false;
+      if (!aqueduct) continue;
+      if (!sourceValid(settlement, entry.catchmentTileId)) return false;
+      if (entry === completed) {
+        if (!record(mapping) || mapping.aqueduct !== entry.catchmentTileId || !completed) return false;
+        const event = events.find(candidate => candidate.id === completed.eventId);
+        if (event && (event.type !== 'building-completed' || event.round !== completed.completedRound || event.tileId !== settlement.tileId
+          || event.actor !== settlement.civId || event.target !== settlement.civId)) return false;
+      }
+    }
+    for (const improvement of Object.values(settlement.improvements ?? {})) {
+      if (improvement.improvementId !== 'pasture') continue;
+      if (!pastoral || !Object.hasOwn(pastoral.sites, String(improvement.tileId))
+        || improvement.operation.lastResult && Object.hasOwn(improvement.operation.lastResult, 'extraction')) return false;
+    }
   }
   return true;
 }
@@ -484,7 +544,8 @@ function constructionIdentity(value: Record<string, unknown>, settlement: City, 
   if (value.kind === 'wonder') return features.includes('unique-wonders') && integer(value.tileId)
     && WONDERS.some(definition => definition.id === value.wonderId);
   if (value.kind === 'improvement') return features.includes(IMPROVEMENT_RULES.featureId) && integer(value.tileId)
-    && IMPROVEMENTS.some(definition => definition.id === value.improvementId);
+    && IMPROVEMENTS.some(definition => definition.id === value.improvementId)
+    && (value.improvementId !== 'pasture' || features.includes('water-land'));
   return !Object.hasOwn(value, 'kind') && typeof value.buildingId === 'string'
     && BUILDINGS.some(building => building.id === value.buildingId)
     && settlement.buildings.includes(value.buildingId) === completed
@@ -492,7 +553,7 @@ function constructionIdentity(value: Record<string, unknown>, settlement: City, 
 }
 
 function constructionKeys(value: Record<string, unknown>): string[] {
-  return value.kind === 'wonder' ? ['kind', 'wonderId', 'tileId'] : value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : [])];
+  return value.kind === 'wonder' ? ['kind', 'wonderId', 'tileId'] : value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : []), ...(Object.hasOwn(value, 'catchmentTileId') ? ['catchmentTileId'] : [])];
 }
 
 function constructionCompletion(value: unknown, settlement: City, features: string[], round: number, revision: number): value is ConstructionCompletion {
@@ -1052,6 +1113,7 @@ export function isWorldState(
     !districtRecords(cities, tiles, value.events, features) ||
     !improvementRecords(cities, tiles, value.events, features, round, value.revision) ||
     !metalRecords(Object.hasOwn(value, 'strategicDeposits'), value.strategicDeposits, value.civilizations, cities, tiles, value.events, value.routes, features, value.seed) ||
+    !waterLandRecords(Object.hasOwn(value, 'pastoralSites'), value.pastoralSites, cities, tiles, value.events, features, value.seed, value.strategicDeposits) ||
     !coastalRecords(cities, value.events, tiles, features, round, value.revision) ||
     !wonderRecords(Object.hasOwn(value, 'wonders'), value.wonders, cities, value.civilizations, tiles, value.events, features, value.revision, round) ||
     !value.civilizations.every((item) =>

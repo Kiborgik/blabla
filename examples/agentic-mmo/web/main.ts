@@ -1,3 +1,4 @@
+import { observedPastoralSites } from '../core/simulation/pastoral.ts';
 import { townDevelopmentFacts } from '../visuals/wonder-visuals.ts';
 import { exactNumber, numberPresentation } from './number-format.ts';
 import { observedStrategicResources } from '../core/simulation/metals.ts';
@@ -7,7 +8,7 @@ import { eventLogEntries, latestStoryEvent, renderEventLog } from './event-log.t
 import { routeInspectionCity } from '../visuals/route-visuals.ts';
 import { renderRouteCard, renderRouteList, retainedRoutePathInspection, routeInspectionIdentity } from './route-inspection.ts';
 import { cityKey, resolveCitySelection, retainedReceiptBuilding } from './city-selection.ts';
-import { renderSettlementInspection, residentSupportForWorld, renderStrategicInspection } from './settlement-inspection.ts';
+import { renderPastoralInspection, renderSettlementInspection, residentSupportForWorld, renderStrategicInspection } from './settlement-inspection.ts';
 import { researchProgressPresentation } from './research-progress.ts';
 import releaseData from '../public/version.json';
 import changelog from '../public/changelog.json';
@@ -186,7 +187,8 @@ function renderInspection(): void {
   }) : null;
   panel.style.setProperty('--civ-color', civ.color);
   const development = snapshot && preferences.selectedCity ? townDevelopmentFacts(snapshot.state, preferences.selectedCity) : undefined;
-  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
+  const pastoral = snapshot && actual ? observedPastoralSites(snapshot.state, actual.id) : undefined;
+  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
   if (fingerprint === inspectionFingerprint) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
   const previousScroll = sameCity && !pendingInspectionWork ? panel.scrollTop : 0;
@@ -250,6 +252,7 @@ function renderInspection(): void {
     }
     researchSection.append(details);
   }
+  if (pastoral) renderPastoralInspection(panel, pastoral);
   if (snapshot && actual) renderStrategicInspection(panel, observedStrategicResources(snapshot.state, actual.id));
   const settlement = panel.querySelector<HTMLElement>('.city-details');
   if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork, development);

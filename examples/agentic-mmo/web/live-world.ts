@@ -1,3 +1,4 @@
+import { projectPastoralSites, projectCatchmentSites } from '../visuals/pastoral-visuals.ts';
 import { projectWonderSites } from '../visuals/wonder-visuals.ts';
 import { projectRevealedDeposits } from '../visuals/strategic-resource-visuals.ts';
 import { projectRoutePath, mapTileHeight } from '../visuals/route-paths.ts';
@@ -124,6 +125,8 @@ export function projectWorld(state: WorldState): AtlasWorld {
     illustrative: false,
     cities,
     districts,
+    pastoralSites: projectPastoralSites(state),
+    catchments: projectCatchmentSites(state),
     wonders: projectWonderSites(state),
     improvements,
     deposits: projectRevealedDeposits(state),

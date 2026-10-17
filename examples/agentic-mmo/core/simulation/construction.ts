@@ -18,7 +18,12 @@ export function requiredConstructionWork(buildingId: string): number {
   return specified?.[1] ?? CONSTRUCTION_RULES.defaultRequiredWork;
 }
 
-export function installBuilding(state: WorldState, city: City, definition: BuildingDefinition, events: GameEvent[], tileId?: number): GameEvent {
+export function installBuilding(state: WorldState, city: City, definition: BuildingDefinition, events: GameEvent[], tileId?: number, catchmentTileId?: number): GameEvent {
+  if (definition.siteRequirement === 'mountain-catchment') {
+    if (catchmentTileId === undefined) throw new RangeError('Building completion requires its retained mountain catchment');
+    city.buildingCatchments ??= {};
+    city.buildingCatchments[definition.id] = catchmentTileId;
+  }
   if (definition.district) {
     if (tileId === undefined) throw new RangeError('District completion requires its retained exact site');
     city.districtSites ??= {};
@@ -43,6 +48,8 @@ export function installBuilding(state: WorldState, city: City, definition: Build
       ...effects,
       ...(definition.district && tileId !== undefined ? [describeDistrictProduction(state, city, definition, tileId)] : []),
       ...(definition.capabilities ?? []).map(capability => `Completed capability ${capability}`),
+      ...(definition.housing && hasFeatures(state, ['water-land']) ? [`Completed housing capacity +${definition.housing}`] : []),
+      ...(catchmentTileId === undefined ? [] : [`Retained mountain catchment ${catchmentTileId}`]),
       ...RESOURCE_IDS.filter(resource => (definition.operatingInputs?.[resource] ?? 0) > 0).map(resource => `Operating input ${resource} ${definition.operatingInputs?.[resource]} per funded beat`),
       ...RESOURCE_IDS.filter(resource => (production[resource] ?? 0) > 0).map(resource => `Seasonal ${resource} +${production[resource]}${paidRecipe(definition) ? ' when the complete operating recipe is funded' : ''}`),
     ],
@@ -71,11 +78,12 @@ export function resolveConstruction(state: WorldState, opening: ReadonlyMap<stri
     }
     const definition = BUILDINGS.find(building => building.id === order.buildingId);
     if (!definition || city.buildings.includes(order.buildingId)) throw new RangeError('Construction completion requires its exact unbuilt definition');
-    const event = installBuilding(state, city, definition, events, order.tileId);
+    const event = installBuilding(state, city, definition, events, order.tileId, order.catchmentTileId);
     construction.lastCompleted = {
       orderId: order.id, cityId: city.id, buildingId: order.buildingId,
       startedRound: order.startedRound, completedRound: state.round,
       ...(order.tileId === undefined ? {} : { tileId: order.tileId }),
+      ...(order.catchmentTileId === undefined ? {} : { catchmentTileId: order.catchmentTileId }),
       paid: structuredClone(order.paid), workRequired: order.workRequired, eventId: event.id,
     };
     construction.active = null;

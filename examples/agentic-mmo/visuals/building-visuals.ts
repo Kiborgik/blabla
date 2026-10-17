@@ -15,6 +15,21 @@ export interface BuildingAppearance {
 }
 
 const APPEARANCES: Record<string, { icon: VisualIcon; label: string; corePartIds: readonly string[]; parts: (detail: DetailLevel) => VisualPart[] }> = {
+  'water-mill': {
+    icon: 'irrigation', label: 'Water mill', corePartIds: ['water-mill-wheel', 'water-mill-roof'], parts: (detail) => [
+      part('water-mill-wheel', 'cylinder', 'timber', [1.25, .3, .98], [.48, .25, .48]),
+      part('water-mill-roof', 'gable', 'roof', [.89, .5, .96], [.58, .3, .48]),
+      ...(detail === 'far' ? [] : [part('water-mill-wall', 'box', 'plaster', [.89, .2, .96], [.5, .4, .4]), part('water-mill-race', 'box', 'water', [1.25, .08, .98], [.26, .05, .74])]),
+      ...(detail === 'close' ? [part('water-mill-axle', 'box', 'timber', [1.14, .3, .98], [.5, .07, .07])] : []),
+    ],
+  },
+  aqueduct: {
+    icon: 'irrigation', label: 'Aqueduct', corePartIds: ['aqueduct-channel'], parts: (detail) => [
+      part('aqueduct-channel', 'box', 'stone', [0, .68, -1.25], [1.32, .2, .3]),
+      ...(detail === 'far' ? [] : [-.52, 0, .52].map((x, index) => part(`aqueduct-support-${index}`, 'box', 'stone', [x, .29, -1.25], [.14, .58, .3]))),
+      ...(detail === 'close' ? [part('aqueduct-water', 'box', 'water', [0, .79, -1.25], [1.2, .02, .14])] : []),
+    ],
+  },
   farm: {
     icon: 'farm', label: 'Farm', corePartIds: ['farm-soil', 'farm-row-0'], parts: (detail) => {
       const rows = DETAIL_BUDGETS[detail].fieldRows;

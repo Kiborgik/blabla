@@ -1,3 +1,5 @@
+import { RESOURCE_IDS } from '../core/content.ts';
+import { METRIC_LABELS } from './visual-language.ts';
 import type { CityImprovement, ImprovementConstructionOrder, ImprovementConstructionCompletion, Resources } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
@@ -31,10 +33,12 @@ export function improvementLastLabel(result: CityImprovement['operation']['lastR
   if (!result) return 'No operating record yet';
   if (result.status === 'paused') return 'Paused that season';
   if (result.status === 'blocked') return result.blockedReason === 'resident-shortage' ? 'Not enough local support' : 'Site could not operate';
-  return Object.values(result.produced).some(amount => amount > 0) ? 'Materials made' : 'Worked with no output';
+  const made = RESOURCE_IDS.filter(resource => (result.produced[resource] ?? 0) > 0).map(resource => METRIC_LABELS[resource]);
+  return made.length ? `${made.join(' and ')} made` : 'Worked with no output';
 }
 
 export function improvementParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
+  if (view.improvementId === 'pasture') return pastureParts(view, detail);
   if (view.improvementId !== 'mine') return [];
   const parts: VisualPart[] = [];
   const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale'], rotation = 0): void => {
@@ -57,6 +61,27 @@ export function improvementParts(view: ImprovementView, detail: DetailLevel): Vi
       add('stack', 'box', 'stone', [.51, .16, -.08], [.3, .2, .3]);
     }
     if (detail === 'close') for (const z of [.05, .27, .49]) add(`sleeper-${z}`, 'box', 'timber', [-.15, .15, z], [.55, .045, .07]);
+  }
+  return parts.slice(0, IMPROVEMENT_PART_BUDGETS[detail]);
+}
+
+function pastureParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
+  const parts: VisualPart[] = [];
+  const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale']): void => { parts.push({ id: `${view.id}:${id}`, shape, material, position, scale, rotation: 0 }); };
+  add('pasture-ground', 'box', 'crop', [0, .035, 0], [1.65, .07, 1.45]);
+  add('pasture-identity', 'box', 'identity', [-.8, .1, 0], [.06, .1, 1.4]);
+  if (view.status === 'building') {
+    for (const x of [-.65, .65]) add(`pasture-survey-${x}`, 'box', 'timber', [x, .25, -.6], [.07, .5, .07]);
+    add('pasture-survey-line', 'box', 'grain', [0, .4, -.6], [1.3, .04, .04]);
+  } else {
+    for (const z of [-.62, .62]) add(`pasture-fence-${z}`, 'box', 'timber', [0, .25, z], [1.5, .12, .07]);
+    add('pasture-fence-end', 'box', 'timber', [.74, .25, 0], [.07, .12, 1.3]);
+    add('pasture-shelter-roof', 'gable', 'roof', [-.4, .55, -.36], [.7, .25, .5]);
+    if (detail !== 'far') {
+      add('pasture-shelter-wall', 'box', 'timber', [-.4, .22, -.36], [.6, .44, .4]);
+      for (const x of [-.7, .7]) for (const z of [-.6, .6]) add(`pasture-post-${x}-${z}`, 'box', 'timber', [x, .25, z], [.08, .5, .08]);
+    }
+    if (detail === 'close') add('pasture-trough', 'box', 'stone', [.35, .11, -.3], [.45, .2, .22]);
   }
   return parts.slice(0, IMPROVEMENT_PART_BUDGETS[detail]);
 }

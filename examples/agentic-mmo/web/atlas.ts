@@ -1,3 +1,4 @@
+import type { PastoralSiteView, CatchmentSiteView } from '../visuals/pastoral-visuals.ts';
 import type { WonderSiteView } from '../visuals/wonder-visuals.ts';
 import type { RouteResultCue } from '../visuals/route-cues.ts';
 import type { VisualEvent } from '../visuals/world-visuals.ts';
@@ -42,6 +43,8 @@ export interface AtlasWorld {
   tiles: AtlasTile[];
   cities: AtlasCivilization[];
   routes: RouteView[];
+  pastoralSites?: PastoralSiteView[];
+  catchments?: CatchmentSiteView[];
   wonders?: WonderSiteView[];
   districts?: DistrictView[];
   improvements?: ImprovementView[];

@@ -1,4 +1,5 @@
 import { executeWonderAction } from './wonders.ts';
+import { selectedMountainCatchment } from './water.ts';
 import { executeImprovementAction } from './improvements.ts';
 import { executeCoastalFounding, foundSettlement } from './coastal.ts';
 import { BUILDINGS, CONSTRUCTION_RULES, DIRECTOR_EVENTS, ECONOMY_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS } from '../content.ts';
@@ -112,6 +113,8 @@ export function executeAction(
       if (!definition || !city)
         throw new RangeError('Construction requires a released building and eligible settlement');
       if (definition.district && action.tileId === undefined) throw new RangeError('District construction requires its exact site');
+      const catchmentTileId = definition.siteRequirement === 'mountain-catchment' ? selectedMountainCatchment(state, city) : undefined;
+      if (definition.siteRequirement === 'mountain-catchment' && catchmentTileId === undefined) throw new RangeError('Construction requires its exact adjacent mountain catchment');
       transferCost(civilization.resources, definition.cost);
       if (hasFeatures(state, ['recurring-decisions'])) {
         city.construction ??= { active: null, lastCompleted: null };
@@ -119,6 +122,7 @@ export function executeAction(
           id: `construction-${state.revision}`, cityId: city.id, buildingId: definition.id,
           ruleVersion: CONSTRUCTION_RULES.version, startedRound: state.round,
           ...(definition.district ? { tileId: action.tileId } : {}),
+          ...(catchmentTileId === undefined ? {} : { catchmentTileId }),
           paid: structuredClone(definition.cost), workRequired: requiredConstructionWork(definition.id), workDone: 0,
         };
         emitEvent(state, events, {
@@ -128,6 +132,7 @@ export function executeAction(
           effects: [
             ...RESOURCE_IDS.filter(resource => (definition.cost[resource] ?? 0) > 0).map(resource => `Paid ${definition.cost[resource]} ${resource}`),
             `Work 0/${city.construction.active.workRequired}`,
+            ...(catchmentTileId === undefined ? [] : [`Retained mountain catchment ${catchmentTileId}`]),
             'No building effects or production until construction completes',
           ], importance: 3,
         });

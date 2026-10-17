@@ -22,6 +22,7 @@ import { availableTradeActions, type TradePresentation } from './trade.ts';
 import { orderedBuildings, paidRecipe } from './operations.ts';
 import { canAct } from './turns.ts';
 import { buildingEligibility, improvementEligibility, researchEligibility } from './capabilities.ts';
+import { selectedMountainCatchment } from './water.ts';
 import { decisionActionBlock } from './decisions.ts';
 import { requiredConstructionWork } from './construction.ts';
 
@@ -125,8 +126,10 @@ export function availableActions(
             });
             continue;
           }
+          const catchmentTileId = building.siteRequirement === 'mountain-catchment' ? selectedMountainCatchment(state, city) : undefined;
           choices.push({
             action: { type: 'build', project: building.id, cityId: city.id },
+            ...(catchmentTileId === undefined ? {} : { catchmentTileId }),
             label: `Build ${building.name} in ${city.name}`,
             reason: `${building.description} ${describeConstruction(building)}${hasFeatures(state, ['recurring-decisions']) ? ` Paid once at start; ${requiredConstructionWork(building.id)} work required over strategic beats; first output after completion.` : ''} Construct only in ${city.name}. ${describeSettlementSite(state, site)}`,
           });

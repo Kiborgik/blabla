@@ -19,7 +19,7 @@ export const CIVILIZATIONS: CivilizationDefinition[] = [
 
 export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, perPaidRecipe: 3 } as const;
 
-export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
 
 export const LOCAL_GROWTH_RULES = { ruleVersion: 1, featureId: 'local-growth', legacyBaseCapacity: 20, foundedBaseCapacity: 8, baseFoodCost: 6, populationPerFoodCost: 4, researchMultiplier: 3 } as const;
 
@@ -39,11 +39,14 @@ export const CONNECTED_RESEARCH_PACING = { ruleVersion: 1, featureId: 'learning-
 
 export const MANUFACTURING_RESEARCH_PACING = { ruleVersion: 1, featureId: 'manufacturing', multiplier: 3, baseCosts: { 'iron-working': 48, apprenticeship: 68 } } as const;
 
+export const PASTORAL_RULES = { ruleVersion: 1, featureId: 'water-land', resource: 'horses', revealTechnology: 'animal-husbandry', placement: { id: 'pastoral-sites-1', maximumSites: 10, frontierMinimumDistance: 2, ownedSiteRange: 3, seedMultiplier: 0x9e3779b1, mixMultipliers: [0x7feb352d, 0x846ca68b], seedSalt: 0x50415354 } } as const;
+
 export const METAL_RULES = { ruleVersion: 1, featureId: 'finite-metals', resource: 'iron', revealTechnology: 'bronze-working', capacityPerCity: 40, extractionPerBeat: 2, initialReserve: 240, placement: { id: 'iron-placement-1', maximumDeposits: 8, frontierMinimumDistance: 2, ownedSiteRange: 3, seedMultiplier: 0x9e3779b1, mixMultipliers: [0x7feb352d, 0x846ca68b], hillOnly: true } } as const;
 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'water-land', name: 'Work land and supply growing towns', description: 'Animal husbandry reveals useful horse pastures; Wheel and Engineering connect completed Irrigation and actual mountain catchments to productive Water mills and local housing.' },
   { id: 'local-growth', name: 'Housing and local growth', description: 'Masonry opens Granaries that add real town housing; later food-funded residents support work on a following season.' },
   { id: 'unique-wonders', name: 'World wonders', description: 'Exact towns compete to complete a unique landmark; real winners, losses, refunds and chosen research boosts remain in history.' },
   { id: 'manufacturing', name: 'Connected local manufacturing', description: 'Iron working and Apprenticeship connect real worked Mine sites to Industrial zones and resident-supported Guild workshops.' },
@@ -107,6 +110,9 @@ export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
+  { id: 'animal-husbandry', name: 'Animal husbandry', requiredFeatures: ['water-land'], era: 0, cost: 60, requires: ['agriculture'], capability: 'Reveal retained horse sites and assign one local resident to a useful Pasture. Finite horse extraction and mounted units remain planned.' },
+  { id: 'wheel', name: 'Wheel', requiredFeatures: ['water-land'], era: 0, cost: 84, requires: ['animal-husbandry', 'kiln-firing'], capability: 'Build a Water mill in a town with completed Irrigation for later food and material production.' },
+  { id: 'engineering', name: 'Engineering', requiredFeatures: ['water-land'], era: 1, cost: 144, requires: ['wheel', 'masonry'], capability: 'Build an Aqueduct supplied by an actual adjacent mountain, adding six housing spaces without creating residents.' },
   { id: 'masonry', name: 'Masonry', requiredFeatures: ['local-growth'], era: 0, cost: 84, requires: ['mining'], capability: 'Build a Granary for food and four additional local housing spaces. Walls, quarries and spoilage protection remain planned.' },
   { id: 'iron-working', name: 'Iron working', requiredFeatures: ['manufacturing'], era: 1, cost: 144, requires: ['bronze-working'], capability: 'Prepare Apprenticeship and local manufacturing supported by worked land. Military units remain planned.' },
   { id: 'apprenticeship', name: 'Apprenticeship', requiredFeatures: ['manufacturing'], era: 1, cost: 204, requires: ['currency', 'iron-working'], capability: 'Build an exact Industrial zone near completed Mines and operate its own Guild workshop.' },
@@ -144,10 +150,13 @@ export const ERAS: EraDefinition[] = ERA_PRESENTATION.map(era => {
 });
 
 export const IMPROVEMENTS: ImprovementDefinition[] = [
+  { id: 'pasture', name: 'Pasture', description: 'Work an exact owned revealed horse site with one local resident for food. Pausing releases that resident; horse stock and mounted use remain planned.', requiredFeatures: ['water-land', 'worked-land', 'resident-capacity', 'recurring-decisions'], requires: ['animal-husbandry'], minEra: 0, cost: { materials: 6, credits: 3 }, requiredWork: 3, siteRange: 3, siteRequirement: 'revealed-horse-site', residentsRequired: 1, production: { food: 2 } },
   { id: 'mine', name: 'Mine', description: 'Work an owned hill with one local resident to make materials. Pausing releases that resident on the next economy beat.', requiredFeatures: ['worked-land', 'mining', 'resident-capacity', 'recurring-decisions'], requires: ['mining'], minEra: 0, cost: { materials: 6, credits: 3 }, requiredWork: 4, siteRange: 3, siteRequirement: 'hill', residentsRequired: 1, production: { materials: 2 } },
 ];
 
 export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'water-mill', name: 'Water mill', requiredFeatures: ['water-land'], minEra: 0, cost: { materials: 16, credits: 6 }, requires: ['wheel'], requiresBuildings: ['irrigation'], effects: [], production: { food: 1, materials: 2 }, description: 'Use this town’s completed Irrigation infrastructure to make food and materials after construction. No river is implied.' },
+  { id: 'aqueduct', name: 'Aqueduct', requiredFeatures: ['water-land', 'local-growth'], minEra: 1, cost: { materials: 22, credits: 8 }, requires: ['engineering'], effects: [], production: {}, housing: 6, siteRequirement: 'mountain-catchment', description: 'Retain an exact adjacent mountain catchment to add six local housing spaces. Later food-funded growth is still required; no residents arrive at completion.' },
   { id: 'granary', name: 'Granary', requiredFeatures: ['local-growth'], minEra: 0, cost: { materials: 14, credits: 6 }, requires: ['masonry'], effects: [], production: { food: 2 }, housing: 4, description: 'Add four housing spaces and later food production in this town. Residents still need food-funded growth before they can support additional work. Spoilage protection remains planned.' },
   { id: 'industrial-zone', name: 'Industrial zone', requiredFeatures: ['district-planning', 'manufacturing'], minEra: 1, cost: { materials: 24, credits: 12 }, requires: ['apprenticeship'], effects: [], production: { materials: 2 }, district: { range: 3, adjacency: { improvement: 'mine', resource: 'materials', amount: 1, maximum: 3 } }, description: 'Commit an exact owned site to local manufacturing. Completed adjacent Mines add up to 3 base materials, even while paused; unfinished orders do not count. Quarry and great-person systems remain planned.' },
   { id: 'guild-workshop', name: 'Guild workshop', requiredFeatures: ['manufacturing', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 26, credits: 12 }, requires: ['apprenticeship'], requiresBuildings: ['industrial-zone'], effects: [], operatingInputs: { energy: 2 }, production: { materials: 6 }, description: 'Use two energy and three local residents to operate a workshop in this town’s completed Industrial zone. First output follows completion on a later season.' },
@@ -254,13 +263,14 @@ export interface ContentCatalog {
   siteOutputs: typeof SETTLEMENT_SITE_OUTPUTS;
   residentCapacityRules: typeof RESIDENT_CAPACITY_RULES;
   metalRules: typeof METAL_RULES;
+  pastoralRules: typeof PASTORAL_RULES;
 }
 
 export const CONTENT: ContentCatalog = {
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
   wonders: WONDERS, wonderRules: WONDER_RULES,
   buildings: BUILDINGS, improvements: IMPROVEMENTS, improvementRules: IMPROVEMENT_RULES, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
-  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES, metalRules: METAL_RULES,
+  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES, metalRules: METAL_RULES, pastoralRules: PASTORAL_RULES,
   tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES, landTransportRules: LAND_TRANSPORT_RULES, publicProjectRecipes: PUBLIC_PROJECT_RECIPES, publicProjectRules: PUBLIC_PROJECT_RULES, siteOutputs: SETTLEMENT_SITE_OUTPUTS,
 };
 
@@ -292,6 +302,9 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   };
   if (catalog.landTransportRules.ruleVersion !== 1 || !Number.isSafeInteger(catalog.landTransportRules.edgesPerBeat) || catalog.landTransportRules.edgesPerBeat < 1) errors.push('land transport: invalid version or pace');
   if (Object.keys(catalog.landTransportRules.passable).length !== 6 || ['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].some(terrain => typeof Reflect.get(catalog.landTransportRules.passable, terrain) !== 'boolean')) errors.push('land transport: invalid terrain passability');
+  const pastoral = catalog.pastoralRules;
+  if (pastoral.ruleVersion !== 1 || !features.has(pastoral.featureId) || pastoral.featureId !== 'water-land' || pastoral.resource !== 'horses' || pastoral.revealTechnology !== 'animal-husbandry' || !catalog.technologies.some(technology => technology.id === pastoral.revealTechnology)) errors.push('pastoral sites: invalid version, feature, resource or reveal technology');
+  if (pastoral.placement.id !== 'pastoral-sites-1' || pastoral.placement.seedSalt !== 0x50415354 || pastoral.placement.seedMultiplier !== 0x9e3779b1 || pastoral.placement.mixMultipliers[0] !== 0x7feb352d || pastoral.placement.mixMultipliers[1] !== 0x846ca68b || ![pastoral.placement.maximumSites, pastoral.placement.frontierMinimumDistance, pastoral.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('pastoral sites: invalid versioned placement');
   const metal = catalog.metalRules;
   if (metal.ruleVersion !== 1 || !features.has(metal.featureId) || metal.resource !== 'iron' || !catalog.technologies.some(technology => technology.id === metal.revealTechnology)) errors.push('metals: invalid feature, resource or reveal technology');
   if (![metal.capacityPerCity, metal.extractionPerBeat, metal.initialReserve, metal.placement.maximumDeposits, metal.placement.frontierMinimumDistance, metal.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('metals: invalid positive integer quantity');
@@ -341,7 +354,8 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     const label = `improvement ${improvement.id}`;
     requireFeatures(label, improvement.requiredFeatures);
     if (!improvement.requiredFeatures.includes(improvementRules.featureId) || !improvement.requiredFeatures.includes('resident-capacity') || !improvement.requiredFeatures.includes('recurring-decisions')) errors.push(`${label}: missing operation or construction gate`);
-    if (!eraValid(improvement.minEra) || !Number.isSafeInteger(improvement.requiredWork) || improvement.requiredWork < 1 || !Number.isSafeInteger(improvement.siteRange) || improvement.siteRange < 1 || !Number.isSafeInteger(improvement.residentsRequired) || improvement.residentsRequired < 1 || improvement.siteRequirement !== 'hill') errors.push(`${label}: invalid work, site or resident requirement`);
+    if (!eraValid(improvement.minEra) || !Number.isSafeInteger(improvement.requiredWork) || improvement.requiredWork < 1 || !Number.isSafeInteger(improvement.siteRange) || improvement.siteRange < 1 || !Number.isSafeInteger(improvement.residentsRequired) || improvement.residentsRequired < 1 || !['hill', 'revealed-horse-site'].includes(improvement.siteRequirement)) errors.push(`${label}: invalid work, site or resident requirement`);
+    if (improvement.siteRequirement === 'revealed-horse-site' && !improvement.requiredFeatures.includes(pastoral.featureId)) errors.push(`${label}: horse site requires water-land feature`);
     resources(`${label} cost`, improvement.cost);
     resources(`${label} production`, improvement.production);
     if (!Object.values(improvement.cost).some(positive) || !Object.values(improvement.production).some(positive)) errors.push(`${label}: requires meaningful construction cost and production`);
@@ -427,7 +441,8 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     const capabilities = building.capabilities ?? [];
     for (const capability of capabilities) if (!Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability)) errors.push(`building ${building.id}: unknown capability ${capability}`);
     if (new Set(capabilities).size !== capabilities.length) errors.push(`building ${building.id}: duplicate capabilities`);
-    if (building.siteRequirement !== undefined && building.siteRequirement !== 'coastal') errors.push(`building ${building.id}: unknown site requirement`);
+    if (building.siteRequirement !== undefined && !['coastal', 'mountain-catchment'].includes(building.siteRequirement)) errors.push(`building ${building.id}: unknown site requirement`);
+    if (building.siteRequirement === 'mountain-catchment' && !building.requiredFeatures.includes(pastoral.featureId)) errors.push(`building ${building.id}: mountain catchment requires water-land feature`);
     if (building.district) {
       const { range, adjacency } = building.district;
       if (!building.requiredFeatures.includes('district-planning')) errors.push(`building ${building.id}: district requires district-planning feature`);
@@ -446,7 +461,7 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
       else if (prerequisite.minEra > building.minEra) errors.push(`building ${building.id}: future building prerequisite ${id}`);
     }
     if (capabilities.includes('coastal-departure') && (building.siteRequirement !== 'coastal' || !building.requiredFeatures.includes('coastal-founding'))) errors.push(`building ${building.id}: coastal departure requires coastal site and feature`);
-    if (building.effects.length === 0 && !Object.values(building.production).some(positive) && !capabilities.some(capability => Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability))) errors.push(`building ${building.id}: no production or world effect`);
+    if (building.effects.length === 0 && !Object.values(building.production).some(positive) && !positive(building.housing ?? 0) && !capabilities.some(capability => Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability))) errors.push(`building ${building.id}: no production or world effect`);
     effects(building.id, building.effects);
     for (const required of building.requires) {
       const technology = technologies.get(required);

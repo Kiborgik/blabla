@@ -71,6 +71,7 @@ function blockerText(blocker: CapabilityBlocker, input: CapabilityTreeInput): st
     case 'wonder-site': return `${town(blocker.cityId)} needs an available wonder site`;
     case 'wonder-contender': return `This civilization already has a contender for ${capabilityName(input, blocker.wonderId)}`;
     case 'wonder-completed': return `${capabilityName(input, blocker.wonderId)} has a recorded world winner: civilization ${blocker.civilizationId}`;
+    case 'mountain-catchment': return `${town(blocker.cityId)} needs an adjacent mountain source`;
     case 'coastal-site': return 'Needs a coastal town';
     case 'building': return `Build ${capabilityName(input, blocker.buildingId)} in ${town(blocker.cityId)}`;
     case 'improvement-site': return `${town(blocker.cityId)} needs an available site for ${capabilityName(input, `improvement:${blocker.improvementId}`)}`;
@@ -169,6 +170,18 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
         if (last?.extraction) facts.push({ label: `Site ${site.tileId} extraction record`, value: extractionFacts(last.extraction).join(' · ') });
       }
     }
+    if (id === 'technology:animal-husbandry' || id === 'improvement:pasture') {
+      const sites = input.projection.pastoral?.revealedPastoralSites;
+      if (sites) facts.push({ label: 'Horse sites known to this civilization', value: sites.length ? sites.map(site => `Tile ${site.tileId}`).join(' · ') : 'None revealed' },
+        { label: 'Meaning', value: 'Revealed geography. No horse stock or extraction is recorded. Pasture food requires a later staffed season.' });
+    }
+    if (row?.catchment) {
+      facts.push({ label: 'Mountain source', value: row.catchment.retainedTileId === null ? 'No source retained yet' : `Tile ${row.catchment.retainedTileId} · Recorded for this town` });
+      if (row.catchment.retainedTileId === null) facts.push({ label: 'Current source options', value: row.catchment.availableTileIds.map(tile => `Tile ${tile}`).join(' · ') || 'None' });
+      facts.push({ label: 'Source meaning', value: 'A retained mountain catchment, not an occupied district or a simulated pipe route.' });
+    }
+    if ('housing' in definition && definition.housing) facts.push({ label: 'Housing after completion', value: `+${definition.housing} capacity. Later growth still needs food.` });
+    if ('requiresBuildings' in definition && definition.requiresBuildings?.length) facts.push({ label: 'Own-town infrastructure', value: definition.requiresBuildings.map(required => capabilityName(input, required)).join(' · ') });
     if (id === 'technology:bronze-working' || id === 'improvement:mine') {
       const strategic = input.projection.strategic;
       if (strategic?.strategicCapacity !== undefined) {
@@ -456,7 +469,7 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
       const item = button('', `node:${node.id}`, () => { selectedNodeId = node.id; finder.value = node.id; renderSelected(); });
       item.className = 'capability-node'; item.dataset['nodeId'] = node.id; item.dataset['status'] = node.status ?? 'unknown'; item.dataset['kind'] = node.kind;
       item.setAttribute('style', `left:${position.x}px;top:${position.y}px;width:${position.width}px;height:${position.height}px`);
-      const name = text('span', node.name, 'capability-name'); name.prepend(visualIcon(node.kind === 'technology' ? 'science' : node.kind === 'improvement' ? 'materials' : 'infrastructure'));
+      const name = text('span', node.name, 'capability-name'); name.prepend(visualIcon(node.kind === 'technology' ? 'science' : node.id === 'improvement:pasture' ? 'food' : node.kind === 'improvement' ? 'materials' : 'infrastructure'));
       item.append(name, text('span', node.research ? 'Researching' : node.construction ? 'Under construction' : node.label, 'capability-node-state')); graph.append(item);
     }
     viewport.append(graph);

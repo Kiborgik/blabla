@@ -79,7 +79,7 @@ await test('research prerequisites cannot form a cycle or require an undiscovere
 
 await test('construction uses valid gates and real production, world effects or consumed capabilities', () => {
   assert.ok(BUILDINGS.some(building => Object.keys(building.production).length > 0));
-  assert.ok(BUILDINGS.every(building => building.effects.length > 0 || Object.values(building.production).some(amount => amount > 0) || (building.capabilities ?? []).some(capability => BUILDING_CAPABILITY_ACTIONS[capability]?.length > 0)));
+  assert.ok(BUILDINGS.every(building => building.effects.length > 0 || (building.housing ?? 0) > 0 || Object.values(building.production).some(amount => amount > 0) || (building.capabilities ?? []).some(capability => BUILDING_CAPABILITY_ACTIONS[capability]?.length > 0)));
   const launchpad = BUILDINGS.find(building => building.id === VICTORY_RULES.mars.requiredBuilding);
   assert.ok(launchpad);
   assert.ok(launchpad.requires.includes(VICTORY_RULES.mars.requiredTechnology));
@@ -255,7 +255,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -265,7 +265,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -495,4 +495,56 @@ await test('local growth data declares a gated paid housing consequence without 
   const ungated = structuredClone(CONTENT);
   required(ungated.buildings.find(item => item.id === 'granary')).requiredFeatures = ['settlement-production'];
   assert.ok(validateContent(ungated).some(error => error.includes('housing')));
+});
+
+await test('water and land connect real sites and local infrastructure without a phantom horse stock', () => {
+  for (const [id, cost, prerequisites] of [
+    ['animal-husbandry', 60, ['agriculture']],
+    ['wheel', 84, ['animal-husbandry', 'kiln-firing']],
+    ['engineering', 144, ['wheel', 'masonry']],
+  ] as const) {
+    const technology = required(TECHNOLOGIES.find(item => item.id === id));
+    assert.equal(technology.cost, cost);
+    assert.deepEqual(technology.requires, prerequisites);
+    assert.deepEqual(technology.requiredFeatures, ['water-land']);
+  }
+  const pasture = required(CONTENT.improvements.find(item => item.id === 'pasture'));
+  assert.equal(pasture.siteRequirement, 'revealed-horse-site');
+  assert.deepEqual(pasture.cost, { materials: 6, credits: 3 });
+  assert.equal(pasture.requiredWork, 3);
+  assert.equal(pasture.residentsRequired, 1);
+  assert.deepEqual(pasture.production, { food: 2 });
+  const mill = required(BUILDINGS.find(item => item.id === 'water-mill'));
+  assert.deepEqual(mill.requiresBuildings, ['irrigation']);
+  assert.deepEqual(mill.production, { food: 1, materials: 2 });
+  const aqueduct = required(BUILDINGS.find(item => item.id === 'aqueduct'));
+  assert.equal(aqueduct.siteRequirement, 'mountain-catchment');
+  assert.equal(aqueduct.housing, 6);
+  assert.equal(aqueduct.minEra, 1);
+  assert.deepEqual(aqueduct.production, {});
+  assert.equal(CONTENT.pastoralRules.placement.maximumSites, 10);
+  assert.equal(CONTENT.pastoralRules.placement.seedSalt, 0x50415354);
+  assert.equal(CONTENT.pastoralRules.resource, 'horses');
+  const predecessor = required(RELEASES.find(item => item.id === 'settlement-growth-1'));
+  const release = required(RELEASES.find(item => item.id === 'settlement-water-land-1'));
+  assert.deepEqual(release.compatibleFrom, [predecessor.id]);
+  assert.deepEqual(release.featureIds, [...predecessor.featureIds, 'water-land']);
+  assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
+  assert.deepEqual(validateContent(), []);
+});
+
+await test('water land catalogue refuses invalid retained placement and ungated site consumers', () => {
+  for (const mutate of [
+    (catalog: typeof CONTENT) => { Reflect.set(catalog.pastoralRules.placement, 'seedSalt', 0); },
+    (catalog: typeof CONTENT) => { Reflect.set(catalog.pastoralRules.placement, 'maximumSites', 0); },
+    (catalog: typeof CONTENT) => { Reflect.set(catalog.pastoralRules.placement, 'frontierMinimumDistance', 0); },
+    (catalog: typeof CONTENT) => { Reflect.set(catalog.pastoralRules, 'revealTechnology', 'unknown'); },
+    (catalog: typeof CONTENT) => { required(catalog.improvements.find(item => item.id === 'pasture')).requiredFeatures = ['worked-land', 'resident-capacity', 'recurring-decisions']; },
+    (catalog: typeof CONTENT) => { required(catalog.buildings.find(item => item.id === 'aqueduct')).requiredFeatures = ['local-growth']; },
+    (catalog: typeof CONTENT) => { required(catalog.buildings.find(item => item.id === 'aqueduct')).housing = 0; },
+  ]) {
+    const broken = structuredClone(CONTENT);
+    mutate(broken);
+    assert.ok(validateContent(broken).length > 0);
+  }
 });

@@ -1,3 +1,4 @@
+import { PASTORAL_MARK_PATH, CATCHMENT_MARK_PATH, pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
 import { wonderSiteLabel } from '../visuals/wonder-visuals.ts';
 import { WONDER_MARK_PATH } from '../visuals/wonder-landmark.ts';
 import { depositLabel, SITE_MARK_PATHS, placeSiteMarks } from '../visuals/strategic-resource-visuals.ts';
@@ -252,8 +253,9 @@ export function createAtlasRenderer(
   const depositMeshes = createDepositMeshes(world, material);
   const wonderMeshes = createWonderMeshes(world, material);
   const sites = [
+    ...(world.catchments ?? []).map(site => ({ ...site, mark: 'catchment' as const, label: `Aqueduct mountain source${site.status === 'building' ? ' · Building' : ''}` })),
     ...(world.districts ?? []).map(site => ({ ...site, mark: site.buildingId === 'industrial-zone' ? 'industry' as const : site.buildingId === 'commercial-hub' ? 'commerce' as const : 'campus' as const, label: districtLabel(site) })),
-    ...(world.improvements ?? []).map(site => ({ ...site, mark: 'mine' as const, label: improvementLabel(site) })),
+    ...(world.improvements ?? []).map(site => ({ ...site, mark: site.improvementId === 'pasture' ? 'pasture' as const : 'mine' as const, workId: site.status === 'building' ? `active:${site.construction?.id ?? ''}` : String(site.tileId), label: improvementLabel(site) })),
     ...(world.wonders ?? []).map(site => ({ ...site, mark: 'wonder' as const, label: wonderSiteLabel(site) })),
   ];
   const districtLabels = sites.map(district => {
@@ -273,13 +275,19 @@ export function createAtlasRenderer(
     element.type = 'button'; element.className = 'site-map-mark';
     element.dataset['status'] = site.status; element.style.setProperty('--civ-color', site.color);
     element.setAttribute('aria-label', `Inspect ${site.label} of ${site.townName}, tile ${site.tileId}${'adjacency' in site && site.adjacency ? `. ${districtAdjacencySummary(site.adjacency)}` : ''}`);
-    element.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${site.mark === 'wonder' ? WONDER_MARK_PATH : SITE_MARK_PATHS[site.mark]}"/></svg>`;
+    element.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${site.mark === 'wonder' ? WONDER_MARK_PATH : site.mark === 'pasture' ? PASTORAL_MARK_PATH : site.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[site.mark]}"/></svg>`;
     if ('adjacency' in site && site.adjacency?.source === 'improvement') {
       const bonus = document.createElement('span'); bonus.className = 'site-base-bonus'; bonus.textContent = `+${site.adjacency.bonus} base`; element.append(bonus);
     }
     element.addEventListener('click', () => onSelect(site.cityId, 'workId' in site ? site.workId : undefined)); labels.append(element);
     const leader = document.createElement('span'); leader.className = 'site-map-leader'; leader.setAttribute('aria-hidden', 'true'); leader.style.background = site.color; labels.append(leader);
     return { element, leader, id: site.id, cityId: site.cityId, family: site.mark, point: new THREE.Vector3(point.x, site.height + .4, point.z) };
+  });
+  const pastoralMarks = (world.pastoralSites ?? []).map(site => {
+    const point = hexPosition(site.q, site.r); const element = document.createElement('span');
+    element.className = 'deposit-map-mark pastoral-map-mark'; element.setAttribute('role', 'img'); element.setAttribute('aria-label', pastoralSiteLabel(site.tileId));
+    element.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${PASTORAL_MARK_PATH}"/></svg>`;
+    labels.append(element); return { element, revealedTo: site.revealedTo, point: new THREE.Vector3(point.x, site.height + .6, point.z) };
   });
   const depositMarks = (world.deposits ?? []).map(site => {
     const point = hexPosition(site.q, site.r); const element = document.createElement('span');
@@ -423,6 +431,11 @@ export function createAtlasRenderer(
         mark.leader.style.width = `${Math.hypot(placed.x - anchor.x, placed.y - anchor.y)}px`;
         mark.leader.style.transform = `rotate(${Math.atan2(placed.y - anchor.y, placed.x - anchor.x)}rad)`;
       }
+    }
+    const selectedCivilization = world.cities.find(city => cityKey(city) === selected)?.id;
+    for (const mark of pastoralMarks) {
+      const point = mark.point.clone().project(camera); mark.element.hidden = selectedCivilization === undefined || !mark.revealedTo.includes(selectedCivilization) || point.z > 1 || point.z < -1;
+      mark.element.style.left = `${(point.x + 1) / 2 * container.clientWidth}px`; mark.element.style.top = `${(1 - point.y) / 2 * container.clientHeight}px`;
     }
     for (const mark of depositMarks) {
       const point = mark.point.clone().project(camera); mark.element.hidden = point.z < -1 || point.z > 1;

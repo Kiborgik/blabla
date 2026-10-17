@@ -1,3 +1,4 @@
+import { PASTORAL_MARK_PATH, CATCHMENT_MARK_PATH, pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
 import { wonderSiteLabel } from '../visuals/wonder-visuals.ts';
 import { greatLibraryVisual, WONDER_MARK_PATH } from '../visuals/wonder-landmark.ts';
 import { depositParts, depositLabel, SITE_MARK_PATHS, placeSiteMarks } from '../visuals/strategic-resource-visuals.ts';
@@ -61,10 +62,12 @@ export function createFlatAtlasRenderer(
   const settlementShapes = node('g', { class: 'flat-settlement-shapes', 'pointer-events': 'none' });
   const districts = node('g', { class: 'flat-districts' });
   const deposits = node('g', { class: 'flat-deposits', 'pointer-events': 'none' });
+  const pastoralNodes: Array<{ element: SVGGElement; mark: SVGGElement; revealedTo: number[] }> = [];
   const depositNodes: Array<{ parts: SVGGElement; mark: SVGGElement; index: number }> = [];
   const sites = [
+    ...(world.catchments ?? []).map(site => ({ ...site, kind: 'catchment', mark: 'catchment' as const, caption: 'Aqueduct source', label: `Aqueduct mountain source${site.status === 'building' ? ' · Building' : ''}`, parts: (_level: DetailLevel) => [] })),
     ...(world.districts ?? []).map(site => ({ ...site, kind: 'district', mark: site.buildingId === 'industrial-zone' ? 'industry' as const : site.buildingId === 'commercial-hub' ? 'commerce' as const : 'campus' as const, caption: site.name ?? 'Campus', label: districtLabel(site), parts: (level: DetailLevel) => districtParts(site, level) })),
-    ...(world.improvements ?? []).map(site => ({ ...site, kind: 'improvement', mark: 'mine' as const, caption: site.name, label: improvementLabel(site), parts: (level: DetailLevel) => improvementParts(site, level) })),
+    ...(world.improvements ?? []).map(site => ({ ...site, kind: 'improvement', mark: site.improvementId === 'pasture' ? 'pasture' as const : 'mine' as const, workId: site.status === 'building' ? `active:${site.construction?.id ?? ''}` : String(site.tileId), caption: site.name, label: improvementLabel(site), parts: (level: DetailLevel) => improvementParts(site, level) })),
     ...(world.wonders ?? []).map(site => ({ ...site, kind: 'wonder', mark: 'wonder' as const, caption: site.name, label: wonderSiteLabel(site), parts: (level: DetailLevel) => greatLibraryVisual(site.record, level).parts })),
   ];
   const districtNodes: Array<{ element: SVGGElement; parts: SVGGElement; hit: SVGCircleElement; label: SVGTextElement; leader: SVGLineElement; mark: SVGGElement; markLeader: SVGLineElement; index: number; placed: boolean }> = [];
@@ -139,7 +142,7 @@ export function createFlatAtlasRenderer(
     const leader = node('line', { x1: '0', y1: '0', stroke: district.color, 'stroke-width': '1', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
     label.textContent = district.caption;
     const mark = node('g', { 'pointer-events': 'none', 'aria-hidden': 'true' });
-    mark.append(node('circle', { r: '12', fill: '#173a3c', stroke: district.color, 'stroke-width': '2', 'stroke-dasharray': district.status === 'building' ? '3 2' : 'none' }), node('path', { d: district.mark === 'wonder' ? WONDER_MARK_PATH : SITE_MARK_PATHS[district.mark], transform: 'translate(-9 -9) scale(.75)', fill: 'none', stroke: '#fff3c6', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+    mark.append(node('circle', { r: '12', fill: '#173a3c', stroke: district.color, 'stroke-width': '2', 'stroke-dasharray': district.status === 'building' ? '3 2' : 'none' }), node('path', { d: district.mark === 'wonder' ? WONDER_MARK_PATH : district.mark === 'pasture' ? PASTORAL_MARK_PATH : district.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[district.mark], transform: 'translate(-9 -9) scale(.75)', fill: 'none', stroke: '#fff3c6', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
     if ('adjacency' in district && district.adjacency?.source === 'improvement') {
       const bonus = node('text', { x: '0', y: '25', 'text-anchor': 'middle', 'font-size': '11', 'font-family': 'Arial, sans-serif', fill: '#fff3c6', stroke: '#173a3c', 'stroke-width': '3', 'paint-order': 'stroke' });
       bonus.textContent = `+${district.adjacency.bonus} base`;
@@ -158,6 +161,13 @@ export function createFlatAtlasRenderer(
     const parts = node('g', {}); const mark = node('g', {});
     mark.append(node('circle', { r: '7', fill: '#edf1e6', stroke: '#293c43', 'stroke-width': '1.5' }), node('path', { d: SITE_MARK_PATHS.iron, transform: 'translate(-6 -6) scale(.5)', fill: 'none', stroke: '#293c43', 'stroke-width': '2' }));
     group.append(parts, mark); deposits.append(group); depositNodes.push({ parts, mark, index });
+  }
+  for (const site of world.pastoralSites ?? []) {
+    const point = hexPosition(site.q, site.r);
+    const group = node('g', { transform: `translate(${point.x} ${point.z})`, 'data-horse-site': String(site.tileId), role: 'img', 'aria-label': pastoralSiteLabel(site.tileId) });
+    const mark = node('g', {});
+    mark.append(node('circle', { r: '9', fill: '#e6d7a5', stroke: '#294b33', 'stroke-width': '1.5' }), node('path', { d: PASTORAL_MARK_PATH, transform: 'translate(-8 -8) scale(.67)', fill: 'none', stroke: '#294b33', 'stroke-width': '2' }));
+    group.append(mark); deposits.append(group); pastoralNodes.push({ element: group, mark, revealedTo: site.revealedTo });
   }
   for (const [index, city] of world.cities.entries()) {
     const point = hexPosition(city.q, city.r);
@@ -225,6 +235,8 @@ export function createFlatAtlasRenderer(
       city.label.setAttribute('font-size', String(metrics.labelFont));
       city.label.setAttribute('y', String(metrics.labelY));
     }
+    const selectedCivilization = world.cities.find(city => cityKey(city) === selected)?.id;
+    for (const entry of pastoralNodes) { entry.element.style.display = selectedCivilization !== undefined && entry.revealedTo.includes(selectedCivilization) ? '' : 'none'; entry.mark.setAttribute('transform', `translate(0 ${-14 / pixelsPerUnit}) scale(${1 / pixelsPerUnit})`); }
     for (const entry of depositNodes) entry.mark.setAttribute('transform', `translate(0 ${-14 / pixelsPerUnit}) scale(${1 / pixelsPerUnit})`);
     const box = svg.viewBox.baseVal;
     const labelPositions = world.cities.map((city) => {

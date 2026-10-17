@@ -3,6 +3,7 @@ import { observedWonders } from './simulation/wonders.ts';
 import type { TradePresentation } from './simulation/trade.ts';
 import { observedRecipes, observedResidentCapacity } from './simulation/operations.ts';
 import { observedStrategicResources } from './simulation/metals.ts';
+import { observedPastoralSites } from './simulation/pastoral.ts';
 import { CIVILIZATIONS, ECONOMY_RULES, LOCAL_GROWTH_RULES, validateContent } from './content.ts';
 import { CURRENT_RELEASE } from './release.ts';
 import { completeAttachedPlan, observeActionPlan, validateAttachedPlan } from './planning.ts';
@@ -175,6 +176,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
     ...(hasFeatures(state, [LOCAL_GROWTH_RULES.featureId]) ? { growth: (director ? state.cities : citiesOf(state, seat)).map(city => cityGrowthFacts(state, city)) } : {}),
     civilization,
     ...observedStrategicResources(state, seat),
+    ...observedPastoralSites(state, seat),
     ...(hasFeatures(state, ['unique-wonders']) ? { wonders: observedWonders(state, seat) } : {}),
     cities: director ? state.cities : citiesOf(state, seat),
     rivals: state.civilizations

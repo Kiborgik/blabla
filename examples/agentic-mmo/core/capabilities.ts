@@ -12,6 +12,8 @@ import { hasFeatures, milestoneEligible } from './simulation/history.ts';
 import { decisionObligations } from './simulation/decisions.ts';
 import { parseUtcTimestamp } from './simulation/time.ts';
 import { observedStrategicResources } from './simulation/metals.ts';
+import { observedPastoralSites } from './simulation/pastoral.ts';
+import { availableMountainCatchments } from './simulation/water.ts';
 
 export type { CapabilityBlocker } from './simulation/capabilities.ts';
 export type CapabilityCatalogue = ReturnType<typeof capabilityCatalogue>;
@@ -25,6 +27,7 @@ export interface CapabilityRow {
   research?: { progress: number; cost: number };
   operation?: BuildingOperation;
   construction?: ConstructionOrder;
+  catchment?: { availableTileIds: number[]; retainedTileId: number | null };
   district?: { capacity: number; used: number; siteId: number | null; siteBaseProduction: Partial<Resources> | null; siteAdjacency?: DistrictAdjacencyFacts | null; availableSites: Array<{ tileId: number; baseProduction: Partial<Resources>; adjacency?: DistrictAdjacencyFacts | null }> };
 }
 
@@ -48,6 +51,7 @@ export interface CapabilityChoiceContext {
 export interface CapabilityProjection {
   growth?: CityGrowthFacts | null;
   strategic?: ReturnType<typeof observedStrategicResources>;
+  pastoral?: ReturnType<typeof observedPastoralSites>;
   choiceReferenceState: 'not-provided' | 'provided';
   revision: number;
   observedAt: string;
@@ -120,7 +124,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     const construction = active && !('kind' in active) && active.buildingId === building.id ? active : null;
     const districtSiteId = city?.districtSites?.[building.id] ?? construction?.tileId;
     const improvementAdjacency = building.district?.adjacency?.improvement !== undefined && hasFeatures(state, building.requiredFeatures);
-    return { ...row(`building:${building.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), ...(operation ? { operation } : {}), ...(city && building.district ? { district: { capacity: districtCapacity(city), used: districtCount(city), siteId: districtSiteId ?? null, ...(improvementAdjacency ? { siteAdjacency: districtSiteId === undefined ? null : districtAdjacencyFacts(state, building, districtSiteId) } : {}), siteBaseProduction: districtSiteId === undefined ? null : buildingBaseProduction(state, city, building, districtSiteId), availableSites: eligibility.completed || eligibility.blockers.length ? [] : availableDistrictSites(state, city, building).map(tileId => ({ tileId, baseProduction: buildingBaseProduction(state, city, building, tileId), ...(improvementAdjacency ? { adjacency: districtAdjacencyFacts(state, building, tileId) } : {}) })) } } : {}) };
+    return { ...row(`building:${building.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), ...(operation ? { operation } : {}), ...(city && building.siteRequirement === 'mountain-catchment' && hasFeatures(state, building.requiredFeatures) ? { catchment: { availableTileIds: availableMountainCatchments(state, city), retainedTileId: city.buildingCatchments?.[building.id] ?? construction?.catchmentTileId ?? null } } : {}), ...(city && building.district ? { district: { capacity: districtCapacity(city), used: districtCount(city), siteId: districtSiteId ?? null, ...(improvementAdjacency ? { siteAdjacency: districtSiteId === undefined ? null : districtAdjacencyFacts(state, building, districtSiteId) } : {}), siteBaseProduction: districtSiteId === undefined ? null : buildingBaseProduction(state, city, building, districtSiteId), availableSites: eligibility.completed || eligibility.blockers.length ? [] : availableDistrictSites(state, city, building).map(tileId => ({ tileId, baseProduction: buildingBaseProduction(state, city, building, tileId), ...(improvementAdjacency ? { adjacency: districtAdjacencyFacts(state, building, tileId) } : {}) })) } } : {}) };
   });
   const improvements: ImprovementCapabilityRow[] = IMPROVEMENTS.map(definition => {
     const eligibility = improvementEligibility(state, civilizationId, definition, cityId);
@@ -157,6 +161,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     improvements,
     wonders,
     ...(hasFeatures(state, ['finite-metals']) ? { strategic: observedStrategicResources(state, civilizationId) } : {}),
+    ...(hasFeatures(state, ['water-land']) ? { pastoral: observedPastoralSites(state, civilizationId) } : {}),
     legalActions,
     recordedIntent: state.actionPlans?.[civilizationId] ?? null,
     ...(hasFeatures(state, ['recurring-decisions']) ? {

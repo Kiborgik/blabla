@@ -5,6 +5,7 @@ import { emitEvent } from './events.ts';
 import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
 import { civilizationById, transferCost } from './world.ts';
+import { revealedHorseSite } from './pastoral.ts';
 
 export function isImprovementOrder(order: ConstructionOrder): order is ImprovementConstructionOrder {
   return 'kind' in order && order.kind === 'improvement';
@@ -27,7 +28,8 @@ export function improvementSiteBlock(state: WorldState, city: City, definition: 
   const center = state.tiles.find(tile => tile.id === city.tileId);
   if (!Number.isSafeInteger(tileId) || !site || !center) return 'The exact improvement site is missing';
   if (site.owner !== city.civId) return 'The improvement site must already belong to this civilization';
-  if (!isHillSite(site)) return 'The improvement requires a buildable hill site';
+  if (definition.siteRequirement === 'hill' && !isHillSite(site)) return 'The improvement requires a buildable hill site';
+  if (definition.siteRequirement === 'revealed-horse-site' && (site.terrain !== 'grassland' || !revealedHorseSite(state, city.civId, tileId))) return 'The improvement requires this civilization’s revealed grassland horse site';
   if (hexDistance(center, site) > definition.siteRange) return `The improvement site must be within ${definition.siteRange} hexes of this town`;
   if (state.cities.some(candidate => candidate.tileId === tileId)) return 'A city center occupies this site';
   if (districtSiteOccupied(state, tileId, installed ? { cityId: city.id, tileId } : undefined)) return 'A completed or reserved district or improvement occupies this site';
