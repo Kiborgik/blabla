@@ -341,6 +341,7 @@ fn lazy_constructor_reset_and_transport_failure_never_manufacture_refusal() {
         assert!(std::path::Path::new(&marker).exists());
         assert_eq!(p.observe()["succeeded"], false);
         assert!(p.observe()["phase_exit"].is_null());
+        #[cfg(unix)]
         return;
     }
     #[cfg(unix)]

@@ -116,8 +116,10 @@ fn tree(root: &Path) -> Result<BTreeMap<String, Option<Vec<u8>>>, String> {
             let name = path
                 .strip_prefix(root)
                 .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .into_owned();
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             if path.is_dir() {
                 result.insert(name, None);
                 walk(root, &path, result)?;
@@ -189,12 +191,13 @@ fn owned(root: &Path, args: &[String], deadline: Instant) -> Result<Value, Strin
 }
 
 fn checked(root: &Path, name: &str, deadline: Instant) -> Result<(), String> {
-    expected(root, &["task", "evidence", name, "--run"], 0, deadline)?;
-    let value = expected(root, &["task", "show", name], 0, deadline)?;
-    if value["task"]["evidence"]
-        .as_array()
-        .and_then(|r| r.last())
-        .is_none_or(|e| e["exit"] != 0)
+    let value = expected(root, &["task", "evidence", name, "--run"], 0, deadline)?;
+    let record: task::Task = serde_json::from_value(value["task"].clone())
+        .map_err(|error| format!("fixture evidence returned an invalid task: {error}"))?;
+    if record
+        .evidence
+        .last()
+        .is_none_or(|evidence| evidence.exit != 0)
     {
         return Err("fixture check child failed".into());
     }
@@ -339,6 +342,14 @@ struct Fixture {
 
 impl Fixture {
     fn prepare(kind: i64, deadline: Instant) -> Result<Self, String> {
+        Self::prepare_with_review(kind, true, deadline)
+    }
+
+    fn prepare_with_review(
+        kind: i64,
+        singular_review: bool,
+        deadline: Instant,
+    ) -> Result<Self, String> {
         let kind = kind.rem_euclid(15);
         let root = TempDir::new().map_err(|e| e.to_string())?;
         let p = root.path();
@@ -415,7 +426,7 @@ impl Fixture {
                 handback(p, "work", deadline)?;
             }
         }
-        if [5, 6, 7, 8, 9, 10, 12, 13, 14].contains(&kind) {
+        if singular_review && [5, 6, 7, 8, 9, 10, 12, 13, 14].contains(&kind) {
             open_review(p, "review", "work", deadline)?;
         }
         if [6, 7, 8, 9, 10, 13, 14].contains(&kind) {
@@ -608,6 +619,9 @@ impl Fixture {
             let Some(r) = task::read(root, name)? else {
                 return Ok(false);
             };
+            if r.state != "accepted" {
+                return Ok(false);
+            }
             let rv = expected(root, &["task", "show", name], 0, deadline)?;
             Ok(r.state == "accepted"
                 && r.role == "reviewer"
@@ -703,7 +717,7 @@ struct BatchFixture {
 impl BatchFixture {
     fn prepare(kind: i64, deadline: Instant) -> Result<Self, String> {
         let kind = kind.rem_euclid(8);
-        let base = Fixture::prepare(5, deadline)?;
+        let base = Fixture::prepare_with_review(5, false, deadline)?;
         let root = base.root.path();
         let mut secondary_args = source_args("secondary", "secondary");
         let check = secondary_args
@@ -870,7 +884,10 @@ impl BatchFixture {
                 && json!(r.claim_digest) == digest
                 && r.verdict == task::delivery::Verdict::Accept
         });
+        let mut task_names: Vec<_> = task::read_all(root).into_iter().map(|t| t.name).collect();
+        task_names.sort();
         Ok(json!({
+            "delivery_batch_task_names":task_names,
             "delivery_batch_initialized":true,
             "delivery_selected_source_assigned":assigned,
             "delivery_selected_source_current":current,
@@ -1208,6 +1225,25 @@ impl GoalDelivery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_record_keys_preserve_bytes_and_detect_changed_source_records() {
+        let root = TempDir::new().unwrap();
+        fs::create_dir_all(root.path().join(".blabla").join("tasks")).unwrap();
+        let path = root.path().join(".blabla").join("tasks").join("work.json");
+        fs::write(&path, [0, 255, 13, 10]).unwrap();
+        let before = tree(root.path()).unwrap();
+        assert_eq!(
+            before.get(".blabla/tasks/work.json"),
+            Some(&Some(vec![0, 255, 13, 10]))
+        );
+        fs::write(&path, [0, 254, 13, 10]).unwrap();
+        let after = tree(root.path()).unwrap();
+        assert_ne!(
+            before.get(".blabla/tasks/work.json"),
+            after.get(".blabla/tasks/work.json")
+        );
+    }
+
     #[test]
     fn only_typed_lifecycle_decisions_are_observed_as_refusals() {
         assert!(decision(0, &json!({"task":{}})).unwrap());

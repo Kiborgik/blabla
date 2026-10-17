@@ -246,3 +246,15 @@ fn evaluate(before: &Value, after: &Value) -> blabla::report::RunStatus {
     .unwrap()
     .status
 }
+
+#[test]
+fn batch_setup_contains_only_its_real_sources_and_assigned_review() {
+    let _guard = serial();
+    let mut probe = goal_delivery::GoalDelivery::new();
+    call(&mut probe, "delivery_batch_fixture", json!([0]));
+    assert_eq!(
+        probe.observe()["delivery_batch_task_names"],
+        json!(["batch", "secondary", "work"])
+    );
+    assert_eq!(probe.observe()["delivery_selected_review_eligible"], true);
+}
