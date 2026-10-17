@@ -1,4 +1,7 @@
 import argparse
+import asyncio
+import codecs
+from contextlib import nullcontext
 import json
 import subprocess
 import sys
@@ -71,18 +74,72 @@ def steps_of(steps):
     return steps
 
 
-def run(command, timeout=1800):
-    started = time.perf_counter()
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
+class CommandProgress(asyncio.SubprocessProtocol):
+    def __init__(self, artifact):
+        self.artifact = artifact
+        self.output = []
+        self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        self.finished = asyncio.get_running_loop().create_future()
+        self.error = None
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def emit(self, text):
+        self.output.append(text)
+        if self.artifact is not None:
+            self.artifact.write(text)
+            self.artifact.flush()
+        print(text, end="", flush=True)
+
+    def pipe_data_received(self, fd, data):
+        try:
+            self.emit(self.decoder.decode(data))
+        except Exception as error:
+            self.error = error
+            self.transport.close()
+
+    def pipe_connection_lost(self, fd, error):
+        self.error = self.error or error
+        if error is not None:
+            self.transport.close()
+
+    def connection_lost(self, error):
+        self.error = self.error or error
+        self.finished.set_result(None)
+
+
+async def run_streaming(command, timeout, artifact, started):
+    loop = asyncio.get_running_loop()
+    progress = CommandProgress(artifact)
+    transport, _ = await loop.subprocess_exec(
+        lambda: progress, *command, cwd=ROOT,
+        stdin=None, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )
-    return completed.returncode, completed.stdout + completed.stderr, time.perf_counter() - started
+    timed_out = False
+    try:
+        remaining = max(0, timeout - (time.perf_counter() - started))
+        try:
+            await asyncio.wait_for(asyncio.shield(progress.finished), remaining)
+        except TimeoutError:
+            timed_out = True
+            transport.close()
+            await progress.finished
+        if progress.error is not None:
+            raise progress.error
+        progress.emit(progress.decoder.decode(b"", final=True))
+        if timed_out:
+            progress.emit(f"\ngate command timed out after {timeout:g} seconds: {command!r}\n")
+        return 124 if timed_out else transport.get_returncode(), "".join(progress.output)
+    finally:
+        transport.close()
+
+
+def run(command, timeout=1800, log_path=None):
+    started = time.perf_counter()
+    with log_path.open("w", encoding="utf-8") if log_path is not None else nullcontext() as artifact:
+        code, output = asyncio.run(run_streaming(command, timeout, artifact, started))
+    return code, output, time.perf_counter() - started
 
 
 FAILED_STATUSES = ("FAIL", "TIMEOUT", "SIGSEGV", "SIGABRT", "SIGBUS", "SIGILL", "ABORT", "LEAK-FAIL")
@@ -97,6 +154,8 @@ def rust_tests_are_clean(log):
 
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="BlaBla product gate: current product health only.")
     parser.add_argument("--tag", default="local")
     parser.add_argument("--out", default="artifacts/gate")
@@ -106,19 +165,14 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     results = []
-    logs = []
     rust_log = ""
-    try:
-        for name, command in checks(out, arguments.offline):
-            exit_code, log, seconds = run(command)
-            logs.append((name, log))
-            if name == "rust-tests":
-                rust_log = log
-            results.append({"name": name, "command": command, "exit": exit_code, "seconds": seconds})
-            print(f"{name}: exit {exit_code} in {seconds:.1f}s", flush=True)
-    finally:
-        for name, log in logs:
-            (out / f"{arguments.tag}-{name}.log").write_text(log, encoding="utf-8")
+    for name, command in checks(out, arguments.offline):
+        print(f"{name}: starting {command!r}", flush=True)
+        exit_code, log, seconds = run(command, log_path=out / f"{arguments.tag}-{name}.log")
+        if name == "rust-tests":
+            rust_log = log
+        results.append({"name": name, "command": command, "exit": exit_code, "seconds": seconds})
+        print(f"{name}: exit {exit_code} in {seconds:.1f}s", flush=True)
 
     summaries, failed_titles, clean = rust_tests_are_clean(rust_log)
     green = all(result["exit"] == 0 for result in results) and clean
