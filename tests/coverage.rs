@@ -475,6 +475,7 @@ mod composed_bridge {
         expert: expert::Expert,
         task_roles: task_roles::TaskRoles,
         effort: development_effort::DevelopmentEffort,
+        delivery: goal_delivery::GoalDelivery,
     }
 
     impl App {
@@ -491,6 +492,7 @@ mod composed_bridge {
                 expert: expert::Expert::new(),
                 task_roles: task_roles::TaskRoles::new(),
                 effort: development_effort::DevelopmentEffort::new(),
+                delivery: goal_delivery::GoalDelivery::new(),
             }
         }
     }
@@ -511,6 +513,10 @@ mod composed_bridge {
                     .map_err(|error| blabla::diagnostic::AppError::new("E_ACTION", error));
             }
             if let Some(result) = self.effort.call(&call.action, &json!(call.args)) {
+                return result
+                    .map_err(|error| blabla::diagnostic::AppError::new("E_ACTION", error));
+            }
+            if let Some(result) = self.delivery.call(&call.action, &json!(call.args)) {
                 return result
                     .map_err(|error| blabla::diagnostic::AppError::new("E_ACTION", error));
             }
@@ -549,6 +555,7 @@ mod composed_bridge {
                 self.expert.observe(),
                 self.task_roles.observe(),
                 self.effort.observe(),
+                self.delivery.observe(),
             ] {
                 state
                     .as_object_mut()
@@ -741,4 +748,179 @@ fn reordered_composed_contract_preserves_targeted_witness() {
     assert_eq!(report.metrics.action_budget, 4096);
     assert_eq!(report.metrics.total_actions, 4096);
     assert!(report.metrics.replay_actions > 0);
+}
+
+#[test]
+fn goal_delivery_composed_probe() {
+    let mut app = composed_bridge::App::new();
+    let initial = app.observe(&[]).unwrap();
+    assert_eq!(initial["delivery_fixture_initialized"], false);
+    for _ in 0..8 {
+        app.reset().unwrap();
+        assert_eq!(app.observe(&[]).unwrap(), initial);
+    }
+    app.call(&Call {
+        action: "delivery_fixture".into(),
+        args: vec![json!(1)],
+    })
+    .unwrap();
+    assert_eq!(app.observe(&[]).unwrap()["delivery_claim_eligible"], true);
+    app.call(&Call {
+        action: "record_delivery_claim".into(),
+        args: vec![],
+    })
+    .unwrap();
+    let claimed = app.observe(&[]).unwrap();
+    assert_eq!(claimed["delivery_operation_succeeded"], true);
+    for (key, value) in initial.as_object().unwrap() {
+        if !key.starts_with("delivery_") {
+            assert_eq!(&claimed[key], value, "{key}");
+        }
+    }
+    app.call(&Call {
+        action: "threshold_budget_fixture".into(),
+        args: vec![],
+    })
+    .unwrap();
+    app.call(&Call {
+        action: "inspect_budget".into(),
+        args: vec![],
+    })
+    .unwrap();
+    app.call(&Call {
+        action: "report_module_unreported".into(),
+        args: vec![],
+    })
+    .unwrap();
+    let independent = app.observe(&[]).unwrap();
+    assert_eq!(independent["budget_fixture_qualified"], true);
+    assert_eq!(independent["determinable"], false);
+    for (key, value) in claimed.as_object().unwrap() {
+        if key.starts_with("delivery_") {
+            assert_eq!(&independent[key], value, "{key}");
+        }
+    }
+    app.call(&Call {
+        action: "delivery_fixture".into(),
+        args: vec![json!(3)],
+    })
+    .unwrap();
+    app.call(&Call {
+        action: "record_delivery_claim".into(),
+        args: vec![],
+    })
+    .unwrap();
+    let refused = app.observe(&[]).unwrap();
+    assert_eq!(refused["delivery_operation_succeeded"], false);
+    assert_eq!(refused["delivery_records_unchanged"], true);
+    for (key, value) in independent.as_object().unwrap() {
+        if !key.starts_with("delivery_") {
+            assert_eq!(&refused[key], value, "{key}");
+        }
+    }
+    let error = app
+        .call(&Call {
+            action: "delivery_fixture".into(),
+            args: vec![json!("invalid")],
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "E_ACTION");
+    assert!(!error.message.contains("unknown composed action"));
+    assert_eq!(app.observe(&[]).unwrap(), refused);
+    app.reset().unwrap();
+    assert_eq!(app.observe(&[]).unwrap(), initial);
+}
+
+#[test]
+fn batched_delivery_composed_probe() {
+    let mut app = composed_bridge::App::new();
+    let initial = app.observe(&[]).unwrap();
+    assert_eq!(initial["delivery_batch_initialized"], false);
+    assert_eq!(initial["delivery_fixture_initialized"], false);
+    for _ in 0..8 {
+        app.reset().unwrap();
+        assert_eq!(app.observe(&[]).unwrap(), initial);
+    }
+    let invoke = |app: &mut composed_bridge::App, action: &str, args: Vec<Value>| {
+        app.call(&Call {
+            action: action.into(),
+            args,
+        })
+        .unwrap();
+    };
+    invoke(&mut app, "delivery_fixture", vec![json!(1)]);
+    let legacy = app.observe(&[]).unwrap()["delivery_task"].clone();
+    invoke(&mut app, "delivery_batch_fixture", vec![json!(0)]);
+    let before = app.observe(&[]).unwrap();
+    assert_eq!(before["delivery_selected_source_assigned"], true);
+    assert_eq!(before["delivery_selected_source_current"], true);
+    assert_eq!(before["delivery_selected_review_eligible"], true);
+    assert_eq!(before["delivery_task"], legacy);
+    invoke(&mut app, "review_explicit_delivery_source", vec![]);
+    let reviewed = app.observe(&[]).unwrap();
+    assert_eq!(reviewed["delivery_operation_succeeded"], true);
+    assert_eq!(reviewed["delivery_selected_verdict_recorded"], true);
+    assert_eq!(reviewed["delivery_other_source_verdicts_preserved"], true);
+    assert_eq!(reviewed["delivery_source_records_unchanged"], true);
+    assert_eq!(reviewed["delivery_task"], legacy);
+    assert_eq!(
+        reviewed["delivery_batch_review"]["task"]["delivery_reviews"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    for (key, value) in initial.as_object().unwrap() {
+        if !key.starts_with("delivery_") {
+            assert_eq!(&reviewed[key], value, "{key}");
+        }
+    }
+    invoke(&mut app, "threshold_budget_fixture", vec![]);
+    invoke(&mut app, "inspect_budget", vec![]);
+    invoke(&mut app, "report_module_unreported", vec![]);
+    let independent = app.observe(&[]).unwrap();
+    assert_eq!(independent["budget_fixture_qualified"], true);
+    assert_eq!(independent["determinable"], false);
+    for (key, value) in reviewed.as_object().unwrap() {
+        if key.starts_with("delivery_") {
+            assert_eq!(&independent[key], value, "{key}");
+        }
+    }
+    invoke(&mut app, "delivery_batch_fixture", vec![json!(2)]);
+    assert_eq!(
+        app.observe(&[]).unwrap()["delivery_selected_source_assigned"],
+        false
+    );
+    invoke(&mut app, "review_explicit_delivery_source", vec![]);
+    let refused = app.observe(&[]).unwrap();
+    assert_eq!(refused["delivery_operation_succeeded"], false);
+    assert_eq!(refused["delivery_exit"], 2);
+    assert_eq!(refused["delivery_records_unchanged"], true);
+    assert_eq!(refused["delivery_other_source_verdicts_preserved"], true);
+    assert_eq!(refused["delivery_source_records_unchanged"], true);
+    assert_eq!(refused["delivery_task"], legacy);
+    for (key, value) in independent.as_object().unwrap() {
+        if !key.starts_with("delivery_") {
+            assert_eq!(&refused[key], value, "{key}");
+        }
+    }
+    let batch = refused["delivery_batch_review"].clone();
+    invoke(&mut app, "record_delivery_claim", vec![]);
+    assert_eq!(
+        app.observe(&[]).unwrap()["delivery_operation_succeeded"],
+        true
+    );
+    assert_eq!(app.observe(&[]).unwrap()["delivery_batch_review"], batch);
+    let stable = app.observe(&[]).unwrap();
+    let error = app
+        .call(&Call {
+            action: "delivery_batch_fixture".into(),
+            args: vec![json!("invalid")],
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "E_ACTION");
+    assert!(!error.message.contains("unknown composed action"));
+    assert_eq!(app.observe(&[]).unwrap(), stable);
+    app.reset().unwrap();
+    assert_eq!(app.observe(&[]).unwrap(), initial);
 }

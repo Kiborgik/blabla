@@ -625,10 +625,15 @@ pub fn review_current(
     review.accepted.is_some()
         && reviewed.state != "withdrawn"
         && review.name != reviewed.name
-        && review.review_of.as_ref().is_some_and(|target| {
-            target.task == reviewed.name
-                && target.revision == review_revision(review, reviewed, tree, identities)
-        })
+        && review
+            .review_of
+            .iter()
+            .chain(&review.delivery_review_targets)
+            .any(|target| {
+                target.task == reviewed.name
+                    && target.revision
+                        == review_revision(review, reviewed, tree, identities.clone())
+            })
 }
 
 pub const INTENT_DISPOSITIONS: [&str; 2] = ["updated", "confirmed-unchanged"];
@@ -930,7 +935,21 @@ pub fn evidence_matches(task: &Task, evidence: &Evidence) -> bool {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvidenceReuse {
+    pub original_index: usize,
+    pub original_digest: String,
+    pub original_epoch: u64,
+    pub original_log_digest: String,
+    pub model: String,
+    pub reason: String,
+    pub unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Evidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reuse: Option<EvidenceReuse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<CheckIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1800,6 +1819,8 @@ pub struct Task {
     pub intent_dispositions: Vec<IntentDisposition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_of: Option<ReviewTarget>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delivery_review_targets: Vec<ReviewTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawal: Option<Withdrawal>,
     pub name: String,
@@ -1884,6 +1905,7 @@ impl Default for Task {
             intent_identities: BTreeSet::new(),
             intent_dispositions: Vec::new(),
             review_of: None,
+            delivery_review_targets: Vec::new(),
             withdrawal: None,
             name: String::new(),
             role: String::new(),

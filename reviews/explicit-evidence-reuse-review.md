@@ -1,0 +1,15 @@
+# Explicit review execution reuse: independent review
+
+Reviewed by actual gpt-6-astra on 17 October 2026 against the frozen `implement-explicit-review-evidence-reuse` epoch 2 source. No bounded source blocker was found.
+
+The opt-in accept path retains ordinary acceptance and closure authority. It requires an existing explicit review, the same permitted accepted model, a reason, a successful original current-epoch argv run, readable task-local log and exact equality of the complete selected input map. Recursive target scope, inputs, deliverables and claim/review artifacts must be covered by those unchanged inputs. Failed latest evidence, manual records, missing provenance, changed membership and chained reuse refuse.
+
+I inspected the complete private implementation, dispatch, shared acceptance extraction, optional evidence schema, rendering and the decisive actual-CLI cases. The new entry preserves original execution time, command, input map, log and result while separately recording reuse time, model, reason and original identity. The original entry and source records stay unchanged. Source repinning does not renew semantic verdicts, dispositions or challenges; both close modes still demand the independent current judgments and retain both Partial origins.
+
+The private checkpoint cases exercise the production inspect/record path. They change real source/report/check files, current task and recursive records, permitted authority, manifest, membership, original evidence/log and an actual manual disposition between inspection and recording. Each refused operation is checked against all tree bytes after the concurrent change. The positive checkpoint reaches the same production acceptance path. This is stronger than an authored race flag, while still not claiming a globally atomic filesystem snapshot.
+
+The author receipt `evidence-1-39-1792195122591202492.log` was read through a complete ordered projection of all 180 lines, including every test result, refusal and serialized task-state variant. It contains 15 actual-CLI cases and 10 private checkpoint groups, all passing. The independent declared check reruns only the 10 private groups. The broader campaign and already-accepted unrelated tooling were not rerun.
+
+Limits remain explicit: local model/reason attestations and existing non-cryptographic record fingerprints are not authenticated human authority. The filesystem can change after the final read; no transaction across all source files is promised. Existing expert routes that require a new `run` stay strict. The later growth-review history is ineligible because its report and command changed; this feature cannot retroactively repair that record or invent an earlier receipt. New semantic judgments remain manual and attributable.
+
+The useful adoption boundary is a future review repin whose full original execution inputs, report and check are actually unchanged. If any deciding file changes, retain the refusal and run the affected check. This acceptance does not declare the overall 20% process target satisfied or erase the historical overhead sample.

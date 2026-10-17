@@ -76,6 +76,8 @@ pub struct Origin {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Review {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_task: Option<String>,
     pub goal: String,
     pub claim_digest: String,
     pub goal_fingerprint: String,

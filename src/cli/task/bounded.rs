@@ -179,24 +179,8 @@ fn inspect(
     }
     let revision = task::relevant_revision(&task, &tree, review_identities(&project, &task));
     let task_record = fingerprint(&task);
-    let mut reviews = BTreeMap::new();
-    let mut current = task.clone();
-    while let Some(target) = &current.review_of {
-        if reviews.contains_key(&target.task) {
-            return Err(refuse("recursive review cycle", json));
-        }
-        let reviewed = load(&project, &target.task, json)?;
-        reviews.insert(
-            target.task.clone(),
-            task::review_revision(
-                &current,
-                &reviewed,
-                &tree,
-                review_dependencies(&project, &current, &reviewed),
-            ),
-        );
-        current = reviewed;
-    }
+    let reviews =
+        review_context(&project, &task, &tree).map_err(|message| refuse(message, json))?;
     Ok(Decision {
         project,
         task,

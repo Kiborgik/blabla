@@ -287,6 +287,8 @@ enum TaskAction {
             help = "The distinct existing task this review inspects"
         )]
         review_of: Option<String>,
+        #[arg(long, value_name = "NAME")]
+        delivery_review_of: Vec<String>,
         #[arg(
             long,
             value_name = "PACK",
@@ -331,6 +333,8 @@ enum TaskAction {
     #[command(about = "Independently review a delivery claim or resolve an exact closed residual")]
     DeliveryReview {
         name: String,
+        #[arg(long)]
+        source: Option<String>,
         goal: String,
         #[arg(long)]
         verdict: String,
@@ -553,6 +557,10 @@ enum TaskAction {
         name: String,
         #[arg(long, help = "The model that accepted the task")]
         model: String,
+        #[arg(long, requires = "reason")]
+        reuse_evidence: bool,
+        #[arg(long, requires = "reuse_evidence")]
+        reason: Option<String>,
     },
     #[command(about = "Block a task due to a reason and record it as a finding")]
     Block { name: String, reason: String },
@@ -1307,9 +1315,10 @@ fn execute(cli: Cli) -> i32 {
                         require_intent_disposition,
                         require_goal_reflection,
                         review_of,
+                        delivery_review_of,
                         lens,
                         falsify,
-                    } => task::open_with_delivery(
+                    } => task::open_with_targets(
                         &loaded,
                         blabla::project::task::Opening {
                             name,
@@ -1329,6 +1338,7 @@ fn execute(cli: Cli) -> i32 {
                             lenses: lens,
                         },
                         delivery_goal,
+                        delivery_review_of,
                         falsify,
                         require_intent_disposition,
                         require_goal_reflection,
@@ -1370,6 +1380,7 @@ fn execute(cli: Cli) -> i32 {
                     ),
                     TaskAction::DeliveryReview {
                         name,
+                        source,
                         goal,
                         verdict,
                         observation_ref,
@@ -1381,6 +1392,7 @@ fn execute(cli: Cli) -> i32 {
                         &loaded,
                         &name,
                         task::delivery::Request::Review(task::delivery::ReviewInput {
+                            source,
                             goal,
                             verdict,
                             refs: observation_ref,
@@ -1508,8 +1520,23 @@ fn execute(cli: Cli) -> i32 {
                     TaskAction::Freshness { .. } => {
                         unreachable!("freshness handled without record lock")
                     }
-                    TaskAction::Accept { name, model } => {
-                        task::accept(&loaded, &name, &model, json)
+                    TaskAction::Accept {
+                        name,
+                        model,
+                        reuse_evidence,
+                        reason,
+                    } => {
+                        if reuse_evidence {
+                            task::evidence_reuse::accept(
+                                &loaded,
+                                &name,
+                                &model,
+                                reason.as_deref().unwrap_or(""),
+                                json,
+                            )
+                        } else {
+                            task::accept(&loaded, &name, &model, json)
+                        }
                     }
                     TaskAction::Block { name, reason } => {
                         task::block(&loaded, &name, &reason, json)

@@ -203,6 +203,7 @@ mod bounded_results;
 mod decisions;
 mod development_effort;
 mod expert;
+mod goal_delivery;
 mod goals;
 mod lifecycle;
 mod questions;
@@ -217,6 +218,7 @@ fn main() {
     let mut task_roles = task_roles::TaskRoles::new();
     let mut ready_receipts = ready_receipts::ReadyReceipts::new();
     let mut effort = development_effort::DevelopmentEffort::new();
+    let mut delivery = goal_delivery::GoalDelivery::new();
     let mut tone = voice::Tone::new();
     let mut app = lifecycle::Lifecycle::new();
     let mut objectives = goals::Goals::new();
@@ -251,6 +253,7 @@ fn main() {
                 task_roles = task_roles::TaskRoles::new();
                 ready_receipts = ready_receipts::ReadyReceipts::new();
                 effort.reset();
+                delivery.reset();
                 tone = voice::Tone::new();
                 app.reset();
                 objectives = goals::Goals::new();
@@ -272,6 +275,7 @@ fn main() {
                         ready_receipts.call(name, request.get("args").unwrap_or(&Value::Null))
                     })
                     .or_else(|| effort.call(name, request.get("args").unwrap_or(&Value::Null)))
+                    .or_else(|| delivery.call(name, request.get("args").unwrap_or(&Value::Null)))
                 {
                     match result {
                         Ok(()) => json!({ "ok": true }),
@@ -304,6 +308,7 @@ fn main() {
                     task_roles.observe(),
                     ready_receipts.observe(),
                     effort.observe(),
+                    delivery.observe(),
                     voiced,
                     app.observe(),
                     objectives.observe(),

@@ -1,6 +1,7 @@
 mod bounded;
 pub(crate) mod delivery;
 pub(super) mod effort;
+pub(super) mod evidence_reuse;
 pub(super) mod freshness;
 mod ready_receipts;
 
@@ -526,26 +527,88 @@ fn knowledge_fingerprints(project: &Project) -> BTreeMap<String, String> {
         .collect()
 }
 
+fn review_graph(project: &Project, review: &Task) -> Result<Vec<(Task, Task)>, String> {
+    fn visit(
+        project: &Project,
+        current: &Task,
+        active: &mut BTreeSet<String>,
+        done: &mut BTreeSet<String>,
+        edges: &mut Vec<(Task, Task)>,
+    ) -> Result<(), String> {
+        if active.contains(&current.name) {
+            return Err("recursive review cycle".into());
+        }
+        if done.contains(&current.name) {
+            return Ok(());
+        }
+        active.insert(current.name.clone());
+        let mut names = BTreeSet::new();
+        for target in current
+            .review_of
+            .iter()
+            .chain(&current.delivery_review_targets)
+        {
+            if !names.insert(&target.task) {
+                return Err("duplicate review target".into());
+            }
+            let reviewed = task::read(&project.manifest.root, &target.task)?
+                .ok_or_else(|| format!("no review target task {:?} exists", target.task))?;
+            if reviewed.state == "withdrawn" {
+                return Err(format!("review target {:?} is withdrawn", target.task));
+            }
+            edges.push((current.clone(), reviewed.clone()));
+            visit(project, &reviewed, active, done, edges)?;
+        }
+        active.remove(&current.name);
+        done.insert(current.name.clone());
+        Ok(())
+    }
+    let mut edges = Vec::new();
+    visit(
+        project,
+        review,
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        &mut edges,
+    )?;
+    Ok(edges)
+}
+
 fn review_target(project: &Project, name: &str, target: &str) -> Result<Task, String> {
-    let root = &project.manifest.root;
-    let reviewed = task::read(root, target)?
+    let reviewed = task::read(&project.manifest.root, target)?
         .ok_or_else(|| format!("no review target task {target:?} exists"))?;
     if reviewed.state == "withdrawn" {
         return Err(format!("review target {target:?} is withdrawn"));
     }
-    let mut visited = vec![name.to_owned()];
-    let mut next = Some(reviewed.clone());
-    while let Some(current) = next {
-        if visited.contains(&current.name) {
-            return Err(format!("review target {target:?} creates a review cycle"));
-        }
-        visited.push(current.name.clone());
-        next = match current.review_of {
-            Some(target) => task::read(root, &target.task)?,
-            None => None,
-        };
+    if reviewed.name == name
+        || review_graph(project, &reviewed)?
+            .iter()
+            .any(|(_, source)| source.name == name)
+    {
+        return Err(format!("review target {target:?} creates a review cycle"));
     }
     Ok(reviewed)
+}
+
+fn review_context(
+    project: &Project,
+    review: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, task::RelevantRevision>, String> {
+    Ok(review_graph(project, review)?
+        .into_iter()
+        .map(|(reviewer, source)| {
+            (
+                format!("{}::{}", reviewer.name, source.name),
+                task::review_revision(
+                    &reviewer,
+                    &source,
+                    tree,
+                    review_dependencies(project, &reviewer, &source),
+                ),
+            )
+        })
+        .collect())
 }
 
 fn review_dependencies(
@@ -561,29 +624,19 @@ fn review_dependencies(
 fn review_freshness(project: &Project, review: &Task) -> Option<bool> {
     review.review_of.as_ref()?;
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
-    let mut current = review.clone();
-    let mut visited = BTreeSet::new();
-    while let Some(target) = &current.review_of {
-        if !visited.insert(current.name.clone()) {
-            return Some(false);
-        }
-        let Ok(Some(reviewed)) = task::read(&project.manifest.root, &target.task) else {
-            return Some(false);
-        };
-        if task::tracking_error(&current, &project.manifest.root, &project.ignore).is_some()
-            || task::tracking_error(&reviewed, &project.manifest.root, &project.ignore).is_some()
-            || !task::review_current(
-                &current,
-                &reviewed,
+    let Ok(edges) = review_graph(project, review) else {
+        return Some(false);
+    };
+    Some(edges.iter().all(|(current, reviewed)| {
+        task::tracking_error(current, &project.manifest.root, &project.ignore).is_none()
+            && task::tracking_error(reviewed, &project.manifest.root, &project.ignore).is_none()
+            && task::review_current(
+                current,
+                reviewed,
                 &tree,
-                review_dependencies(project, &current, &reviewed),
+                review_dependencies(project, current, reviewed),
             )
-        {
-            return Some(false);
-        }
-        current = reviewed;
-    }
-    Some(true)
+    }))
 }
 
 fn review_identities(project: &Project, task: &Task) -> BTreeMap<String, String> {
@@ -1008,10 +1061,35 @@ pub(super) fn open(
     )
 }
 
+#[cfg(test)]
 pub(super) fn open_with_delivery(
+    project: &Project,
+    opening: Opening,
+    delivery_goals: Vec<String>,
+    falsify: Vec<String>,
+    require_intent_disposition: bool,
+    require_goal_reflection: bool,
+    json: bool,
+    swallowed: &[String],
+) -> i32 {
+    open_with_targets(
+        project,
+        opening,
+        delivery_goals,
+        Vec::new(),
+        falsify,
+        require_intent_disposition,
+        require_goal_reflection,
+        json,
+        swallowed,
+    )
+}
+
+pub(super) fn open_with_targets(
     project: &Project,
     mut opening: Opening,
     delivery_goals: Vec<String>,
+    delivery_targets: Vec<String>,
     falsify: Vec<String>,
     require_intent_disposition: bool,
     require_goal_reflection: bool,
@@ -1045,6 +1123,26 @@ pub(super) fn open_with_delivery(
             json,
             2,
         );
+    }
+    if !delivery_targets.is_empty() && opening.review_of.is_none() {
+        return emit_error(
+            error(
+                "task",
+                "additional delivery review targets require a primary --review-of",
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    let mut declared_targets: BTreeSet<String> = opening.review_of.iter().cloned().collect();
+    for target in &delivery_targets {
+        if !declared_targets.insert(target.clone()) {
+            return emit_error(error("task", "duplicate review target", None), json, 2);
+        }
+        if let Err(message) = review_target(project, &opening.name, target) {
+            return emit_error(error("task", message, None), json, 2);
+        }
     }
     if let Some(target) = &opening.review_of
         && let Err(message) = review_target(project, &opening.name, target)
@@ -1108,6 +1206,18 @@ pub(super) fn open_with_delivery(
         },
         now_unix(),
     );
+    recorded.delivery_review_targets = delivery_targets
+        .into_iter()
+        .map(|name| task::ReviewTarget {
+            task: name,
+            revision: task::RelevantRevision {
+                acceptance_epoch: 0,
+                task_digest: String::new(),
+                paths: BTreeMap::new(),
+                identities: BTreeMap::new(),
+            },
+        })
+        .collect();
     if let Err(message) = delivery::pin(project, &mut recorded, &delivery_goals) {
         return emit_error(error("task", message, None), json, 2);
     }
@@ -2200,10 +2310,23 @@ fn join_or(values: &[String], empty: &str) -> String {
 }
 
 pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> i32 {
-    let mut task = match mutate(project, name, json) {
+    let task = match mutate(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    match prepare_acceptance(project, task, model, json) {
+        Ok(mut task) => store(project, &mut task, json),
+        Err(exit) => exit,
+    }
+}
+
+fn prepare_acceptance(
+    project: &Project,
+    mut task: Task,
+    model: &str,
+    json: bool,
+) -> Result<Task, i32> {
+    let name = task.name.clone();
     if !task::apply(&mut task, "accepted") {
         let reason = match task::unanswered_decision(&task) {
             Some(decision) => format!(
@@ -2220,13 +2343,13 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
                 state = task.state
             ),
         };
-        return emit_error(error("task", reason, None), json, 2);
+        return Err(emit_error(error("task", reason, None), json, 2));
     }
     let current_tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     if let Some(target) = task.review_of.as_ref().map(|target| target.task.clone()) {
-        let reviewed = match review_target(project, name, &target) {
+        let reviewed = match review_target(project, &name, &target) {
             Ok(reviewed) => reviewed,
-            Err(message) => return emit_error(error("task", message, None), json, 2),
+            Err(message) => return Err(emit_error(error("task", message, None), json, 2)),
         };
         let revision = task::review_revision(
             &task,
@@ -2239,11 +2362,28 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
             revision,
         });
     }
+    let mut additional = Vec::new();
+    for target in &task.delivery_review_targets {
+        let reviewed = match review_target(project, &name, &target.task) {
+            Ok(t) => t,
+            Err(message) => return Err(emit_error(error("task", message, None), json, 2)),
+        };
+        additional.push(task::ReviewTarget {
+            task: target.task.clone(),
+            revision: task::review_revision(
+                &task,
+                &reviewed,
+                &current_tree,
+                review_dependencies(project, &task, &reviewed),
+            ),
+        });
+    }
+    task.delivery_review_targets = additional;
     if let Err(message) = delivery::pin(project, &mut task, &[]) {
-        return emit_error(error("task", message, None), json, 2);
+        return Err(emit_error(error("task", message, None), json, 2));
     }
     task::record_acceptance(&mut task, &current_tree, &project.ignore, model, now_unix());
-    store(project, &mut task, json)
+    Ok(task)
 }
 
 pub(super) fn block(project: &Project, name: &str, reason: &str, json: bool) -> i32 {
@@ -2699,6 +2839,7 @@ fn record_evidence(
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     let inputs = task::evidence_inputs(task, &tree);
     task.evidence.push(task::Evidence {
+        reuse: None,
         identity: task::declared_check(task),
         acceptance_epoch: Some(task.acceptance_epoch),
         check,
@@ -2854,6 +2995,7 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         );
     }
     let evidence = task::Evidence {
+        reuse: None,
         identity,
         acceptance_epoch: Some(acceptance_epoch),
         check: argv.join(" "),
@@ -3443,6 +3585,18 @@ fn write_evidence_receipt(output: &mut impl Write, evidence: &task::Evidence) ->
         epoch_label(evidence.acceptance_epoch),
         evidence.exit
     )?;
+    if let Some(reuse) = &evidence.reuse {
+        writeln!(
+            output,
+            "  original execution {}   explicitly reused {} by {}",
+            evidence.unix, reuse.unix, reuse.model
+        )?;
+        writeln!(
+            output,
+            "  original evidence {} epoch {}: {}",
+            reuse.original_index, reuse.original_epoch, reuse.reason
+        )?;
+    }
     if let Some(log) = &evidence.log {
         writeln!(output, "  log {log}")?;
     }
@@ -3639,6 +3793,17 @@ fn write_task(
                 "  Reaccept an open review to inspect the changed target; a CLOSED review remains historical and new work needs a new review task"
             )?;
         }
+    }
+    if !task.delivery_review_targets.is_empty() {
+        writeln!(
+            output,
+            "  Additional explicit delivery sources: {}",
+            task.delivery_review_targets
+                .iter()
+                .map(|target| format!("task::{}", target.task))
+                .collect::<Vec<_>>()
+                .join("  ")
+        )?;
     }
     if task.state == "ready" && (task.intent_disposition_required || task.goal_reflection_required)
     {

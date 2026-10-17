@@ -302,6 +302,11 @@ Reviewed Partial or Blocked source can close. Its exact origin remains visible i
 run. Status shows at most 50 residual rows and reports total/omitted counts; goal
 explanation gives the complete filtered list. Unreadable records remain unavailable
 notices. Owner retirement is retained as retirement, never described as delivery.
+Residual JSON includes `origin_role`, the recorded task role (null if unavailable).
+When a delivery owner is absent, text shows “delivery owner not recorded” plus the
+origin role and lifecycle state. This does not assign that role the remaining
+outcome, infer a successor, or promote a historical reflection owner. An explicit
+claim owner remains separate; unresolved origins and closure checks are unchanged.
 
 A later review of the closed source can resolve only the named historical residual:
 
@@ -405,3 +410,26 @@ hidden by the path cap; unavailable baselines have null totals. The same child
 can occur in different receipt contexts. No task/status/evidence bytes, target
 pins, check predicates, claim authority or closure rules change. Follow the
 existing explicit disposition/reflect/evidence routes after inspecting the cause.
+
+### One review of several delivery sources
+
+Declare each source explicitly when opening the review:
+
+```sh
+blabla task open combined-review --role reviewer --statement "Inspect Core and Server delivery" --scope reviews/combined.md --review-of core-task --delivery-review-of server-task --input core server --check-argv node --test tests/combined.test.ts
+blabla task accept combined-review --model REVIEWER_MODEL
+blabla task evidence combined-review --run
+blabla task delivery-review combined-review GOAL --source server-task --verdict accept --reason "Inspected this source's exact outcome and remaining limits" --observation-ref '{"kind":"artifact","locator":"reviews/combined.md","context":"Independent source inspection"}' --model REVIEWER_MODEL
+```
+
+Repeat `--delivery-review-of` for additional distinct tasks. Omitted `--source` selects only the primary `--review-of`; same-goal verdicts for different sources remain separate. Acceptance pins every declared source and recursive review dependency. Changed claims, source inputs or inspection artifacts require current inspection and explicit receipts. A shared review must still reach its own independently accepted close before each source can close separately. Neither source closure nor accepting a Partial claim completes its residual. Existing records without additional targets or verdict source fields retain primary-only behavior. Additional targets cannot be inferred or added to an existing assignment in this slice.
+
+### Reusing an unchanged review execution
+
+`blabla task accept REVIEW --model MODEL --reuse-evidence --reason "Exact execution inputs remain unchanged; renewed source claims were inspected"` explicitly repins an ACCEPTED or READY review and reuses its latest original successful argv run. Ordinary acceptance still requires a new-epoch execution.
+
+Reuse requires the same still-permitted accepted model, exact check identity and complete observable input map, a readable original task-local log, and unchanged execution coverage of every recursive source scope, declared input, deliverable and recorded artifact. A report edit counts as an input edit. Missing paths, manual evidence, an older success behind a newer failure, falsification obligations and chained reuse refuse before recording. Current source targets remain explicit; no target is inferred.
+
+The original evidence stays intact. The appended `tool: "reuse"` entry retains its execution time, argv, input hashes, exit, tree and log, with a separate optional `reuse` object naming the zero-based original evidence index, original epoch/digests, attesting model, reason and reuse time. Text output distinguishes execution from reuse. Old records without this object remain compatible.
+
+Acceptance advances the epoch and clears the challenge. Dispositions, lenses, reflections and delivery verdicts are not renewed; inspect and record them explicitly before hand-back. Both closure modes retain their existing checks, independent outcome review and Partial/Blocked residuals. Final recording reloads task, process authority, execution inputs/log and recursive review context and refuses if the inspected context changed. This is an explicit execution reuse path, not a guarantee of filesystem-wide atomicity or permission to omit report dependencies.

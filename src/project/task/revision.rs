@@ -54,6 +54,10 @@ pub fn relevant_revision(
         "decisions": task.decisions,
         "findings": findings,
     });
+    if !task.delivery_review_targets.is_empty() {
+        assignment["delivery_review_targets"] =
+            serde_json::to_value(&task.delivery_review_targets).expect("review targets serialize");
+    }
     if !task.delivery_obligations.is_empty() {
         assignment["delivery_obligations"] = serde_json::to_value(
             task.delivery_obligations

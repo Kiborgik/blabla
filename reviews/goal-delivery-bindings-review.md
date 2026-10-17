@@ -1,0 +1,30 @@
+# Independent goal-delivery binding review
+
+Actual reviewer gpt-6-astra/high, 2026-10-16, ROOT task `review-goal-delivery-bindings`. I did not author the tooling implementation. Verdict: no blocking correctness defect found within this standalone finite bridge packet; suitable for the owner's next composition/measurement step. This does not promote the prospective contract or certify a complete root campaign.
+
+## Inspected evidence
+
+Read all931 lines of `bridge/goal_delivery.rs`, all383 lines of its focused test file, the current prospective contract, the author report, the actual missing-binding RED, the earlier measured terminal log and the final five-test author log. The RED compiled and reached the real missing-action assertion; an earlier missing scratch directory is correctly excluded. Final author evidence has five tests passing, including explicit invocation classification and the enlarged operation matrix. The earlier four-test timing log is retained as development measurement, not mislabeled final verification.
+
+The review's declared command is `cargo test --locked --test goal_delivery_bindings`, run after this report text. Its current full log and child exit are recorded on the review task. Existing source reread/race and52-origin stress tests are reused only at their stated boundary; this review does not claim to rerun them.
+
+## Deciding implementation findings
+
+- Fixture preparation creates one isolated temporary project, actual registered process/system/goal declarations, a real Python source/artifact check and a genuinely verified two-step counter. All lifecycle operations invoke the current repository Cargo CLI. Source task records, current check evidence and closure results are never manually fabricated. Invalid applicability and source drift are explicit adversarial fixture changes.
+- Per-operation eligibility is read from real declarations, permitted models, task acceptance/state, tracked readiness, challenge fingerprints, claim/review projections and actual canonical status. The fixture selector controls preparation and requested payload only. Eligibility is not defined by running the same prospective operation and copying its answer. The finite20-row matrix separately asserts expected eligible and ineligible preparations, then actual success/refusal; refusal-all and acceptance-all mutations cannot pass those positive controls.
+- The predicates deliberately describe the finite supported fixture family, rather than a replacement universal CLI validator. Ordinary close requires current real GREEN; bounded close uses the earlier actual GREEN, unchanged stored canonical receipt, implementation-only drift and live structure. The exact-resolution preparation additionally requires a closed Partial/Blocked origin, matching digest, assigned current independent reviewer and a read terminal artifact. Real CLI authority remains decisive.
+- CLI success must have exit0 plus a task object. Refusal requires exit2 plus category task. Signals, compilation failures, malformed output, other categories and budget exhaustion remain adapter errors. Review/resolution operations are disclosed composites: record verdict, then real challenge/READY/close. A downstream failure is not disguised as the original operation's refusal.
+- Complete fixture trees are compared across refusals. Contract/memory declarations and canonical verification records are checked independently across every operation. Closed task bytes and other-origin residual rows are preserved. Exact resolution removes only the selected work origin; repeated resolution refuses and leaves records unchanged. Fresh CLI processes inspect persisted task/status/goal views, so in-memory probe flags cannot substitute for retention.
+- The test evaluator consumes the actual observed before/after pairs. Close's Boolean argument is specialized into the test contract before one-step evaluation; predicates themselves are retained. This is a transparent finite evaluator control, not proof of composed randomized campaign behavior. Adversarial changes to results, write preservation, authority, residual visibility, other origins, historical bytes and view agreement produce RED.
+
+## Bounds and limitations
+
+The signed fixture selector is reduced modulo15; malformed shapes and unsupported JSON integers fail without changing observations. Unused construction/reset/inspection does not create the temporary project or launch child CLI processes. The phrase “allocation-free” in the existing report/test name must be read narrowly as fixture/process-free: `observe` clones a JSON value and therefore does allocate ordinary memory. No allocator instrumentation or zero-allocation proof exists. This wording limit is not a fixture-laziness or lifecycle defect.
+
+Each request retains4500ms and2MiB combined child-output limits. Process-group termination covers exceeded child deadlines/output; a final request deadline check also prevents a slow completed operation from being reported as success. The finite warm timings do not establish cold-build or canonical-profile cost. Observe itself returns the retained observation; fresh CLI reads occur in actions that refresh it. There is no automatic background refresh or general cross-process race proof in this bridge.
+
+All artifact references and model labels in these component fixtures are explicitly synthetic. The terminal file is genuinely created/read under an assigned scope, but accepting its semantic meaning exercises lifecycle plumbing rather than independently proving any real game, viewer or user outcome. This distinction is essential to the delivery feature and is retained by the report.
+
+## Handoff
+
+All named deliverables are accounted for. The current source packet supplies real executable bindings and meaningful finite positive/negative controls without changing the shared adapter, request allowance, contract authority or project completion state. The owner must still compose the standalone bridge, measure the resulting finite campaign under the existing request limit and decide draft promotion separately. No source or test edits were made by this review.

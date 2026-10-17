@@ -326,6 +326,7 @@ pub(crate) struct ClaimInput {
 
 #[derive(Clone)]
 pub(crate) struct ReviewInput {
+    pub source: Option<String>,
     pub goal: String,
     pub verdict: String,
     pub refs: Vec<String>,
@@ -434,11 +435,15 @@ fn independent_review(
     input: &ReviewInput,
     tree: &BTreeMap<String, String>,
 ) -> Result<Review, String> {
-    let target = task
+    let primary = task
         .review_of
         .as_ref()
         .ok_or("delivery review requires an independently assigned review_of task")?;
-    let source = task::read(&project.manifest.root, &target.task)?
+    let selected = input.source.as_deref().unwrap_or(&primary.task);
+    if !assigned_source(task, selected) {
+        return Err("delivery source is not explicitly assigned to this review".into());
+    }
+    let source = task::read(&project.manifest.root, selected)?
         .ok_or("delivery review target is unavailable")?;
     if source.name == task.name {
         return Err("a source task cannot review its own outcome".into());
@@ -496,6 +501,8 @@ fn independent_review(
         return Err("independent delivery review requires an inspection reason".into());
     }
     Ok(Review {
+        source_task: (!task.delivery_review_targets.is_empty() || input.source.is_some())
+            .then(|| source.name.clone()),
         goal: key,
         claim_digest: fingerprint(claim),
         goal_fingerprint: fingerprint(&declarations(project)?.get(&obligation.goal.id())),
@@ -557,15 +564,11 @@ fn inspect(manifest: &Path, name: &str, request: &Request, json: bool) -> Result
         }),
     }
     .map_err(|m| refuse(m, json))?;
-    let mut targets = BTreeMap::new();
-    let mut current = task.clone();
-    while let Some(target) = current.review_of {
-        if targets.contains_key(&target.task) {
-            return Err(refuse("recursive review cycle", json));
-        }
-        current = load(&project, &target.task, json)?;
-        targets.insert(current.name.clone(), fingerprint(&current));
-    }
+    let targets: BTreeMap<_, _> = review_graph(&project, &task)
+        .map_err(|message| refuse(message, json))?
+        .into_iter()
+        .map(|(_, source)| (source.name.clone(), fingerprint(&source)))
+        .collect();
     let authority: BTreeMap<_, _> = [
         &project.manifest.process,
         &project.manifest.goal,
@@ -623,8 +626,12 @@ fn record(initial: Inspection, request: &Request, json: bool) -> i32 {
         Request::Review(input) => {
             match independent_review(&current.project, &current.task, input, &current.tree) {
                 Ok(review) => {
+                    let primary = current.task.review_of.as_ref().map(|t| t.task.clone());
                     current.task.delivery_reviews.retain(|r| {
-                        !(r.goal == review.goal && r.resolve_origin == review.resolve_origin)
+                        !(r.source_task.as_deref().or(primary.as_deref())
+                            == review.source_task.as_deref().or(primary.as_deref())
+                            && r.goal == review.goal
+                            && r.resolve_origin == review.resolve_origin)
                     });
                     current.task.delivery_reviews.push(review);
                 }
@@ -643,6 +650,21 @@ pub(crate) fn write(project: &Project, name: &str, request: Request, json: bool)
     }
 }
 
+fn assigned_source(reviewer: &Task, source: &str) -> bool {
+    reviewer
+        .review_of
+        .iter()
+        .chain(&reviewer.delivery_review_targets)
+        .any(|target| target.task == source)
+}
+
+fn review_source<'a>(reviewer: &'a Task, review: &'a Review) -> Option<&'a str> {
+    review
+        .source_task
+        .as_deref()
+        .or_else(|| reviewer.review_of.as_ref().map(|t| t.task.as_str()))
+}
+
 fn review_record_current(
     project: &Project,
     reviewer: &Task,
@@ -650,7 +672,9 @@ fn review_record_current(
     source: &Task,
     tree: &BTreeMap<String, String>,
 ) -> bool {
-    if !permitted(project, reviewer, &review.model)
+    if review_source(reviewer, review) != Some(source.name.as_str())
+        || !assigned_source(reviewer, &source.name)
+        || !permitted(project, reviewer, &review.model)
         || review_freshness(project, reviewer) != Some(true)
         || !task::tracked_readiness(reviewer, &project.manifest.root, &project.ignore, tree)
             .supported
@@ -707,11 +731,10 @@ fn accepted_review(
     tasks: &[Task],
 ) -> bool {
     let mut accepted = false;
-    for reviewer in tasks.iter().filter(|r| {
-        r.state == "closed"
-            && r.result.is_some()
-            && r.review_of.as_ref().is_some_and(|t| t.task == source.name)
-    }) {
+    for reviewer in tasks
+        .iter()
+        .filter(|r| r.state == "closed" && r.result.is_some() && assigned_source(r, &source.name))
+    {
         if !task::challenge_current(reviewer, tree) {
             continue;
         }
@@ -744,16 +767,18 @@ pub(crate) fn reviews_pending(
         .cloned()
         .collect();
     if !source.delivery_reviews.is_empty() {
-        let target = source
-            .review_of
-            .as_ref()
-            .and_then(|t| task::read(&project.manifest.root, &t.task).ok().flatten());
         for review in &source.delivery_reviews {
+            let target = review_source(source, review)
+                .and_then(|name| task::read(&project.manifest.root, name).ok().flatten());
             if !target
                 .as_ref()
                 .is_some_and(|target| review_record_current(project, source, review, target, tree))
             {
-                pending.push(format!("stale review of {}", review.goal));
+                pending.push(format!(
+                    "stale review of {} from {}",
+                    review.goal,
+                    review_source(source, review).unwrap_or("unassigned source")
+                ));
             }
         }
     }
@@ -786,11 +811,7 @@ fn resolved_origin(
 ) -> bool {
     tasks
         .iter()
-        .filter(|r| {
-            r.state == "closed"
-                && r.result.is_some()
-                && r.review_of.as_ref().is_some_and(|t| t.task == source.name)
-        })
+        .filter(|r| r.state == "closed" && r.result.is_some() && assigned_source(r, &source.name))
         .any(|reviewer| {
             task::challenge_current(reviewer, tree)
                 && reviewer.delivery_reviews.iter().any(|r| {
@@ -857,7 +878,7 @@ pub(crate) fn project_view(project: &Project, filter: Option<&str>) -> Option<Va
                     continue;
                 }
             }
-            residuals.push(json!({"origin_task":source.name,"goal":id,"claim_digest":claim.map(fingerprint),"status":claim.map(|c| json!(c.status)).unwrap_or(json!("unclaimed")),"source_state":source.state,"owner":claim.and_then(|c| c.owner.as_ref()),"remaining":claim.and_then(|c| c.remaining.as_ref()),"blocker":claim.and_then(|c| c.blocker.as_ref()),"next":claim.and_then(|c| c.next.as_ref().or(c.unblock_when.as_ref())),"current":current,"review_accepted":approved,"retired":retired,"route":format!("blabla task show {}",source.name)}));
+            residuals.push(json!({"origin_task":source.name,"origin_role":if source.role.trim().is_empty() { None } else { Some(source.role.as_str()) },"goal":id,"claim_digest":claim.map(fingerprint),"status":claim.map(|c| json!(c.status)).unwrap_or(json!("unclaimed")),"source_state":source.state,"owner":claim.and_then(|c| c.owner.as_ref()),"remaining":claim.and_then(|c| c.remaining.as_ref()),"blocker":claim.and_then(|c| c.blocker.as_ref()),"next":claim.and_then(|c| c.next.as_ref().or(c.unblock_when.as_ref())),"current":current,"review_accepted":approved,"retired":retired,"route":format!("blabla task show {}",source.name)}));
         }
     }
     residuals.sort_by_key(|v| {
@@ -903,13 +924,24 @@ pub(crate) fn write_projection(output: &mut impl Write, view: Option<&Value>) ->
     )?;
     if let Some(rows) = view["residuals"].as_array() {
         for row in rows {
+            let ownership = match row["owner"].as_str() {
+                Some(owner) => format!("owner {owner}"),
+                None => format!(
+                    "delivery owner not recorded; origin {} ({})",
+                    row["origin_role"]
+                        .as_str()
+                        .map(|role| format!("role::{role}"))
+                        .unwrap_or_else(|| "unknown".to_owned()),
+                    row["source_state"].as_str().unwrap_or("unknown")
+                ),
+            };
             writeln!(
                 output,
-                "  {} from {}: {} owner {} next {}{}",
+                "  {} from {}: {} {} next {}{}",
                 row["goal"].as_str().unwrap_or("?"),
                 row["origin_task"].as_str().unwrap_or("?"),
                 row["status"].as_str().unwrap_or("?"),
-                row["owner"].as_str().unwrap_or("unassigned"),
+                ownership,
                 row["next"]
                     .as_str()
                     .unwrap_or("inspect current claim/review"),
@@ -957,18 +989,29 @@ pub(crate) fn close_context(
     }
     close_check(project, task, json)?;
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
-    let mut records: BTreeMap<String, String> = task::read_all(&project.manifest.root)
-        .iter()
-        .filter(|r| r.review_of.as_ref().is_some_and(|t| t.task == task.name))
-        .map(|r| (r.name.clone(), fingerprint(r)))
+    let reviewers: Vec<_> = task::read_all(&project.manifest.root)
+        .into_iter()
+        .filter(|r| assigned_source(r, &task.name))
         .collect();
-    let mut current = task.clone();
-    while let Some(target) = current.review_of {
-        if records.contains_key(&target.task) {
-            return Err(refuse("delivery close review cycle", json));
+    let mut records = BTreeMap::new();
+    for reviewer in reviewers.iter().chain(std::iter::once(task)) {
+        records.insert(reviewer.name.clone(), fingerprint(reviewer));
+        if reviewer.name != task.name
+            && !(reviewer.state == "closed"
+                && reviewer.result.is_some()
+                && task::challenge_current(reviewer, &tree)
+                && reviewer
+                    .delivery_reviews
+                    .iter()
+                    .any(|review| review_record_current(project, reviewer, review, task, &tree)))
+        {
+            continue;
         }
-        current = load(project, &target.task, json)?;
-        records.insert(current.name.clone(), fingerprint(&current));
+        for (_, source) in
+            review_graph(project, reviewer).map_err(|message| refuse(message, json))?
+        {
+            records.insert(source.name.clone(), fingerprint(&source));
+        }
     }
     let authority: BTreeMap<_, _> = [
         &project.manifest.process,
@@ -1053,7 +1096,7 @@ mod tests {
     }
 
     fn review_request(origin: Option<Origin>) -> Request {
-        Request::Review(ReviewInput { goal: "deliver".into(), verdict: "accept".into(), refs: vec![json!({"kind":"runtime","locator":"fixture://independent-observation","context":"Explicit synthetic independent observation"}).to_string()], reason: "Inspected the actual stated boundary".into(), model: "reviewer".into(), resolution: origin.as_ref().map(|_| "delivered".into()), resolve_origin: origin.map(|o| serde_json::to_string(&o).unwrap()) })
+        Request::Review(ReviewInput { source: None, goal: "deliver".into(), verdict: "accept".into(), refs: vec![json!({"kind":"runtime","locator":"fixture://independent-observation","context":"Explicit synthetic independent observation"}).to_string()], reason: "Inspected the actual stated boundary".into(), model: "reviewer".into(), resolution: origin.as_ref().map(|_| "delivered".into()), resolve_origin: origin.map(|o| serde_json::to_string(&o).unwrap()) })
     }
 
     fn prepare(project: &Project, name: &str, scope: &str, primary: bool, target: Option<&str>) {
@@ -1473,6 +1516,153 @@ mod tests {
                 },
                 2,
             );
+        }
+    }
+    fn batched_fixture() -> (TempDir, Project, Request) {
+        let (temp, project, _, _) = fixture(1);
+        prepare(&project, "secondary", "secondary.md", true, None);
+        assert_eq!(write(&project, "secondary", claim(), true), 0);
+        handback(&project, "secondary");
+        assert_eq!(
+            super::super::open_with_targets(
+                &project,
+                Opening {
+                    name: "batch".into(),
+                    role: "reviewer".into(),
+                    statement: "Inspect two explicit sources".into(),
+                    scope: vec!["reviews/batch.md".into()],
+                    inputs: vec!["src".into(), "check.py".into()],
+                    check_argv: Some(vec!["python3".into(), "check.py".into()]),
+                    review_of: Some("work".into()),
+                    ..Default::default()
+                },
+                vec![],
+                vec!["secondary".into()],
+                vec![],
+                false,
+                false,
+                true,
+                &[]
+            ),
+            0
+        );
+        assert_eq!(super::super::accept(&project, "batch", "reviewer", true), 0);
+        assert_eq!(super::super::evidence_run(&project, "batch", true), 0);
+        let Request::Review(mut request) = review_request(None) else {
+            unreachable!()
+        };
+        request.source = Some("secondary".into());
+        (temp, project, Request::Review(request))
+    }
+
+    #[test]
+    fn batched_delivery_checkpoint_noop_records_the_explicit_secondary() {
+        let (_temp, project, request) = batched_fixture();
+        let mut reached = false;
+        assert_eq!(
+            write_with_checkpoint(&project, "batch", request, || reached = true),
+            0
+        );
+        assert!(reached);
+        let task = task::read(&project.manifest.root, "batch")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            task.delivery_reviews[0].source_task.as_deref(),
+            Some("secondary")
+        );
+    }
+
+    #[test]
+    fn batched_delivery_checkpoint_preserves_changed_secondary_context() {
+        for mutation in ["note", "claim", "artifact", "authority", "input"] {
+            let (_temp, project, request) = batched_fixture();
+            let mut after = None;
+            let result = write_with_checkpoint(&project, "batch", request, || {
+                let root = &project.manifest.root;
+                match mutation {
+                    "note" => assert_eq!(
+                        super::super::note(&project, "secondary", "Valid concurrent context", true),
+                        0
+                    ),
+                    "claim" => rewrite(root, "secondary", |v| {
+                        v["delivery_obligations"]["goal::deliver"]["claim"]["observation"] =
+                            json!("Changed explicit observation")
+                    }),
+                    "artifact" => put(root, "observation.txt", "Changed inspected artifact"),
+                    "input" => put(root, "src/app.rs", "pub fn run() { let x = 1; }"),
+                    _ => {
+                        let original = std::fs::read_to_string(root.join("process.bla")).unwrap();
+                        put(
+                            root,
+                            "process.bla",
+                            &original.replace(
+                                "purpose \"Review\"",
+                                "purpose \"Changed review authority\"",
+                            ),
+                        );
+                    }
+                }
+                after = Some(bytes(root));
+            });
+            assert!(
+                after.is_some(),
+                "must reach exact production checkpoint: {mutation}"
+            );
+            assert_eq!(result, 2, "{mutation}");
+            assert_eq!(bytes(&project.manifest.root), after.unwrap());
+        }
+    }
+
+    #[test]
+    fn batched_source_close_checkpoint_rechecks_other_source_in_both_modes() {
+        for bounded in [false, true] {
+            for mutate in [false, true] {
+                let (_temp, project, secondary_request) = batched_fixture();
+                assert_eq!(write(&project, "batch", review_request(None), true), 0);
+                assert_eq!(write(&project, "batch", secondary_request, true), 0);
+                handback(&project, "batch");
+                assert_eq!(super::super::close(&project, "batch", "owner", true), 0);
+                if bounded {
+                    prepare(&project, "concurrent", "other.md", false, None);
+                    put(
+                        &project.manifest.root,
+                        "other.md",
+                        "Actual unrelated implementation change",
+                    );
+                }
+                let mut after = None;
+                let checkpoint = || {
+                    if mutate {
+                        assert_eq!(
+                            super::super::note(
+                                &project,
+                                "secondary",
+                                "Valid later source context",
+                                true
+                            ),
+                            0
+                        );
+                    }
+                    after = Some(bytes(&project.manifest.root));
+                };
+                let exit = if bounded {
+                    super::super::bounded::close_with_checkpoint(
+                        &project,
+                        "work",
+                        "owner",
+                        "Current independently reviewed work",
+                        checkpoint,
+                    )
+                } else {
+                    super::super::close_with_checkpoint(&project, "work", "owner", checkpoint)
+                };
+                assert!(after.is_some());
+                assert_eq!(exit, if mutate { 2 } else { 0 });
+                if mutate {
+                    assert_eq!(bytes(&project.manifest.root), after.unwrap());
+                }
+            }
         }
     }
 }
