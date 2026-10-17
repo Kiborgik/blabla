@@ -59,3 +59,103 @@ when refuse_civic_action {
 when replay_civic_history {
     expect "civic-history-replays-with-legacy-state-preserved": after.replay_exact and after.legacy_preserved
 }
+
+state second_release_preserves_existing: bool
+state second_release_no_grants: bool
+state second_release_timing_exact: bool
+state second_calendar_era_milestones_unchanged: bool
+state second_branch_prerequisites_exact: bool
+state second_code_of_laws_cost: int
+state second_craftsmanship_cost: int
+state second_foreign_trade_cost: int
+state second_early_empire_cost: int
+state second_state_workforce_cost: int
+state second_political_philosophy_cost: int
+state second_civic_progress_snapshots_exact: bool
+state second_no_new_era_gate: bool
+state second_no_unimplemented_choices: bool
+state second_final_civic_actual: bool
+state second_military_slots: int
+state second_economic_slots: int
+state second_diplomatic_slots: int
+state second_wildcard_slots: int
+state second_unique_policy_assignments: bool
+state second_empty_slots_legal: bool
+state second_initial_adoption_exact: bool
+state second_change_credit_price: int
+state second_reslot_credit_price: int
+state second_entitlement_price_exact: bool
+state second_commitment_beats: int
+state second_commitment_enforced: bool
+state second_original_capital_owned: bool
+state second_four_work_families: bool
+state second_capital_bonus_percent: int
+state second_opening_modifier_order_exact: bool
+state second_single_final_rounding: bool
+state second_existing_order_snapshots_preserved: bool
+state second_future_work_only: bool
+state second_noncapital_work_unchanged: bool
+state second_fixed_charters_unchanged: bool
+state second_other_ordinary_outputs_and_power_unchanged: bool
+state second_chiefdom_food_tradeoff_exact: bool
+state second_current_projection_exact: bool
+state second_historical_work_not_relabelled: bool
+state second_real_transition: bool
+state second_transition_beats: int
+state second_transition_output_percent: int
+state second_old_arrangement_openings_exact: bool
+state second_target_starts_next_opening: bool
+state second_outgoing_capital_bonus_retained: bool
+state second_transition_fixed_payments_preserved: bool
+state second_latest_entitlement_replaces: bool
+state second_consumed_marker_preserved: bool
+state second_pending_completion_entitlement_preserved: bool
+state second_pruned_entitlement_cannot_reinstate: bool
+state second_retained_events_cross_checked: bool
+state second_refusals_discriminate: bool
+state second_zero_effect_refusals: bool
+state second_legal_unedited_civic_journey: bool
+state second_actual_paid_capital_consequence: bool
+state second_replay_exact: bool
+state second_legacy_history_preserved: bool
+state second_pending_and_completed_snapshots_exact: bool
+
+action adopt_second_government_release()
+action complete_second_government_civics()
+action choose_second_government()
+action work_in_original_capital()
+action resolve_real_government_change()
+action retain_second_government_reform()
+action refuse_second_government_action()
+action replay_second_government_history()
+
+when adopt_second_government_release {
+    expect "second-government-release-preserves-paid-world-and-civic-state-without-grants": after.second_release_preserves_existing and after.second_release_no_grants and after.second_release_timing_exact and after.second_calendar_era_milestones_unchanged
+}
+when complete_second_government_civics {
+    expect "five-civic-branch-keeps-exact-prerequisites-and-culture-costs": after.second_branch_prerequisites_exact and after.second_code_of_laws_cost == 16 and after.second_craftsmanship_cost == 22 and after.second_foreign_trade_cost == 24 and after.second_early_empire_cost == 30 and after.second_state_workforce_cost == 40 and after.second_political_philosophy_cost == 48
+    expect "new-civics-use-explicit-snapshotted-productive-culture-without-extra-era-gates": after.selected_explicitly and after.second_civic_progress_snapshots_exact and after.current_culture_only and after.culture_conserved and after.science_independent and after.successor_unselected and after.second_no_new_era_gate
+}
+when choose_second_government {
+    expect "autocracy-needs-actual-political-philosophy-and-exact-unique-or-empty-slots": after.second_final_civic_actual and after.second_military_slots == 2 and after.second_economic_slots == 1 and after.second_diplomatic_slots == 0 and after.second_wildcard_slots == 1 and after.second_unique_policy_assignments and after.second_empty_slots_legal and after.second_no_unimplemented_choices
+    expect "first-adoption-and-paid-or-free-reforms-preserve-existing-prices-and-commitments": after.second_initial_adoption_exact and after.second_change_credit_price == 10 and after.second_reslot_credit_price == 8 and after.second_entitlement_price_exact and after.second_commitment_beats == 4 and after.second_commitment_enforced and after.payment_exact
+}
+when work_in_original_capital {
+    expect "autocracy-adds-fifteen-percent-to-all-four-owned-original-capital-work-families": after.second_original_capital_owned and after.second_four_work_families and after.second_capital_bonus_percent == 15 and after.second_opening_modifier_order_exact and after.second_single_final_rounding and after.second_current_projection_exact
+    expect "capital-work-only-changes-future-progress-and-preserves-committed-order-terms": after.second_existing_order_snapshots_preserved and after.second_future_work_only and after.completion_before_output and after.second_historical_work_not_relabelled
+    expect "capital-specialization-replaces-chiefdom-food-without-changing-other-work-or-fixed-charters": after.second_chiefdom_food_tradeoff_exact and after.second_noncapital_work_unchanged and after.second_fixed_charters_unchanged and after.second_other_ordinary_outputs_and_power_unchanged
+}
+when resolve_real_government_change {
+    expect "real-government-switch-retains-two-old-openings-at-seventy-five-percent-output": after.second_real_transition and after.second_transition_beats == 2 and after.second_transition_output_percent == 75 and after.second_old_arrangement_openings_exact and after.second_target_starts_next_opening and after.second_commitment_enforced
+    expect "outgoing-autocracy-keeps-work-until-transition-close-with-fixed-payments-intact": after.second_outgoing_capital_bonus_retained and after.second_transition_fixed_payments_preserved and after.second_fixed_charters_unchanged
+}
+when retain_second_government_reform {
+    expect "latest-civic-reform-replaces-without-stacking-or-reviving-a-spent-completion": after.second_latest_entitlement_replaces and after.second_consumed_marker_preserved and after.second_pending_completion_entitlement_preserved and after.second_pruned_entitlement_cannot_reinstate and after.second_retained_events_cross_checked
+}
+when refuse_second_government_action {
+    expect "unreleased-prerequisite-slot-lock-payment-and-stale-reform-refusals-have-no-effects": after.second_refusals_discriminate and after.second_zero_effect_refusals and after.second_no_unimplemented_choices
+}
+when replay_second_government_history {
+    expect "legal-five-civic-journey-reaches-a-real-transition-and-paid-capital-consequence": after.second_legal_unedited_civic_journey and after.second_real_transition and after.second_actual_paid_capital_consequence
+    expect "second-government-history-preserves-pending-completed-and-legacy-replay-identities": after.second_replay_exact and after.second_pending_and_completed_snapshots_exact and after.second_consumed_marker_preserved and after.second_legacy_history_preserved
+}

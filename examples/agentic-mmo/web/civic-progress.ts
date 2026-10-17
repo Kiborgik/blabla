@@ -34,6 +34,17 @@ function slots(input: CivicProgressInput, governmentId: string, assignments: rea
   }));
 }
 
+function governmentChoice(input: CivicProgressInput, target: NonNullable<CapabilityProjection['governance']>['targets'][number]): string {
+  const definition = input.catalogue.governments.find(candidate => candidate.id === target.governmentId);
+  const terms = RESOURCE_IDS.flatMap(resource => {
+    const amount = definition?.baseProduction[resource];
+    return amount ? [`${amount > 0 ? '+' : ''}${exactNumber(amount)} base ${METRIC_LABELS[resource]} in every owned town`] : [];
+  });
+  if (definition?.capitalConstructionWorkPercent) terms.push(`+${exactNumber(definition.capitalConstructionWorkPercent)}% construction work in the owned original capital`);
+  const counts = POLICY_SLOT_TYPES.map(type => `${exactNumber(target.slots[type])} ${type}`).join(' · ');
+  return [`${name(input, 'governments', target.governmentId)} · ${target.eligible ? 'Prerequisites met' : 'Prerequisites not met'} · Quote ${exactNumber(target.price.credits)} Credits`, `Slots: ${counts}`, ...terms].join(' · ');
+}
+
 function constructionRecord(input: CivicProgressInput): string | null {
   const city = input.city;
   if (!city || city.id !== input.projection.cityId) return null;
@@ -68,6 +79,15 @@ export function civicProgressPresentation(input: CivicProgressInput) {
     return amount ? [`${amount > 0 ? '+' : ''}${exactNumber(amount)} base ${METRIC_LABELS[resource]}`] : [];
   });
   if (modifiers.constructionWork) effects.push(`${modifiers.constructionWork > 0 ? '+' : ''}${exactNumber(modifiers.constructionWork)} base construction work`);
+  const capitalPercent = modifiers.capitalConstructionWorkPercent;
+  const capitalId = governance.originalCapitalCityId;
+  let capitalApplicability: string | null = null;
+  if (capitalPercent > 0) {
+    if (!capitalId) capitalApplicability = 'The original capital is not owned. No capital construction bonus applies.';
+    else if (!input.projection.cityId) capitalApplicability = 'Select a town to inspect its capital construction bonus.';
+    else if (input.projection.cityId === capitalId) effects.push(`+${exactNumber(capitalPercent)}% construction work in this town · Owned original capital`);
+    else capitalApplicability = `No capital construction bonus in this town. It applies only to the owned original capital · ${capitalId}.`;
+  }
   return {
     status: lane?.status ?? 'unknown',
     heading: !civic ? 'Civic record unavailable' : project ? `Developing ${name(input, 'civics', project.civicId)}` : completion ? `${name(input, 'civics', completion.civicId)} completed` : lane?.status === 'required' ? 'Choose a civic' : 'No active civic',
@@ -83,17 +103,19 @@ export function civicProgressPresentation(input: CivicProgressInput) {
       heading: !government ? 'Government record unavailable' : current ? name(input, 'governments', current.governmentId) : 'No government adopted',
       slots: current ? slots(input, current.governmentId, current.assignments) : [],
       records: current ? [`Recorded effective round · ${current.effectiveRound}`, `Government commitment until round ${current.governmentLockUntilRound}`, `Policy commitment until round ${current.policyLockUntilRound}`] : [],
-      pending: pending ? [`Pending arrangement · ${name(input, 'governments', pending.targetGovernmentId)}`, `Accepted round ${pending.acceptedRound} · Recorded transition end ${pending.completionRound}`, `Paid ${exactNumber(pending.paidCredits)} Credits`, `Reform used · ${pending.spentCompletionEventId ?? 'None'}`, ...slots(input, pending.targetGovernmentId, pending.targetAssignments)] : [],
+      pending: pending ? [`Pending arrangement · ${name(input, 'governments', pending.targetGovernmentId)}`, `Accepted round ${pending.acceptedRound} · Recorded transition end ${pending.completionRound}`, 'Current effects still use the active arrangement. The pending arrangement does not apply early.', `Paid ${exactNumber(pending.paidCredits)} Credits`, `Reform used · ${pending.spentCompletionEventId ?? 'None'}`, ...slots(input, pending.targetGovernmentId, pending.targetAssignments)] : [],
       reform: reform ? `Unused reform · ${name(input, 'civics', reform.civicId)} · Round ${reform.completedRound} · Event ${reform.completionEventId}` : 'No unused reform recorded.',
-      targets: governance.targets.map(target => `${name(input, 'governments', target.governmentId)} · ${target.eligible ? 'Prerequisites met' : 'Prerequisites not met'} · Quote ${exactNumber(target.price.credits)} Credits`),
+      targets: governance.targets.map(target => governmentChoice(input, target)),
       choiceExplanation: 'Prerequisites and price are not permission to act. Adoption needs an explicit agent choice and the current action rules. Civic completion does not adopt a government or assign a policy.',
       events: (input.events ?? []).filter(event => event.actor === input.projection.civilizationId && (event.type === 'arrangement-accepted' || event.type === 'transition-completed')).slice(-2).map(event => `${event.title} · Round ${event.round} · Event ${event.id}`),
     },
     effects,
+    capitalApplicability,
+    emptyEffects: current ? input.projection.cityId ? 'No government or policy bonus applies to this town.' : 'No town selected for local effects.' : 'No government or policy effects active.',
     outputFactor: `Current ordinary output factor · ${exactNumber(modifiers.ordinaryOutputMultiplier)}`,
     constructionCapacity: governance.cityConstructionWork === null ? null : `${exactNumber(governance.cityConstructionWork)} work · Current town capacity`,
     constructionRecord: constructionRecord(input),
-    effectExplanation: 'These are current base contributions, not credited work or goods. Town capacity includes focus and productivity. Actual construction progress and past production receipts are separate.',
+    effectExplanation: 'These are current government and policy effects, not credited work or goods. Town capacity already includes focus, productivity and any applicable capital bonus. Recorded order work does not identify which government produced it.',
   };
 }
 
@@ -142,7 +164,8 @@ export function createCivicProgress(input: CivicProgressInput): HTMLElement | nu
   for (const event of view.government.events) government.append(text('p', `Recorded event · ${event}`, 'civic-note'));
   section.append(government, text('h4', 'Current opening effects'));
   for (const effect of view.effects) section.append(text('p', effect, 'civic-effect'));
-  if (!view.effects.length) section.append(text('p', 'No government or policy effects active.', 'civic-note'));
+  if (view.capitalApplicability) section.append(text('p', view.capitalApplicability, 'civic-note'));
+  if (!view.effects.length) section.append(text('p', view.emptyEffects, 'civic-note'));
   section.append(text('p', view.outputFactor, 'civic-note'));
   if (view.constructionCapacity) section.append(text('p', view.constructionCapacity, 'civic-amount'));
   if (view.constructionRecord) section.append(text('p', view.constructionRecord, 'civic-note'));

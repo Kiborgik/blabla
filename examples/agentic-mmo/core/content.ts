@@ -6,12 +6,19 @@ import type {
 } from './types.ts';
 
 export const CIVIC_RULES = { ruleVersion: 1, featureId: 'civic-bootstrap', governmentCredits: 10, reslotCredits: 8, commitmentBeats: 4, transitionBeats: 2, transitionOutput: 0.75 } as const;
+export const SECOND_GOVERNMENT_RULES = { ruleVersion: 1, featureId: 'second-government' } as const;
 export const POLICY_SLOT_TYPES = ['military', 'economic', 'diplomatic', 'wildcard'] as const;
 export const CIVICS: CivicDefinition[] = [
   { id: 'code-of-laws', name: 'Code of laws', requiredFeatures: ['civic-bootstrap'], requires: [], cost: 16, capability: 'Choose Chiefdom and explicitly assign Urban planning to fund additional local construction work.' },
+  { id: 'craftsmanship', name: 'Craftsmanship', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['code-of-laws'], cost: 22, capability: 'Combine practical craft with Early empire to develop State workforce.' },
+  { id: 'foreign-trade', name: 'Foreign trade', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['code-of-laws'], cost: 24, capability: 'Develop Early empire and contribute the exchange tradition required by Political philosophy.' },
+  { id: 'early-empire', name: 'Early empire', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['foreign-trade'], cost: 30, capability: 'Combine organized settlements with Craftsmanship to develop State workforce.' },
+  { id: 'state-workforce', name: 'State workforce', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['craftsmanship', 'early-empire'], cost: 40, capability: 'Prepare Political philosophy through coordinated civic work.' },
+  { id: 'political-philosophy', name: 'Political philosophy', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['state-workforce', 'foreign-trade'], cost: 48, capability: 'Choose Autocracy for fifteen percent more construction work in the still-owned original capital, instead of Chiefdom Food across towns.' },
 ];
 export const GOVERNMENTS: GovernmentDefinition[] = [
   { id: 'chiefdom', name: 'Chiefdom', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slots: { military: 1, economic: 1, diplomatic: 0, wildcard: 0 }, baseProduction: { food: 1 } },
+  { id: 'autocracy', name: 'Autocracy', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['political-philosophy'], slots: { military: 2, economic: 1, diplomatic: 0, wildcard: 1 }, baseProduction: {}, capitalConstructionWorkPercent: 15 },
 ];
 export const POLICIES: PolicyDefinition[] = [
   { id: 'urban-planning', name: 'Urban planning', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slotType: 'economic', constructionWork: 1 },
@@ -72,6 +79,7 @@ export const FEATURES: FeatureDefinition[] = [
   { id: 'local-power', name: 'Local Coal power supplies productive Factories', description: 'Opening Coal and residents generate expiring same-town Power for atomically staffed Factories. Emissions are receipt-only; industrial-project work remains planned.' },
   { id: 'industrial-steam', name: 'Finite Coal powers useful rail exchanges', description: 'Connected productive research reveals finite hill Coal, funds exact owned rail edges and enables newly consented fuel-paid steam delivery.' },
   { id: 'civic-bootstrap', name: 'Culture shapes government', description: 'Actual current Culture funds explicitly chosen civics. Chiefdom and a chosen Urban planning policy improve the next working season.' },
+  { id: 'second-government', name: 'Political philosophy offers a second government', description: 'Five connected Culture commitments make Autocracy available, trading distributed Chiefdom Food for construction work in the still-owned original capital.' },
   { id: 'observatory-learning', name: 'Learning from the sky', description: 'Sailing and Celestial navigation connect Mathematics to Astronomy and a locally staffed Observatory beside its own completed high-ground Campus. Harbor, fishing, ships and great-person systems remain planned.' },
   { id: 'foundry-production', name: 'Iron supports local industry', description: 'Military engineering, Gunpowder and Metal casting connect existing discoveries to a locally staffed Foundry that consumes actual iron and energy. Niter, forts and military units remain planned.' },
   { id: 'culture-production', name: 'Culture in inhabited places', description: 'Construction and Printing connect exact Theater sites near completed wonders to locally staffed Printing houses. Tourism, civic Amphitheaters and great-person systems remain planned.' },
@@ -178,7 +186,7 @@ export const TECHNOLOGIES: TechnologyDefinition[] = [
   { id: 'civic-institutions', name: 'Civic institutions', requiredFeatures: ['statecraft'], era: 1, cost: 24, requires: ['agriculture'], capability: 'Public institutions connect learning, belonging and durable cooperation.' },
   { id: 'fuel-management', name: 'Fuel management', requiredFeatures: ['statecraft', 'settlement-crafts'], era: 1, cost: 28, requires: ['civic-institutions', 'kiln-firing'], capability: 'Fuel yards use materials to supply energy for production, trade and repairs.' },
   { id: 'navigation', name: 'Navigation', requiredFeatures: ['navigation'], era: 2, cost: 42, requires: ['civic-institutions'], capability: 'A completed coastal Boat yard can send existing residents to a new shore beyond the ordinary frontier.' },
-  { id: 'industrialization', name: 'Industrialization', requiredFeatures: ['industrialization', 'industrial-steam'], era: 3, cost: 220, requires: ['apprenticeship', 'metal-casting', 'scientific-method'], capability: 'Reveal finite hill Coal for staffed Mines and connect Shipbuilding to Steam power. Coal plants, local Power and Factories remain planned.' },
+  { id: 'industrialization', name: 'Industrialization', requiredFeatures: ['industrialization', 'industrial-steam'], era: 3, cost: 220, requires: ['apprenticeship', 'metal-casting', 'scientific-method'], capability: 'Reveal finite hill Coal for staffed Mines and connect Shipbuilding to Steam power. Coal power plants and Factories additionally require the local Power release, era 3 and a completed Industrial zone.' },
   { id: 'computing', name: 'Planetary computing', requiredFeatures: ['planetary-networks'], era: 4, cost: 100, requires: ['industrialization'], capability: 'Information networks connect markets and political projects across the planet.' },
   { id: 'spaceflight', name: 'Interplanetary logistics', requiredFeatures: ['interplanetary-logistics'], era: 5, cost: 144, requires: ['computing'], capability: 'Launch infrastructure and life-support supply make off-world settlements possible.' },
 ];
@@ -417,6 +425,7 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   for (const government of catalog.governments) {
     if (Object.keys(government.slots).length !== POLICY_SLOT_TYPES.length || POLICY_SLOT_TYPES.some(slot => !Number.isSafeInteger(government.slots[slot]) || government.slots[slot] < 0) || Object.values(government.slots).reduce((sum, count) => sum + count, 0) > 16) errors.push(`government ${government.id}: invalid bounded slots`);
     resources(`government ${government.id}`, government.baseProduction);
+    if (government.capitalConstructionWorkPercent !== undefined && (!positive(government.capitalConstructionWorkPercent) || !government.requiredFeatures.includes(SECOND_GOVERNMENT_RULES.featureId))) errors.push(`government ${government.id}: capital work requires a positive modifier and second-government feature`);
   }
   for (const policy of catalog.policies) if (!['military', 'economic', 'diplomatic'].includes(policy.slotType) || !positive(policy.constructionWork)) errors.push(`policy ${policy.id}: invalid slot or productive modifier`);
   const technologies = new Map(catalog.technologies.map(technology => [technology.id, technology]));

@@ -1,3 +1,4 @@
+import { SecondGovernmentProbe, SECOND_GOVERNMENT_ACTIONS } from './second-government-probe.ts';
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { BUILDINGS, GOVERNMENTS, RESOURCE_IDS, ECONOMY_RULES, IMPROVEMENTS } from '../core/content.ts';
@@ -43,6 +44,7 @@ function paidInputs(result: TransitionResult) { return result.state.cities.filte
 function exempt(result: TransitionResult) { return { extractions: result.events.flatMap(event => event.strategicExtraction ? [event.strategicExtraction] : []), transfers: result.events.filter(event => /trade|shipment/.test(event.type)) }; }
 
 export class CivicBootstrapProbe {
+  private successor: SecondGovernmentProbe | null = null;
   private path: ReturnType<typeof civicBootstrapJourney> | null = null;
   private state: WorldState | null = null;
   private before: WorldState | null = null;
@@ -53,14 +55,15 @@ export class CivicBootstrapProbe {
   private replayedFrames = 0;
   private transition: TransitionResult[] = [];
 
-  reset(): void { this.state = null; this.before = null; this.result = null; this.control = null; this.operation = ''; this.predicates = {}; this.replayedFrames = 0; this.transition = []; }
-  snapshot() { return structuredClone({ state: this.state, before: this.before, result: this.result, control: this.control, operation: this.operation, predicates: this.predicates, replayedFrames: this.replayedFrames, transition: this.transition }); }
+  reset(): void { this.successor = null; this.state = null; this.before = null; this.result = null; this.control = null; this.operation = ''; this.predicates = {}; this.replayedFrames = 0; this.transition = []; }
+  snapshot() { if (this.successor) return this.successor.snapshot(); return structuredClone({ state: this.state, before: this.before, result: this.result, control: this.control, operation: this.operation, predicates: this.predicates, replayedFrames: this.replayedFrames, transition: this.transition }); }
   private getPath() { this.path ??= civicBootstrapJourney(); return this.path; }
   private select(step: CoastalPrefixStep): void { this.before = structuredClone(step.before); this.result = replayCoastalStep(this.before, structuredClone(step.input)); assert.deepEqual(this.before, step.before); assert.deepEqual(this.result, step.result); assert.ok(this.result.ok, this.result.error); assert.ok(isWorldState(this.result.state)); this.state = this.result.state; }
 
   call(action: string): void {
+    if (SECOND_GOVERNMENT_ACTIONS.some(candidate => candidate === action)) { this.successor ??= new SecondGovernmentProbe(); this.successor.call(action); return; }
     if (!actions.includes(action)) throw new RangeError(`Unknown civic action ${action}`);
-    const path = this.getPath(); this.operation = action; this.predicates = {}; this.control = null; this.replayedFrames = 0; this.transition = [];
+    this.successor = null; const path = this.getPath(); this.operation = action; this.predicates = {}; this.control = null; this.replayedFrames = 0; this.transition = [];
     if (action === 'replay_civic_history') {
       this.before = structuredClone(path.initial); let state = structuredClone(path.initial);
       for (const step of path.steps) { assert.deepEqual(state, step.before); const retained = structuredClone(state); const result = replayCoastalStep(state, structuredClone(step.input)); assert.deepEqual(state, retained); assert.deepEqual(result, step.result); assert.ok(isWorldState(result.state)); state = result.state; this.result = result; this.replayedFrames++; }
@@ -128,5 +131,5 @@ export class CivicBootstrapProbe {
     } finally { GOVERNMENTS.pop(); }
   }
 
-  observe() { return { initialized: this.state !== null, ...this.predicates, replayed_frames: this.replayedFrames, provenance: this.operation === 'resolve_government_transition' ? 'Actual generic switch actions with a synthetic advanced-government definition; not a released advanced government' : this.operation === 'work_with_arrangement' || this.operation === 'invest_culture' ? 'Legal civic journey with explicitly synthetic idle, modifier-removal and construction-removal controls' : 'Legal Observatory-to-civic journey and exact deterministic replay' }; }
+  observe() { if (this.successor) return this.successor.observe(); return { initialized: this.state !== null, ...this.predicates, replayed_frames: this.replayedFrames, provenance: this.operation === 'resolve_government_transition' ? 'Actual generic switch actions with a synthetic advanced-government definition; not a released advanced government' : this.operation === 'work_with_arrangement' || this.operation === 'invest_culture' ? 'Legal civic journey with explicitly synthetic idle, modifier-removal and construction-removal controls' : 'Legal Observatory-to-civic journey and exact deterministic replay' }; }
 }

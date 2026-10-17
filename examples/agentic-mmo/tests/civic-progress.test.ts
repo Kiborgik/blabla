@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
-import type { WorldState } from '../core/types.ts';
+import type { ConstructionOrder, WorldState } from '../core/types.ts';
 import { civicBootstrapJourney } from './fixtures/civic-bootstrap-journey.ts';
+import { secondGovernmentJourney } from './fixtures/second-government-journey.ts';
 import { civicProgressPresentation, createCivicProgress, type CivicProgressInput } from '../web/civic-progress.ts';
 
 const journey = civicBootstrapJourney();
@@ -213,4 +214,162 @@ await test('catalogue and event text stays text, with no fabricated HTML control
   assert.ok(section);
   assert.match(section.content(), /<button>Adopt now<\/button>/);
   assert.equal(section.all().some(node => node.tag === 'button'), false);
+});
+
+const secondGovernment = secondGovernmentJourney();
+
+function governmentInput(state: WorldState, cityId: string | null = secondGovernment.cityId): CivicProgressInput {
+  const city = state.cities.find(candidate => candidate.id === cityId);
+  return { catalogue, projection: projectCapabilities(state, secondGovernment.seat, cityId, secondGovernment.time()), ...(city ? { city } : {}), events: state.events };
+}
+
+await test('government choices show canonical distributed Food versus capital work and every slot count', () => {
+  const source = governmentInput(secondGovernment.completed);
+  const view = civicProgressPresentation(source);
+  assert.ok(view);
+  const chiefdom = view.government.targets.find(line => line.startsWith('Chiefdom ·'));
+  const autocracy = view.government.targets.find(line => line.startsWith('Autocracy ·'));
+  assert.ok(chiefdom && autocracy);
+  assert.match(chiefdom, /Slots: 1 military · 1 economic · 0 diplomatic · 0 wildcard/);
+  assert.match(chiefdom, /\+1 base Food in every owned town/);
+  assert.match(autocracy, /Prerequisites met · Quote 0 Credits/);
+  assert.match(autocracy, /Slots: 2 military · 1 economic · 0 diplomatic · 1 wildcard/);
+  assert.match(autocracy, /\+15% construction work in the owned original capital/);
+  assert.equal(view.government.heading, 'Chiefdom');
+  assert.ok(view.effects.includes('+1 base Food'));
+  assert.ok(!view.effects.some(line => line.includes('15%')));
+  const changed = structuredClone(source);
+  const definition = changed.catalogue.governments.find(candidate => candidate.id === 'autocracy');
+  const target = changed.projection.governance?.targets.find(candidate => candidate.governmentId === 'autocracy');
+  assert.ok(definition && target);
+  definition.capitalConstructionWorkPercent = 12.5;
+  target.slots.wildcard = 2;
+  const changedView = civicProgressPresentation(changed);
+  assert.ok(changedView?.government.targets.some(line => line.includes('+12.5% construction work') && line.includes('2 wildcard')));
+});
+
+await test('real transition snapshots keep active and pending arrangements separate until the next opening', () => {
+  for (const state of [secondGovernment.accepted, secondGovernment.firstTransitionBeat]) {
+    const source = governmentInput(state);
+    const view = civicProgressPresentation(source);
+    const pending = source.projection.governance?.government?.pending;
+    assert.ok(view && pending);
+    assert.equal(view.government.heading, 'Chiefdom');
+    assert.ok(view.government.pending.includes('Pending arrangement · Autocracy'));
+    assert.ok(view.government.pending.includes(`Accepted round ${pending.acceptedRound} · Recorded transition end ${pending.completionRound}`));
+    assert.ok(view.government.pending.includes('Military slot 2 · Empty'));
+    assert.ok(view.government.pending.includes('Wildcard slot 1 · Empty'));
+    assert.ok(view.government.pending.some(line => line.includes('does not apply early')));
+    assert.deepEqual(view.effects, ['+1 base Food', '+1 base construction work']);
+  }
+  assert.equal(civicProgressPresentation(governmentInput(secondGovernment.firstTransitionBeat))?.outputFactor, 'Current ordinary output factor · 0.75');
+  const completed = civicProgressPresentation(governmentInput(secondGovernment.transitionCompleted));
+  assert.ok(completed);
+  assert.equal(completed.government.heading, 'Autocracy');
+  assert.deepEqual(completed.government.pending, []);
+  assert.deepEqual(completed.government.slots, ['Military slot 1 · Empty', 'Military slot 2 · Empty', 'Economic slot 1 · Urban planning', 'Wildcard slot 1 · Empty']);
+  assert.deepEqual(completed.effects, ['+1 base construction work', '+15% construction work in this town · Owned original capital']);
+  for (const state of [secondGovernment.returnAccepted, secondGovernment.returnFirstBeat]) {
+    const view = civicProgressPresentation(governmentInput(state));
+    assert.ok(view);
+    assert.equal(view.government.heading, 'Autocracy');
+    assert.ok(view.government.pending.includes('Pending arrangement · Chiefdom'));
+    assert.ok(view.effects.some(line => line.includes('+15%')));
+    assert.ok(!view.effects.includes('+1 base Food'));
+  }
+  const returned = civicProgressPresentation(governmentInput(secondGovernment.returned));
+  assert.ok(returned);
+  assert.equal(returned.government.heading, 'Chiefdom');
+  assert.deepEqual(returned.effects, ['+1 base Food', '+1 base construction work']);
+});
+
+await test('synthetic selected-town identity uses only the canonical owned original capital', () => {
+  const source = structuredClone(governmentInput(secondGovernment.transitionCompleted));
+  assert.ok(source.projection.governance && source.city);
+  source.city.name = 'An unrelated display name';
+  assert.ok(civicProgressPresentation(source)?.effects.some(line => line.includes('+15%')));
+  source.projection.cityId = 'another-owned-town';
+  source.city.id = 'another-owned-town';
+  source.city.name = 'Original capital';
+  const elsewhere = civicProgressPresentation(source);
+  assert.ok(elsewhere);
+  assert.ok(!elsewhere.effects.some(line => line.includes('+15%')));
+  assert.equal(elsewhere.capitalApplicability, `No capital construction bonus in this town. It applies only to the owned original capital · ${secondGovernment.cityId}.`);
+  source.projection.cityId = null;
+  assert.equal(civicProgressPresentation(source)?.capitalApplicability, 'Select a town to inspect its capital construction bonus.');
+  source.projection.cityId = secondGovernment.cityId;
+  source.city.id = secondGovernment.cityId;
+  source.projection.governance.originalCapitalCityId = null;
+  const lost = civicProgressPresentation(source);
+  assert.ok(lost);
+  assert.ok(!lost.effects.some(line => line.includes('+15%')));
+  assert.equal(lost.capitalApplicability, 'The original capital is not owned. No capital construction bonus applies.');
+  source.projection.governance.modifiers.constructionWork = 0;
+  assert.equal(civicProgressPresentation(source)?.emptyEffects, 'No government or policy bonus applies to this town.');
+});
+
+await test('actual paid capital work displays exact current capacity and recorded order work separately', () => {
+  const source = governmentInput(secondGovernment.firstWorkBeat);
+  const before = structuredClone(source);
+  const view = civicProgressPresentation(source);
+  const order = source.city?.construction?.active;
+  assert.ok(view && order && source.projection.governance);
+  assert.equal(order.workDone, 4.49);
+  assert.match(view.constructionRecord ?? '', /^Theater square · 4.49 \/ 10 work recorded/);
+  assert.equal(view.constructionCapacity, `${source.projection.governance.cityConstructionWork} work · Current town capacity`);
+  assert.match(view.effectExplanation, /already includes focus, productivity and any applicable capital bonus/);
+  assert.match(view.effectExplanation, /does not identify which government produced it/);
+  assert.deepEqual(source, before);
+  const reslotted = civicProgressPresentation(governmentInput(secondGovernment.reslotted));
+  assert.ok(reslotted);
+  assert.ok(reslotted.government.slots.includes('Economic slot 1 · Empty'));
+  assert.ok(reslotted.government.slots.includes('Wildcard slot 1 · Urban planning'));
+  assert.ok(reslotted.government.records.includes(`Policy commitment until round ${secondGovernment.reslotted.civilizations.find(actor => actor.id === secondGovernment.seat)?.government?.active?.policyLockUntilRound}`));
+});
+
+await test('synthetic records for all four construction families do not acquire current-government attribution', () => {
+  const source = structuredClone(governmentInput(secondGovernment.transitionCompleted));
+  assert.ok(source.city && source.projection.governance);
+  const base = { ruleVersion: 1 as const, id: 'historical-order', cityId: source.city.id, tileId: 10, startedRound: 700, paid: { materials: 4 }, workRequired: 20, workDone: 7.25 };
+  const records: Array<{ order: ConstructionOrder; label: string }> = [
+    { order: { ...base, buildingId: 'theater-square' }, label: 'Theater square' },
+    { order: { ...base, kind: 'improvement', improvementId: 'mine' }, label: 'Mine' },
+    { order: { ...base, kind: 'wonder', wonderId: 'great-library' }, label: 'Great library' },
+    { order: { ...base, kind: 'rail', edgeId: '10:11', toTileId: 11, strategicPaid: { iron: 1, coal: 1 } }, label: 'Rail · Tiles 10 ↔ 11 · Edge 10:11' },
+  ];
+  for (const { order, label } of records) {
+    source.city.construction = { active: order, lastCompleted: null };
+    source.projection.governance.modifiers.capitalConstructionWorkPercent = 15;
+    source.projection.governance.cityConstructionWork = 4.49;
+    const boosted = civicProgressPresentation(source);
+    source.projection.governance.modifiers.capitalConstructionWorkPercent = 0;
+    source.projection.governance.cityConstructionWork = 3.9;
+    const ordinary = civicProgressPresentation(source);
+    assert.ok(boosted && ordinary);
+    assert.equal(boosted.constructionRecord, `${label} · 7.25 / 20 work recorded · Order historical-order`);
+    assert.equal(boosted.constructionRecord, ordinary.constructionRecord);
+    assert.equal(boosted.constructionCapacity, '4.49 work · Current town capacity');
+    assert.equal(ordinary.constructionCapacity, '3.9 work · Current town capacity');
+  }
+  const completed = governmentInput(secondGovernment.built);
+  const retained = civicProgressPresentation(completed)?.constructionRecord;
+  assert.match(retained ?? '', /^Last completed · Theater square/);
+  assert.ok(completed.projection.governance);
+  completed.projection.governance.modifiers.capitalConstructionWorkPercent = 0;
+  assert.equal(civicProgressPresentation(completed)?.constructionRecord, retained);
+});
+
+await test('second-government comparison and effects stay inside the existing safe native disclosures', () => {
+  const source = structuredClone(governmentInput(secondGovernment.accepted));
+  const definition = source.catalogue.governments.find(candidate => candidate.id === 'autocracy');
+  assert.ok(definition);
+  definition.name = '<button>Switch government</button>';
+  const section = render(source);
+  assert.ok(section);
+  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civics', 'government']);
+  assert.ok(section.all().filter(node => node.tag === 'details').every(node => node.children[0]?.tag === 'summary'));
+  assert.match(section.content(), /<button>Switch government<\/button>/);
+  assert.match(section.content(), /0 diplomatic · 1 wildcard/);
+  assert.match(section.content(), /Current effects still use the active arrangement/);
+  assert.equal(section.all().filter(node => ['button', 'input', 'select', 'form'].includes(node.tag)).length, 0);
 });

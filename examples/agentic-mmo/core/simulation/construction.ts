@@ -1,6 +1,6 @@
 import { initializeLocalPower } from './local-power.ts';
 import { installRail, isRailOrder, railSiteBlock } from './rail.ts';
-import { governmentModifiers } from './government.ts';
+import { governmentModifiers, originalCapitalCityId } from './government.ts';
 import { isWonderOrder, resolveWonderConstruction } from './wonders.ts';
 import { installImprovement, isImprovementOrder } from './improvements.ts';
 import { buildingBaseProduction, describeDistrictProduction } from './districts.ts';
@@ -13,7 +13,9 @@ import { paidRecipe } from './operations.ts';
 import { cityProductivity } from './world.ts';
 
 export function constructionWork(state: WorldState, city: City): number {
-  return Math.round(((city.focus === 'industry' ? CONSTRUCTION_RULES.industryWork : CONSTRUCTION_RULES.baseWork) + governmentModifiers(state, city.civId).constructionWork) * cityProductivity(city) * 100) / 100;
+  const government = governmentModifiers(state, city.civId);
+  const multiplier = city.id === originalCapitalCityId(state, city.civId) ? 1 + government.capitalConstructionWorkPercent / 100 : 1;
+  return Math.round(((city.focus === 'industry' ? CONSTRUCTION_RULES.industryWork : CONSTRUCTION_RULES.baseWork) + government.constructionWork) * cityProductivity(city) * multiplier * 100) / 100;
 }
 
 export function requiredConstructionWork(buildingId: string): number {

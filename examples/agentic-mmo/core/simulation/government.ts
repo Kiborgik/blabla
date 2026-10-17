@@ -86,12 +86,17 @@ export function adoptGovernment(state: WorldState, seat: number, governmentId: s
   emitEvent(state, events, { type: 'arrangement-accepted', title: `${civilization.name} chooses ${must(GOVERNMENTS.find(candidate => candidate.id === governmentId)).name}`, detail: canonical.length ? canonical.map(assignment => `${assignment.slotType}:${assignment.slotIndex} ${assignment.policyId}`).join(', ') : 'All policy slots explicitly empty', actor: seat, target: seat, tileId: null, cause: 'The civilization explicitly chose a complete eligible government arrangement', effects: [`Government ${governmentId}`, `Credits paid ${price.credits}`, `Reform completion ${price.completionEventId ?? 'none'}`, government.pending ? `Transition completes after round ${government.pending.completionRound}` : `Policy commitment until round ${must(government.active).policyLockUntilRound}`], importance: 4 });
 }
 
-export function governmentModifiers(state: WorldState, seat: number): { baseProduction: Partial<Resources>; constructionWork: number; ordinaryOutputMultiplier: number } {
+export function originalCapitalCityId(state: WorldState, seat: number): string | null {
+  return state.cities.find(city => city.id === `city-${seat}` && city.civId === seat)?.id ?? null;
+}
+
+export function governmentModifiers(state: WorldState, seat: number): { baseProduction: Partial<Resources>; constructionWork: number; capitalConstructionWorkPercent: number; ordinaryOutputMultiplier: number } {
   const government = civilizationById(state, seat).government;
-  if (!hasFeatures(state, [CIVIC_RULES.featureId]) || !government?.active) return { baseProduction: {}, constructionWork: 0, ordinaryOutputMultiplier: 1 };
+  if (!hasFeatures(state, [CIVIC_RULES.featureId]) || !government?.active) return { baseProduction: {}, constructionWork: 0, capitalConstructionWorkPercent: 0, ordinaryOutputMultiplier: 1 };
   const definition = GOVERNMENTS.find(candidate => candidate.id === must(government.active).governmentId);
   const constructionWork = government.active.assignments.reduce((sum, assignment) => sum + (POLICIES.find(candidate => candidate.id === assignment.policyId)?.constructionWork ?? 0), 0);
-  return { baseProduction: { ...definition?.baseProduction }, constructionWork, ordinaryOutputMultiplier: government.pending && state.round > government.pending.acceptedRound && state.round <= government.pending.completionRound ? CIVIC_RULES.transitionOutput : 1 };
+  const capitalConstructionWorkPercent = definition && hasFeatures(state, definition.requiredFeatures) ? definition.capitalConstructionWorkPercent ?? 0 : 0;
+  return { baseProduction: { ...definition?.baseProduction }, constructionWork, capitalConstructionWorkPercent, ordinaryOutputMultiplier: government.pending && state.round > government.pending.acceptedRound && state.round <= government.pending.completionRound ? CIVIC_RULES.transitionOutput : 1 };
 }
 
 export function resolveGovernmentTransitions(state: WorldState, events: GameEvent[]): void {
@@ -107,7 +112,7 @@ export function resolveGovernmentTransitions(state: WorldState, events: GameEven
 
 export function observedGovernment(state: WorldState, seat: number) {
   const civilization = civilizationById(state, seat);
-  return structuredClone({ civics: civilization.civics, government: civilization.government, modifiers: governmentModifiers(state, seat), targets: GOVERNMENTS.map(definition => ({ governmentId: definition.id, eligible: prerequisites(state, seat, definition), slots: definition.slots, price: governmentPrice(state, seat, definition.id) })) });
+  return structuredClone({ civics: civilization.civics, government: civilization.government, modifiers: governmentModifiers(state, seat), originalCapitalCityId: originalCapitalCityId(state, seat), targets: GOVERNMENTS.map(definition => ({ governmentId: definition.id, eligible: prerequisites(state, seat, definition), slots: definition.slots, price: governmentPrice(state, seat, definition.id) })) });
 }
 
 function must<T>(value: T | null | undefined): T { if (value === null || value === undefined) throw new RangeError("Required civic fact is missing"); return value; }

@@ -172,7 +172,7 @@ function civicState(value: unknown, features: string[], round: number, revision:
   if (!record(value) || !exactKeys(value, ['ruleVersion', 'completedCivicIds', 'active', 'lastCompleted', 'reformEntitlement'])
     || value.ruleVersion !== 1 || !knownStrings(value.completedCivicIds, CIVICS.map(definition => definition.id))) return false;
   const completed = value.completedCivicIds;
-  if (!completed.every(id => { const definition = CIVICS.find(candidate => candidate.id === id); return definition !== undefined && civicDefinitionAvailable(definition, features, completed); })) return false;
+  if (!completed.every((id, index) => { const definition = CIVICS.find(candidate => candidate.id === id); return definition !== undefined && civicDefinitionAvailable(definition, features, completed.slice(0, index)); })) return false;
   if (value.active !== null) {
     const active = value.active;
     if (!record(active) || !exactKeys(active, ['civicId', 'startedRound', 'progress', 'requiredCulture'])
