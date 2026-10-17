@@ -1,5 +1,11 @@
 import {
   BUILDINGS,
+  COAL_RULES,
+  INDUSTRIAL_RULES,
+  LAND_TRANSPORT_RULES,
+  RESIDENT_CAPACITY_RULES,
+  STRATEGIC_RESOURCE_IDS,
+  STRATEGIC_RESOURCE_RULES,
   CIVICS,
   CIVIC_RULES,
   GOVERNMENTS,
@@ -21,9 +27,10 @@ import {
   WONDERS,
 } from './content.ts';
 import { parseUtcTimestamp } from './simulation/clock.ts';
-import { isLandTransportQuote, landTransportTopologyBlock } from './simulation/transport.ts';
+import { isTransportQuote, transportTopologyBlock } from './simulation/transport.ts';
 import { coastalTopologyBlock, isCoastalFoundingQuote } from './simulation/coastal.ts';
 import { hexDistance } from './simulation/geography.ts';
+import { isHillSite } from './simulation/improvements.ts';
 import { isPersistedActionPlan } from './planning.ts';
 import { RELEASES } from './release.ts';
 import {
@@ -45,6 +52,10 @@ import {
   type Route,
   type Resources,
   type StrategicResources,
+  type RailCompletion,
+  type SteamDeliveryReceipt,
+  type IndustrialFoundryReceipt,
+  type ResidentAllocationResult,
   type StrategicDepositLayer,
   type StrategicExtractionResult,
   type StrategicShipmentResult,
@@ -157,7 +168,7 @@ function civicState(value: unknown, features: string[], round: number, revision:
   if (!record(value) || !exactKeys(value, ['ruleVersion', 'completedCivicIds', 'active', 'lastCompleted', 'reformEntitlement'])
     || value.ruleVersion !== 1 || !knownStrings(value.completedCivicIds, CIVICS.map(definition => definition.id))) return false;
   const completed = value.completedCivicIds;
-  if (!completed.every(id => { const definition = CIVICS.find(candidate => candidate.id === id)!; return civicDefinitionAvailable(definition, features, completed); })) return false;
+  if (!completed.every(id => { const definition = CIVICS.find(candidate => candidate.id === id); return definition !== undefined && civicDefinitionAvailable(definition, features, completed); })) return false;
   if (value.active !== null) {
     const active = value.active;
     if (!record(active) || !exactKeys(active, ['civicId', 'startedRound', 'progress', 'requiredCulture'])
@@ -201,7 +212,7 @@ function governmentState(value: unknown, civics: CivicState, features: string[],
   const spent = value.lastSpentReformCompletionEventId;
   const last = civics.lastCompleted;
   if (spent !== null && (!text(spent) || completionRevision(spent, revision) === null || !last
-    || completionRevision(spent, revision)! > completionRevision(last.eventId, revision)!
+    || (completionRevision(spent, revision) ?? 0) > (completionRevision(last.eventId, revision) ?? 0)
     || !retainedCivicCompletion(events, spent, actor))) return false;
   if (last && (civics.reformEntitlement === null) !== (spent === last.eventId)) return false;
   if (!last && spent !== null) return false;
@@ -266,11 +277,11 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 }
 
 function strategicResources(value: unknown): value is StrategicResources {
-  return record(value) && Object.entries(value).every(([resource, amount]) => resource === 'iron' && integer(amount));
+  return record(value) && Object.entries(value).every(([resource, amount]) => STRATEGIC_RESOURCE_IDS.some(id => id === resource) && integer(amount));
 }
 
 function sameStrategicResources(first: StrategicResources, second: StrategicResources): boolean {
-  return Object.hasOwn(first, 'iron') === Object.hasOwn(second, 'iron') && first.iron === second.iron;
+  return STRATEGIC_RESOURCE_IDS.every(id => Object.hasOwn(first, id) === Object.hasOwn(second, id) && first[id] === second[id]);
 }
 
 function strategicCargo(value: unknown): value is NonNullable<TradeTerms['strategicCargo']> {
@@ -282,11 +293,11 @@ const strategicExtractionFields = ['ruleVersion', 'tileId', 'round', 'resource',
 
 function strategicExtraction(value: unknown): value is StrategicExtractionResult {
   if (!record(value) || !exactKeys(value, strategicExtractionFields)
-    || value.ruleVersion !== 1 || value.resource !== 'iron'
+    || value.ruleVersion !== 1 || !STRATEGIC_RESOURCE_IDS.some(id => id === value.resource)
     || !integer(value.tileId) || !integer(value.round) || !integer(value.quantity)
     || !integer(value.reserveBefore) || !integer(value.reserveAfter) || !integer(value.stockBefore) || !integer(value.stockAfter) || !integer(value.capacity)
     || value.reserveBefore - value.reserveAfter !== value.quantity || value.stockAfter - value.stockBefore !== value.quantity) return false;
-  if (value.status === 'extracted') return value.quantity > 0 && value.stockAfter <= value.capacity;
+  if (value.status === 'extracted') return value.quantity > 0 && value.quantity === Math.min(value.reserveBefore, Math.max(0, value.capacity - value.stockBefore), (value.resource === 'coal' ? STRATEGIC_RESOURCE_RULES.coal.extractionPerBeat : STRATEGIC_RESOURCE_RULES.iron.extractionPerBeat)) && value.stockAfter <= value.capacity;
   return value.quantity === 0 && (value.status === 'unrevealed' || value.status === 'exhausted' && value.reserveBefore === 0
     || value.status === 'storage-full' && value.reserveBefore > 0 && value.stockBefore >= value.capacity);
 }
@@ -313,14 +324,15 @@ function strategicLayer(value: unknown, seed: number, tiles: HexTile[]): value i
     && deposit.resource === 'iron' && integer(deposit.initialReserve, 1) && integer(deposit.remaining, 0, deposit.initialReserve));
 }
 
-function metalRecords(hasLayer: boolean, layer: unknown, civilizations: Civilization[], cities: City[], tiles: HexTile[], events: GameEvent[], routes: Route[], features: string[], seed: number): boolean {
+function metalRecords(hasLayer: boolean, layer: unknown, civilizations: Civilization[], cities: City[], tiles: HexTile[], events: GameEvent[], routes: Route[], features: string[], seed: number, coal: unknown): boolean {
   const enabled = features.includes('finite-metals');
   if (hasLayer !== enabled || civilizations.some(actor => Object.hasOwn(actor, 'strategicResources') !== enabled)) return false;
   if (!enabled) return !events.some(event => Object.hasOwn(event, 'strategicExtraction') || Object.hasOwn(event, 'strategicShipment'));
   if (!strategicLayer(layer, seed, tiles) || !civilizations.every(actor => strategicResources(actor.strategicResources))) return false;
   const retainedExtraction = (value: StrategicExtractionResult): boolean => {
-    const deposit = layer.deposits[String(value.tileId)];
-    return deposit !== undefined && deposit.resource === value.resource && value.reserveBefore <= deposit.initialReserve;
+    const deposit = value.resource === 'coal' ? record(coal) && record(coal.deposits) ? coal.deposits[String(value.tileId)] : undefined : layer.deposits[String(value.tileId)];
+    return record(deposit) && deposit.resource === value.resource && integer(deposit.initialReserve) && integer(deposit.remaining) && value.reserveBefore <= deposit.initialReserve && value.reserveAfter >= deposit.remaining
+      && value.capacity > 0 && value.capacity % STRATEGIC_RESOURCE_RULES[value.resource].capacityPerCity === 0;
   };
   for (const settlement of cities) for (const improvement of Object.values(settlement.improvements ?? {})) {
     const result = improvement.operation.lastResult;
@@ -346,6 +358,189 @@ function metalRecords(hasLayer: boolean, layer: unknown, civilizations: Civiliza
       || event.round <= agreement.acceptedRound || (event.round - (agreement.terms.transport ? agreement.acceptedRound : 0)) % agreement.terms.cadenceRounds !== 0) return false;
   }
   return true;
+}
+
+function sameSnapshot(first: unknown, second: unknown): boolean {
+  if (Array.isArray(first)) return Array.isArray(second) && first.length === second.length && first.every((item: unknown, index) => sameSnapshot(item, second[index]));
+  if (record(first)) return record(second) && exactKeys(second, Object.keys(first)) && Object.entries(first).every(([key, value]) => sameSnapshot(value, second[key]));
+  return first === second;
+}
+
+function railIdentity(value: Record<string, unknown>): boolean {
+  return value.ruleVersion === 1 && integer(value.tileId) && integer(value.toTileId, value.tileId + 1)
+    && value.edgeId === `${value.tileId}:${value.toTileId}` && boundedText(value.cityId)
+    && sameSnapshot(value.paid, INDUSTRIAL_RULES.railCost) && sameSnapshot(value.strategicPaid, INDUSTRIAL_RULES.railStrategicCost)
+    && value.workRequired === INDUSTRIAL_RULES.railWork;
+}
+
+function railCompletion(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is RailCompletion {
+  if (!record(value) || !exactKeys(value, ['kind', 'ruleVersion', 'orderId', 'cityId', 'civId', 'edgeId', 'tileId', 'toTileId', 'startedRound', 'completedRound', 'paid', 'strategicPaid', 'workRequired', 'eventId'])
+    || value.kind !== 'rail' || !railIdentity(value) || !integer(value.civId, 0, CIV_COUNT - 1)
+    || !integer(value.startedRound, 0, round) || !integer(value.completedRound, value.startedRound + 1, round)) return false;
+  const started = orderRevision(value.orderId, revision); const completed = completionRevision(value.eventId, revision);
+  return started !== null && completed !== null && completed > started;
+}
+
+function industrialFoundry(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is IndustrialFoundryReceipt {
+  return record(value) && exactKeys(value, ['ruleVersion', 'cityId', 'civId', 'round', 'eventId', 'paid', 'strategicPaid', 'produced', 'residents'])
+    && value.ruleVersion === 1 && boundedText(value.cityId) && integer(value.civId, 0, CIV_COUNT - 1) && integer(value.round, 1, round)
+    && completionRevision(value.eventId, revision) !== null && sameSnapshot(value.paid, { energy: 2 }) && sameSnapshot(value.strategicPaid, { iron: 1 })
+    && resourceAmounts(value.produced) && exactKeys(value.produced, ['materials']) && finite(value.produced.materials, Number.MIN_VALUE)
+    && residentAllocation(value.residents) && value.residents.required === RESIDENT_CAPACITY_RULES.perPaidRecipe
+    && record(value.residents) && value.residents.communityReserve === RESIDENT_CAPACITY_RULES.communityReserve
+    && value.residents.allocated === value.residents.required && value.residents.available >= value.residents.required;
+}
+
+function paymentSum(value: unknown, first: Partial<Resources>, second: Partial<Resources>): boolean {
+  if (!resourceAmounts(value)) return false;
+  const expected = Object.fromEntries(RESOURCE_IDS.map(id => [id, (first[id] ?? 0) + (second[id] ?? 0)]));
+  return sameSnapshot(value, expected);
+}
+
+function strategicPayment(value: unknown, cargo: StrategicResources | undefined, fuel: number): boolean {
+  if (!strategicResources(value)) return false;
+  const expected = { ...cargo };
+  if (fuel > 0) expected.coal = (expected.coal ?? 0) + fuel;
+  return sameSnapshot(value, expected);
+}
+
+function steamReceipt(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER, maxTiles = Number.MAX_SAFE_INTEGER): value is SteamDeliveryReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'routeId', 'offerId', 'proposer', 'recipient', 'acceptedRound', 'round', 'eventId', 'terms', 'proposerPaid', 'recipientPaid', 'proposerStrategicPaid', 'recipientStrategicPaid'])
+    || value.ruleVersion !== 1 || !boundedText(value.routeId) || !boundedText(value.offerId)
+    || !integer(value.proposer, 0, CIV_COUNT - 1) || !integer(value.recipient, 0, CIV_COUNT - 1) || value.proposer === value.recipient
+    || !integer(value.acceptedRound, 0, round) || !integer(value.round, value.acceptedRound + 1, round)
+    || completionRevision(value.eventId, revision) === null || !tradeTerms(value.terms)) return false;
+  const terms = value.terms; const quote = terms.transport;
+  return record(terms) && exactKeys(terms, ['recipeId', 'recipeVersion', ...tradeResourceFields, 'cadenceRounds', 'damageDisableAt', 'transport', ...(Object.hasOwn(terms, 'strategicCargo') ? ['strategicCargo'] : [])])
+    && isTransportQuote(quote, maxTiles) && quote.mode === 'steam'
+    && terms.cadenceRounds === Math.max(quote.baseCadence, Math.ceil(quote.weightedDistance / INDUSTRIAL_RULES.edgesPerBeat))
+    && (value.round - value.acceptedRound) % terms.cadenceRounds === 0
+    && paymentSum(value.proposerPaid, terms.proposerCargo, terms.proposerUpkeep)
+    && paymentSum(value.recipientPaid, terms.recipientCargo, terms.recipientUpkeep)
+    && strategicPayment(value.proposerStrategicPaid, terms.strategicCargo?.proposer, INDUSTRIAL_RULES.shipmentCoal)
+    && strategicPayment(value.recipientStrategicPaid, terms.strategicCargo?.recipient, 0);
+}
+
+function industrialEvent(value: Record<string, unknown>): boolean {
+  if (value.type === 'rail-completed' && !Object.hasOwn(value, 'railCompletion')) return false;
+  if (Object.hasOwn(value, 'railCompletion')) {
+    const fact = value.railCompletion;
+    if (!railCompletion(fact) || value.type !== 'rail-completed' || fact.eventId !== value.id || fact.completedRound !== value.round
+      || fact.civId !== value.actor || value.target !== value.actor || fact.tileId !== value.tileId || fact.edgeId !== value.detail) return false;
+  }
+  if (Object.hasOwn(value, 'industrialFoundry')) {
+    const fact = value.industrialFoundry;
+    if (!industrialFoundry(fact) || value.type !== 'building-operation' || fact.eventId !== value.id || fact.round !== value.round
+      || fact.civId !== value.actor || value.target !== value.actor || value.detail !== `${fact.cityId}/foundry at strategic round ${fact.round}`) return false;
+  }
+  if (Object.hasOwn(value, 'steamDelivery')) {
+    const fact = value.steamDelivery;
+    if (!steamReceipt(fact) || value.type !== 'trade-delivered' || fact.eventId !== value.id || fact.round !== value.round
+      || fact.proposer !== value.actor || fact.recipient !== value.target || fact.routeId !== value.detail) return false;
+  }
+  return true;
+}
+
+type IndustrialContext = Pick<WorldState, 'seed' | 'tiles' | 'cities' | 'civilizations' | 'events' | 'routes' | 'unlockedFeatures' | 'revision' | 'round' | 'calendarMilestones'> & { coalDeposits: unknown; railEdges: unknown; industrialEvidence: unknown; strategicDeposits: unknown; pastoralSites: unknown; tradeOffers: TradeOffer[]; presentFields: string[] };
+
+function coalLayer(value: unknown, world: IndustrialContext): value is StrategicDepositLayer {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'placementId', 'seed', 'tileIds', 'deposits'])
+    || value.ruleVersion !== 1 || value.placementId !== COAL_RULES.placement.id || value.seed !== world.seed
+    || !Array.isArray(value.tileIds) || value.tileIds.length > COAL_RULES.placement.maximumDeposits || !unique(value.tileIds)
+    || !value.tileIds.every((id: unknown) => integer(id) && world.tiles.some(site => site.id === id))
+    || !record(value.deposits) || !exactKeys(value.deposits, value.tileIds.map(String))) return false;
+  const ids = value.tileIds; const selected = world.tiles.filter(site => ids.includes(site.id));
+  const overlaps = (layer: unknown, id: number): boolean => record(layer) && Array.isArray(layer.tileIds) && layer.tileIds.includes(id);
+  if (!selected.every(site => isHillSite(site) && site.resource === null && !overlaps(world.strategicDeposits, site.id) && !overlaps(world.pastoralSites, site.id)
+    && selected.every(other => other.id === site.id || hexDistance(site, other) >= COAL_RULES.placement.frontierMinimumDistance))) return false;
+  return Object.entries(value.deposits).every(([key, deposit]) => record(deposit) && exactKeys(deposit, ['tileId', 'resource', 'initialReserve', 'remaining'])
+    && integer(deposit.tileId) && key === String(deposit.tileId) && deposit.resource === 'coal' && deposit.initialReserve === COAL_RULES.initialReserve
+    && integer(deposit.remaining, 0, COAL_RULES.initialReserve));
+}
+
+function industrialRecords(world: IndustrialContext): boolean {
+  const enabled = world.unlockedFeatures.includes('industrial-steam');
+  if (['coalDeposits', 'railEdges', 'industrialEvidence'].some(field => world.presentFields.includes(field) !== enabled)) return false;
+  if (!enabled) return world.civilizations.every(actor => !Object.hasOwn(actor.strategicResources ?? {}, 'coal'))
+    && world.events.every(event => !event.industrialFoundry && !event.steamDelivery && !event.railCompletion && event.strategicExtraction?.resource !== 'coal' && !Object.hasOwn(event.strategicShipment?.proposerSent ?? {}, 'coal') && !Object.hasOwn(event.strategicShipment?.recipientSent ?? {}, 'coal'))
+    && world.routes.every(connection => !Object.hasOwn(connection.agreement ?? {}, 'lastSteamDelivery'))
+    && [...(world.tradeOffers ?? []).map(offer => offer.terms), ...world.routes.flatMap(connection => connection.agreement ? [connection.agreement.terms] : [])].every(terms => !Object.hasOwn(terms.strategicCargo?.proposer ?? {}, 'coal') && !Object.hasOwn(terms.strategicCargo?.recipient ?? {}, 'coal'));
+  if (!coalLayer(world.coalDeposits, world) || !record(world.railEdges) || !record(world.industrialEvidence)
+    || !exactKeys(world.industrialEvidence, ['ruleVersion', 'foundryOperations', 'steamDelivery']) || world.industrialEvidence.ruleVersion !== 1
+    || !Array.isArray(world.industrialEvidence.foundryOperations) || world.industrialEvidence.foundryOperations.length > 2) return false;
+  const registry = world.railEdges; const evidence = world.industrialEvidence;
+  const proofs = evidence.foundryOperations;
+  if (!Array.isArray(proofs)) return false;
+  const edges = new Set<string>(); const orders = new Set<string>(); const events = new Set<string>();
+  const geometry = (fact: { tileId: number; toTileId: number; cityId: string }, owner?: number): boolean => {
+    const first = world.tiles.find(site => site.id === fact.tileId); const second = world.tiles.find(site => site.id === fact.toTileId);
+    const town = world.cities.find(settlement => settlement.id === fact.cityId); const center = world.tiles.find(site => site.id === town?.tileId);
+    return !!first && !!second && !!center && hexDistance(first, second) === 1
+      && [first, second].every(site => LAND_TRANSPORT_RULES.passable[site.terrain] && hexDistance(center, site) <= INDUSTRIAL_RULES.railRange && (owner === undefined || site.owner === owner));
+  };
+  for (const [key, fact] of Object.entries(registry)) {
+    if (!railCompletion(fact, world.revision, world.round) || key !== fact.edgeId || !geometry(fact) || orders.has(fact.orderId) || events.has(fact.eventId)) return false;
+    edges.add(key); orders.add(fact.orderId); events.add(fact.eventId);
+    const retained = world.events.find(event => event.id === fact.eventId);
+    if (retained && !sameSnapshot(retained.railCompletion, fact)) return false;
+  }
+  for (const settlement of world.cities) {
+    const active = settlement.construction?.active; const last = settlement.construction?.lastCompleted;
+    if (active && 'kind' in active && active.kind === 'rail') {
+      if (edges.has(active.edgeId) || !geometry(active, settlement.civId) || orders.has(active.id)
+        || !world.civilizations.find(actor => actor.id === settlement.civId)?.technologies.includes(INDUSTRIAL_RULES.requiredTechnology)) return false;
+      edges.add(active.edgeId); orders.add(active.id);
+    } else if (active && orders.has(active.id)) return false;
+    if (last && 'kind' in last && last.kind === 'rail') { if (!sameSnapshot(registry[last.edgeId], last)) return false; }
+    else if (last && (orders.has(last.orderId) || events.has(last.eventId))) return false;
+    for (const improvement of Object.values(settlement.improvements ?? {})) if (orders.has(improvement.completion.orderId) || events.has(improvement.completion.eventId)) return false;
+  }
+  const validFoundry = (fact: unknown): fact is IndustrialFoundryReceipt => {
+    if (!industrialFoundry(fact, world.revision, world.round)) return false;
+    const settlement = world.cities.find(candidate => candidate.id === fact.cityId); if (!settlement) return false;
+    const result = settlement.buildingOperations?.foundry?.lastResult;
+    if (result?.round === fact.round && settlement.civId === fact.civId && (result.status !== 'operated' || !sameSnapshot(result.paid, fact.paid)
+      || !sameSnapshot(result.strategicPaid, fact.strategicPaid) || !sameSnapshot(result.produced, fact.produced) || !sameSnapshot(result.residents, fact.residents))) return false;
+    const retained = world.events.find(event => event.id === fact.eventId);
+    return !retained || sameSnapshot(retained.industrialFoundry, fact);
+  };
+  const validSteam = (fact: unknown): fact is SteamDeliveryReceipt => {
+    if (!steamReceipt(fact, world.revision, world.round, world.tiles.length)) return false;
+    const connection = world.routes.find(candidate => candidate.id === fact.routeId); const agreement = connection?.agreement;
+    if (!connection || !agreement || agreement.offerId !== fact.offerId || connection.owner !== fact.proposer || connection.partner !== fact.recipient
+      || agreement.acceptedRound !== fact.acceptedRound || !sameTradeTerms(agreement.terms, fact.terms)) return false;
+    const origin = world.cities.find(settlement => settlement.id === connection.from); const destination = world.cities.find(settlement => settlement.id === connection.to);
+    const quote = fact.terms.transport;
+    if (!origin || !destination || !quote || quote.mode !== 'steam' || transportTopologyBlock(world, quote, origin.tileId, destination.tileId) !== null
+      || !quote.railEdges.every(edge => { const completion = registry[edge.edgeId]; return railCompletion(completion, world.revision, world.round) && completion.eventId === edge.completionEventId && completion.completedRound <= fact.acceptedRound; })) return false;
+    const retained = world.events.find(event => event.id === fact.eventId);
+    return !retained || sameSnapshot(retained.steamDelivery, fact);
+  };
+  if (!proofs.every(validFoundry) || !unique(proofs.map(fact => fact.cityId))
+    || !unique(proofs.map(fact => fact.eventId))) return false;
+  if (evidence.steamDelivery !== null && (!validSteam(evidence.steamDelivery) || evidence.steamDelivery.terms.transport?.mode !== 'steam'
+    || evidence.steamDelivery.terms.cadenceRounds >= evidence.steamDelivery.terms.transport.unrailedCadence)) return false;
+  for (const connection of world.routes) {
+    const agreement = connection.agreement; if (!agreement) continue;
+    const steam = agreement.terms.transport?.mode === 'steam';
+    if (Object.hasOwn(agreement, 'lastSteamDelivery') !== steam) return false;
+    if (!steam) continue;
+    const fact = agreement.lastSteamDelivery;
+    if (fact === null) { if (agreement.lastDeliveryRound !== null) return false; continue; }
+    if (!validSteam(fact) || fact.routeId !== connection.id || fact.offerId !== agreement.offerId || fact.proposer !== connection.owner || fact.recipient !== connection.partner
+      || fact.acceptedRound !== agreement.acceptedRound || fact.round !== agreement.lastDeliveryRound || !sameTradeTerms(fact.terms, agreement.terms)) return false;
+  }
+  const proofIds = [...events, ...proofs.map(fact => fact.eventId), ...(steamReceipt(evidence.steamDelivery) ? [evidence.steamDelivery.eventId] : [])];
+  if (!unique(proofIds)) return false;
+  for (const event of world.events) {
+    if (event.industrialFoundry && (!validFoundry(event.industrialFoundry)
+      || proofs.length < 2 && !proofs.some(fact => fact.cityId === event.industrialFoundry?.cityId))
+      || event.steamDelivery && (!validSteam(event.steamDelivery)
+        || evidence.steamDelivery === null && event.steamDelivery.terms.transport?.mode === 'steam' && event.steamDelivery.terms.cadenceRounds < event.steamDelivery.terms.transport.unrailedCadence)
+      || event.railCompletion && !sameSnapshot(registry[event.railCompletion.edgeId], event.railCompletion)) return false;
+  }
+  return !world.calendarMilestones.includes('industrial-world') || proofs.length === 2 && evidence.steamDelivery !== null
+    && world.civilizations.some(actor => actor.technologies.includes('industrialization'));
 }
 
 function pastoralLayer(value: unknown, seed: number, tiles: HexTile[], iron: StrategicDepositLayer | undefined): value is PastoralSiteLayer {
@@ -447,7 +642,7 @@ function observatoryRecords(cities: City[], tiles: HexTile[], events: GameEvent[
   return true;
 }
 
-function residentAllocation(value: unknown): value is { available: number; required: number; allocated: number } {
+function residentAllocation(value: unknown): value is ResidentAllocationResult {
   return record(value) && exactKeys(value, ['ruleVersion', 'openingPopulation', 'communityReserve', 'required', 'available', 'allocated'])
     && value.ruleVersion === 1 && integer(value.openingPopulation, 1) && integer(value.communityReserve)
     && integer(value.required, 1) && integer(value.available) && integer(value.allocated)
@@ -461,7 +656,7 @@ function operationResult(value: unknown, round: number, features: string[], stra
   const strategic: string[] = [];
   if (strategicRecipe) {
     if (!features.includes('foundry-production') || !features.includes('finite-metals')
-      || !strategicResources(value.strategicPaid) || !Array.isArray(value.strategicShortages) || !residentAllocation(value.residents)) return false;
+      || !strategicResources(value.strategicPaid) || !features.includes('industrial-steam') && Object.hasOwn(value.strategicPaid, 'coal') || !Array.isArray(value.strategicShortages) || !residentAllocation(value.residents)) return false;
     for (const shortage of value.strategicShortages) {
       if (!record(shortage) || !exactKeys(shortage, ['resource', 'required', 'available'])
         || shortage.resource !== 'iron' || !integer(shortage.required, 1) || !integer(shortage.available)
@@ -699,6 +894,7 @@ function wonderRecords(hasRegistry: boolean, registry: unknown, cities: City[], 
 
 function constructionIdentity(value: Record<string, unknown>, settlement: City, features: string[], completed: boolean): boolean {
   if (value.cityId !== settlement.id) return false;
+  if (value.kind === 'rail') return features.includes('industrial-steam') && railIdentity(value);
   if (value.kind === 'wonder') return features.includes('unique-wonders') && integer(value.tileId)
     && WONDERS.some(definition => definition.id === value.wonderId);
   if (value.kind === 'improvement') return features.includes(IMPROVEMENT_RULES.featureId) && integer(value.tileId)
@@ -712,10 +908,11 @@ function constructionIdentity(value: Record<string, unknown>, settlement: City, 
 }
 
 function constructionKeys(value: Record<string, unknown>): string[] {
-  return value.kind === 'wonder' ? ['kind', 'wonderId', 'tileId'] : value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : []), ...(Object.hasOwn(value, 'catchmentTileId') ? ['catchmentTileId'] : []), ...(Object.hasOwn(value, 'highGround') ? ['highGround'] : [])];
+  return value.kind === 'rail' ? ['kind', 'edgeId', 'tileId', 'toTileId', 'strategicPaid'] : value.kind === 'wonder' ? ['kind', 'wonderId', 'tileId'] : value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : []), ...(Object.hasOwn(value, 'catchmentTileId') ? ['catchmentTileId'] : []), ...(Object.hasOwn(value, 'highGround') ? ['highGround'] : [])];
 }
 
 function constructionCompletion(value: unknown, settlement: City, features: string[], round: number, revision: number): value is ConstructionCompletion {
+  if (record(value) && value.kind === 'rail') return features.includes('industrial-steam') && railCompletion(value, revision, round) && value.cityId === settlement.id;
   if (record(value) && value.kind === 'wonder') return features.includes('unique-wonders') && wonderCompletion(value, revision, round)
     && value.cityId === settlement.id && value.civId === settlement.civId;
   if (!record(value) || !exactKeys(value, ['orderId', 'cityId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId', ...constructionKeys(value)])
@@ -761,7 +958,7 @@ function improvementResult(value: unknown, completedRound: number, round: number
   if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'residents', 'blockedReason', ...(Object.hasOwn(value, 'extraction') ? ['extraction'] : [])])
     || !integer(value.round, completedRound + 1, round) || !resourceAmounts(value.paid) || Object.keys(value.paid).length !== 0
     || !resourceAmounts(value.produced) || !residentAllocation(value.residents)) return false;
-  if (Object.hasOwn(value, 'extraction') && (!features.includes('finite-metals') || value.status !== 'operated' || !strategicExtraction(value.extraction))) return false;
+  if (Object.hasOwn(value, 'extraction') && (!features.includes('finite-metals') || value.status !== 'operated' || !strategicExtraction(value.extraction) || value.extraction.resource === 'coal' && !features.includes('industrial-steam'))) return false;
   const residents = value.residents;
   if (value.status === 'operated') return value.blockedReason === null && residents.allocated === residents.required && residents.available >= residents.required;
   if (residents.allocated !== 0 || Object.keys(value.produced).length !== 0) return false;
@@ -785,7 +982,7 @@ function improvementRecords(cities: City[], tiles: HexTile[], events: GameEvent[
   for (const settlement of cities) {
     const active = settlement.construction?.active;
     const last = settlement.construction?.lastCompleted;
-    if (active) { orderIds.push(active.id); if ('kind' in active && !reserve(active.tileId)) return false; }
+    if (active) { orderIds.push(active.id); if ('kind' in active && active.kind !== 'rail' && !reserve(active.tileId)) return false; }
     if (last) { orderIds.push(last.orderId); eventIds.push(last.eventId); }
     const mapping: unknown = settlement.improvements;
     if (Object.hasOwn(settlement, 'improvements')) {
@@ -940,10 +1137,7 @@ function tradeOffer(value: unknown): value is TradeOffer {
 function sameTradeTerms(first: TradeTerms, second: TradeTerms): boolean {
   return first.recipeId === second.recipeId && first.recipeVersion === second.recipeVersion
     && first.cadenceRounds === second.cadenceRounds && first.damageDisableAt === second.damageDisableAt
-    && (first.transport === undefined ? second.transport === undefined : second.transport !== undefined
-      && first.transport.mode === second.transport.mode && first.transport.ruleVersion === second.transport.ruleVersion
-      && first.transport.edges === second.transport.edges && first.transport.tileIds.length === second.transport.tileIds.length
-      && first.transport.tileIds.every((id, index) => id === second.transport?.tileIds[index]))
+    && sameSnapshot(first.transport, second.transport)
     && (first.strategicCargo === undefined ? second.strategicCargo === undefined : second.strategicCargo !== undefined
       && sameStrategicResources(first.strategicCargo.proposer, second.strategicCargo.proposer) && sameStrategicResources(first.strategicCargo.recipient, second.strategicCargo.recipient))
     && tradeResourceFields.every((field) => RESOURCE_IDS.every((resource) => first[field][resource] === second[field][resource]));
@@ -952,11 +1146,12 @@ function sameTradeTerms(first: TradeTerms, second: TradeTerms): boolean {
 function tradeTransport(terms: TradeTerms, from: string, to: string, cities: City[], tiles: HexTile[], features: string[]): boolean {
   if (Object.hasOwn(terms, 'strategicCargo') && !features.includes('finite-metals')) return false;
   if (!Object.hasOwn(terms, 'transport')) return true;
-  if (!features.includes('land-transport') || !isLandTransportQuote(terms.transport, tiles.length)) return false;
+  if (!features.includes('land-transport') || !isTransportQuote(terms.transport, tiles.length)) return false;
+  if (terms.transport.mode === 'steam' && (!features.includes('industrial-steam') || terms.cadenceRounds !== Math.max(terms.transport.baseCadence, Math.ceil(terms.transport.weightedDistance / INDUSTRIAL_RULES.edgesPerBeat)))) return false;
   const origin = cities.find(settlement => settlement.id === from);
   const destination = cities.find(settlement => settlement.id === to);
   return origin !== undefined && destination !== undefined
-    && landTransportTopologyBlock({ tiles }, terms.transport, origin.tileId, destination.tileId) === null;
+    && transportTopologyBlock({ tiles }, terms.transport, origin.tileId, destination.tileId) === null;
 }
 
 function tradePair(first: number, second: number): string {
@@ -1164,7 +1359,7 @@ function territoryRecords(present: boolean, value: unknown, cities: City[], tile
     if (!Object.values(settlement.districtSites ?? {}).every(tileId => bound(settlement.id, tileId))
       || !Object.values(settlement.improvements ?? {}).every(improvement => bound(settlement.id, improvement.tileId))) return false;
     for (const order of [settlement.construction?.active, settlement.construction?.lastCompleted])
-      if (order && 'tileId' in order && order.tileId !== undefined && !bound(settlement.id, order.tileId)) return false;
+      if (order && 'tileId' in order && order.tileId !== undefined && (!bound(settlement.id, order.tileId) || 'kind' in order && order.kind === 'rail' && !bound(settlement.id, order.toTileId))) return false;
   }
   if (record(wonders)) for (const entry of Object.values(wonders)) {
     if (!record(entry) || !wonderCompletion(entry.completion, revision, round) || !bound(entry.completion.cityId, entry.completion.tileId)) return false;
@@ -1187,7 +1382,7 @@ export function isGameEvent(value: unknown): value is GameEvent {
     (value.tileId === null || integer(value.tileId)) &&
     strings(value.effects) &&
     value.effects.length > 0 &&
-    finite(value.importance) && wonderEvent(value) &&
+    finite(value.importance) && wonderEvent(value) && industrialEvent(value) &&
     (!Object.hasOwn(value, 'populationGrowth') || (populationGrowth(value.populationGrowth) && value.type === 'population-growth'
       && value.populationGrowth.eventId === value.id && value.populationGrowth.round === value.round
       && value.populationGrowth.civId === value.actor && value.actor === value.target && integer(value.tileId))) &&
@@ -1347,7 +1542,7 @@ export function isWorldState(
     !districtRecords(cities, tiles, value.events, features) ||
     !observatoryRecords(cities, tiles, value.events, features) ||
     !improvementRecords(cities, tiles, value.events, features, round, value.revision) ||
-    !metalRecords(Object.hasOwn(value, 'strategicDeposits'), value.strategicDeposits, value.civilizations, cities, tiles, value.events, value.routes, features, value.seed) ||
+    !metalRecords(Object.hasOwn(value, 'strategicDeposits'), value.strategicDeposits, value.civilizations, cities, tiles, value.events, value.routes, features, value.seed, value.coalDeposits) ||
     !waterLandRecords(Object.hasOwn(value, 'pastoralSites'), value.pastoralSites, cities, tiles, value.events, features, value.seed, value.strategicDeposits) ||
     !coastalRecords(cities, value.events, tiles, features, round, value.revision) ||
     !wonderRecords(Object.hasOwn(value, 'wonders'), value.wonders, cities, value.civilizations, tiles, value.events, features, value.revision, round) ||
@@ -1374,5 +1569,5 @@ export function isWorldState(
     (value.outcome !== null && value.outcome.round > round)
   )
     return false;
-  return true;
+  return industrialRecords({ seed: value.seed, tiles, cities, civilizations: value.civilizations, events: value.events, routes: value.routes, unlockedFeatures: features, revision: value.revision, round, calendarMilestones: value.calendarMilestones, coalDeposits: value.coalDeposits, railEdges: value.railEdges, industrialEvidence: value.industrialEvidence, strategicDeposits: value.strategicDeposits, pastoralSites: value.pastoralSites, tradeOffers: Array.isArray(value.tradeOffers) && value.tradeOffers.every(tradeOffer) ? value.tradeOffers : [], presentFields: Object.keys(value) });
 }

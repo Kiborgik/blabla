@@ -1,12 +1,15 @@
 import { observedStrategicResources } from '../core/simulation/metals.ts';
+import { STRATEGIC_RESOURCE_IDS } from '../core/content.ts';
 import type { StrategicDeposit, StrategicExtractionResult, StrategicResource, StrategicResources, WorldState } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 import { mapTileHeight } from './route-paths.ts';
 
 export interface StrategicAmount { resource: StrategicResource; label: string; amount: number }
 
+export function strategicResourceLabel(resource: StrategicResource): string { return resource === 'coal' ? 'Coal' : 'Iron'; }
+
 export function strategicResourceAmounts(values: StrategicResources | undefined): StrategicAmount[] {
-  return values?.iron === undefined ? [] : [{ resource: 'iron', label: 'Iron', amount: values.iron }];
+  return STRATEGIC_RESOURCE_IDS.flatMap(resource => values?.[resource] === undefined ? [] : [{ resource, label: strategicResourceLabel(resource), amount: values[resource] }]);
 }
 
 export interface DepositView extends StrategicDeposit {
@@ -41,16 +44,17 @@ export function projectRevealedDeposits(state: WorldState): DepositView[] {
 }
 
 export function depositLabel(deposit: StrategicDeposit): string {
-  return `Iron · Tile ${deposit.tileId} · ${deposit.remaining} / ${deposit.initialReserve} left`;
+  return `${strategicResourceLabel(deposit.resource)} · Tile ${deposit.tileId} · ${deposit.remaining} / ${deposit.initialReserve} left`;
 }
 
 export function extractionFacts(result: StrategicExtractionResult): string[] {
-  if (result.status === 'unrevealed') return [`Round ${result.round} · No iron extracted · Discovery required`];
-  const state = result.status === 'extracted' ? `Extracted ${result.quantity} Iron`
-    : result.status === 'storage-full' ? 'No iron extracted · Storage full'
-      : result.status === 'exhausted' ? 'No iron extracted · Deposit exhausted' : 'No iron extracted · Discovery required';
+  const label = strategicResourceLabel(result.resource);
+  if (result.status === 'unrevealed') return [`Round ${result.round} · No ${label} extracted · Discovery required`];
+  const state = result.status === 'extracted' ? `Extracted ${result.quantity} ${label}`
+    : result.status === 'storage-full' ? `No ${label} extracted · Storage full`
+      : result.status === 'exhausted' ? `No ${label} extracted · Deposit exhausted` : `No ${label} extracted · Discovery required`;
   return [`Round ${result.round} · ${state}`, `Deposit at Tile ${result.tileId}: ${result.reserveBefore} → ${result.reserveAfter} left`,
-    `Stored iron then: ${result.stockBefore} → ${result.stockAfter} / ${result.capacity} capacity`,
+    `Stored ${label} then: ${result.stockBefore} → ${result.stockAfter} / ${result.capacity} capacity`,
     'Historical extraction. Ordinary materials and later trade are separate.'];
 }
 

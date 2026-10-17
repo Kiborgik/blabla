@@ -1,3 +1,4 @@
+import { installRail, isRailOrder, railSiteBlock } from './rail.ts';
 import { governmentModifiers } from './government.ts';
 import { isWonderOrder, resolveWonderConstruction } from './wonders.ts';
 import { installImprovement, isImprovementOrder } from './improvements.ts';
@@ -77,8 +78,10 @@ export function resolveConstruction(state: WorldState, opening: ReadonlyMap<stri
     const order = construction?.active;
     const work = opening.get(city.id);
     if (!construction || !order || isWonderOrder(order) || work === undefined || state.round <= order.startedRound) continue;
+    if (isRailOrder(order) && railSiteBlock(state, city, order.tileId, order.toTileId, order.id)) continue;
     order.workDone = Math.min(order.workRequired, Math.round((order.workDone + work) * 100) / 100);
     if (order.workDone < order.workRequired) continue;
+    if (isRailOrder(order)) { installRail(state, city, order, events); construction.active = null; continue; }
     if (isImprovementOrder(order)) {
       installImprovement(state, city, order, events);
       construction.active = null;

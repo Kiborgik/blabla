@@ -2,7 +2,7 @@ import { CIV_COUNT } from './types.ts';
 import type {
   CivicDefinition, GovernmentDefinition, PolicyDefinition, BuildingCapability, BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
   EraDefinition, FeatureDefinition, Focus, GameAction, HistoricalMilestone, Resource,
-  Resources, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe, ImprovementDefinition, WonderDefinition,
+  Resources, StrategicResource, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe, ImprovementDefinition, WonderDefinition,
 } from './types.ts';
 
 export const CIVIC_RULES = { ruleVersion: 1, featureId: 'civic-bootstrap', governmentCredits: 10, reslotCredits: 8, commitmentBeats: 4, transitionBeats: 2, transitionOutput: 0.75 } as const;
@@ -59,9 +59,15 @@ export const PASTORAL_RULES = { ruleVersion: 1, featureId: 'water-land', resourc
 
 export const METAL_RULES = { ruleVersion: 1, featureId: 'finite-metals', resource: 'iron', revealTechnology: 'bronze-working', capacityPerCity: 40, extractionPerBeat: 2, initialReserve: 240, placement: { id: 'iron-placement-1', maximumDeposits: 8, frontierMinimumDistance: 2, ownedSiteRange: 3, seedMultiplier: 0x9e3779b1, mixMultipliers: [0x7feb352d, 0x846ca68b], hillOnly: true } } as const;
 
+export const INDUSTRIAL_RULES = { ruleVersion: 1, featureId: 'industrial-steam', requiredTechnology: 'steam-power', railRange: 3, railWork: 2, railCost: { materials: 4, credits: 2 }, railStrategicCost: { iron: 1, coal: 1 }, railWeight: 0.25, plainWeight: 1, edgesPerBeat: 2, shipmentCoal: 1 } as const;
+export const COAL_RULES = { ...METAL_RULES, featureId: 'industrial-steam', resource: 'coal', revealTechnology: 'industrialization', capacityPerCity: 60, initialReserve: 300, placement: { ...METAL_RULES.placement, id: 'coal-placement-1', seedSalt: 0x434f414c } } as const;
+export const STRATEGIC_RESOURCE_IDS: readonly StrategicResource[] = ['iron', 'coal'];
+export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } as const;
+
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'industrial-steam', name: 'Finite Coal powers useful rail exchanges', description: 'Connected productive research reveals finite hill Coal, funds exact owned rail edges and enables newly consented fuel-paid steam delivery.' },
   { id: 'civic-bootstrap', name: 'Culture shapes government', description: 'Actual current Culture funds explicitly chosen civics. Chiefdom and a chosen Urban planning policy improve the next working season.' },
   { id: 'observatory-learning', name: 'Learning from the sky', description: 'Sailing and Celestial navigation connect Mathematics to Astronomy and a locally staffed Observatory beside its own completed high-ground Campus. Harbor, fishing, ships and great-person systems remain planned.' },
   { id: 'foundry-production', name: 'Iron supports local industry', description: 'Military engineering, Gunpowder and Metal casting connect existing discoveries to a locally staffed Foundry that consumes actual iron and energy. Niter, forts and military units remain planned.' },
@@ -118,6 +124,7 @@ export const FEATURES: FeatureDefinition[] = [
 ];
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  'build-rail': ['industrial-steam', 'recurring-decisions', 'owned-territory'],
   'choose-civic': ['civic-bootstrap'],
   'adopt-government': ['civic-bootstrap'],
   'acquire-tile': ['owned-territory'],
@@ -136,6 +143,9 @@ export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
+  { id: 'scientific-method', name: 'Scientific method', requiredFeatures: ['industrial-steam'], era: 2, cost: 150, requires: ['printing', 'astronomy'], capability: 'Connect Printing and Astronomy to accepted Industrialization and finite Coal. Chemistry and later discoveries remain planned.' },
+  { id: 'shipbuilding', name: 'Shipbuilding', requiredFeatures: ['industrial-steam'], era: 1, cost: 66, requires: ['sailing', 'celestial-navigation'], capability: 'Connect Sailing and Celestial navigation to Steam power. Shipyards and ships remain planned.' },
+  { id: 'steam-power', name: 'Steam power', requiredFeatures: ['industrial-steam'], era: 3, cost: 240, requires: ['industrialization', 'shipbuilding'], capability: 'Pay for exact owned Rail edges and propose new immutable fuel-paid steam exchanges. Canals and physical ships remain planned.' },
   { id: 'sailing', name: 'Sailing', requiredFeatures: ['observatory-learning'], era: 0, cost: 72, requires: ['water-management'], capability: 'Connect water knowledge to Celestial navigation and the useful Astronomy branch. Fishing, Lighthouse and ships remain planned.' },
   { id: 'celestial-navigation', name: 'Celestial navigation', requiredFeatures: ['observatory-learning'], era: 1, cost: 132, requires: ['sailing', 'writing'], capability: 'Connect written navigation and Mathematics to Astronomy. Harbor remains planned.' },
   { id: 'astronomy', name: 'Astronomy', requiredFeatures: ['observatory-learning'], era: 2, cost: 360, requires: ['mathematics', 'celestial-navigation'], capability: 'Operate an Observatory at an own completed Campus with adjacent mountain or hill, using two Credits and three local residents for Science.' },
@@ -165,7 +175,7 @@ export const TECHNOLOGIES: TechnologyDefinition[] = [
   { id: 'civic-institutions', name: 'Civic institutions', requiredFeatures: ['statecraft'], era: 1, cost: 24, requires: ['agriculture'], capability: 'Public institutions connect learning, belonging and durable cooperation.' },
   { id: 'fuel-management', name: 'Fuel management', requiredFeatures: ['statecraft', 'settlement-crafts'], era: 1, cost: 28, requires: ['civic-institutions', 'kiln-firing'], capability: 'Fuel yards use materials to supply energy for production, trade and repairs.' },
   { id: 'navigation', name: 'Navigation', requiredFeatures: ['navigation'], era: 2, cost: 42, requires: ['civic-institutions'], capability: 'A completed coastal Boat yard can send existing residents to a new shore beyond the ordinary frontier.' },
-  { id: 'industrialization', name: 'Industrialization', requiredFeatures: ['industrialization'], era: 3, cost: 66, requires: ['navigation'], capability: 'Energy and mechanization change production, transport and urban life.' },
+  { id: 'industrialization', name: 'Industrialization', requiredFeatures: ['industrialization', 'industrial-steam'], era: 3, cost: 220, requires: ['apprenticeship', 'metal-casting', 'scientific-method'], capability: 'Reveal finite hill Coal for staffed Mines and connect Shipbuilding to Steam power. Coal plants, local Power and Factories remain planned.' },
   { id: 'computing', name: 'Planetary computing', requiredFeatures: ['planetary-networks'], era: 4, cost: 100, requires: ['industrialization'], capability: 'Information networks connect markets and political projects across the planet.' },
   { id: 'spaceflight', name: 'Interplanetary logistics', requiredFeatures: ['interplanetary-logistics'], era: 5, cost: 144, requires: ['computing'], capability: 'Launch infrastructure and life-support supply make off-world settlements possible.' },
 ];
@@ -277,7 +287,7 @@ export const HISTORICAL_MILESTONES: HistoricalMilestone[] = [
   { id: 'roads-between-peoples', name: 'Roads between peoples', requiredFeatures: ['trade-routes'], requiresMilestones: ['first-harvest'], conditions: [{ kind: 'active-routes', minimum: 2 }], year: -6000, era: 0, explanation: 'Working exchanges now connect independent civilizations. Trade is a world fact, not just a newly installed feature.' },
   { id: 'rise-of-states', name: 'The rise of states', requiredFeatures: ['statecraft'], requiresMilestones: ['roads-between-peoples'], conditions: [{ kind: 'technology', technology: 'civic-institutions', civilizations: 2 }, { kind: 'active-routes', minimum: 3 }], year: -3000, era: 1, explanation: 'Civic discoveries and functioning exchanges have made organized states possible. Public institutions can now be built.' },
   { id: 'connected-world', name: 'A connected world', requiredFeatures: ['navigation'], requiresMilestones: ['rise-of-states'], conditions: [{ kind: 'technology', technology: 'navigation', civilizations: 1 }, { kind: 'active-routes', minimum: 3 }, { kind: 'recorded-event-count', eventType: 'coastal-founded', minimum: 1 }], year: -500, era: 2, explanation: 'Navigation has founded an actual coastal settlement while a working exchange network connects peoples.' },
-  { id: 'industrial-world', name: 'The industrial transformation', requiredFeatures: ['industrialization'], requiresMilestones: ['connected-world'], conditions: [{ kind: 'technology', technology: 'industrialization', civilizations: 1 }, { kind: 'building-count', building: 'workshop', minimum: 5 }], year: 1750, era: 3, explanation: 'Industrial capability is now supported by an actual productive foundation.' },
+  { id: 'industrial-world', name: 'The industrial transformation', requiredFeatures: ['industrialization', 'industrial-steam'], requiresMilestones: ['connected-world'], conditions: [{ kind: 'technology', technology: 'industrialization', civilizations: 1 }, { kind: 'industrial-evidence' }], year: 1750, era: 3, explanation: 'Two distinct towns operated supplied Foundries and a newly consented Coal-paid steam route delivered at a genuinely improved cadence. The capability era changes; the calendar does not.' },
   { id: 'planetary-world', name: 'A planetary civilization', requiredFeatures: ['planetary-networks'], requiresMilestones: ['industrial-world'], conditions: [{ kind: 'technology', technology: 'computing', civilizations: 1 }, { kind: 'active-routes', minimum: 5 }], year: 2000, era: 4, explanation: 'Information systems and functioning global exchanges have made planetary interdependence real.' },
   { id: 'beyond-earth', name: 'The interplanetary threshold', requiredFeatures: ['interplanetary-logistics'], requiresMilestones: ['planetary-world'], conditions: [{ kind: 'technology', technology: 'spaceflight', civilizations: 1 }, { kind: 'active-routes', minimum: 5 }], year: 2150, era: 5, explanation: 'Interplanetary knowledge can now draw on Earth’s connected economy. Launch infrastructure and a viable colony remain separate achievements.' },
 ];
@@ -308,6 +318,8 @@ export interface ContentCatalog {
   siteOutputs: typeof SETTLEMENT_SITE_OUTPUTS;
   residentCapacityRules: typeof RESIDENT_CAPACITY_RULES;
   metalRules: typeof METAL_RULES;
+  coalRules: typeof COAL_RULES;
+  industrialRules: typeof INDUSTRIAL_RULES;
   pastoralRules: typeof PASTORAL_RULES;
   territoryRules: typeof TERRITORY_RULES;
 }
@@ -317,7 +329,7 @@ export const CONTENT: ContentCatalog = {
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
   wonders: WONDERS, wonderRules: WONDER_RULES,
   buildings: BUILDINGS, improvements: IMPROVEMENTS, improvementRules: IMPROVEMENT_RULES, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
-  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES, metalRules: METAL_RULES, pastoralRules: PASTORAL_RULES, territoryRules: TERRITORY_RULES,
+  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES, metalRules: METAL_RULES, coalRules: COAL_RULES, industrialRules: INDUSTRIAL_RULES, pastoralRules: PASTORAL_RULES, territoryRules: TERRITORY_RULES,
   tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES, landTransportRules: LAND_TRANSPORT_RULES, publicProjectRecipes: PUBLIC_PROJECT_RECIPES, publicProjectRules: PUBLIC_PROJECT_RULES, siteOutputs: SETTLEMENT_SITE_OUTPUTS,
 };
 
@@ -358,6 +370,10 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   if (metal.ruleVersion !== 1 || !features.has(metal.featureId) || metal.resource !== 'iron' || !catalog.technologies.some(technology => technology.id === metal.revealTechnology)) errors.push('metals: invalid feature, resource or reveal technology');
   if (![metal.capacityPerCity, metal.extractionPerBeat, metal.initialReserve, metal.placement.maximumDeposits, metal.placement.frontierMinimumDistance, metal.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('metals: invalid positive integer quantity');
   if (metal.placement.id !== 'iron-placement-1' || !metal.placement.hillOnly || metal.placement.seedMultiplier !== 0x9e3779b1 || metal.placement.mixMultipliers[0] !== 0x7feb352d || metal.placement.mixMultipliers[1] !== 0x846ca68b) errors.push('metals: invalid versioned placement');
+  const coal = catalog.coalRules;
+  if (coal.ruleVersion !== 1 || coal.featureId !== 'industrial-steam' || !features.has(coal.featureId) || coal.resource !== 'coal' || coal.revealTechnology !== 'industrialization' || !catalog.technologies.some(technology => technology.id === coal.revealTechnology) || coal.placement.id !== 'coal-placement-1' || coal.placement.seedSalt !== 0x434f414c || !coal.placement.hillOnly || ![coal.capacityPerCity, coal.extractionPerBeat, coal.initialReserve, coal.placement.maximumDeposits, coal.placement.frontierMinimumDistance, coal.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('coal: invalid versioned placement, reveal or finite resource quantities');
+  const industrial = catalog.industrialRules;
+  if (industrial.ruleVersion !== 1 || !features.has(industrial.featureId) || !catalog.technologies.some(technology => technology.id === industrial.requiredTechnology) || industrial.railRange !== 3 || industrial.railWork !== 2 || industrial.railWeight !== 0.25 || industrial.plainWeight !== 1 || industrial.edgesPerBeat !== 2 || industrial.shipmentCoal !== 1 || industrial.railCost.materials !== 4 || industrial.railCost.credits !== 2 || industrial.railStrategicCost.iron !== 1 || industrial.railStrategicCost.coal !== 1) errors.push('industrial steam: invalid versioned edge, work, payment or cadence rules');
   unique('trade recipes', catalog.tradeRecipes.map(recipe => recipe.id));
   for (const [name, value] of Object.entries(catalog.tradeRules)) {
     if (!Number.isSafeInteger(value) || value < 1) errors.push(`trade rules: invalid ${name}`);
@@ -372,7 +388,7 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     if (recipe.requiredTechnology !== undefined && !catalog.technologies.some(technology => technology.id === recipe.requiredTechnology)) errors.push(`${label}: unknown proposer technology`);
     if (terms.strategicCargo && !recipe.requiredFeatures.includes('finite-metals')) errors.push(`${label}: strategic cargo requires finite-metals`);
     for (const cargo of [terms.strategicCargo?.proposer, terms.strategicCargo?.recipient]) {
-      if (cargo && Object.entries(cargo).some(([resource, amount]) => resource !== 'iron' || !Number.isSafeInteger(amount) || amount < 0)) errors.push(`${label}: invalid strategic cargo`);
+      if (cargo && Object.entries(cargo).some(([resource, amount]) => !STRATEGIC_RESOURCE_IDS.some(id => id === resource) || !Number.isSafeInteger(amount) || amount < 0)) errors.push(`${label}: invalid strategic cargo`);
     }
     if (![[terms.proposerCargo, terms.strategicCargo?.proposer], [terms.recipientCargo, terms.strategicCargo?.recipient]].every(vectors => vectors.some(cargo => Object.values(cargo ?? {}).some(positive)))) errors.push(`${label}: both partners require meaningful cargo`);
   }
@@ -510,7 +526,7 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     if (building.housing !== undefined && (!Number.isSafeInteger(building.housing) || building.housing <= 0 || !building.requiredFeatures.includes('local-growth'))) errors.push(`building ${building.id}: housing requires a positive integer and local-growth feature`);
     resources(`${building.id} operating inputs`, building.operatingInputs ?? {});
     if (building.strategicInputs !== undefined) {
-      if (!Object.values(building.strategicInputs).some(positive) || Object.entries(building.strategicInputs).some(([resource, amount]) => resource !== 'iron' || !Number.isSafeInteger(amount) || amount < 0)) errors.push(`building ${building.id}: invalid strategic operating inputs`);
+      if (!Object.values(building.strategicInputs).some(positive) || Object.entries(building.strategicInputs).some(([resource, amount]) => !STRATEGIC_RESOURCE_IDS.some(id => id === resource) || !Number.isSafeInteger(amount) || amount < 0)) errors.push(`building ${building.id}: invalid strategic operating inputs`);
       if (!['foundry-production', 'finite-metals', 'building-operations', 'resident-capacity'].every(feature => building.requiredFeatures.includes(feature))) errors.push(`building ${building.id}: strategic operating inputs require released ledger and operation gates`);
     }
     if (Object.values(building.operatingInputs ?? {}).some(positive) && !building.requiredFeatures.includes('building-operations')) errors.push(`building ${building.id}: operating inputs require the building-operations feature`);

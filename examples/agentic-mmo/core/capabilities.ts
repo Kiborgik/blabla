@@ -1,3 +1,4 @@
+import { observedRail } from './simulation/rail.ts';
 import { observedGovernment } from './simulation/government.ts';
 import { constructionWork } from './simulation/construction.ts';
 import { availableCampusHighGround } from './simulation/observatory.ts';
@@ -6,7 +7,7 @@ import { cityGrowthFacts } from './simulation/growth.ts';
 import { availableWonderSites, isWonderOrder, observedWonders, wonderEligibility } from './simulation/wonders.ts';
 import { availableImprovementSites, isImprovementOrder, orderedImprovements } from './simulation/improvements.ts';
 import { availableDistrictSites, buildingBaseProduction, districtCapacity, districtCount, districtAdjacencyFacts, type DistrictAdjacencyFacts } from './simulation/districts.ts';
-import { CIVICS, GOVERNMENTS, POLICIES, BUILDINGS, LOCAL_GROWTH_RULES, IMPROVEMENTS, WONDERS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
+import { INDUSTRIAL_RULES, CIVICS, GOVERNMENTS, POLICIES, BUILDINGS, LOCAL_GROWTH_RULES, IMPROVEMENTS, WONDERS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
 import { RELEASES } from './release.ts';
 import type { ActionPlan } from './planning.ts';
 import type { CampusHighGroundSite, ActionOption, CityGrowthFacts, CityImprovement, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, Resources, WonderObservation, WorldState } from './types.ts';
@@ -54,6 +55,8 @@ export interface CapabilityChoiceContext {
 }
 
 export interface CapabilityProjection {
+  rail?: ReturnType<typeof observedRail>;
+  industrialEvidence?: WorldState['industrialEvidence'];
   governance?: ReturnType<typeof observedGovernment> & { cityConstructionWork: number | null };
   territory?: ReturnType<typeof observedTerritory>;
   growth?: CityGrowthFacts | null;
@@ -82,6 +85,7 @@ export interface CapabilityProjection {
 export function capabilityCatalogue() {
   return structuredClone({
     technologies: TECHNOLOGIES,
+    rails: [{ id: 'rail', name: 'Rail', requires: [INDUSTRIAL_RULES.requiredTechnology], requiredFeatures: [INDUSTRIAL_RULES.featureId], cost: INDUSTRIAL_RULES.railCost, strategicCost: INDUSTRIAL_RULES.railStrategicCost, workRequired: INDUSTRIAL_RULES.railWork, range: INDUSTRIAL_RULES.railRange, weight: INDUSTRIAL_RULES.railWeight }],
     civics: CIVICS,
     governments: GOVERNMENTS,
     policies: POLICIES,
@@ -89,6 +93,7 @@ export function capabilityCatalogue() {
     improvements: IMPROVEMENTS,
     wonders: WONDERS,
     edges: [
+      { from: `technology:${INDUSTRIAL_RULES.requiredTechnology}`, to: 'rail:rail' },
       ...CIVICS.flatMap(civic => civic.requires.map(id => ({ from: `civic:${id}`, to: `civic:${civic.id}` }))),
       ...GOVERNMENTS.flatMap(government => government.requires.map(id => ({ from: `civic:${id}`, to: `government:${government.id}` }))),
       ...POLICIES.flatMap(policy => policy.requires.map(id => ({ from: `civic:${id}`, to: `policy:${policy.id}` }))),
@@ -161,6 +166,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
   });
   return structuredClone({
     ...(hasFeatures(state, ['civic-bootstrap']) ? { governance: { ...observedGovernment(state, civilizationId), cityConstructionWork: city ? constructionWork(state, city) : null } } : {}),
+    ...(hasFeatures(state, [INDUSTRIAL_RULES.featureId]) ? { rail: observedRail(state, civilizationId, cityId), industrialEvidence: state.industrialEvidence } : {}),
     choiceReferenceState: choices ? 'provided' : 'not-provided',
     revision: state.revision,
     observedAt: timestamp,

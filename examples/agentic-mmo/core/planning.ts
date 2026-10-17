@@ -1,3 +1,4 @@
+import { railEdgeId, railTownBlock, railSiteBlock } from './simulation/rail.ts';
 import { governmentActionBlock } from './simulation/government.ts';
 import { civicActionBlock } from './simulation/civics.ts';
 import { createTerritoryPlanner } from './simulation/territory.ts';
@@ -75,6 +76,8 @@ export function isGameAction(value: unknown): value is GameAction {
       return FOCUS_IDS.some((focus) => focus === value.focus) && (fields(value, ['type', 'focus']) || (fields(value, ['type', 'focus', 'cityId']) && text(value.cityId, 128)));
     case 'research':
       return fields(value, ['type', 'technology']) && text(value.technology, 128);
+    case 'build-rail':
+      return fields(value, ['type', 'cityId', 'fromTileId', 'toTileId']) && text(value.cityId, 128) && integer(value.fromTileId) && integer(value.toTileId);
     case 'build-wonder':
       return fields(value, ['type', 'wonderId', 'cityId', 'tileId']) && text(value.wonderId, 128) && text(value.cityId, 128) && integer(value.tileId);
     case 'apply-research-boost':
@@ -103,7 +106,7 @@ export function isGameAction(value: unknown): value is GameAction {
     case 'cancel-public-project':
       return fields(value, ['type', 'projectId']) && text(value.projectId, 128);
     case 'propose-trade':
-      return integer(value.partner, CIV_COUNT - 1) && text(value.recipeId, 128) && (fields(value, ['type', 'partner', 'recipeId']) || (fields(value, ['type', 'partner', 'recipeId', 'sourceCityId', 'recipientCityId']) && text(value.sourceCityId, 128) && text(value.recipientCityId, 128)));
+      return integer(value.partner, CIV_COUNT - 1) && text(value.recipeId, 128) && (fields(value, ['type', 'partner', 'recipeId']) || ((fields(value, ['type', 'partner', 'recipeId', 'sourceCityId', 'recipientCityId']) || (value.transportMode === 'steam' && fields(value, ['type', 'partner', 'recipeId', 'sourceCityId', 'recipientCityId', 'transportMode']))) && text(value.sourceCityId, 128) && text(value.recipientCityId, 128)));
     case 'respond-trade':
       return fields(value, ['type', 'offerId', 'accept']) && text(value.offerId, 128) && typeof value.accept === 'boolean';
     case 'withdraw-trade':
@@ -198,6 +201,13 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
       if (civilization?.technologies.includes(action.technology)) return invalidated(`Technology ${action.technology} is already known`);
       if (civilization?.researchTarget === action.technology) return invalidated(`Research ${action.technology} is already underway`);
       return null;
+    case 'build-rail': {
+      const city = cities.find(candidate => candidate.id === action.cityId);
+      if (!city) return invalidated('The exact owned Rail town is missing');
+      if (state.railEdges?.[railEdgeId(action.fromTileId, action.toTileId)]) return invalidated('The canonical Rail edge is already completed');
+      const block = railSiteBlock(state, city, action.fromTileId, action.toTileId);
+      return block ? invalidated(block) : null;
+    }
     case 'build-wonder': {
       const city = cities.find(candidate => candidate.id === action.cityId);
       const definition = WONDERS.find(candidate => candidate.id === action.wonderId);
@@ -312,6 +322,7 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
 }
 
 function unavailableReason(state: WorldState, seat: number, action: GameAction): string {
+  if (action.type === 'build-rail') return railTownBlock(state, seat, action.cityId) ?? 'Review the exact local Rail edge';
   if (action.type === 'adopt-government') return governmentActionBlock(state, seat, action.governmentId, action.assignments) ?? 'Review current arrangement admission';
   if (action.type === 'choose-civic') return civicActionBlock(state, seat, action.civicId) ?? 'Review current civic admission';
   if (action.type === 'acquire-tile') return createTerritoryPlanner(state).assess(seat, action.cityId, action.tileId).blocker ?? 'Review the current acquisition context';

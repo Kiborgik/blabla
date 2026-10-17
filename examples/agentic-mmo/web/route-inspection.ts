@@ -1,9 +1,12 @@
 import { exactNumber } from './number-format.ts';
 import { RESOURCE_IDS } from '../core/content.ts';
-import type { Resources, StrategicResources } from '../core/types.ts';
+import { railEdgeId } from '../core/simulation/rail.ts';
+import { isTransportQuote } from '../core/simulation/transport.ts';
+import type { Resources, StrategicResources, StrategicResource } from '../core/types.ts';
+import { strategicResourceAmounts, strategicResourceLabel } from '../visuals/strategic-resource-visuals.ts';
 import { routeTitle, routeVisual, ROUTE_LIMIT } from '../visuals/route-visuals.ts';
 import type { RouteView } from '../visuals/route-visuals.ts';
-import { hasRouteQuote, routePathOmission, routeTilePage } from '../visuals/route-paths.ts';
+import { hasRouteQuote, routePathOmission, routeTilePage, ROUTE_TILE_PAGE_SIZE } from '../visuals/route-paths.ts';
 import { resourceGuide } from './viewer-appearance.ts';
 import { visualIcon } from './world-cues.ts';
 
@@ -28,12 +31,12 @@ export function routePage(routes: readonly RouteView[], page: number): { rows: R
   return { rows: routes.toSorted((a, b) => a.id.localeCompare(b.id)).slice(current * ROUTE_LIMIT, (current + 1) * ROUTE_LIMIT), page: current, pages };
 }
 
-export function routeAmounts(label: string, values: Partial<Resources>, strategic?: StrategicResources): Array<{ resource: keyof Resources | 'iron'; label: string; amount: number }> {
+export function routeAmounts(label: string, values: Partial<Resources>, strategic?: StrategicResources): Array<{ resource: keyof Resources | StrategicResource; label: string; amount: number }> {
   const ordinary = RESOURCE_IDS.flatMap((resource) => {
     const amount = values[resource] ?? 0;
     return amount > 0 ? [{ resource, label: `${label}: ${exactNumber(amount)} ${resourceGuide(resource).label}`, amount }] : [];
   });
-  return [...ordinary, ...((strategic?.iron ?? 0) > 0 ? [{ resource: 'iron' as const, label: `${label}: ${strategic?.iron} Iron`, amount: strategic?.iron ?? 0 }] : [])];
+  return [...ordinary, ...strategicResourceAmounts(strategic).filter(entry => entry.amount > 0).map(entry => ({ ...entry, label: `${label}: ${exactNumber(entry.amount)} ${entry.label}` }))];
 }
 
 function amounts(label: string, values: Partial<Resources>, strategic?: StrategicResources): HTMLElement {
@@ -42,19 +45,55 @@ function amounts(label: string, values: Partial<Resources>, strategic?: Strategi
   const entries = routeAmounts(label, values, strategic);
   if (!entries.length) row.append(document.createTextNode('None'));
   for (const entry of entries) {
-    const item = text('span', `${exactNumber(entry.amount)} ${entry.resource === 'iron' ? 'Iron' : resourceGuide(entry.resource).label}`);
-    item.prepend(visualIcon(entry.resource === 'iron' ? 'materials' : entry.resource));
+    const resource = entry.resource;
+    const strategic = resource === 'iron' || resource === 'coal';
+    const item = text('span', `${exactNumber(entry.amount)} ${strategic ? strategicResourceLabel(resource) : resourceGuide(resource).label}`);
+    item.prepend(visualIcon(strategic ? 'materials' : resource));
     row.append(item);
   }
   return row;
 }
 
-export interface RoutePathInspection { open: boolean; page: number }
+export interface RoutePathInspection { open: boolean; page: number; steamOpen?: boolean }
+
+export function steamRoutePresentation(route: RouteView) {
+  const agreement = route.agreement;
+  const quote = agreement?.terms.transport;
+  if (!agreement || quote?.mode !== 'steam' || !isTransportQuote(quote, Number.MAX_SAFE_INTEGER)) return null;
+  const last = agreement.lastSteamDelivery;
+  return {
+    terms: [
+      `Steam transport · Version ${quote.ruleVersion} · Agreed round ${agreement.acceptedRound}`,
+      `Stored exchange interval · ${agreement.terms.cadenceRounds} rounds`,
+      `Unrailed comparison at proposal · ${quote.unrailedCadence} rounds · ${quote.unrailedEdges} steps`,
+      agreement.terms.cadenceRounds < quote.unrailedCadence ? 'This agreement has a shorter stored interval than its unrailed comparison.' : 'No shorter interval is recorded for this agreement.',
+      `Recorded weighted distance · ${exactNumber(quote.weightedDistance)} · Recipe interval floor ${quote.baseCadence} rounds`,
+      `Proposer fuel each successful delivery · ${exactNumber(quote.proposerFuel.coal)} Coal`,
+    ],
+    edges: quote.edgeWeights.map((weight, index) => {
+      const from = quote.tileIds[index]; const to = quote.tileIds[index + 1];
+      const edge = from === undefined || to === undefined ? undefined : quote.railEdges.find(record => record.edgeId === railEdgeId(from, to));
+      return `Tiles ${from} ↔ ${to} · ${edge ? `Rail · Completion ${edge.completionEventId}` : 'Unrailed'} · Recorded weight ${exactNumber(weight)}`;
+    }),
+    rails: quote.railEdges.map(edge => `Rail edge ${edge.edgeId} · Completion ${edge.completionEventId}`),
+    last: last ? {
+      heading: `Last successful steam payment · Round ${last.round}`,
+      identity: `Route ${last.routeId} · Agreement ${last.offerId} · Event ${last.eventId}`,
+      cadence: `Delivered on stored interval · ${last.terms.cadenceRounds} rounds`,
+      proposerPaid: last.proposerPaid,
+      recipientPaid: last.recipientPaid,
+      proposerStrategicPaid: last.proposerStrategicPaid,
+      recipientStrategicPaid: last.recipientStrategicPaid,
+    } : null,
+    explanation: 'Periodic shipments use the consented path and terms. Later rail does not change this agreement. Coal is fuel, separate from cargo and ordinary Energy. Path weights are a route-planning measure, not travel time.',
+  };
+}
 
 export function routeInspectionIdentity(route: RouteView): string { return JSON.stringify([route.id, route.agreement?.offerId ?? null]); }
 
-export function retainedRoutePathInspection(previous: string | undefined, route: RouteView, open: boolean, page: number): RoutePathInspection {
-  return previous === routeInspectionIdentity(route) ? { open, page: routeTilePage(route, page).page } : { open: false, page: 0 };
+export function retainedRoutePathInspection(previous: string | undefined, route: RouteView, open: boolean, page: number, steamOpen = false): RoutePathInspection {
+  const retained = previous === routeInspectionIdentity(route) ? { open, page: routeTilePage(route, page).page } : { open: false, page: 0 };
+  return route.agreement?.terms.transport?.mode === 'steam' ? { ...retained, steamOpen: previous === routeInspectionIdentity(route) && steamOpen } : retained;
 }
 
 function renderPathTiles(card: HTMLElement, route: RouteView, retained: RoutePathInspection): void {
@@ -65,6 +104,8 @@ function renderPathTiles(card: HTMLElement, route: RouteView, retained: RoutePat
   const summary = text('summary', `Recorded tiles · ${page.total}`);
   summary.dataset['routeFocus'] = 'path-summary';
   const ids = text('p', '', 'route-tile-ids');
+  const edgeFacts = text('div', '', 'route-edge-records');
+  const steam = steamRoutePresentation(route);
   const status = text('span', '');
   const change = (value: number): void => { page = routeTilePage(route, value); render(); };
   const previous = button('Previous tiles', 'path-previous', () => change(page.page - 1));
@@ -72,11 +113,12 @@ function renderPathTiles(card: HTMLElement, route: RouteView, retained: RoutePat
   const render = (): void => {
     details.dataset['page'] = String(page.page);
     ids.textContent = page.ids.join(' → ');
+    if (steam) edgeFacts.replaceChildren(...steam.edges.slice(page.page * ROUTE_TILE_PAGE_SIZE, (page.page + 1) * ROUTE_TILE_PAGE_SIZE).map(fact => text('p', fact, 'inspection-note')));
     status.textContent = `${page.page + 1} / ${page.pages}`;
     previous.disabled = page.page === 0;
     next.disabled = page.page + 1 === page.pages;
   };
-  details.append(summary, text('p', 'Each step joins neighboring tiles. This corridor is not a constructed road.', 'inspection-note'), ids);
+  details.append(summary, text('p', route.agreement?.terms.transport?.mode === 'steam' ? 'Each step joins neighboring tiles. The retained quote lists which edges had completed Rail.' : 'Each step joins neighboring tiles. This corridor is not a constructed road.', 'inspection-note'), ids, edgeFacts);
   if (page.pages > 1) {
     const pager = text('div', '', 'route-pages');
     pager.append(previous, status, next);
@@ -119,6 +161,23 @@ export function renderRouteCard(host: HTMLElement, route: RouteView, onTown: (id
       card.append(text('h4', town), amounts('Sends', cargo, strategic), amounts('Transport cost', upkeep), amounts('Commerce received', commerce));
     }
     card.append(text('p', `Agreement ${route.agreement?.offerId}`, 'inspection-note'));
+  }
+  const steam = steamRoutePresentation(route);
+  if (steam) {
+    const stored = text('details', '', 'route-steam-terms');
+    stored.open = retained.steamOpen ?? false;
+    const summary = text('summary', 'Stored steam path & fuel'); summary.dataset['routeFocus'] = 'steam-summary';
+    stored.append(summary);
+    for (const fact of steam.terms) stored.append(text('p', fact));
+    stored.append(text('p', `${steam.rails.length} completed Rail references · Exact edges are in Recorded tiles below.`, 'inspection-note'));
+    stored.append(text('p', steam.explanation, 'inspection-note'));
+    card.append(stored);
+    if (steam.last) {
+      card.append(text('h3', steam.last.heading), text('p', steam.last.cadence),
+        amounts(`${route.fromTown?.name ?? route.from} paid`, steam.last.proposerPaid, steam.last.proposerStrategicPaid),
+        amounts(`${route.toTown?.name ?? route.to} paid`, steam.last.recipientPaid, steam.last.recipientStrategicPaid),
+        text('p', steam.last.identity, 'inspection-note'), text('p', 'These payments belong to that successful delivery. A later blocked attempt does not replace them.', 'inspection-note'));
+    } else card.append(text('p', 'No successful steam payment recorded yet.', 'inspection-note'));
   }
   renderPathTiles(card, route, retained);
   card.append(text('p', `Route ${route.id}`, 'inspection-note'));

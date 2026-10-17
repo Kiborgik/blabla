@@ -101,7 +101,7 @@ export function observeCompactTrade(state: WorldState, seat: number, timestamp?:
       cities: townFacts,
       recipes,
       semantics: {
-        distance: hasFeatures(state, ['land-transport']) ? 'Land offers quote their exact ordered path and acceptance-relative exchange cadence; straight-line distance is a separate geometric fact' : 'Straight-line hex distance, not a traversed path or travel time',
+        distance: hasFeatures(state, ['industrial-steam']) ? 'Land and explicit steam offers retain exact ordered paths and acceptance-relative cadence. Steam retains edge weights, completed Rail references, an unrailed cadence baseline and one proposer Coal per successful due exchange; current recipe facts do not replace accepted terms' : hasFeatures(state, ['land-transport']) ? 'Land offers quote their exact ordered path and acceptance-relative exchange cadence; straight-line distance is a separate geometric fact' : 'Straight-line hex distance, not a traversed path or travel time',
         stockScope: 'Supplies remain shared across each civilization',
         proposal: 'No payment or shipment; recipient consent required',
         construction: 'Proposer pays construction once at acceptance',

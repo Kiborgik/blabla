@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
 import { applyCommand, applyRelease, catchUpStrategy, createWorld } from '../core/engine.ts';
-import { capabilityTreeNodes, createCapabilityTreeSheet, restoreCapabilityOpener } from '../web/capability-tree.ts';
+import { capabilityTreeNodes, createCapabilityTreeSheet, railCapabilityPresentation, restoreCapabilityOpener } from '../web/capability-tree.ts';
 import type { CapabilityTreeInput } from '../web/capability-tree.ts';
 
 const time = '2026-10-16T00:00:00.000Z';
@@ -65,7 +65,7 @@ await test('research and construction tree retains every owned edge and leaves c
   const treeEdges = input.catalogue.edges.filter(edge => ids.has(edge.from) && ids.has(edge.to));
   const edgeKey = (edge: { from: string; to: string }): string => `${edge.from}->${edge.to}`;
   assert.deepEqual(nodes.flatMap(node => node.requires.map(from => ({ from, to: node.id }))).map(edgeKey).toSorted(), treeEdges.map(edgeKey).toSorted());
-  assert.deepEqual(input.catalogue.edges.filter(edge => !ids.has(edge.from) || !ids.has(edge.to)).map(edgeKey).toSorted(), ['civic:code-of-laws->government:chiefdom', 'civic:code-of-laws->policy:urban-planning']);
+  assert.deepEqual(input.catalogue.edges.filter(edge => !ids.has(edge.from) || !ids.has(edge.to)).map(edgeKey).toSorted(), ['civic:code-of-laws->government:chiefdom', 'civic:code-of-laws->policy:urban-planning', 'technology:steam-power->rail:rail']);
   const fuel = nodes.find(node => node.id === 'technology:fuel-management');
   assert.ok(fuel);
   assert.deepEqual(fuel.requires.toSorted(), ['technology:civic-institutions', 'technology:kiln-firing']);
@@ -88,6 +88,20 @@ await test('presentation preserves canonical statuses, current research and unav
   assert.equal(nodes.find(node => node.id === 'building:kiln')?.status, null);
   assert.equal(nodes.find(node => node.id === 'building:kiln')?.label, 'Facts unavailable');
   assert.equal(nodes.length, input.catalogue.technologies.length + input.catalogue.buildings.length + input.catalogue.improvements.length + input.catalogue.wonders.length);
+});
+
+await test('the industrial research chain keeps every canonical parent while Rail stays a separate edge capability', () => {
+  const input = fixture(); const before = structuredClone(input); const nodes = capabilityTreeNodes(input);
+  for (const [id, parents] of [
+    ['scientific-method', ['printing', 'astronomy']],
+    ['shipbuilding', ['sailing', 'celestial-navigation']],
+    ['industrialization', ['apprenticeship', 'metal-casting', 'scientific-method']],
+    ['steam-power', ['industrialization', 'shipbuilding']],
+  ] as const) assert.deepEqual(nodes.find(node => node.id === `technology:${id}`)?.requires.toSorted(), parents.map(parent => `technology:${parent}`).toSorted());
+  assert.equal(nodes.some(node => node.id === 'improvement:rail'), false);
+  assert.equal(nodes.some(node => node.id === 'building:rail'), false);
+  assert.match(railCapabilityPresentation(input)?.blocker ?? '', /unavailable in this release/);
+  assert.deepEqual(input, before);
 });
 
 await test('planned source support and exact construction blockers use distinct familiar facts', () => {
@@ -200,6 +214,27 @@ await test('native sheet exposes compact nodes, one selected detail, exact town 
   assert.equal(record.control('node:technology:kiln-firing').attributes.get('aria-pressed'), 'true');
   assert.equal(record.all().filter(node => node.className === 'capability-selected-detail').length, 1);
   assert.ok(record.all().filter(node => node.tag === 'button').every(node => node.type === 'button'));
+  sheet.destroy();
+}));
+
+await test('synthetic rail candidates have an exact native inspection selector with no build action', () => withDom((dialog, record) => {
+  const input = fixture();
+  input.projection.rail = { cityId: 'city-0', active: null, completed: [], blocker: null, available: [
+    { edgeId: '3:4', tileId: 3, toTileId: 4, paid: { materials: 4, credits: 2 }, strategicPaid: { iron: 1, coal: 1 }, workRequired: 2 },
+    { edgeId: '4:5', tileId: 4, toTileId: 5, paid: { materials: 6.25, credits: 3 }, strategicPaid: { iron: 2, coal: 1 }, workRequired: 3.5 },
+  ] };
+  const before = structuredClone(input); const choices: string[] = [];
+  const sheet = createCapabilityTreeSheet(dialog, id => choices.push(id)); sheet.open(input);
+  record.control('node:technology:steam-power').dispatch('click');
+  assert.equal(record.control('rail-edge').tag, 'select');
+  assert.match(record.content(), /Rail is edge construction, separate from town buildings and worked tiles/);
+  assert.match(record.content(), /Quote 4 Materials · 2 Credits · 1 Iron · 1 Coal · 2 work · Edge 3:4/);
+  record.control('rail-edge').value = '4:5'; record.control('rail-edge').dispatch('change');
+  assert.match(record.content(), /Quote 6.25 Materials · 3 Credits · 2 Iron · 1 Coal · 3.5 work · Edge 4:5/);
+  record.control('rail-edge').focus();
+  const newer = structuredClone(input); newer.projection.revision += 1; sheet.observe(newer); sheet.refresh();
+  assert.equal(record.control('rail-edge').value, '4:5'); assert.equal(dom.activeElement, record.control('rail-edge'));
+  assert.match(record.content(), /Inspection only/); assert.deepEqual(choices, []); assert.deepEqual(input, before);
   sheet.destroy();
 }));
 

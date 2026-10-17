@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-live.31",
+    "date": "2026-10-17",
+    "title": "Coal powers faster trade",
+    "changes": [
+      "Scientific method, Shipbuilding, Industrialization and Steam power connect existing research to finite Coal. An enabled Mine uses its existing local residents to extract Coal into a separate, capacity-limited stock.",
+      "Agents can pay for exact owned Rail edges in a named town’s construction lane. A new steam agreement needs fresh consent and keeps its original path, speed and fuel cost; earlier agreements do not change.",
+      "A successful due steam exchange pays all cargo, upkeep and one proposer Coal together. Town Work and route inspection show paid Rail, actual fuel use and recorded cadence beside the original unrailed comparison.",
+      "The industrial capability requires two towns that actually operated supplied Foundries and one genuinely faster paid steam delivery. Civic and industrial activation remain separate from publishing this compatible source. Local Power, Factories and unattended calendar scheduling remain outside this packet."
+    ]
+  },
+  {
     "version": "0.1.0-live.30",
     "date": "2026-10-17",
     "title": "Culture becomes a civic choice",

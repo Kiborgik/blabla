@@ -160,7 +160,7 @@ function renderInspection(): void {
     if (fingerprint === inspectionFingerprint) return;
     const sameRoute = panel.dataset['routeId'] === routeInspectionIdentity(route);
     const pathDetails = panel.querySelector<HTMLDetailsElement>('.route-path-tiles');
-    const pathInspection = retainedRoutePathInspection(panel.dataset['routeId'], route, pathDetails?.open ?? false, Number(pathDetails?.dataset['page'] ?? 0));
+    const pathInspection = retainedRoutePathInspection(panel.dataset['routeId'], route, pathDetails?.open ?? false, Number(pathDetails?.dataset['page'] ?? 0), panel.querySelector<HTMLDetailsElement>('.route-steam-terms')?.open ?? false);
     const scroll = sameRoute ? panel.scrollTop : 0;
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset['routeFocus'] : undefined;
     inspectionFingerprint = fingerprint;
@@ -195,7 +195,7 @@ function renderInspection(): void {
   const pastoral = snapshot && actual ? observedPastoralSites(snapshot.state, actual.id) : undefined;
   const capabilities = state && actual && observedAt ? projectCapabilities(state, actual.id, preferences.selectedCity, observedAt) : null;
   const territory = state && capabilities ? projectTownTerritory(state, capabilities) : undefined;
-  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, territory, capabilities?.governance, capabilities?.decisions?.civic, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
+  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, territory, capabilities?.governance, capabilities?.decisions?.civic, capabilities?.rail, capabilities?.strategic, capabilities?.industrialEvidence, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
   if (fingerprint === inspectionFingerprint) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
   const previousScroll = sameCity && !pendingInspectionWork ? panel.scrollTop : 0;
@@ -272,7 +272,7 @@ function renderInspection(): void {
   if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork, development, territory, retainedTerritory, () => {
     chooseSection('work');
     panel.scrollTop = 0;
-  });
+  }, capabilities?.rail);
   const overview = settlement?.querySelector<HTMLElement>('.town-overview');
   if (overview) panel.insertBefore(overview, panel.querySelector('.research-detail'));
   const aim = panel.querySelector('.ambition'); if (aim) panel.append(aim);

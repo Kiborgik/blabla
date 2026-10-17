@@ -13,7 +13,7 @@ export function isImprovementOrder(order: ConstructionOrder): order is Improveme
 }
 
 export function constructionTarget(order: ConstructionOrder | ConstructionCompletion): string {
-  return 'kind' in order ? order.kind === 'wonder' ? `wonder:${order.wonderId}` : `improvement:${order.improvementId}` : order.buildingId;
+  return 'kind' in order ? order.kind === 'wonder' ? `wonder:${order.wonderId}` : order.kind === 'rail' ? `rail:${order.edgeId}` : `improvement:${order.improvementId}` : order.buildingId;
 }
 
 export function isHillSite(tile: HexTile): boolean {

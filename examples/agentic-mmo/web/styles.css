@@ -1147,6 +1147,10 @@ dialog h2 {
 .route-path-tiles { margin-top: 14px; border-top: 1px solid var(--border); }
 .route-path-tiles summary { min-height: 44px; box-sizing: border-box; padding: 12px 4px; cursor: pointer; font-weight: 600; }
 .route-path-tiles summary:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.route-steam-terms { margin-top: 14px; border-top: 1px solid var(--border); }
+.route-steam-terms summary { min-height: 44px; box-sizing: border-box; padding: 12px 4px; cursor: pointer; font-weight: 600; }
+.route-steam-terms summary:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.route-steam-terms p, .route-edge-records p, .rail-work p { overflow-wrap: anywhere; }
 .route-tile-ids { overflow-wrap: anywhere; line-height: 1.8; font-variant-numeric: tabular-nums; }
 .route-path-tiles .route-pages { flex-wrap: wrap; }
 .route-close { display: block; min-height: 44px; min-width: 74px; margin-left: auto; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 5px; }

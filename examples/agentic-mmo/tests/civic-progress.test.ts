@@ -111,6 +111,17 @@ await test('a later real opening presents the credited construction progress rat
   assert.ok(view.constructionRecord?.includes(`${work.workDone} / ${work.workRequired} work recorded`));
 });
 
+await test('synthetic rail union records remain exact edge work rather than a wonder', () => {
+  const source = structuredClone(input(journey.arranged));
+  assert.ok(source.city);
+  const active = { kind: 'rail' as const, ruleVersion: 1 as const, id: 'rail-fixture', cityId: source.city.id, edgeId: '10:11', tileId: 10, toTileId: 11, startedRound: 700, paid: { materials: 4, credits: 2 }, strategicPaid: { iron: 1, coal: 1 }, workRequired: 2, workDone: 1.25 };
+  source.city.construction = { active, lastCompleted: null };
+  assert.equal(civicProgressPresentation(source)?.constructionRecord, 'Rail · Tiles 10 ↔ 11 · Edge 10:11 · 1.25 / 2 work recorded · Order rail-fixture');
+  const { id, workDone, ...base } = active;
+  source.city.construction = { active: null, lastCompleted: { ...base, orderId: id, civId: journey.seat, completedRound: 702, eventId: 'rail-completion' } };
+  assert.equal(civicProgressPresentation(source)?.constructionRecord, 'Last completed · Rail · Tiles 10 ↔ 11 · Edge 10:11 · Round 702 · Event rail-completion');
+});
+
 await test('a synthetic pending read model retains exact transition rounds and the supplied current output factor', () => {
   const source = structuredClone(input(journey.arranged));
   const governance = source.projection.governance;

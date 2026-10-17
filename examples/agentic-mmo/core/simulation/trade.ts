@@ -1,4 +1,4 @@
-import { ACTION_FEATURES, METAL_RULES, RESOURCE_IDS, TRADE_RECIPES, TRADE_RULES } from '../content.ts';
+import { ACTION_FEATURES, INDUSTRIAL_RULES, METAL_RULES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TRADE_RECIPES, TRADE_RULES } from '../content.ts';
 import type {
   ActionOption,
   City,
@@ -6,6 +6,8 @@ import type {
   GameEvent,
   Resources,
   Route,
+  SteamDeliveryReceipt,
+  StrategicResources,
   TradeOffer,
   TradeTerms,
   WorldState,
@@ -14,7 +16,7 @@ import { emitEvent } from './events.ts';
 import { describeSettlementSite } from './sites.ts';
 import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
-import { createLandTransportPlanner, describeLandTransport, landTransportBlock, landTransportCadence } from './transport.ts';
+import { createLandTransportPlanner, createSteamTransportPlanner, describeTransport, transportBlock, transportCadence } from './transport.ts';
 import { canAfford, citiesOf, civilizationById, transferCost } from './world.ts';
 import { strategicCapacity } from './metals.ts';
 
@@ -51,7 +53,7 @@ function offeredTransportBlock(state: WorldState, offer: TradeOffer): string | n
   if (!quote) return null;
   const from = state.cities.find(city => city.id === offer.from && city.civId === offer.proposer);
   const to = state.cities.find(city => city.id === offer.to && city.civId === offer.recipient);
-  return from && to ? landTransportBlock(state, quote, from.tileId, to.tileId) : 'An exact endpoint is missing';
+  return from && to ? transportBlock(state, quote, from.tileId, to.tileId) : 'An exact endpoint is missing';
 }
 
 function nextBeat(round: number, cadence: number): number {
@@ -72,7 +74,7 @@ function compactDistance(state: WorldState, from: City | undefined, to: City | u
 }
 
 function compactLandReason(quote: NonNullable<ActionOption['tradeQuote']>, authority: string): string {
-  return `Land path in tradeQuote: ${quote.transport.edges} edges; exchange every ${quote.cadenceRounds} rounds, first due ${quote.cadenceRounds} rounds after acceptance. Town facts in tradeFacts; ${authority}`;
+  return `${quote.transport.mode === 'steam' ? 'Steam' : 'Land'} path in tradeQuote: ${quote.transport.edges} edges; exchange every ${quote.cadenceRounds} rounds, first due ${quote.cadenceRounds} rounds after acceptance. Town facts in tradeFacts; ${authority}`;
 }
 
 function compactProposalReason(state: WorldState, from: City | undefined, to: City | undefined, exact: boolean): string {
@@ -114,14 +116,14 @@ export function availableTradeActions(state: WorldState, seat: number, presentat
           for (const from of citiesOf(state, seat)) for (const to of citiesOf(state, partner.id)) {
             const transport = planner?.quote(from.tileId, to.tileId);
             if (land && !transport) continue;
-            const tradeQuote = transport ? { transport, cadenceRounds: landTransportCadence(recipe.terms.cadenceRounds, transport) } : undefined;
+            const tradeQuote = transport ? { transport, cadenceRounds: transportCadence(recipe.terms.cadenceRounds, transport) } : undefined;
             choices.push({
               action: { type: 'propose-trade', partner: partner.id, recipeId: recipe.id, sourceCityId: from.id, recipientCityId: to.id },
               ...(tradeQuote ? { tradeQuote } : {}),
               label: `Offer ${recipe.id}: ${from.name} to ${to.name}`,
               reason: presentation === 'compact-trade-v1'
                 ? tradeQuote ? compactLandReason(tradeQuote, 'current recipe facts in tradeFacts') : compactProposalReason(state, from, to, true)
-                : `Request consent to these exact towns and recurring terms; no recipient stock is spent by a proposal. ${transport ? `${describeLandTransport(transport, landTransportCadence(recipe.terms.cadenceRounds, transport))}. ` : ''}${describeTradeEndpoints(state, from, to)}${strategicTermsDescription(recipe.terms)}`,
+                : `Request consent to these exact towns and recurring terms; no recipient stock is spent by a proposal. ${transport ? `${describeTransport(transport, transportCadence(recipe.terms.cadenceRounds, transport))}. ` : ''}${describeTradeEndpoints(state, from, to)}${strategicTermsDescription(recipe.terms)}`,
             });
           }
         } else choices.push({
@@ -132,6 +134,17 @@ export function availableTradeActions(state: WorldState, seat: number, presentat
             : 'Request consent to exact recurring terms; no recipient stock is spent by a proposal',
         });
       }
+    }
+  }
+  if (hasFeatures(state, [INDUSTRIAL_RULES.featureId]) && civilization.technologies.includes(INDUSTRIAL_RULES.requiredTechnology)) {
+    const steamPlanner = createSteamTransportPlanner(state);
+    for (const option of [...choices]) {
+      const action = option.action; if (action.type !== 'propose-trade') continue;
+      const from = state.cities.find(city => city.id === action.sourceCityId); const to = state.cities.find(city => city.id === action.recipientCityId);
+      const recipe = TRADE_RECIPES.find(candidate => candidate.id === action.recipeId); if (!from || !to || !recipe) continue;
+      const transport = steamPlanner.quote(from.tileId, to.tileId, recipe.terms.cadenceRounds); if (!transport) continue;
+      const cadenceRounds = transportCadence(recipe.terms.cadenceRounds, transport);
+      choices.push({ action: { ...action, transportMode: 'steam' }, label: `Offer steam ${recipe.id}: ${from.name} to ${to.name}`, tradeQuote: { transport, cadenceRounds }, reason: `${describeTransport(transport, cadenceRounds)}. New recipient consent is required; existing terms are unchanged.` });
     }
   }
   for (const offer of state.tradeOffers ?? []) {
@@ -157,7 +170,7 @@ export function availableTradeActions(state: WorldState, seat: number, presentat
           label: `Accept ${offer.id}`,
           reason: presentation === 'compact-trade-v1'
             ? tradeQuote ? compactLandReason(tradeQuote, `snapshotted ${offer.id} terms in tradeOffers`) : `Consent to ${offer.id} and its snapshotted tradeOffers terms every ${offer.terms.cadenceRounds} rounds; first shipment is on a later strategic beat. ${compactDistance(state, from, to)}; town facts in tradeFacts`
-            : `Consent to deliveries every ${offer.terms.cadenceRounds} rounds; ${offer.terms.transport ? describeLandTransport(offer.terms.transport, offer.terms.cadenceRounds) : 'first shipment is on a later strategic beat'}${hasFeatures(state, ['exact-trade-endpoints']) && from && to ? `. ${describeTradeEndpoints(state, from, to)}` : ''}${strategicTermsDescription(offer.terms)}`,
+            : `Consent to deliveries every ${offer.terms.cadenceRounds} rounds; ${offer.terms.transport ? describeTransport(offer.terms.transport, offer.terms.cadenceRounds) : 'first shipment is on a later strategic beat'}${hasFeatures(state, ['exact-trade-endpoints']) && from && to ? `. ${describeTradeEndpoints(state, from, to)}` : ''}${strategicTermsDescription(offer.terms)}`,
         });
       }
     }
@@ -197,10 +210,11 @@ export function executeTradeAction(
       throw new RangeError('Trade proposal requires a released recipe and two existing endpoints');
     const terms = structuredClone(recipe.terms);
     if (hasFeatures(state, ['land-transport'])) {
-      const quote = createLandTransportPlanner(state).quote(from.tileId, to.tileId);
+      if (action.transportMode === 'steam' && (!hasFeatures(state, [INDUSTRIAL_RULES.featureId]) || !actor.technologies.includes(INDUSTRIAL_RULES.requiredTechnology))) throw new RangeError('Steam proposal requires released Steam power');
+      const quote = action.transportMode === 'steam' ? createSteamTransportPlanner(state).quote(from.tileId, to.tileId, terms.cadenceRounds) : createLandTransportPlanner(state).quote(from.tileId, to.tileId);
       if (!quote) throw new RangeError('The exact trade towns have no passable land path');
       terms.transport = quote;
-      terms.cadenceRounds = landTransportCadence(terms.cadenceRounds, quote);
+      terms.cadenceRounds = transportCadence(terms.cadenceRounds, quote);
     }
     const offer: TradeOffer = {
       id: `offer-${state.revision}`,
@@ -275,8 +289,8 @@ export function executeTradeAction(
     });
     return;
   }
-  const transportBlock = offeredTransportBlock(state, offer);
-  if (transportBlock) throw new RangeError(transportBlock);
+  const currentTransportBlock = offeredTransportBlock(state, offer);
+  if (currentTransportBlock) throw new RangeError(currentTransportBlock);
   transferCost(civilizationById(state, offer.proposer).resources, offer.terms.constructionCost);
   const route: Route = {
     id: `route-${state.revision}`,
@@ -288,6 +302,7 @@ export function executeTradeAction(
     damage: 0,
     volume: 0,
     agreement: {
+      ...(offer.terms.transport?.mode === 'steam' ? { lastSteamDelivery: null } : {}),
       offerId: offer.id,
       terms: structuredClone(offer.terms),
       enabled: true,
@@ -333,6 +348,12 @@ function shortages(resources: Resources, required: Partial<Resources>): string[]
   );
 }
 
+export function strategicObligations(terms: TradeTerms, side: 'proposer' | 'recipient'): StrategicResources {
+  const result = { ...terms.strategicCargo?.[side] };
+  if (side === 'proposer' && terms.transport?.mode === 'steam') result.coal = (result.coal ?? 0) + terms.transport.proposerFuel.coal;
+  return result;
+}
+
 function shipmentBlock(
   state: WorldState,
   route: Route,
@@ -346,7 +367,7 @@ function shipmentBlock(
     const from = state.cities.find(city => city.id === route.from);
     const to = state.cities.find(city => city.id === route.to);
     if (from && to) {
-      const reason = landTransportBlock(state, terms.transport, from.tileId, to.tileId);
+      const reason = transportBlock(state, terms.transport, from.tileId, to.tileId);
       if (reason) return { by: null, reason };
     }
   }
@@ -360,17 +381,13 @@ function shipmentBlock(
     if (missing.length)
       return { by: id, reason: `Combined cargo and upkeep shortage: ${missing.join(', ')}` };
   }
-  if (terms.strategicCargo) {
-    const resource = METAL_RULES.resource;
-    for (const [id, sent, received] of [
-      [route.owner, terms.strategicCargo.proposer, terms.strategicCargo.recipient],
-      [route.partner, terms.strategicCargo.recipient, terms.strategicCargo.proposer],
-    ] as const) {
+  for (const resource of STRATEGIC_RESOURCE_IDS) {
+    for (const [id, side, opposite] of [[route.owner, 'proposer', 'recipient'], [route.partner, 'recipient', 'proposer']] as const) {
       const stock = civilizationById(state, id).strategicResources?.[resource] ?? 0;
-      const outgoing = sent[resource] ?? 0;
-      const incoming = received[resource] ?? 0;
-      if (stock < outgoing) return { by: id, reason: `Strategic cargo shortage: ${resource} ${stock}/${outgoing}` };
-      const capacity = strategicCapacity(state, id);
+      const outgoing = strategicObligations(terms, side)[resource] ?? 0;
+      const incoming = terms.strategicCargo?.[opposite][resource] ?? 0;
+      if (stock < outgoing) return { by: id, reason: `Strategic cargo${terms.transport?.mode === 'steam' ? ' and fuel' : ''} shortage: ${resource} ${stock}/${outgoing}` };
+      const capacity = strategicCapacity(state, id, resource);
       if (incoming > 0 && stock - outgoing + incoming > capacity) return { by: id, reason: `Strategic storage full: ${resource} incoming ${incoming}, stock after outgoing ${stock - outgoing}, capacity ${capacity}` };
     }
   }
@@ -435,25 +452,22 @@ export function resolveTrade(state: WorldState, events: GameEvent[]): void {
     transferCost(owner.resources, terms.recipientCargo, 1);
     transferCost(owner.resources, terms.proposerYield, 1);
     transferCost(partner.resources, terms.recipientYield, 1);
-    if (terms.strategicCargo) {
-      const resource = METAL_RULES.resource;
-      const proposerSent = terms.strategicCargo.proposer[resource] ?? 0;
-      const recipientSent = terms.strategicCargo.recipient[resource] ?? 0;
-      owner.strategicResources ??= {};
-      partner.strategicResources ??= {};
-      if (proposerSent > 0 || recipientSent > 0) {
-        owner.strategicResources[resource] = (owner.strategicResources[resource] ?? 0) - proposerSent + recipientSent;
-        partner.strategicResources[resource] = (partner.strategicResources[resource] ?? 0) - recipientSent + proposerSent;
-      }
+    const proposerStrategicPaid = strategicObligations(terms, 'proposer');
+    const recipientStrategicPaid = strategicObligations(terms, 'recipient');
+    for (const resource of STRATEGIC_RESOURCE_IDS) {
+      const proposerSent = terms.strategicCargo?.proposer[resource] ?? 0; const recipientSent = terms.strategicCargo?.recipient[resource] ?? 0;
+      const proposerPaid = proposerStrategicPaid[resource] ?? 0; const recipientPaid = recipientStrategicPaid[resource] ?? 0;
+      if (proposerPaid > 0 || recipientSent > 0) { owner.strategicResources ??= {}; owner.strategicResources[resource] = (owner.strategicResources[resource] ?? 0) - proposerPaid + recipientSent; }
+      if (recipientPaid > 0 || proposerSent > 0) { partner.strategicResources ??= {}; partner.strategicResources[resource] = (partner.strategicResources[resource] ?? 0) - recipientPaid + proposerSent; }
     }
     route.volume = RESOURCE_IDS.reduce(
       (total, resource) =>
         total + (terms.proposerCargo[resource] ?? 0) + (terms.recipientCargo[resource] ?? 0),
-      (terms.strategicCargo?.proposer[METAL_RULES.resource] ?? 0) + (terms.strategicCargo?.recipient[METAL_RULES.resource] ?? 0),
+      STRATEGIC_RESOURCE_IDS.reduce((total, resource) => total + (terms.strategicCargo?.proposer[resource] ?? 0) + (terms.strategicCargo?.recipient[resource] ?? 0), 0),
     );
     agreement.lastDeliveryRound = state.round;
     agreement.deliveryCount += 1;
-    emitEvent(state, events, {
+    const event = emitEvent(state, events, {
       type: 'trade-delivered',
       ...(terms.strategicCargo ? { strategicShipment: { ruleVersion: METAL_RULES.ruleVersion, routeId: route.id, offerId: agreement.offerId, proposer: route.owner, recipient: route.partner, proposerSent: structuredClone(terms.strategicCargo.proposer), recipientSent: structuredClone(terms.strategicCargo.recipient) } } : {}),
       title: `${owner.name} and ${partner.name} exchange agreed cargo`,
@@ -469,5 +483,10 @@ export function resolveTrade(state: WorldState, events: GameEvent[]): void {
       ],
       importance: 3,
     });
+    if (terms.transport?.mode === 'steam') {
+      const receipt: SteamDeliveryReceipt = { ruleVersion: 1, routeId: route.id, offerId: agreement.offerId, proposer: route.owner, recipient: route.partner, acceptedRound: agreement.acceptedRound, round: state.round, eventId: event.id, terms: structuredClone(terms), proposerPaid: obligations(terms.proposerCargo, terms.proposerUpkeep), recipientPaid: obligations(terms.recipientCargo, terms.recipientUpkeep), proposerStrategicPaid, recipientStrategicPaid };
+      event.steamDelivery = structuredClone(receipt); agreement.lastSteamDelivery = structuredClone(receipt);
+      if (state.industrialEvidence && !state.industrialEvidence.steamDelivery && terms.cadenceRounds < terms.transport.unrailedCadence && terms.transport.railEdges.length > 0) state.industrialEvidence.steamDelivery = structuredClone(receipt);
+    }
   }
 }

@@ -1,3 +1,4 @@
+import { industrialEvidenceComplete } from './industrial-evidence.ts';
 import { HISTORICAL_MILESTONES } from '../content.ts';
 import type { GameEvent, HistoricalMilestone, MilestoneCondition, WorldState } from '../types.ts';
 import { emitEvent } from './events.ts';
@@ -12,6 +13,8 @@ function conditionMet(
   condition: MilestoneCondition,
 ): boolean {
   switch (condition.kind) {
+    case 'industrial-evidence':
+      return industrialEvidenceComplete(state);
     case 'city-count':
       return state.cities.length >= condition.minimum;
     case 'building-count':

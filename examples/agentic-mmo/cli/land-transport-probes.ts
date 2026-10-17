@@ -190,7 +190,7 @@ export class LandTransportProbes {
     const quote = offer?.terms.transport;
     const from = state?.cities.find(city => city.id === offer?.from);
     const to = state?.cities.find(city => city.id === offer?.to);
-    const valid = !!state && !!quote && !!from && !!to && landTransportBlock(state, quote, from.tileId, to.tileId) === null
+    const valid = !!state && quote?.mode === 'land' && !!from && !!to && landTransportBlock(state, quote, from.tileId, to.tileId) === null
       && isDeepStrictEqual(quote, createLandTransportPlanner(state).quote(from.tileId, to.tileId));
     const recipe = TRADE_RECIPES.find(candidate => candidate.id === offer?.terms.recipeId);
     const attemptState = this.operation === 'resolve' ? this.before : state;
@@ -228,7 +228,7 @@ export class LandTransportProbes {
       land_exchange_funded: funded,
       land_route_usable: !!route && !!agreement?.enabled && route.damage < agreement.terms.damageDisableAt && from?.civId === route.owner && to?.civId === route.partner,
       land_delivered: delivered,
-      land_cadence_exact: !!quote && !!recipe && offer?.terms.cadenceRounds === landTransportCadence(recipe.terms.cadenceRounds, quote),
+      land_cadence_exact: quote?.mode === 'land' && !!recipe && offer?.terms.cadenceRounds === landTransportCadence(recipe.terms.cadenceRounds, quote),
       land_payment_exact: payment,
       land_refusal_unchanged: this.operation === 'resolve' ? !!state && !!control && resourcesEqual(state, control.state) : !!this.result && !this.result.ok && isDeepStrictEqual(this.result.state, this.before) && this.result.events.length === 0,
       land_legacy_preserved: !!legacy && !!oldOffer && !!oldAgreement && oldOffer.terms.transport === undefined && isDeepStrictEqual(legacy.before.tradeOffers, legacy.adopted.tradeOffers) && isDeepStrictEqual(legacy.before.routes, legacy.adopted.routes) && isDeepStrictEqual(oldAgreement.terms, oldOffer.terms) && isDeepStrictEqual(oldAgreement, legacy.historical.routes[0]?.agreement) && isDeepStrictEqual(legacy.accepted, legacy.replay),

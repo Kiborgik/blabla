@@ -40,6 +40,10 @@ function constructionRecord(input: CivicProgressInput): string | null {
   const construction = city.construction;
   const record = construction?.active ?? construction?.lastCompleted;
   if (!record) return 'No construction record for this town.';
+  if ('kind' in record && record.kind === 'rail') {
+    const label = `Rail · Tiles ${record.tileId} ↔ ${record.toTileId} · Edge ${record.edgeId}`;
+    return 'workDone' in record ? `${label} · ${exactNumber(record.workDone)} / ${exactNumber(record.workRequired)} work recorded · Order ${record.id}` : `Last completed · ${label} · Round ${record.completedRound} · Event ${record.eventId}`;
+  }
   const id = 'buildingId' in record ? record.buildingId : 'improvementId' in record ? record.improvementId : record.wonderId;
   const definition = [...input.catalogue.buildings, ...input.catalogue.improvements, ...input.catalogue.wonders].find(candidate => candidate.id === id);
   const label = definition?.name ?? id;

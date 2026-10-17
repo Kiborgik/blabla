@@ -52,6 +52,7 @@ function amounts(values: Partial<Resources>, strategic?: StrategicResources): st
 }
 
 function capabilityName(input: CapabilityTreeInput, id: string): string {
+  if (id.startsWith('rail:')) return id === 'rail:rail' ? 'Rail' : `Rail edge ${id.slice(5)}`;
   const key = id.includes(':') ? id.slice(id.indexOf(':') + 1) : id;
   return [...input.catalogue.technologies, ...input.catalogue.buildings, ...input.catalogue.improvements, ...input.catalogue.wonders].find(item => item.id === key)?.name ?? id;
 }
@@ -191,10 +192,10 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
     }
     if ('housing' in definition && definition.housing) facts.push({ label: 'Housing after completion', value: `+${definition.housing} capacity. Later growth still needs food.` });
     if ('requiresBuildings' in definition && definition.requiresBuildings?.length) facts.push({ label: 'Own-town infrastructure', value: definition.requiresBuildings.map(required => capabilityName(input, required)).join(' · ') });
-    if (id === 'technology:bronze-working' || id === 'improvement:mine') {
+    if (id === 'technology:bronze-working' || id === 'technology:industrialization' || id === 'improvement:mine') {
       const strategic = input.projection.strategic;
       if (strategic?.strategicCapacity !== undefined) {
-        facts.push({ label: 'Civilization iron stock', value: `${strategic.strategicResources?.iron ?? 0} stored / ${strategic.strategicCapacity} capacity` });
+        for (const entry of strategicResourceAmounts(strategic.strategicCapacities ?? { iron: strategic.strategicCapacity })) facts.push({ label: `Civilization ${entry.label} stock`, value: `${number(strategic.strategicResources?.[entry.resource] ?? 0)} stored / ${number(entry.amount)} capacity` });
         for (const deposit of strategic.revealedDeposits ?? []) facts.push({ label: 'Revealed deposit', value: depositLabel(deposit) });
       }
     }
@@ -286,6 +287,22 @@ export interface CapabilityTreeSheet {
   destroy: () => void;
 }
 
+export function railCapabilityPresentation(input: CapabilityTreeInput) {
+  const definition = input.catalogue.rails.find(candidate => candidate.id === 'rail');
+  if (!definition) return null;
+  const rail = input.projection.rail;
+  return {
+    description: `${definition.name} is edge construction, separate from town buildings and worked tiles.`,
+    requirements: definition.requires.map(id => capabilityName(input, id)),
+    cost: `${amounts(definition.cost, definition.strategicCost)} · ${number(definition.workRequired)} work`,
+    range: `Both endpoints need ownership and a valid site within ${definition.range} tiles of this town.`,
+    blocker: rail?.blocker ?? (rail ? null : 'Rail facts are unavailable in this release.'),
+    active: rail?.active ? `Rail edge ${rail.active.edgeId} · ${number(rail.active.workDone)} / ${number(rail.active.workRequired)} work · Not built yet` : null,
+    completed: rail?.completed.map(record => `Tiles ${record.tileId} ↔ ${record.toTileId} · Civilization ${record.civId} · Completed round ${record.completedRound} · Event ${record.eventId}`) ?? [],
+    available: rail?.available.map(edge => ({ id: edge.edgeId, label: `Tiles ${edge.tileId} ↔ ${edge.toTileId}`, facts: `Quote ${amounts(edge.paid, edge.strategicPaid)} · ${number(edge.workRequired)} work · Edge ${edge.edgeId}` })) ?? [],
+  };
+}
+
 export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id: string) => void, onClose: () => void = () => undefined): CapabilityTreeSheet {
   let captured: CapabilityTreeInput | null = null;
   let latest: CapabilityTreeInput | null = null;
@@ -341,6 +358,7 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
     return line;
   };
   let selectedNodeId: string | null = null;
+  let selectedRailEdge: string | null = null;
   let currentNodes: CapabilityTreeNode[] = [];
   let detailHost: HTMLElement | null = null;
   const renderSelected = (): void => {
@@ -356,6 +374,24 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
     const facts = text('dl', '', 'capability-facts');
     for (const fact of node.facts) { const row = text('div', ''); row.append(text('dt', fact.label), text('dd', fact.value)); facts.append(row); }
     detailHost.append(facts);
+    if (node.id === 'technology:steam-power' && captured) {
+      const rail = railCapabilityPresentation(captured);
+      if (rail) {
+        const section = text('section', '', 'capability-rail');
+        section.append(text('h4', 'Rail edge work'), text('p', rail.description), text('p', `Requires ${rail.requirements.join(' · ')}`), text('p', `Build once · ${rail.cost}`), text('p', rail.range, 'capability-note'));
+        if (rail.blocker) section.append(text('p', rail.blocker, 'capability-blocker'));
+        if (rail.active) section.append(text('p', rail.active));
+        section.append(text('p', `${rail.completed.length} completed edges · Exact paid records are in this town's Work inspection.`, 'capability-note'));
+        const picker = control(text('select', ''), 'rail-edge'); picker.setAttribute('aria-label', 'Inspect available rail edge');
+        for (const edge of rail.available) { const option = text('option', edge.label); option.value = edge.id; picker.append(option); }
+        const record = text('p', '');
+        const select = (): void => { selectedRailEdge = picker.value; record.textContent = rail.available.find(edge => edge.id === picker.value)?.facts ?? 'No available edge in this observation.'; };
+        picker.addEventListener('change', select); picker.disabled = !rail.available.length;
+        picker.value = rail.available.some(edge => edge.id === selectedRailEdge) ? selectedRailEdge ?? '' : rail.available[0]?.id ?? ''; select();
+        section.append(picker, record, text('p', 'Inspection only. The agent must explicitly choose an exact edge.', 'capability-note'));
+        detailHost.append(section);
+      }
+    }
     if (node.researchExplanation) detailHost.append(text('p', node.researchExplanation, 'capability-note'));
     detailHost.append(button('Back to selected node', 'back-to-node', () => focusNode(node.id)));
   };
@@ -389,14 +425,16 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
       }
       if (lane.kind === 'construction' && lane.targetId) {
         const definition = input.catalogue.buildings.find(building => building.id === lane.targetId);
-        const explanation = lane.targetId.startsWith('improvement:')
+        const explanation = lane.targetId.startsWith('rail:')
+          ? 'This exact edge is not built yet. Only completed Rail can be quoted in a new steam agreement.'
+          : lane.targetId.startsWith('improvement:')
           ? 'The worked site is not finished yet. Output requires completion and local support in a later season.'
           : definition?.capabilities?.includes('coastal-departure')
           ? 'The building is not finished yet. Its capability becomes usable after completion.'
           : 'The building is not finished yet. Output starts in a later season after completion.';
         card.append(text('p', explanation, 'capability-note'));
       }
-      if (lane.availableIds.length) card.append(text('p', `${lane.availableIds.length} options in the tree`, 'capability-note')); 
+      if (lane.availableIds.length) card.append(text('p', projection.rail ? `${lane.availableIds.length} available options · Rail edges are inspected under Steam power` : `${lane.availableIds.length} options in the tree`, 'capability-note'));
       if (lane.blockers.length) {
         const reasons = text('details', '', 'capability-decision-reasons');
         reasons.append(control(text('summary', lane.status === 'blocked' ? 'Why this is blocked' : 'Other requirements'), `decision-reasons:${lane.kind}:${lane.cityId ?? 'shared'}`));
@@ -419,8 +457,8 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
     if (city && projection.lastConstructionCompletion?.cityId === city.id) {
       const last = projection.lastConstructionCompletion;
       completed.append(text('p', `Last construction completed: ${capabilityName(input, constructionTarget(last))} · ${city.name} · Round ${last.completedRound} · Event ${last.eventId}`));
-      if ('kind' in last) completed.append(text('p', `Exact worked site · Tile ${last.tileId}`, 'capability-note'));
-      completed.append(text('p', `Paid for that completed order: ${amounts(last.paid)} · Work ${number(last.workRequired)}`, 'capability-note'));
+      if ('kind' in last) completed.append(text('p', last.kind === 'rail' ? `Exact edge · Tiles ${last.tileId} ↔ ${last.toTileId} · ${last.edgeId}` : `Exact worked site · Tile ${last.tileId}`, 'capability-note'));
+      completed.append(text('p', `Paid for that completed order: ${amounts(last.paid, 'strategicPaid' in last ? last.strategicPaid : undefined)} · Work ${number(last.workRequired)}`, 'capability-note'));
     }
     section.append(completed);
     return [section];
@@ -500,6 +538,15 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
       if (definition.requiresMilestones.length) card.append(text('p', `Earlier achievements: ${definition.requiresMilestones.map(id => input.catalogue.milestones.find(item => item.id === id)?.name ?? id).join(' · ')}`));
       milestones.append(card);
     }
+    if (projection.industrialEvidence) {
+      const proof = text('section', '', 'capability-milestone'); proof.append(text('h4', 'Recorded industrial evidence'));
+      for (const receipt of projection.industrialEvidence.foundryOperations) proof.append(text('p', `Foundry · Town ${receipt.cityId} · Civilization ${receipt.civId} · Round ${receipt.round} · Paid ${amounts(receipt.paid, receipt.strategicPaid)} · Made ${amounts(receipt.produced)} · Event ${receipt.eventId}`));
+      if (!projection.industrialEvidence.foundryOperations.length) proof.append(text('p', 'No qualifying Foundry operations recorded.'));
+      const steam = projection.industrialEvidence.steamDelivery;
+      proof.append(text('p', steam ? `Faster steam delivery · Route ${steam.routeId} · Round ${steam.round} · Proposer paid ${amounts(steam.proposerPaid, steam.proposerStrategicPaid)} · Stored interval ${steam.terms.cadenceRounds} · Event ${steam.eventId}` : 'No qualifying faster, fuel-paid steam delivery recorded.'));
+      proof.append(text('p', 'Historical proof from actual operations and delivery. Construction or research alone does not supply it.', 'capability-note'));
+      milestones.append(proof);
+    }
     const overview = text('details', '', 'capability-overview'); overview.append(text('summary', 'Current projects & completed work'), ...decisionCards(input));
     const record = text('details', '', 'capability-record'); record.append(text('summary', `Captured revision ${projection.revision}`), stamp);
     if (projection.admission.reason) record.append(text('p', `Action timing: ${timingText(projection.admission.reason)}`, 'capability-note'));
@@ -520,6 +567,7 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
   return {
     open(input, invokingElement) {
       if (disposed) return;
+      if (!captured || contextKey(input) !== contextKey(captured)) selectedRailEdge = null;
       latest = structuredClone(input); captured = structuredClone(input); opener = invokingElement;
       render(false);
       if (!dialog.open) dialog.showModal();
@@ -532,7 +580,7 @@ export function createCapabilityTreeSheet(dialog: HTMLDialogElement, onTown: (id
       if (!changedContext && latest?.projection.revision === input.projection.revision) return;
       latest = structuredClone(input);
       if (!dialog.open) return;
-      if (changedContext) { captured = structuredClone(input); render(false); controls.get('heading')?.focus({ preventScroll: true }); }
+      if (changedContext) { selectedRailEdge = null; captured = structuredClone(input); render(false); controls.get('heading')?.focus({ preventScroll: true }); }
       else if (refreshButton) refreshButton.hidden = false;
     },
     refresh,

@@ -1,3 +1,4 @@
+import { availableRailActions } from './rail.ts';
 import { civicActionBlock, civicDecision } from './civics.ts';
 import { wonderEligibility } from './wonders.ts';
 import { constructionTarget } from './improvements.ts';
@@ -54,6 +55,7 @@ export function decisionObligations(state: WorldState, civilizationId: number): 
         if (!eligibility.blockers.length) lane.availableIds.push(capabilityId);
         else lane.blockers.push(...eligibility.blockers.map(reason => ({ capabilityId, reason })));
       }
+      if (availableRailActions(state, civilizationId, city.id).length) lane.availableIds.push('rail:rail');
       if (lane.availableIds.length) lane.status = 'required';
       else lane.blockers.push({ capabilityId: null, reason: { kind: 'no-available-choice' } });
     }
@@ -68,7 +70,7 @@ export function decisionActionBlock(state: WorldState, seat: number, action: Gam
   if (action.type === 'choose-civic') return civicActionBlock(state, seat, action.civicId);
   if (action.type === 'research' && civilization.researchTarget)
     return `Active research ${civilization.researchTarget} must finish before another research commitment`;
-  if (action.type === 'build' || action.type === 'improve' || action.type === 'build-wonder') {
+  if (action.type === 'build' || action.type === 'improve' || action.type === 'build-wonder' || action.type === 'build-rail') {
     const city = state.cities.find(candidate => candidate.civId === seat && candidate.id === action.cityId);
     if (city?.construction?.active) return `Active construction ${constructionTarget(city.construction.active)} in ${city.id} must finish before another commitment`;
   }

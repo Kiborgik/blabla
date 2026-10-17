@@ -160,7 +160,7 @@ await test('synthetic quoted-path disruption refuses consent without charging or
   state = act(state, 2, proposal(state, 2, 3));
   const offer = pending(state);
   const transport = offer.terms.transport;
-  assert.ok(transport);
+  assert.ok(transport?.mode === 'land');
   const tile = state.tiles.find(candidate => candidate.id === transport.tileIds[Math.floor(transport.tileIds.length / 2)]);
   assert.ok(tile);
   tile.terrain = 'mountain';

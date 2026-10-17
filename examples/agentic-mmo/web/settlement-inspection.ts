@@ -3,14 +3,14 @@ import type { observedPastoralSites } from '../core/simulation/pastoral.ts';
 import { pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
 import { wonderWorkRows, type TownDevelopmentFacts, type WonderWorkRow } from '../visuals/wonder-visuals.ts';
 import { exactNumber, numberElement } from './number-format.ts';
-import { strategicResourceAmounts, SITE_MARK_PATHS, type StrategicAmount, extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
+import { strategicResourceAmounts, strategicResourceLabel, SITE_MARK_PATHS, type StrategicAmount, extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
 import type { observedStrategicResources } from '../core/simulation/metals.ts';
 import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
 import { damageCondition } from '../visuals/damage-visuals.ts';
 import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
 import { hasFeatures } from '../core/simulation/history.ts';
 import { observedResidentCapacity } from '../core/simulation/operations.ts';
-import type { City, WorldState, ResidentCapacityObservation, Resources } from '../core/types.ts';
+import type { City, WorldState, ResidentCapacityObservation, Resources, RailObservation, RailConstructionOrder, RailCompletion } from '../core/types.ts';
 import { buildingAppearance } from '../visuals/building-visuals.ts';
 import { operationVisual } from '../visuals/operation-visuals.ts';
 import type { ResourceAmount } from '../visuals/operation-visuals.ts';
@@ -31,7 +31,7 @@ function amountLine(label: string, amounts: Array<ResourceAmount | StrategicAmou
   if (!amounts.length) line.append(document.createTextNode('None'));
   for (const entry of amounts) {
     const item = text('span', `${exactNumber(entry.amount)} ${entry.label}`);
-    const icon = visualIcon(entry.resource === 'iron' ? 'materials' : entry.resource);
+    const icon = visualIcon(entry.resource === 'iron' || entry.resource === 'coal' ? 'materials' : entry.resource);
     if (entry.resource === 'iron') icon.querySelector('path')?.setAttribute('d', SITE_MARK_PATHS.iron);
     item.prepend(icon);
     line.append(item);
@@ -146,7 +146,23 @@ export function renderTerritoryInspection(host: HTMLElement, territory: TownTerr
   previous.addEventListener('click', () => { page--; draw(); }); next.addEventListener('click', () => { page++; draw(); }); draw();
 }
 
-export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }, onInspectWork?: () => void): void {
+export function railWorkRows(city: Pick<City, 'id' | 'civId' | 'construction'>, rail?: RailObservation) {
+  const active = rail ? rail.active : city.construction?.active;
+  const last = city.construction?.lastCompleted;
+  const records: Array<RailConstructionOrder | RailCompletion> = [];
+  if (active && 'kind' in active && active.kind === 'rail' && active.cityId === city.id) records.push(active);
+  records.push(...(rail?.completed ?? (last && 'kind' in last && last.kind === 'rail' ? [last] : [])).filter(record => record.cityId === city.id));
+  return records.map(record => ({
+    key: `rail:${record.edgeId}:${'id' in record ? record.id : record.orderId}`,
+    heading: `Rail · Tiles ${record.tileId} ↔ ${record.toTileId}`,
+    state: 'workDone' in record ? 'Under construction · Not built yet' : 'Completed Rail',
+    progress: 'workDone' in record ? `${exactNumber(record.workDone)} / ${exactNumber(record.workRequired)} work` : `${exactNumber(record.workRequired)} work completed · Round ${record.completedRound}`,
+    owner: 'civId' in record ? record.civId : city.civId,
+    record,
+  }));
+}
+
+export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }, onInspectWork?: () => void, rail?: RailObservation): void {
   host.replaceChildren();
   const city = cities.find((entry) => entry.id === selectedId) ?? cities[0];
   if (!city) return;
@@ -318,7 +334,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
       for (const shortage of view.last.shortages) {
         receipt.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${shortage.required}; ${shortage.available} left in opening stock at round ${view.last.round}.`, 'operation-shortage'));
       }
-      for (const shortage of view.last.strategicShortages ?? []) receipt.append(text('p', `Iron needed ${exactNumber(shortage.required)}; ${exactNumber(shortage.available)} left in opening stock at round ${view.last.round}.`, 'operation-shortage'));
+      for (const shortage of view.last.strategicShortages ?? []) receipt.append(text('p', `${strategicResourceLabel(shortage.resource)} needed ${exactNumber(shortage.required)}; ${exactNumber(shortage.available)} left in opening stock at round ${view.last.round}.`, 'operation-shortage'));
       if (view.last.status === 'blocked' && !view.last.strategicPaid?.length && !view.last.paid.length && !view.last.produced.length) receipt.append(text('p', 'Nothing was paid or made in that record.', 'operation-shortage'));
       card.append(receipt);
     }
@@ -326,6 +342,17 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
   }
   const wonderRows = wonderWorkRows(development?.wonders ?? [], city.id);
   for (const row of wonderRows) host.append(wonderCard(row));
+  const rails = railWorkRows(city, rail);
+  for (const row of rails) {
+    const card = text('section', '', 'building-card rail-work'); card.dataset['workId'] = row.key;
+    card.append(text('h4', row.heading), text('strong', row.state), text('p', row.progress),
+      text('p', `Owner civilization ${row.owner} · Town ${city.name} · Edge ${row.record.edgeId}`),
+      vectorLine('Paid once for this order', row.record.paid), amountLine('Strategic payment', strategicResourceAmounts(row.record.strategicPaid)),
+      text('p', `Started round ${row.record.startedRound} · Order ${'id' in row.record ? row.record.id : row.record.orderId}`, 'settlement-facts'));
+    if ('eventId' in row.record) card.append(text('p', `Completion event ${row.record.eventId}`, 'settlement-facts'));
+    card.append(text('p', 'Rail belongs to this exact edge. Existing trade agreements keep their consented path and schedule.', 'building-summary'));
+    host.append(card);
+  }
   const cards = [...host.children].filter((node): node is HTMLElement => node instanceof HTMLElement && node !== overview);
   const work = text('section', '', 'town-work'); work.dataset['inspectionSection'] = 'work';
   const label = text('label', ''); label.append(text('span', 'Inspect work & buildings', 'sr-only'));
@@ -346,7 +373,9 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     const worked = Object.values(city.improvements ?? {}).find(site => String(site.tileId) === key);
     const operation = key ? city.buildingOperations?.[key] : undefined;
     const wonder = wonderRows.find(row => row.key === key);
-    if (wonder) preview.append(wonderPreview(wonder));
+    const railway = rails.find(row => row.key === key);
+    if (railway) preview.append(text('strong', railway.state), text('p', railway.heading), text('p', railway.progress));
+    else if (wonder) preview.append(wonderPreview(wonder));
     else if (key?.startsWith('active:') && activeDistrict) {
       preview.append(text('strong', 'Under construction'), text('p', `${exactNumber(activeDistrict.workDone)} / ${exactNumber(activeDistrict.workRequired)} work · Not built yet`));
       if ('buildingId' in activeDistrict && activeDistrict.catchmentTileId !== undefined) preview.append(text('p', `Mountain source · Tile ${activeDistrict.catchmentTileId}`));
@@ -361,7 +390,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
           amountLine('Used', [...RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; }), ...strategicResourceAmounts('strategicPaid' in last ? last.strategicPaid : undefined)]));
         preview.append(results);
         if (last.status === 'blocked' && 'shortages' in last) for (const shortage of last.shortages) preview.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
-        if ('strategicShortages' in last) for (const shortage of last.strategicShortages ?? []) preview.append(text('p', `Iron needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
+        if ('strategicShortages' in last) for (const shortage of last.strategicShortages ?? []) preview.append(text('p', `${strategicResourceLabel(shortage.resource)} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
         if (last.status === 'blocked' && operation) preview.append(text('p', operationVisual(operation).last?.label ?? 'Could not operate', 'work-record-round'));
         if (last.status !== 'operated') preview.append(text('span', last.status === 'paused' ? 'Paused in that season' : 'Could not operate in that season', 'work-record-round'));
       } else {
@@ -391,15 +420,19 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
 export function renderStrategicInspection(host: HTMLElement, facts: ReturnType<typeof observedStrategicResources>): void {
   if (facts.strategicCapacity === undefined) return;
   const section = text('section', '', 'strategic-stock'); section.dataset['inspectionSection'] = 'overview';
-  section.setAttribute('aria-label', 'Civilization iron');
-  const heading = text('h3', 'Iron'); heading.prepend(visualIcon('materials'));
-  const value = text('p', '', 'strategic-stock-value'); value.append(numberElement(facts.strategicResources?.iron ?? 0), text('span', ` stored / ${exactNumber(facts.strategicCapacity)} capacity`));
-  section.append(heading, value,
-    text('p', 'Civilization stock. Finite deposits and ordinary materials are separate.', 'building-summary'));
-  const deposits = townDisclosure('revealed-deposits', `Known iron sites · ${facts.revealedDeposits?.length ?? 0}`);
-  if (!facts.revealedDeposits?.length) deposits.append(text('p', 'No deposits are revealed to this civilization.'));
-  for (const deposit of facts.revealedDeposits ?? []) deposits.append(text('p', depositLabel(deposit)));
-  section.append(deposits); host.append(section);
+  section.setAttribute('aria-label', 'Civilization strategic resources');
+  const capacities = facts.strategicCapacities ?? { iron: facts.strategicCapacity };
+  for (const entry of strategicResourceAmounts(capacities)) {
+    const heading = text('h3', entry.label); heading.prepend(visualIcon('materials'));
+    const value = text('p', '', 'strategic-stock-value'); value.append(numberElement(facts.strategicResources?.[entry.resource] ?? 0), text('span', ` stored / ${exactNumber(entry.amount)} capacity`));
+    const revealed = facts.revealedDeposits?.filter(deposit => deposit.resource === entry.resource) ?? [];
+    const deposits = townDisclosure(`revealed-deposits:${entry.resource}`, `Known ${entry.label} sites · ${revealed.length}`);
+    if (!revealed.length) deposits.append(text('p', 'No deposits are revealed to this civilization.'));
+    for (const deposit of revealed) deposits.append(text('p', depositLabel(deposit)));
+    section.append(heading, value, deposits);
+  }
+  section.append(text('p', 'Civilization stock. Finite deposits, ordinary Materials and Energy are separate.', 'building-summary'));
+  host.append(section);
 }
 
 export function renderPastoralInspection(host: HTMLElement, facts: ReturnType<typeof observedPastoralSites>): void {

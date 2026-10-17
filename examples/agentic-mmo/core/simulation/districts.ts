@@ -5,7 +5,7 @@ import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
 
 export function districtSiteOccupied(state: WorldState, tileId: number, installed?: { cityId: string; tileId: number }): boolean {
-  return Object.values(state.wonders ?? {}).some(wonder => wonder.completion.tileId === tileId) || state.cities.some(city => Object.values(city.districtSites ?? {}).includes(tileId) || city.construction?.active?.tileId === tileId || (hasFeatures(state, [IMPROVEMENT_RULES.featureId]) && Object.values(city.improvements ?? {}).some(improvement => improvement.tileId === tileId && !(installed?.cityId === city.id && installed.tileId === tileId))));
+  return Object.values(state.wonders ?? {}).some(wonder => wonder.completion.tileId === tileId) || state.cities.some(city => Object.values(city.districtSites ?? {}).includes(tileId) || (city.construction?.active?.tileId === tileId && !('kind' in city.construction.active && city.construction.active.kind === 'rail')) || (hasFeatures(state, [IMPROVEMENT_RULES.featureId]) && Object.values(city.improvements ?? {}).some(improvement => improvement.tileId === tileId && !(installed?.cityId === city.id && installed.tileId === tileId))));
 }
 
 export function districtCapacity(city: City): number {

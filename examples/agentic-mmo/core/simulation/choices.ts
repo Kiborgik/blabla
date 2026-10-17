@@ -1,3 +1,4 @@
+import { availableRailActions } from './rail.ts';
 import { availableGovernmentActions } from './government.ts';
 import { availableCivicActions } from './civics.ts';
 import { selectedCampusHighGround } from './observatory.ts';
@@ -216,6 +217,7 @@ export function availableActions(
       }
     }
   }
+  choices.push(...availableRailActions(state, seat));
   choices.push(...availableCoastalActions(state, seat));
   choices.push(...availableTradeActions(state, seat, tradePresentation), ...availablePublicProjectActions(state, seat));
   if (actionFeatureAvailable(state, 'repair-city') && canAfford(civilization.resources, ECONOMY_RULES.repair.cost)) {
@@ -267,6 +269,8 @@ export function sameAction(left: GameAction, right: unknown): boolean {
       return 'focus' in right && left.focus === right.focus && left.cityId === ('cityId' in right ? right.cityId : undefined);
     case 'research':
       return 'technology' in right && left.technology === right.technology;
+    case 'build-rail':
+      return 'cityId' in right && left.cityId === right.cityId && 'fromTileId' in right && 'toTileId' in right && ((left.fromTileId === right.fromTileId && left.toTileId === right.toTileId) || (left.fromTileId === right.toTileId && left.toTileId === right.fromTileId));
     case 'build-wonder':
       return 'wonderId' in right && 'cityId' in right && 'tileId' in right && left.wonderId === right.wonderId && left.cityId === right.cityId && left.tileId === right.tileId;
     case 'apply-research-boost':
@@ -286,7 +290,7 @@ export function sameAction(left: GameAction, right: unknown): boolean {
     case 'federate':
       return 'partner' in right && left.partner === right.partner;
     case 'propose-trade':
-      return (
+      return left.transportMode === ('transportMode' in right ? right.transportMode : undefined) && (
         'partner' in right &&
         'recipeId' in right &&
         left.partner === right.partner &&

@@ -1,5 +1,5 @@
 import type { Route, WorldState } from '../core/types.ts';
-import { isLandTransportQuote, landTransportBlock, landTransportTopologyBlock } from '../core/simulation/transport.ts';
+import { isTransportQuote, transportBlock, transportTopologyBlock } from '../core/simulation/transport.ts';
 import { visibleRoutes } from './route-visuals.ts';
 import type { RouteView } from './route-visuals.ts';
 
@@ -17,15 +17,15 @@ export function hasRouteQuote(route: Route): boolean {
 
 function unavailable(reason: string): RoutePath { return { kind: 'unavailable', points: [], currentBlock: null, reason }; }
 
-export function projectRoutePath(route: Route, state: Pick<WorldState, 'tiles' | 'cities' | 'width' | 'height'>): RoutePath {
+export function projectRoutePath(route: Route, state: Pick<WorldState, 'tiles' | 'cities' | 'width' | 'height' | 'railEdges'>): RoutePath {
   const from = state.cities.find(city => city.id === route.from && city.civId === route.owner);
   const to = state.cities.find(city => city.id === route.to && city.civId === route.partner);
   if (!from || !to) return unavailable('An exact endpoint is unavailable.');
   const quote = route.agreement?.terms.transport;
   const quoted = hasRouteQuote(route);
   if (quoted) {
-    if (!isLandTransportQuote(quote, state.tiles.length)) return unavailable('The retained path is malformed or unsupported.');
-    const reason = landTransportTopologyBlock(state, quote, from.tileId, to.tileId);
+    if (!isTransportQuote(quote, state.tiles.length)) return unavailable('The retained path is malformed or unsupported.');
+    const reason = transportTopologyBlock(state, quote, from.tileId, to.tileId);
     if (reason) return unavailable(reason);
   }
   const tiles = new Map(state.tiles.map(tile => [tile.id, tile]));
@@ -38,7 +38,7 @@ export function projectRoutePath(route: Route, state: Pick<WorldState, 'tiles' |
       height: quoted ? mapTileHeight(tile.elevation) + 0.06 : 0.72 });
   }
   return { kind: quoted ? 'land' : 'schematic', points,
-    currentBlock: quoted && quote ? landTransportBlock(state, quote, from.tileId, to.tileId) : null, reason: null };
+    currentBlock: quoted && quote ? transportBlock(state, quote, from.tileId, to.tileId) : null, reason: null };
 }
 
 export function routePathPoints(route: RouteView): readonly RoutePathPoint[] {
@@ -67,7 +67,7 @@ export function visibleRoutePaths(routes: readonly RouteView[], selected: string
 
 export function routeTilePage(route: RouteView, page: number): { ids: number[]; page: number; pages: number; total: number } {
   const quote = route.agreement?.terms.transport;
-  const ids = isLandTransportQuote(quote, Number.MAX_SAFE_INTEGER) ? quote.tileIds : [];
+  const ids = isTransportQuote(quote, Number.MAX_SAFE_INTEGER) ? quote.tileIds : [];
   const pages = Math.max(1, Math.ceil(ids.length / ROUTE_TILE_PAGE_SIZE));
   const current = Math.max(0, Math.min(pages - 1, Number.isFinite(page) ? Math.trunc(page) : 0));
   return { ids: ids.slice(current * ROUTE_TILE_PAGE_SIZE, (current + 1) * ROUTE_TILE_PAGE_SIZE), page: current, pages, total: ids.length };

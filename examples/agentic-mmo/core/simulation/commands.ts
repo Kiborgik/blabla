@@ -1,3 +1,4 @@
+import { executeRailAction } from './rail.ts';
 import { adoptGovernment } from './government.ts';
 import { chooseCivic } from './civics.ts';
 import { selectedCampusHighGround } from './observatory.ts';
@@ -74,6 +75,9 @@ export function executeAction(
   const firstCity = cities[0];
   const location = firstCity?.tileId ?? null;
   switch (action.type) {
+    case 'build-rail':
+      executeRailAction(state, seat, action.cityId, action.fromTileId, action.toTileId, events);
+      return;
     case 'adopt-government':
       adoptGovernment(state, seat, action.governmentId, action.assignments, events);
       return;
