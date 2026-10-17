@@ -1,0 +1,6 @@
+[test-groups]
+source-cli-probes = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(=batched_delivery_bindings) | binary(=goal_delivery_bindings) | binary(=goal_delivery_composition) | binary(=bounded_result_bridge) | binary(=ready_receipt_bindings) | binary(=task_role_bridge) | binary(=development_effort_bindings) | binary(=development_effort_composition) | (binary(=coverage) & (test(=goal_delivery_composed_probe) | test(=batched_delivery_composed_probe) | test(=effort_composed_probe_uses_real_dispatch_and_preserves_legacy_state) | test(=reordered_composed_contract_preserves_targeted_witness) | test(=composed_bridge::development_effort::tests::budget_read_preserves_real_close_refusal_and_restored_success)))'
+test-group = 'source-cli-probes'

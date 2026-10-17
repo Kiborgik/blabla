@@ -186,7 +186,7 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
     )]
     Task {
         #[command(subcommand)]
-        action: TaskAction,
+        action: Box<TaskAction>,
     },
     #[command(
         about = "Evaluate, record, reserve and replay bounded expert advice independently of completion"
@@ -1234,6 +1234,7 @@ fn execute(cli: Cli) -> i32 {
         },
         Command::Task { action } => match project::load(explicit, &cwd, json, None) {
             Ok(loaded) => {
+                let action = *action;
                 if let TaskAction::Open { role, .. } = &action
                     && let Err(exit) = task::validate_open_role(&loaded, role, json)
                 {
@@ -1337,11 +1338,13 @@ fn execute(cli: Cli) -> i32 {
                             review_of,
                             lenses: lens,
                         },
-                        delivery_goal,
-                        delivery_review_of,
-                        falsify,
-                        require_intent_disposition,
-                        require_goal_reflection,
+                        task::OpenOptions {
+                            delivery_goals: delivery_goal,
+                            delivery_targets: delivery_review_of,
+                            falsify,
+                            require_intent_disposition,
+                            require_goal_reflection,
+                        },
                         json,
                         &swallowed,
                     ),
@@ -1558,9 +1561,11 @@ fn execute(cli: Cli) -> i32 {
                     } => task::disposition(
                         &loaded,
                         &name,
-                        &identity,
-                        &status,
-                        &reason,
+                        task::DispositionInput {
+                            identity: &identity,
+                            status: &status,
+                            reason: &reason,
+                        },
                         &model,
                         refresh_ready,
                         json,
@@ -1649,11 +1654,13 @@ fn execute(cli: Cli) -> i32 {
                         task::reflect(
                             &loaded,
                             &name,
-                            decision,
-                            observation,
-                            evidence_refs,
-                            reason,
-                            outcome,
+                            task::ReflectionInput {
+                                decision,
+                                observation,
+                                evidence_refs,
+                                reason,
+                                outcome,
+                            },
                             model,
                             refresh_ready,
                             json,

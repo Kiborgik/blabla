@@ -270,7 +270,7 @@ fn reviewed(root: &Path, name: &str, status: &str) {
     success(root, &close_args(&reviewer, false));
 }
 
-fn close_args<'a>(name: &'a str, bounded: bool) -> Vec<&'a str> {
+fn close_args(name: &str, bounded: bool) -> Vec<&str> {
     let mut args = vec!["task", "close", name, "--model", "owner"];
     if bounded {
         args.extend([

@@ -103,8 +103,10 @@ fn tree(root: &Path) -> Result<BTreeMap<String, Option<Vec<u8>>>, String> {
             let name = path
                 .strip_prefix(root)
                 .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .into_owned();
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             if path.is_dir() {
                 result.insert(name, None);
                 walk(root, &path, result)?;
@@ -431,10 +433,12 @@ impl PhaseFixture {
             observed_interval_effect(
                 &before.work_intervals,
                 &after.work_intervals,
-                &self.worker,
-                &self.model,
-                &self.requested,
-                self.reason.as_deref(),
+                (
+                    &self.worker,
+                    &self.model,
+                    &self.requested,
+                    self.reason.as_deref(),
+                ),
                 started,
                 ended,
                 changed,
@@ -457,14 +461,12 @@ impl PhaseFixture {
 fn observed_interval_effect(
     before: &[task::effort::Interval],
     after: &[task::effort::Interval],
-    worker: &str,
-    model: &str,
-    phase: &str,
-    reason: Option<&str>,
+    request: (&str, &str, &str, Option<&str>),
     start: u64,
     end: u64,
     changed: bool,
 ) -> bool {
+    let (worker, model, phase, reason) = request;
     let pending: Vec<_> = before
         .iter()
         .enumerate()
@@ -820,12 +822,24 @@ impl BudgetFixture {
                 _ => {}
             }
         }
-        let main = self.root.path().to_string_lossy();
-        let peer = self.other.as_ref().map(|r| r.path().to_string_lossy());
-        let mut replacements = vec![(main.as_ref(), "fixture-main")];
-        if let Some(peer) = &peer {
-            replacements.push((peer.as_ref(), "fixture-peer"));
+        let mut roots = Vec::new();
+        for (root, label) in std::iter::once((self.root.path(), "fixture-main"))
+            .chain(self.other.as_ref().map(|r| (r.path(), "fixture-peer")))
+        {
+            roots.push((
+                fs::canonicalize(root)
+                    .map_err(|e| e.to_string())?
+                    .to_string_lossy()
+                    .into_owned(),
+                label,
+            ));
+            roots.push((root.to_string_lossy().into_owned(), label));
         }
+        roots.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
+        let replacements: Vec<_> = roots
+            .iter()
+            .map(|(path, label)| (path.as_str(), *label))
+            .collect();
         normalize(&mut visible, &replacements);
         for key in ["projects", "intervals", "diagnostics"] {
             visible[key]
@@ -953,6 +967,19 @@ impl DevelopmentEffort {
 mod tests {
     use super::*;
     #[test]
+    fn nested_record_keys_preserve_bytes_with_portable_components() {
+        let root = TempDir::new().unwrap();
+        let record = root.path().join(".blabla").join("tasks").join("one.json");
+        fs::create_dir_all(record.parent().unwrap()).unwrap();
+        fs::write(&record, [0, 255, 13, 10]).unwrap();
+        let mut files = tree(root.path()).unwrap();
+        assert_eq!(
+            files.remove(".blabla/tasks/one.json"),
+            Some(Some(vec![0, 255, 13, 10]))
+        );
+        assert_eq!(files.len(), 2);
+    }
+    #[test]
     fn budget_read_preserves_real_close_refusal_and_restored_success() {
         let deadline = Instant::now() + BUDGET;
         let fixture = BudgetFixture::prepare(2, deadline).unwrap();
@@ -1002,10 +1029,7 @@ mod effect_controls {
         assert!(!observed_interval_effect(
             &[],
             &[],
-            "a",
-            "worker-model",
-            "development",
-            None,
+            ("a", "worker-model", "development", None),
             10,
             10,
             false
@@ -1013,12 +1037,9 @@ mod effect_controls {
         let old = interval("a", "development", 0, Some(5), Some("attested"));
         let new = interval("a", "review", 10, None, None);
         assert!(observed_interval_effect(
-            &[old.clone()],
+            std::slice::from_ref(&old),
             &[old.clone(), new.clone()],
-            "a",
-            "worker-model",
-            "review",
-            None,
+            ("a", "worker-model", "review", None),
             10,
             10,
             true
@@ -1028,21 +1049,15 @@ mod effect_controls {
         assert!(!observed_interval_effect(
             &[old],
             &[corrupt, new.clone()],
-            "a",
-            "worker-model",
-            "review",
-            None,
+            ("a", "worker-model", "review", None),
             10,
             10,
             true
         ));
         assert!(observed_interval_effect(
-            &[new.clone()],
-            &[new],
-            "a",
-            "worker-model",
-            "review",
-            None,
+            std::slice::from_ref(&new),
+            std::slice::from_ref(&new),
+            ("a", "worker-model", "review", None),
             10,
             10,
             false

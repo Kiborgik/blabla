@@ -1039,6 +1039,15 @@ fn write_result_basis(output: &mut impl Write, task: &Task) -> io::Result<()> {
     Ok(())
 }
 
+#[derive(Default)]
+pub(super) struct OpenOptions {
+    pub delivery_goals: Vec<String>,
+    pub delivery_targets: Vec<String>,
+    pub falsify: Vec<String>,
+    pub require_intent_disposition: bool,
+    pub require_goal_reflection: bool,
+}
+
 #[cfg(test)]
 pub(super) fn open(
     project: &Project,
@@ -1049,37 +1058,15 @@ pub(super) fn open(
     json: bool,
     swallowed: &[String],
 ) -> i32 {
-    open_with_delivery(
-        project,
-        opening,
-        Vec::new(),
-        falsify,
-        require_intent_disposition,
-        require_goal_reflection,
-        json,
-        swallowed,
-    )
-}
-
-#[cfg(test)]
-pub(super) fn open_with_delivery(
-    project: &Project,
-    opening: Opening,
-    delivery_goals: Vec<String>,
-    falsify: Vec<String>,
-    require_intent_disposition: bool,
-    require_goal_reflection: bool,
-    json: bool,
-    swallowed: &[String],
-) -> i32 {
     open_with_targets(
         project,
         opening,
-        delivery_goals,
-        Vec::new(),
-        falsify,
-        require_intent_disposition,
-        require_goal_reflection,
+        OpenOptions {
+            falsify,
+            require_intent_disposition,
+            require_goal_reflection,
+            ..Default::default()
+        },
         json,
         swallowed,
     )
@@ -1088,14 +1075,17 @@ pub(super) fn open_with_delivery(
 pub(super) fn open_with_targets(
     project: &Project,
     mut opening: Opening,
-    delivery_goals: Vec<String>,
-    delivery_targets: Vec<String>,
-    falsify: Vec<String>,
-    require_intent_disposition: bool,
-    require_goal_reflection: bool,
+    options: OpenOptions,
     json: bool,
     swallowed: &[String],
 ) -> i32 {
+    let OpenOptions {
+        delivery_goals,
+        delivery_targets,
+        falsify,
+        require_intent_disposition,
+        require_goal_reflection,
+    } = options;
     if let Err(exit) = validate_open_role(project, &opening.role, json) {
         return exit;
     }
@@ -2140,13 +2130,8 @@ fn inspect_close(
     model: &str,
     json: bool,
 ) -> Result<CloseDecision, i32> {
-    let mut task = match mutate(project, name, json) {
-        Ok(task) => task,
-        Err(exit) => return Err(exit),
-    };
-    if let Err(exit) = require_tracking(project, &task, json) {
-        return Err(exit);
-    }
+    let mut task = mutate(project, name, json)?;
+    require_tracking(project, &task, json)?;
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     if task.state == "ready" && !task::challenge_current(&task, &tree) {
         return Err(emit_error(
@@ -2175,10 +2160,7 @@ fn inspect_close(
         }
         validate_orchestrator_model(project, model, json)?;
     }
-    let delivery_context = match delivery::close_context(project, &task, json) {
-        Ok(context) => context,
-        Err(exit) => return Err(exit),
-    };
+    let delivery_context = delivery::close_context(project, &task, json)?;
     let evaluation = super::project::evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let status = status_view(project, &evaluation, &structure);
@@ -2564,16 +2546,25 @@ pub(super) fn lens(
     store(project, &mut task, json)
 }
 
+pub(super) struct DispositionInput<'a> {
+    pub identity: &'a str,
+    pub status: &'a str,
+    pub reason: &'a str,
+}
+
 pub(super) fn disposition(
     project: &Project,
     name: &str,
-    identity: &str,
-    status: &str,
-    reason: &str,
+    input: DispositionInput<'_>,
     model: &str,
     refresh_ready: bool,
     json: bool,
 ) -> i32 {
+    let DispositionInput {
+        identity,
+        status,
+        reason,
+    } = input;
     if refresh_ready {
         return ready_receipts::refresh(
             project,
@@ -2610,18 +2601,29 @@ pub(super) fn disposition(
     store(project, &mut task, json)
 }
 
+pub(super) struct ReflectionInput {
+    pub decision: String,
+    pub observation: String,
+    pub evidence_refs: Vec<String>,
+    pub reason: String,
+    pub outcome: task::GoalReflectionOutcome,
+}
+
 pub(super) fn reflect(
     project: &Project,
     name: &str,
-    decision: String,
-    observation: String,
-    evidence_refs: Vec<String>,
-    reason: String,
-    outcome: task::GoalReflectionOutcome,
+    input: ReflectionInput,
     model: String,
     refresh_ready: bool,
     json: bool,
 ) -> i32 {
+    let ReflectionInput {
+        decision,
+        observation,
+        evidence_refs,
+        reason,
+        outcome,
+    } = input;
     if refresh_ready {
         return ready_receipts::refresh(
             project,

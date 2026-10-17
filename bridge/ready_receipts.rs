@@ -103,8 +103,10 @@ fn tree(root: &Path) -> Result<BTreeMap<String, Option<Vec<u8>>>, String> {
             let name = path
                 .strip_prefix(root)
                 .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .into_owned();
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             if path.is_dir() {
                 result.insert(name, None);
                 walk(root, &path, result)?;
@@ -660,10 +662,20 @@ impl ReadyReceipts {
 mod tests {
     use super::*;
     #[test]
+    fn nested_record_keys_preserve_bytes_with_portable_components() {
+        let root = TempDir::new().unwrap();
+        let record = root.path().join(".blabla").join("tasks").join("work.json");
+        fs::create_dir_all(record.parent().unwrap()).unwrap();
+        fs::write(&record, [0, 255, 13, 10]).unwrap();
+        let files = tree(root.path()).unwrap();
+        assert_eq!(files[".blabla/tasks/work.json"], Some(vec![0, 255, 13, 10]));
+        assert_eq!(files.len(), 3);
+    }
+    #[test]
     fn invocation_errors_are_not_task_refusals() {
         assert!(decided(2, &json!({"category":"invocation"})).is_err());
         assert!(decided(4, &json!({"category":"task"})).is_err());
         assert!(decided(0, &json!({"ok":true})).is_err());
-        assert_eq!(decided(2, &json!({"category":"task"})).unwrap(), false);
+        assert!(!decided(2, &json!({"category":"task"})).unwrap());
     }
 }

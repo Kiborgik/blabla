@@ -262,7 +262,7 @@ fn unreadable_file_and_directory_observations_follow_actual_access() {
     let temp = fixture(None);
     write(temp.path(), "locked/file.txt", "locked");
     let file = temp.path().join("locked/file.txt");
-    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o0)).unwrap();
     let file_denied = std::fs::read(&file).is_err();
     cli(temp.path(), &["finish"], 0);
     if file_denied {
@@ -277,7 +277,7 @@ fn unreadable_file_and_directory_observations_follow_actual_access() {
     }
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     let directory = temp.path().join("locked");
-    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o0)).unwrap();
     let directory_denied = std::fs::read_dir(&directory).is_err();
     cli(temp.path(), &["finish"], 0);
     if directory_denied {
@@ -350,7 +350,8 @@ fn explicit_command_input_under_ignore_remains_visible() {
     assert_eq!(
         changes(&view)[0]["path"],
         temp.path()
-            .join("generated/input.txt")
+            .join("generated")
+            .join("input.txt")
             .to_string_lossy()
             .as_ref()
     );

@@ -1,0 +1,25 @@
+# Published CI repair: independent review
+
+2026-10-17, actual gpt-6-astra/xhigh. Target: `diagnose-published-ci-regression`, frozen READY epoch 6. I authored none of the reviewed Rust, probe or scheduling changes. Verdict: no blocking defect found in this bounded repair. Corrected published Ubuntu and Windows gates remain the delivery criterion.
+
+## Deciding failures and corrections
+
+- Actual [run 38992490911](https://github.com/Kiborgik/blabla/actions/runs/38992490911) tested PR head `602c660615b80c89aa00cba646b7275cc0ff7025`; Ubuntu's checkout was merge `7c70425675094064a6168db9279aec647cdb0f60`. I inspected retained Ubuntu/Windows failure sections, the Ubuntu console provenance, reproductions and exact source deltas. Ubuntu had three Rust failures; Windows had 22. A passing self-hosting finish did not override either failed product gate.
+- The missing goal-delivery batch contract extension explains the selected-action and missing-initial-field failures. The retained remote contract differs by the approved 20-line extension. Both remote batch/composition test files are byte-identical to their current counterparts, so their successful local rerun did not depend on weakened assertions.
+- Restore both accepted historical reports: `civilization-choice-ux.md`, linked by `capability-tree-sheet.md`, and its transitive `capability-tree-data-seam.md`. I read the latter and checked its absence of further Markdown links. These original reports are historical source artifacts, not current catalogue counts or deployed outcome claims. Their restoration repairs the incomplete publication rather than concealing the broken link. The UX report's other local link is the existing `VISUAL_DIRECTION.md`.
+- The effort nested-condition collapse preserves short-circuit evaluation. The subsequent all-target clippy repairs preserve CLI field mappings and error propagation: grouped opening/disposition/reflection/phase inputs, boxed task enum, equivalent conditions, `?`, assertions, lifetimes, reference slices and zero-permission spelling. Both private delivery opening callers retain their original targets. I inspected the isolated two-hunk `delivery.rs` mechanical patch; unrelated claim-normalization behavior is outside this verdict and the owner's staged CI packet.
+- Windows byte-map changes normalize relative path components while retaining every file byte and exact map membership. Canonical/raw temporary-root scrubbing is presentation normalization; canonicalization errors still propagate. The input-drift expectation now joins native path components. The two added nested-record controls include binary bytes. These are plausible, source-grounded portability repairs; Linux evidence does not establish their Windows execution.
+
+## Scheduling boundary and resolved observation
+
+The real deadline failures include Cargo lock contention under the existing 4,500 ms request allowance. A process-local mutex cannot coordinate nextest's separate test processes. The new resource group limits only eight named nested-Cargo binaries and five exact composed coverage witnesses to one concurrent member. Other tests remain parallel. No timeout, output cap, assertion, retry or verification profile was weakened.
+
+My source review found one omitted imported coverage witness, `composed_bridge::development_effort::tests::budget_read_preserves_real_close_refusal_and_restored_success`; the author added its exact name before freeze. That observation is resolved. TOML parsing and the [official test-group semantics](https://nexte.st/docs/configuration/test-groups/) and [exact filter matching](https://nexte.st/docs/filtersets/reference/) support the intended scope. Local nextest is unavailable, so actual scheduling remains a remote verification obligation.
+
+## Reused verification and this review's check
+
+I reused the author receipt `.blabla/scratch/diagnose-published-ci-regression/evidence-1-17-1792203773454630589.log`, child exit 0. It contains all-target clippy, 67 integration cases (4 batch, 9 effort, 2 composition, 11 input-drift, 10 READY bindings, 31 READY refresh), 16 private READY checkpoint controls and one nested composed witness. The maximum measured batch setup was 2,181 ms against the unchanged 4,500 ms allowance. The previous six-case contract reproduction and masked-clippy RED/GREEN sequence remain supporting evidence.
+
+I inspected all result/diagnostic lines and the complete stderr tail, with repetitive fixture output reduced rather than claiming a fresh product run. Expected task-refusal diagnostics belong to the passing checkpoint controls; no failed test or panic appears in the deciding log. Its SHA-256 is `b0e9788be4aaefd451fee26dc9fa67730c631424b3d0fd912251a1feacc6de46`.
+
+This review runs only the declared existence check for this report and the author's report. It does not rerun the product or claim a corrected published tree has passed. The owner retains publication and terminal verification of both OS gates, including nextest scheduling, Windows representations, audit and documentation links. Any remaining remote failure must stay open.

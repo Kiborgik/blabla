@@ -66,3 +66,23 @@ when resolve_delivery_origin {
     expect "invalid-resolution-refuses-without-erasure": not before.delivery_fixture_initialized or before.delivery_resolution_eligible or (not after.delivery_operation_succeeded and after.delivery_records_unchanged)
     expect "resolution-retains-existing-completion-authority": after.delivery_contract_authority_preserved
 }
+
+state delivery_batch_initialized: bool
+state delivery_selected_source_assigned: bool
+state delivery_selected_source_current: bool
+state delivery_selected_review_eligible: bool
+state delivery_selected_verdict_recorded: bool
+state delivery_other_source_verdicts_preserved: bool
+state delivery_source_records_unchanged: bool
+
+action delivery_batch_fixture(kind: int)
+action review_explicit_delivery_source()
+
+when delivery_batch_fixture {
+    expect "explicit-batch-fixture-is-observed": after.delivery_batch_initialized
+}
+when review_explicit_delivery_source {
+    expect "eligible-assigned-current-source-review-succeeds": not (before.delivery_selected_source_assigned and before.delivery_selected_source_current and before.delivery_selected_review_eligible) or (after.delivery_operation_succeeded and after.delivery_selected_verdict_recorded)
+    expect "unassigned-stale-or-ineligible-source-refuses-before-writes": not before.delivery_batch_initialized or (before.delivery_selected_source_assigned and before.delivery_selected_source_current and before.delivery_selected_review_eligible) or (not after.delivery_operation_succeeded and after.delivery_records_unchanged)
+    expect "explicit-source-review-preserves-other-sources-and-verdicts": after.delivery_other_source_verdicts_preserved and after.delivery_source_records_unchanged
+}

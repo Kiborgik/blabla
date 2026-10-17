@@ -259,7 +259,7 @@ fn verdict(root: &Path, reviewer: &str, goal: &str, value: &str) -> Value {
     )
 }
 
-fn close_args<'a>(name: &'a str, bounded: bool) -> Vec<&'a str> {
+fn close_args(name: &str, bounded: bool) -> Vec<&str> {
     let mut args = vec!["task", "close", name, "--model", "owner"];
     if bounded {
         args.extend([
@@ -312,7 +312,7 @@ fn sources() -> TempDir {
     temp
 }
 
-fn batch_args<'a>(extra: &'a str) -> Vec<&'a str> {
+fn batch_args(extra: &str) -> Vec<&str> {
     vec![
         "task",
         "open",

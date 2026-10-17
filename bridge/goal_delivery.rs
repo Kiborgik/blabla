@@ -1210,8 +1210,8 @@ mod tests {
     use super::*;
     #[test]
     fn only_typed_lifecycle_decisions_are_observed_as_refusals() {
-        assert_eq!(decision(0, &json!({"task":{}})).unwrap(), true);
-        assert_eq!(decision(2, &json!({"category":"task"})).unwrap(), false);
+        assert!(decision(0, &json!({"task":{}})).unwrap());
+        assert!(!decision(2, &json!({"category":"task"})).unwrap());
         for (exit, value) in [
             (101, json!({"category":"task"})),
             (2, json!({"category":"memory"})),

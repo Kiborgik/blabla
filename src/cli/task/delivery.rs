@@ -1106,7 +1106,7 @@ mod tests {
             "worker"
         };
         assert_eq!(
-            super::super::open_with_delivery(
+            super::super::open_with_targets(
                 project,
                 Opening {
                     name: name.into(),
@@ -1119,10 +1119,7 @@ mod tests {
                     review_of: target.map(str::to_owned),
                     ..Default::default()
                 },
-                vec![],
-                vec![],
-                false,
-                false,
+                super::super::OpenOptions::default(),
                 true,
                 &[]
             ),
@@ -1536,11 +1533,10 @@ mod tests {
                     review_of: Some("work".into()),
                     ..Default::default()
                 },
-                vec![],
-                vec!["secondary".into()],
-                vec![],
-                false,
-                false,
+                super::super::OpenOptions {
+                    delivery_targets: vec!["secondary".into()],
+                    ..Default::default()
+                },
                 true,
                 &[]
             ),

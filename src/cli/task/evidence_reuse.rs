@@ -517,9 +517,11 @@ mod tests {
                     super::super::disposition(
                         &project,
                         "source",
-                        "role::reviewer",
-                        "confirmed-unchanged",
-                        "Fresh manual inspection recorded concurrently",
+                        super::super::DispositionInput {
+                            identity: "role::reviewer",
+                            status: "confirmed-unchanged",
+                            reason: "Fresh manual inspection recorded concurrently"
+                        },
                         "reviewer",
                         false,
                         true

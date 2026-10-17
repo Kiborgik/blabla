@@ -300,9 +300,11 @@ mod tests {
                 super::super::disposition(
                     project,
                     name,
-                    identity,
-                    "confirmed-unchanged",
-                    "Actual entry and evidence inspected",
+                    super::super::DispositionInput {
+                        identity,
+                        status: "confirmed-unchanged",
+                        reason: "Actual entry and evidence inspected"
+                    },
                     "worker",
                     false,
                     false
@@ -325,11 +327,13 @@ mod tests {
             super::super::reflect(
                 project,
                 name,
-                decision,
-                observation,
-                evidence_refs,
-                reason,
-                outcome,
+                super::super::ReflectionInput {
+                    decision,
+                    observation,
+                    evidence_refs,
+                    reason,
+                    outcome
+                },
                 model,
                 false,
                 false
@@ -391,7 +395,12 @@ mod tests {
                     visit(root, &path, result);
                 } else {
                     result.insert(
-                        path.strip_prefix(root).unwrap().to_string_lossy().into(),
+                        path.strip_prefix(root)
+                            .unwrap()
+                            .components()
+                            .map(|component| component.as_os_str().to_string_lossy())
+                            .collect::<Vec<_>>()
+                            .join("/"),
                         std::fs::read(path).unwrap(),
                     );
                 }

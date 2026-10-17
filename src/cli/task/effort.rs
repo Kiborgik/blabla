@@ -94,10 +94,10 @@ fn permitted(
     {
         return Ok(());
     }
-    if phase == "integration" || ["stop", "interrupt"].contains(&phase) {
-        if ["accepted", "ready", "closed"].contains(&record.state.as_str()) {
-            return validate_orchestrator_model(project, model, json);
-        }
+    if (phase == "integration" || ["stop", "interrupt"].contains(&phase))
+        && ["accepted", "ready", "closed"].contains(&record.state.as_str())
+    {
+        return validate_orchestrator_model(project, model, json);
     }
     Err(emit_error(
         error(
@@ -119,19 +119,40 @@ pub(crate) fn phase(
     reason: Option<&str>,
     json: bool,
 ) -> i32 {
-    phase_with_checkpoint(project, name, phase, worker, model, reason, json, || {})
+    phase_with_checkpoint(
+        project,
+        name,
+        PhaseInput {
+            phase,
+            worker,
+            model,
+            reason,
+        },
+        json,
+        || {},
+    )
+}
+
+struct PhaseInput<'a> {
+    phase: &'a str,
+    worker: &'a str,
+    model: &'a str,
+    reason: Option<&'a str>,
 }
 
 fn phase_with_checkpoint(
     project: &Project,
     name: &str,
-    phase: &str,
-    worker: &str,
-    model: &str,
-    reason: Option<&str>,
+    input: PhaseInput<'_>,
     json: bool,
     checkpoint: impl FnOnce(),
 ) -> i32 {
+    let PhaseInput {
+        phase,
+        worker,
+        model,
+        reason,
+    } = input;
     let refuse = |message| emit_error(error("task", message, None), json, 2);
     let fresh = match blabla::project::read_manifest(&project.manifest.path)
         .and_then(blabla::project::load)
@@ -347,10 +368,12 @@ mod tests {
             phase_with_checkpoint(
                 &project,
                 "one",
-                "development",
-                "actor",
-                "worker",
-                None,
+                PhaseInput {
+                    phase: "development",
+                    worker: "actor",
+                    model: "worker",
+                    reason: None
+                },
                 true,
                 || {}
             ),
@@ -374,10 +397,12 @@ mod tests {
             phase_with_checkpoint(
                 &project,
                 "one",
-                "development",
-                "actor",
-                "worker",
-                None,
+                PhaseInput {
+                    phase: "development",
+                    worker: "actor",
+                    model: "worker",
+                    reason: None
+                },
                 true,
                 || {
                     let mut changed = task::read(dir.path(), "one").unwrap().unwrap();
@@ -401,10 +426,12 @@ mod tests {
             phase_with_checkpoint(
                 &project,
                 "one",
-                "development",
-                "actor",
-                "worker",
-                None,
+                PhaseInput {
+                    phase: "development",
+                    worker: "actor",
+                    model: "worker",
+                    reason: None
+                },
                 true,
                 || {
                     std::fs::write(dir.path().join("process.bla"),"role \"worker\" { purpose \"Changed authority context\" model \"worker\" }\n").unwrap();
@@ -427,10 +454,12 @@ mod tests {
                 phase_with_checkpoint(
                     &project,
                     "one",
-                    "development",
-                    "actor",
-                    "worker",
-                    None,
+                    PhaseInput {
+                        phase: "development",
+                        worker: "actor",
+                        model: "worker",
+                        reason: None
+                    },
                     true,
                     || {
                         if revoke {

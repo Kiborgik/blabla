@@ -39,9 +39,10 @@ fn tree(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
             let key = path
                 .strip_prefix(root)
                 .unwrap()
-                .to_str()
-                .unwrap()
-                .to_owned();
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             if path.is_dir() {
                 found.insert(key, None);
                 visit(root, &path, found);

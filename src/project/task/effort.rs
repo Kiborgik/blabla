@@ -85,10 +85,8 @@ pub fn switch(
                 interval.started_unix,
                 interval.ended_unix.unwrap_or(u64::MAX),
             ));
-            if interval.ended_unix.is_none() {
-                if open.replace((ti, ii)).is_some() {
-                    return Err("worker has multiple pending intervals".into());
-                }
+            if interval.ended_unix.is_none() && open.replace((ti, ii)).is_some() {
+                return Err("worker has multiple pending intervals".into());
             }
         }
     }
