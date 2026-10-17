@@ -1424,3 +1424,19 @@ dialog h2 {
 .territory-pagination[hidden] { display: none; }
 .territory-pagination button { min-width: 44px; min-height: 44px; font: inherit; }
 .territory-detail > summary { min-height: 56px; padding-right: 80px; }
+
+.town-production { margin: 0 0 12px; }
+.town-production > h4 { margin: 0 0 7px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.town-production-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; width: 100%; margin: 0 0 6px; padding: 8px 9px; border: 1px solid var(--border); border-inline-start: 3px solid var(--gold); border-radius: 6px; background: var(--surface); color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
+.town-production-row:hover { background: color-mix(in srgb, var(--gold) 9%, var(--surface)); }
+.town-production-row:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.town-production-title { display: flex; align-items: center; gap: 6px; grid-column: 1 / -1; min-width: 0; }
+.town-production-title > strong { flex: 1; min-width: 0; font-size: 13px; }
+.town-production-title .visual-icon { width: 17px; height: 17px; flex: 0 0 17px; }
+.town-production-state { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.town-production-result { grid-column: 1 / -1; font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.town-production-inputs { grid-column: 1 / -1; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.town-production-record { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.town-production-link { grid-column: 2; color: var(--ink); font-size: 11px; line-height: 1.4; align-self: end; }
+.town-production-more > summary { display: list-item; min-height: 44px; padding: 10px 2px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.town-production-more > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }

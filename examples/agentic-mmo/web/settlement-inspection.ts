@@ -16,6 +16,7 @@ import { operationVisual } from '../visuals/operation-visuals.ts';
 import type { ResourceAmount } from '../visuals/operation-visuals.ts';
 import { METRIC_LABELS } from '../visuals/visual-language.ts';
 import { visualIcon } from './world-cues.ts';
+import { createTownProduction } from './town-production.ts';
 
 function text<K extends keyof HTMLElementTagNameMap>(tag: K, value: string, className = ''): HTMLElementTagNameMap[K] {
   const element = document.createElement(tag);
@@ -145,7 +146,7 @@ export function renderTerritoryInspection(host: HTMLElement, territory: TownTerr
   previous.addEventListener('click', () => { page--; draw(); }); next.addEventListener('click', () => { page++; draw(); }); draw();
 }
 
-export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }): void {
+export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }, onInspectWork?: () => void): void {
   host.replaceChildren();
   const city = cities.find((entry) => entry.id === selectedId) ?? cities[0];
   if (!city) return;
@@ -378,6 +379,13 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
   picker.addEventListener('change', choose); label.append(picker); work.append(label, detail);
   for (const card of cards) card.remove();
   host.append(work); choose();
+  const production = createTownProduction(city, buildingId => {
+    picker.value = buildingId;
+    choose();
+    onInspectWork?.();
+    picker.focus({ preventScroll: true });
+  });
+  if (production) overview.prepend(production);
 }
 
 export function renderStrategicInspection(host: HTMLElement, facts: ReturnType<typeof observedStrategicResources>): void {

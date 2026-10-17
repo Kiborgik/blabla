@@ -262,7 +262,10 @@ function renderInspection(): void {
   if (pastoral) renderPastoralInspection(panel, pastoral);
   if (snapshot && actual) renderStrategicInspection(panel, observedStrategicResources(snapshot.state, actual.id));
   const settlement = panel.querySelector<HTMLElement>('.city-details');
-  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork, development, territory, retainedTerritory);
+  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork, development, territory, retainedTerritory, () => {
+    chooseSection('work');
+    panel.scrollTop = 0;
+  });
   const overview = settlement?.querySelector<HTMLElement>('.town-overview');
   if (overview) panel.insertBefore(overview, panel.querySelector('.research-detail'));
   const aim = panel.querySelector('.ambition'); if (aim) panel.append(aim);

@@ -1,0 +1,90 @@
+import { BUILDINGS } from '../core/content.ts';
+import type { City } from '../core/types.ts';
+import { buildingIdentity } from '../visuals/building-visuals.ts';
+import { operationVisual, type OperationVisual } from '../visuals/operation-visuals.ts';
+import { exactNumber } from './number-format.ts';
+import { visualIcon } from './world-cues.ts';
+
+export interface TownProductionRow extends OperationVisual {
+  buildingId: string;
+  name: string;
+  result: string;
+  recordedAt: string | null;
+}
+
+export function townProductionRows(city: Pick<City, 'buildings' | 'buildingOperations'>): TownProductionRow[] {
+  return [...city.buildings].reverse().flatMap(buildingId => {
+    const definition = BUILDINGS.find(building => building.id === buildingId);
+    if (!definition?.operatingInputs) return [];
+    const view = operationVisual(city.buildingOperations?.[buildingId]);
+    const last = view.last;
+    const produced = last?.produced.filter(amount => amount.amount > 0) ?? [];
+    const result = !last ? 'No operating record yet'
+      : last.status === 'paused' ? 'Paused in that season'
+      : last.status === 'operated' && produced.length ? `Made ${produced.map(amount => `${exactNumber(amount.amount)} ${amount.label}`).join(' · ')}`
+      : last.label;
+    return [{ ...view, buildingId, name: definition.name, result, recordedAt: last ? `Last recorded season · ${last.round}` : null }];
+  });
+}
+
+export function createTownProduction(city: Pick<City, 'buildings' | 'buildingOperations'>, onInspect: (buildingId: string) => void): HTMLElement | null {
+  const rows = townProductionRows(city);
+  if (!rows.length) return null;
+  const section = document.createElement('section');
+  section.className = 'town-production';
+  section.setAttribute('aria-label', 'Town production');
+  const heading = document.createElement('h4');
+  heading.textContent = 'Town production';
+  section.append(heading);
+  const more = document.createElement('details');
+  more.className = 'town-production-more';
+  more.dataset['townDisclosure'] = 'production';
+  const summary = document.createElement('summary');
+  summary.textContent = `More town production (${Math.max(0, rows.length - 3)})`;
+  more.append(summary);
+  for (const [index, row] of rows.entries()) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'town-production-row';
+    button.dataset['productionWork'] = row.buildingId;
+    button.dataset['inspectionFocus'] = `production:${row.buildingId}`;
+    button.dataset['tone'] = row.tone;
+    const title = document.createElement('span');
+    title.className = 'town-production-title';
+    const name = document.createElement('strong');
+    name.textContent = row.name;
+    const definition = BUILDINGS.find(building => building.id === row.buildingId);
+    const icon = buildingIdentity(row.buildingId)?.icon ?? (row.buildingId === 'foundry' ? 'kiln' : definition?.production.science ? 'science' : definition?.production.culture ? 'culture' : 'infrastructure');
+    title.append(visualIcon(icon), name);
+    const state = document.createElement('span');
+    state.className = 'town-production-state';
+    state.textContent = row.current === 'Unknown' ? 'State unavailable' : `${row.current} now`;
+    title.append(state);
+    const result = document.createElement('span');
+    result.className = 'town-production-result';
+    result.textContent = row.result;
+    button.append(title, result);
+    if (row.last) {
+      const inputs = document.createElement('span');
+      inputs.className = 'town-production-inputs';
+      const paid = [...row.last.paid, ...row.last.strategicPaid ?? []].map(amount => `${exactNumber(amount.amount)} ${amount.label}`).join(' · ') || 'None';
+      const residents = row.last.residents;
+      inputs.textContent = `Used ${paid}${residents ? ` · Assigned ${exactNumber(residents.allocated)} resident${residents.allocated === 1 ? '' : 's'}` : ''}`;
+      button.append(inputs);
+    }
+    if (row.recordedAt) {
+      const record = document.createElement('span');
+      record.className = 'town-production-record';
+      record.textContent = row.recordedAt;
+      button.append(record);
+    }
+    const link = document.createElement('span');
+    link.className = 'town-production-link';
+    link.textContent = 'Inspect record →';
+    button.append(link);
+    button.addEventListener('click', () => onInspect(row.buildingId));
+    (index < 3 ? section : more).append(button);
+  }
+  if (rows.length > 3) section.append(more);
+  return section;
+}

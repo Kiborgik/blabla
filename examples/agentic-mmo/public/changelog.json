@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-live.29",
+    "date": "2026-10-17",
+    "title": "Town production at a glance",
+    "changes": [
+      "Town Overview shows the latest recorded output from completed paid-input buildings, including Foundries, Observatories and Printing houses. Inputs and local residents come from actual operation receipts.",
+      "Current On or Paused settings stay separate from the last recorded round and output. Missing records and blocked production are stated without inventing results.",
+      "Choose a production row to open its exact Work details. The three newest installed paid buildings stay visible; a compact disclosure retains the rest.",
+      "This presentation update preserves the existing world, resource economy and calendar. Civic and industrial successors remain separate work."
+    ]
+  },
+  {
     "version": "0.1.0-live.28",
     "date": "2026-10-17",
     "title": "Learning follows the land",
