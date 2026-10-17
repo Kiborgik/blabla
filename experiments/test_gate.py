@@ -138,12 +138,14 @@ class RustTestLog(unittest.TestCase):
             captured = StringIO()
             with redirect_stdout(captured):
                 code, output, _ = run(
-                    [sys.executable, "-c", "import sys; print('stdout'); print('stderr', file=sys.stderr); sys.exit(7)"],
+                    [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'stdout\\r\\n'); sys.stdout.buffer.flush(); sys.stderr.buffer.write(b'stderr\\r\\n'); sys.exit(7)"],
                     log_path=path,
                 )
             self.assertEqual(code, 7)
             self.assertIn("stdout", output)
             self.assertIn("stderr", output)
+            self.assertEqual(output.splitlines(), ["stdout", "stderr"])
+            self.assertNotIn("\r", output)
             self.assertEqual(path.read_text(encoding="utf-8"), output)
             self.assertEqual(captured.getvalue(), output)
 
@@ -161,7 +163,7 @@ class RustTestLog(unittest.TestCase):
             captured = Capture()
             with redirect_stdout(captured):
                 code, output, seconds = run(
-                    [sys.executable, "-c", "import time; print('active-test', flush=True); time.sleep(60)"],
+                    [sys.executable, "-c", "import sys,time; sys.stdout.buffer.write(b'active-test\\r\\n'); sys.stdout.buffer.flush(); time.sleep(60)"],
                     timeout=1, log_path=path,
                 )
             self.assertEqual(code, 124)
@@ -169,6 +171,8 @@ class RustTestLog(unittest.TestCase):
             self.assertTrue(persisted)
             self.assertIn("active-test", persisted[0])
             self.assertIn("timed out after 1 seconds", output)
+            self.assertTrue(output.startswith("active-test\n\n"))
+            self.assertNotIn("\r", output)
             self.assertFalse(rust_tests_are_clean(output)[2])
             self.assertEqual(path.read_text(encoding="utf-8"), output)
             self.assertEqual(captured.getvalue(), output)

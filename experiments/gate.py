@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import codecs
 from contextlib import nullcontext
+import io
 import json
 import subprocess
 import sys
@@ -78,7 +79,9 @@ class CommandProgress(asyncio.SubprocessProtocol):
     def __init__(self, artifact):
         self.artifact = artifact
         self.output = []
-        self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        self.decoder = io.IncrementalNewlineDecoder(
+            codecs.getincrementaldecoder("utf-8")("replace"), translate=True,
+        )
         self.finished = asyncio.get_running_loop().create_future()
         self.error = None
 
@@ -137,7 +140,7 @@ async def run_streaming(command, timeout, artifact, started):
 
 def run(command, timeout=1800, log_path=None):
     started = time.perf_counter()
-    with log_path.open("w", encoding="utf-8") if log_path is not None else nullcontext() as artifact:
+    with log_path.open("w", encoding="utf-8", newline="\n") if log_path is not None else nullcontext() as artifact:
         code, output = asyncio.run(run_streaming(command, timeout, artifact, started))
     return code, output, time.perf_counter() - started
 
