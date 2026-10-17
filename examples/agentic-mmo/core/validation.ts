@@ -50,6 +50,7 @@ import {
   type ResearchBoostReceipt,
   type PopulationGrowthReceipt,
   type PastoralSiteLayer,
+  type TileAcquisitionReceipt,
   type WorldState,
 } from './types.ts';
 
@@ -305,6 +306,46 @@ function waterLandRecords(hasLayer: boolean, layer: unknown, cities: City[], til
   return true;
 }
 
+function observatoryRecords(cities: City[], tiles: HexTile[], events: GameEvent[], features: string[]): boolean {
+  const enabled = features.includes('observatory-learning');
+  const sourceValid = (settlement: City, value: unknown): boolean => {
+    if (!enabled || !record(value) || !exactKeys(value, ['campusTileId', 'sourceTileId'])
+      || !integer(value.campusTileId) || !integer(value.sourceTileId) || value.campusTileId === value.sourceTileId
+      || !settlement.buildings.includes('campus') || settlement.districtSites?.campus !== value.campusTileId) return false;
+    const campus = tiles.find(site => site.id === value.campusTileId);
+    const source = tiles.find(site => site.id === value.sourceTileId);
+    return campus !== undefined && source !== undefined && hexDistance(campus, source) === 1;
+  };
+  for (const settlement of cities) {
+    const installed = settlement.buildings.includes('observatory');
+    const result = settlement.buildingOperations?.observatory?.lastResult;
+    if (result && !Object.hasOwn(result, 'residents')) return false;
+    const mapping: unknown = settlement.buildingHighGround;
+    if (Object.hasOwn(settlement, 'buildingHighGround')) {
+      if (!enabled || !record(mapping) || !exactKeys(mapping, installed ? ['observatory'] : [])
+        || installed && !sourceValid(settlement, mapping.observatory)) return false;
+    } else if (installed) return false;
+    const active = settlement.construction?.active;
+    const completed = settlement.construction?.lastCompleted;
+    for (const entry of [active, completed]) {
+      if (!entry || 'kind' in entry) continue;
+      const observatory = entry.buildingId === 'observatory';
+      if (observatory !== Object.hasOwn(entry, 'highGround')) return false;
+      if (!observatory) continue;
+      if (!sourceValid(settlement, entry.highGround)) return false;
+      if (entry === completed) {
+        if (!record(mapping) || !record(mapping.observatory) || !entry.highGround || !completed
+          || mapping.observatory.campusTileId !== entry.highGround.campusTileId
+          || mapping.observatory.sourceTileId !== entry.highGround.sourceTileId) return false;
+        const event = events.find(candidate => candidate.id === completed.eventId);
+        if (event && (event.type !== 'building-completed' || event.round !== completed.completedRound || event.tileId !== settlement.tileId
+          || event.actor !== settlement.civId || event.target !== settlement.civId)) return false;
+      }
+    }
+  }
+  return true;
+}
+
 function residentAllocation(value: unknown): value is { available: number; required: number; allocated: number } {
   return record(value) && exactKeys(value, ['ruleVersion', 'openingPopulation', 'communityReserve', 'required', 'available', 'allocated'])
     && value.ruleVersion === 1 && integer(value.openingPopulation, 1) && integer(value.communityReserve)
@@ -312,10 +353,22 @@ function residentAllocation(value: unknown): value is { available: number; requi
     && value.available <= Math.max(0, value.openingPopulation - value.communityReserve);
 }
 
-function operationResult(value: unknown, round: number, features: string[]): boolean {
-  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages', ...(Object.hasOwn(value, 'residents') ? ['residents'] : [])])
+function operationResult(value: unknown, round: number, features: string[], strategicRecipe: boolean): boolean {
+  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages', ...(strategicRecipe ? ['strategicPaid', 'strategicShortages'] : []), ...(Object.hasOwn(value, 'residents') ? ['residents'] : [])])
     || !integer(value.round, 0, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
     || !Array.isArray(value.shortages)) return false;
+  const strategic: string[] = [];
+  if (strategicRecipe) {
+    if (!features.includes('foundry-production') || !features.includes('finite-metals')
+      || !strategicResources(value.strategicPaid) || !Array.isArray(value.strategicShortages) || !residentAllocation(value.residents)) return false;
+    for (const shortage of value.strategicShortages) {
+      if (!record(shortage) || !exactKeys(shortage, ['resource', 'required', 'available'])
+        || shortage.resource !== 'iron' || !integer(shortage.required, 1) || !integer(shortage.available)
+        || shortage.required <= shortage.available) return false;
+      strategic.push(shortage.resource);
+    }
+    if (!unique(strategic)) return false;
+  }
   if (Object.hasOwn(value, 'residents') && (!features.includes('resident-capacity') || !residentAllocation(value.residents))) return false;
   const residents = residentAllocation(value.residents) ? value.residents : null;
   const resources: string[] = [];
@@ -327,23 +380,27 @@ function operationResult(value: unknown, round: number, features: string[]): boo
     resources.push(shortage.resource);
   }
   if (!unique(resources)) return false;
-  if (value.status === 'operated') return resources.length === 0
+  if (value.status === 'operated') return resources.length === 0 && strategic.length === 0
+    && (!strategicRecipe || strategicResources(value.strategicPaid) && Object.values(value.strategicPaid).some(amount => amount > 0))
     && (residents === null || residents.allocated === residents.required && residents.available >= residents.required);
   return Object.keys(value.paid).length === 0 && Object.keys(value.produced).length === 0
+    && (!strategicRecipe || strategicResources(value.strategicPaid) && Object.keys(value.strategicPaid).length === 0)
     && (residents === null || residents.allocated === 0)
-    && (value.status === 'paused' ? resources.length === 0 : value.status === 'blocked'
-      && (resources.length > 0 || residents !== null && residents.available < residents.required));
+    && (value.status === 'paused' ? resources.length === 0 && strategic.length === 0 : value.status === 'blocked'
+      && (resources.length > 0 || strategic.length > 0 || residents !== null && residents.available < residents.required));
 }
 
 function buildingOperations(value: City, round: number, features: string[]): boolean {
-  const paid = BUILDINGS.filter((building) => value.buildings.includes(building.id)
-    && RESOURCE_IDS.some((resource) => (building.operatingInputs?.[resource] ?? 0) > 0)).map((building) => building.id);
+  const definitions = BUILDINGS.filter((building) => value.buildings.includes(building.id)
+    && (RESOURCE_IDS.some((resource) => (building.operatingInputs?.[resource] ?? 0) > 0) || (building.strategicInputs?.iron ?? 0) > 0));
+  const paid = definitions.map((building) => building.id);
   if (!Object.hasOwn(value, 'buildingOperations')) return paid.length === 0;
   const operations: unknown = value.buildingOperations;
   if (!features.includes('building-operations') || !record(operations) || !exactKeys(operations, paid)) return false;
-  return Object.values(operations).every((operation) => record(operation)
+  return Object.entries(operations).every(([id, operation]) => record(operation)
     && exactKeys(operation, ['enabled', 'lastResult']) && typeof operation.enabled === 'boolean'
-    && (operation.lastResult === null || operationResult(operation.lastResult, round, features)));
+    && (operation.lastResult === null || operationResult(operation.lastResult, round, features,
+      (definitions.find(building => building.id === id)?.strategicInputs?.iron ?? 0) > 0)));
 }
 
 function orderRevision(value: unknown, revision: number): number | null {
@@ -554,7 +611,7 @@ function constructionIdentity(value: Record<string, unknown>, settlement: City, 
 }
 
 function constructionKeys(value: Record<string, unknown>): string[] {
-  return value.kind === 'wonder' ? ['kind', 'wonderId', 'tileId'] : value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : []), ...(Object.hasOwn(value, 'catchmentTileId') ? ['catchmentTileId'] : [])];
+  return value.kind === 'wonder' ? ['kind', 'wonderId', 'tileId'] : value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : []), ...(Object.hasOwn(value, 'catchmentTileId') ? ['catchmentTileId'] : []), ...(Object.hasOwn(value, 'highGround') ? ['highGround'] : [])];
 }
 
 function constructionCompletion(value: unknown, settlement: City, features: string[], round: number, revision: number): value is ConstructionCompletion {
@@ -950,6 +1007,74 @@ function growthRecords(cities: City[], events: GameEvent[], features: string[], 
   return true;
 }
 
+function territoryReceipt(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER, maxTiles = Number.MAX_SAFE_INTEGER): value is TileAcquisitionReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'id', 'cityId', 'civId', 'cityTileId', 'tileId', 'pathTileIds', 'distance', 'priorCivilizationPurchases', 'paid', 'acquiredRound', 'eventId'])
+    || value.ruleVersion !== 1 || !boundedText(value.id) || !/^territory-[1-9]\d*$/.test(value.id)
+    || !boundedText(value.cityId) || !integer(value.civId, 0, CIV_COUNT - 1) || !integer(value.cityTileId, 0, maxTiles - 1) || !integer(value.tileId, 0, maxTiles - 1)
+    || !integer(value.distance, 1, 3) || !integer(value.priorCivilizationPurchases, 0, maxTiles - 1)
+    || !record(value.paid) || !exactKeys(value.paid, ['credits']) || !finite(value.paid.credits)
+    || !integer(value.acquiredRound, 0, round) || !Array.isArray(value.pathTileIds)
+    || value.pathTileIds.length < 2 || value.pathTileIds.length > Math.min(37, maxTiles)
+    || Object.keys(value.pathTileIds).length !== value.pathTileIds.length || !value.pathTileIds.every((id: unknown) => integer(id, 0, maxTiles - 1))
+    || !unique(value.pathTileIds) || value.pathTileIds[0] !== value.cityTileId || value.pathTileIds.at(-1) !== value.tileId) return false;
+  const accepted = Number(value.id.slice('territory-'.length));
+  return integer(accepted, 1, revision) && completionRevision(value.eventId, revision) === accepted;
+}
+
+function sameTerritoryReceipt(left: TileAcquisitionReceipt, right: TileAcquisitionReceipt): boolean {
+  return left.ruleVersion === right.ruleVersion && left.id === right.id && left.cityId === right.cityId && left.civId === right.civId
+    && left.cityTileId === right.cityTileId && left.tileId === right.tileId && left.distance === right.distance
+    && left.priorCivilizationPurchases === right.priorCivilizationPurchases && left.paid.credits === right.paid.credits
+    && left.acquiredRound === right.acquiredRound && left.eventId === right.eventId
+    && left.pathTileIds.length === right.pathTileIds.length && left.pathTileIds.every((id, index) => id === right.pathTileIds[index]);
+}
+
+function territoryRecords(present: boolean, value: unknown, cities: City[], tiles: HexTile[], events: GameEvent[], features: string[], round: number, revision: number, wonders: unknown): boolean {
+  const enabled = features.includes('owned-territory');
+  if (!enabled) return !present && events.every(event => !Object.hasOwn(event, 'territoryAcquisition'));
+  if (!present || !record(value) || Object.keys(value).length > tiles.length) return false;
+  const tileIndex = new Map(tiles.map(site => [site.id, site]));
+  const cityIndex = new Map(cities.map(settlement => [settlement.id, settlement]));
+  const centers = new Set(cities.map(settlement => settlement.tileId));
+  const receipts = new Map<number, TileAcquisitionReceipt>();
+  for (const [key, raw] of Object.entries(value)) {
+    if (!territoryReceipt(raw, revision, round, tiles.length) || key !== String(raw.tileId)) return false;
+    const center = tileIndex.get(raw.cityTileId); const target = tileIndex.get(raw.tileId); const settlement = cityIndex.get(raw.cityId);
+    if (!center || !target || target.owner !== raw.civId || centers.has(raw.tileId) || hexDistance(center, target) !== raw.distance
+      || settlement && (settlement.civId !== raw.civId || settlement.tileId !== raw.cityTileId)) return false;
+    for (const [index, tileId] of raw.pathTileIds.entries()) {
+      const site = tileIndex.get(tileId); const previous = tileIndex.get(raw.pathTileIds[index - 1] ?? -1);
+      if (!site || hexDistance(center, site) > 3 || index > 0 && (!previous || hexDistance(previous, site) !== 1)) return false;
+    }
+    const event = events.find(candidate => candidate.id === raw.eventId);
+    if (event && (!event.territoryAcquisition || !sameTerritoryReceipt(raw, event.territoryAcquisition))) return false;
+    receipts.set(raw.tileId, raw);
+  }
+  const all = [...receipts.values()];
+  if (!unique(all.map(receipt => receipt.id)) || !unique(all.map(receipt => receipt.eventId))) return false;
+  const counts = new Map<number, number>();
+  for (const receipt of all.toSorted((left, right) => Number(left.id.slice(10)) - Number(right.id.slice(10)))) {
+    const count = counts.get(receipt.civId) ?? 0;
+    if (receipt.priorCivilizationPurchases !== count) return false;
+    counts.set(receipt.civId, count + 1);
+  }
+  const bound = (cityId: string, tileId: number): boolean => !receipts.has(tileId) || receipts.get(tileId)?.cityId === cityId;
+  for (const settlement of cities) {
+    if (!Object.values(settlement.districtSites ?? {}).every(tileId => bound(settlement.id, tileId))
+      || !Object.values(settlement.improvements ?? {}).every(improvement => bound(settlement.id, improvement.tileId))) return false;
+    for (const order of [settlement.construction?.active, settlement.construction?.lastCompleted])
+      if (order && 'tileId' in order && order.tileId !== undefined && !bound(settlement.id, order.tileId)) return false;
+  }
+  if (record(wonders)) for (const entry of Object.values(wonders)) {
+    if (!record(entry) || !wonderCompletion(entry.completion, revision, round) || !bound(entry.completion.cityId, entry.completion.tileId)) return false;
+  }
+  return events.every(event => {
+    if (!event.territoryAcquisition) return true;
+    const retained = receipts.get(event.territoryAcquisition.tileId);
+    return !!retained && sameTerritoryReceipt(retained, event.territoryAcquisition);
+  });
+}
+
 export function isGameEvent(value: unknown): value is GameEvent {
   return (
     record(value) &&
@@ -965,6 +1090,10 @@ export function isGameEvent(value: unknown): value is GameEvent {
     (!Object.hasOwn(value, 'populationGrowth') || (populationGrowth(value.populationGrowth) && value.type === 'population-growth'
       && value.populationGrowth.eventId === value.id && value.populationGrowth.round === value.round
       && value.populationGrowth.civId === value.actor && value.actor === value.target && integer(value.tileId))) &&
+    (value.type !== 'territory-acquired' || Object.hasOwn(value, 'territoryAcquisition')) &&
+    (!Object.hasOwn(value, 'territoryAcquisition') || (territoryReceipt(value.territoryAcquisition) && value.type === 'territory-acquired'
+      && value.territoryAcquisition.eventId === value.id && value.territoryAcquisition.acquiredRound === value.round
+      && value.territoryAcquisition.tileId === value.tileId && value.territoryAcquisition.civId === value.actor && value.actor === value.target)) &&
     (value.type !== 'coastal-founded' || Object.hasOwn(value, 'coastalFounding')) &&
     (!Object.hasOwn(value, 'coastalFounding') || (coastalReceipt(value.coastalFounding) && value.type === 'coastal-founded'
       && value.coastalFounding.eventId === value.id && value.coastalFounding.foundedRound === value.round && value.coastalFounding.destinationTileId === value.tileId
@@ -1114,11 +1243,13 @@ export function isWorldState(
     !growthRecords(cities, value.events, features, round, value.revision) ||
     !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
     !districtRecords(cities, tiles, value.events, features) ||
+    !observatoryRecords(cities, tiles, value.events, features) ||
     !improvementRecords(cities, tiles, value.events, features, round, value.revision) ||
     !metalRecords(Object.hasOwn(value, 'strategicDeposits'), value.strategicDeposits, value.civilizations, cities, tiles, value.events, value.routes, features, value.seed) ||
     !waterLandRecords(Object.hasOwn(value, 'pastoralSites'), value.pastoralSites, cities, tiles, value.events, features, value.seed, value.strategicDeposits) ||
     !coastalRecords(cities, value.events, tiles, features, round, value.revision) ||
     !wonderRecords(Object.hasOwn(value, 'wonders'), value.wonders, cities, value.civilizations, tiles, value.events, features, value.revision, round) ||
+    !territoryRecords(Object.hasOwn(value, 'tileAcquisitions'), value.tileAcquisitions, cities, tiles, value.events, features, round, value.revision, value.wonders) ||
     !value.civilizations.every((item) =>
       cities.some((settlement) => settlement.civId === item.id),
     ) ||

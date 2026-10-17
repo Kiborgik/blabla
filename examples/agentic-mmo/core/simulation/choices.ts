@@ -1,3 +1,5 @@
+import { selectedCampusHighGround } from './observatory.ts';
+import { availableTerritoryActions } from './territory.ts';
 import { availableWonderActions } from './wonders.ts';
 import { availableImprovementSites, orderedImprovements } from './improvements.ts';
 import { availableDistrictSites, describeDistrictProduction } from './districts.ts';
@@ -73,6 +75,7 @@ export function availableActions(
   if (!civilization) return [];
   const cities = citiesOf(state, seat);
   choices.push(...availableWonderActions(state, seat));
+  choices.push(...availableTerritoryActions(state, seat));
   const specialized = hasFeatures(state, ['city-specialization']);
   if (actionFeatureAvailable(state, 'focus')) {
     if (specialized) {
@@ -126,12 +129,14 @@ export function availableActions(
             });
             continue;
           }
+          const highGround = building.siteRequirement === 'campus-high-ground' ? selectedCampusHighGround(state, city) : undefined;
           const catchmentTileId = building.siteRequirement === 'mountain-catchment' ? selectedMountainCatchment(state, city) : undefined;
           choices.push({
             action: { type: 'build', project: building.id, cityId: city.id },
             ...(catchmentTileId === undefined ? {} : { catchmentTileId }),
+            ...(highGround === undefined ? {} : { highGround }),
             label: `Build ${building.name} in ${city.name}`,
-            reason: `${building.description} ${describeConstruction(building)}${hasFeatures(state, ['recurring-decisions']) ? ` Paid once at start; ${requiredConstructionWork(building.id)} work required over strategic beats; first output after completion.` : ''} Construct only in ${city.name}. ${describeSettlementSite(state, site)}`,
+            reason: `${building.description} ${describeConstruction(building)}${hasFeatures(state, ['recurring-decisions']) ? ` Paid once at start; ${requiredConstructionWork(building.id)} work required over strategic beats; first output after completion.` : ''} Construct only in ${city.name}.${highGround === undefined ? '' : ` Retain Campus ${highGround.campusTileId} with adjacent high ground ${highGround.sourceTileId}.`} ${describeSettlementSite(state, site)}`,
           });
         }
       } else {
@@ -248,6 +253,8 @@ export function sameAction(left: GameAction, right: unknown): boolean {
   )
     return false;
   switch (left.type) {
+    case 'acquire-tile':
+      return 'cityId' in right && 'tileId' in right && left.cityId === right.cityId && left.tileId === right.tileId;
     case 'focus':
       return 'focus' in right && left.focus === right.focus && left.cityId === ('cityId' in right ? right.cityId : undefined);
     case 'research':

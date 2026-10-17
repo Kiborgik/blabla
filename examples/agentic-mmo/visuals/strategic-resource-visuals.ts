@@ -1,7 +1,13 @@
 import { observedStrategicResources } from '../core/simulation/metals.ts';
-import type { StrategicDeposit, StrategicExtractionResult, WorldState } from '../core/types.ts';
+import type { StrategicDeposit, StrategicExtractionResult, StrategicResource, StrategicResources, WorldState } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 import { mapTileHeight } from './route-paths.ts';
+
+export interface StrategicAmount { resource: StrategicResource; label: string; amount: number }
+
+export function strategicResourceAmounts(values: StrategicResources | undefined): StrategicAmount[] {
+  return values?.iron === undefined ? [] : [{ resource: 'iron', label: 'Iron', amount: values.iron }];
+}
 
 export interface DepositView extends StrategicDeposit {
   id: string;
@@ -16,6 +22,7 @@ export const SITE_MARK_PATHS = {
   campus: 'M3 6L12 3L21 6L12 9ZM5 10V19H19V10M9 12V19M15 12V19',
   commerce: 'M3 10L5 4H19L21 10M4 10V20H20V10M3 10Q6 14 9 10Q12 14 15 10Q18 14 21 10',
   industry: 'M3 20V10L9 6V11L15 7V12H20V4H23V20ZM7 15V17M12 15V17M17 15V17',
+  culture: 'M3 5H21V13M3 5L8 9V13M21 5L16 9V13M6 16H18M3 20H21M8 16V20M16 16V20',
   iron: 'M3 16L8 7L14 4L21 12L18 20H7ZM8 7L11 14L18 20M11 14L21 12',
 } as const;
 

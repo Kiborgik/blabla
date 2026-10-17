@@ -1,3 +1,5 @@
+import { selectedCampusHighGround } from './observatory.ts';
+import { executeTerritoryAcquisition } from './territory.ts';
 import { executeWonderAction } from './wonders.ts';
 import { selectedMountainCatchment } from './water.ts';
 import { executeImprovementAction } from './improvements.ts';
@@ -70,6 +72,9 @@ export function executeAction(
   const firstCity = cities[0];
   const location = firstCity?.tileId ?? null;
   switch (action.type) {
+    case 'acquire-tile':
+      executeTerritoryAcquisition(state, seat, action.cityId, action.tileId, events);
+      return;
     case 'focus': {
       const specialized = hasFeatures(state, ['city-specialization']);
       const targets = specialized ? cities.filter((city) => city.id === action.cityId) : cities;
@@ -113,6 +118,8 @@ export function executeAction(
       if (!definition || !city)
         throw new RangeError('Construction requires a released building and eligible settlement');
       if (definition.district && action.tileId === undefined) throw new RangeError('District construction requires its exact site');
+      const highGround = definition.siteRequirement === 'campus-high-ground' ? selectedCampusHighGround(state, city) : undefined;
+      if (definition.siteRequirement === 'campus-high-ground' && highGround === undefined) throw new RangeError('Construction requires its exact own completed Campus and adjacent high ground');
       const catchmentTileId = definition.siteRequirement === 'mountain-catchment' ? selectedMountainCatchment(state, city) : undefined;
       if (definition.siteRequirement === 'mountain-catchment' && catchmentTileId === undefined) throw new RangeError('Construction requires its exact adjacent mountain catchment');
       transferCost(civilization.resources, definition.cost);
@@ -123,6 +130,7 @@ export function executeAction(
           ruleVersion: CONSTRUCTION_RULES.version, startedRound: state.round,
           ...(definition.district ? { tileId: action.tileId } : {}),
           ...(catchmentTileId === undefined ? {} : { catchmentTileId }),
+          ...(highGround === undefined ? {} : { highGround: structuredClone(highGround) }),
           paid: structuredClone(definition.cost), workRequired: requiredConstructionWork(definition.id), workDone: 0,
         };
         emitEvent(state, events, {
@@ -133,6 +141,7 @@ export function executeAction(
             ...RESOURCE_IDS.filter(resource => (definition.cost[resource] ?? 0) > 0).map(resource => `Paid ${definition.cost[resource]} ${resource}`),
             `Work 0/${city.construction.active.workRequired}`,
             ...(catchmentTileId === undefined ? [] : [`Retained mountain catchment ${catchmentTileId}`]),
+            ...(highGround === undefined ? [] : [`Retained Campus ${highGround.campusTileId} high ground ${highGround.sourceTileId}`]),
             'No building effects or production until construction completes',
           ], importance: 3,
         });

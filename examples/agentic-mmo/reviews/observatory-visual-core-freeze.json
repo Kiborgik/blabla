@@ -1,0 +1,310 @@
+[
+  {
+    "path": "cli/culture-production-probe.ts",
+    "sha256": "25f0f1001ba05e9816848c9c045d03031c8e0d7eadc0225e8ce38d1a402a2a12"
+  },
+  {
+    "path": "cli/foundry-production-probe.ts",
+    "sha256": "012b13534a7b825accb4432e713f678a0b3befee4034a94becc763859b9e6f02"
+  },
+  {
+    "path": "contracts/culture-production.bla",
+    "sha256": "d7389c6f1bab2585ac709476c33227bb0b216fb14e36805cece1a2bc220374d4"
+  },
+  {
+    "path": "contracts/foundry-production.bla",
+    "sha256": "c211aa9439005506703f961fb6df7bbd528568ff7e254f57408650877b8dcbad"
+  },
+  {
+    "path": "contracts/observatory-learning.bla",
+    "sha256": "1508e9933b7198c640d3c8a4b313e878fa55f9b0fde6302cf0b778bf615a4e9a"
+  },
+  {
+    "path": "core/capabilities.ts",
+    "sha256": "d79dae6279de6944c8f461eb5b0cd6a61d255224cbd8dd8d3c1a21b27826c6ac"
+  },
+  {
+    "path": "core/content.ts",
+    "sha256": "4eef42a8b9dbc8967507b87c94a450dd32f3fe1ee4702bc5d07f5d987b3811b6"
+  },
+  {
+    "path": "core/engine.ts",
+    "sha256": "17db33416e9cd03c2760170ba048c61d0ef2fa0016a72613030b7fd183aa1133"
+  },
+  {
+    "path": "core/observation.ts",
+    "sha256": "3b6e23d5f458ce77c8d0267509c9c0fca4d8bc2aa80eceec799cfeeb632b6867"
+  },
+  {
+    "path": "core/planning.ts",
+    "sha256": "abf54bcc110f3f32310f2aa2fbb53a41c0a61ef3909d16bc0c9452c3108270e1"
+  },
+  {
+    "path": "core/policies.ts",
+    "sha256": "76270172d76739a36ec207f6cfca623812d401621863aa99c362afa21c8fbc89"
+  },
+  {
+    "path": "core/release.ts",
+    "sha256": "8ad324a82c7966c99e756fc92826e12ef7da02e58295140f4fd2bc50f2841c66"
+  },
+  {
+    "path": "core/simulation/capabilities.ts",
+    "sha256": "409d5691074994a5371b1d340a28e984a3a947da353809e7f7ce149b439626b7"
+  },
+  {
+    "path": "core/simulation/choices.ts",
+    "sha256": "d0dfcf6cd16bb64f52623e44154df166f3042a8a943caa07417c4de1ca0d6b13"
+  },
+  {
+    "path": "core/simulation/clock.ts",
+    "sha256": "f0d666b3d8e132dc2cf7c301418296919826ba1bc37d24bd7a9831e9f890fd9b"
+  },
+  {
+    "path": "core/simulation/coastal.ts",
+    "sha256": "a6cdb5d7096832cc6c015c540a7826b3a3ef8ddd66cb9dd516e505cef0ee88ff"
+  },
+  {
+    "path": "core/simulation/commands.ts",
+    "sha256": "43e8625f65bb00d3628d3be2ee46bd30df6d3b9db31b7d80b9fcccdbba559711"
+  },
+  {
+    "path": "core/simulation/construction.ts",
+    "sha256": "90f2aa36e25482d6d668a3f26036f73eded3b09a3049431e833602e74ccd6e1f"
+  },
+  {
+    "path": "core/simulation/decisions.ts",
+    "sha256": "cc7eef5d02f5e9f9f2cde7a822ab626fe00e03a3ff51629f2af8598fd05c1c58"
+  },
+  {
+    "path": "core/simulation/districts.ts",
+    "sha256": "db1614edc66b2530e6afe4a41055aa732f20c09931f8da41816693e7e1a92af7"
+  },
+  {
+    "path": "core/simulation/economy.ts",
+    "sha256": "a1d3197a607b79cb143ee2ebea76ffa140bad5ac2eb1fca47d51524a10fefbbc"
+  },
+  {
+    "path": "core/simulation/effects.ts",
+    "sha256": "1bbf51758c7fcf7f2b693db760bbc8280ed0ec97e94d4c5266e956fd2a0fd4f7"
+  },
+  {
+    "path": "core/simulation/events.ts",
+    "sha256": "7795a5490e9c901d695b7fd3d0e020f2cdd88bc0aee0bcf67dca2f7dafe1614e"
+  },
+  {
+    "path": "core/simulation/evolution.ts",
+    "sha256": "7b59d266e856ca497a027b1bd420463074079132dc2642288289cb826c703c3f"
+  },
+  {
+    "path": "core/simulation/geography.ts",
+    "sha256": "0bbba564114b8f1ea3b2354db1c61560a62684e4918ea75e8964c7a04b1eca90"
+  },
+  {
+    "path": "core/simulation/growth.ts",
+    "sha256": "415001273a632da805d39aba80e91c9b25be47367968bae2d21bf22bae8d2bee"
+  },
+  {
+    "path": "core/simulation/history.ts",
+    "sha256": "48f7b94ad5b9a953a480f973344578c9a50b0fd4466b77ad2e7135771d1f36bd"
+  },
+  {
+    "path": "core/simulation/improvements.ts",
+    "sha256": "e91b9ffe73058721e0a185d778c684f98b5e5c7ee219c50e9e9ba7179cd4f7d4"
+  },
+  {
+    "path": "core/simulation/map-expansion.ts",
+    "sha256": "24c4c66f25e67589f6c83ad42894a3a58c528d406396237b2168812707cd2605"
+  },
+  {
+    "path": "core/simulation/metals.ts",
+    "sha256": "aa2fefc468f1948c299f6c84815c89c9649f691661068d257b310f352d009a4b"
+  },
+  {
+    "path": "core/simulation/observatory.ts",
+    "sha256": "4829408eaf9e27289ee3c6e804aed920890cca37cee63e639570be43e00555bf"
+  },
+  {
+    "path": "core/simulation/operations.ts",
+    "sha256": "0059b009e32c89fc48c5f912cf4bf298f8bc46c952d730d36fa61ef18617884e"
+  },
+  {
+    "path": "core/simulation/pastoral.ts",
+    "sha256": "bd6d7ba4cfd9a1589cba89916f62ab632b07286107e81471c39e671079772412"
+  },
+  {
+    "path": "core/simulation/public-projects.ts",
+    "sha256": "9f41c5944addf93612a88f008a511b502658c3a30efe372c1b13120a666f6575"
+  },
+  {
+    "path": "core/simulation/random.ts",
+    "sha256": "5ac093366f2e39b112ab3de0851f6323253249598177b156f2e6f2d6fe9124db"
+  },
+  {
+    "path": "core/simulation/research.ts",
+    "sha256": "07fd657430116ca202f20aa274765c428d17d9ea1cd33ca417674c0af06b85a0"
+  },
+  {
+    "path": "core/simulation/site-binding.ts",
+    "sha256": "525e35c3befe7f10169b53f0dcaaebe834c9884ea898c5043f5b0cb07d416339"
+  },
+  {
+    "path": "core/simulation/site-placement.ts",
+    "sha256": "0faacca682a99bc05a3e3ecaec32b071c310d50580392200563ce0a29879dee8"
+  },
+  {
+    "path": "core/simulation/sites.ts",
+    "sha256": "f1f020e90dc00fdc8049e870617ad4258c0c00b3c7f15821e44fe24f1b6711e5"
+  },
+  {
+    "path": "core/simulation/territory.ts",
+    "sha256": "c5dd463f9490f75696f6a40b317eccb5059329211cc2b2ada04c51790bbfbecf"
+  },
+  {
+    "path": "core/simulation/time.ts",
+    "sha256": "631c511fe6c6eb6ac3065c8c5601863ca935d1dc6f25ee6b80a79c37a4b48170"
+  },
+  {
+    "path": "core/simulation/trade.ts",
+    "sha256": "9e866959393084ef88ee4d22fa22f1b2193d7716e646f6cffe7ca9d4c40483bd"
+  },
+  {
+    "path": "core/simulation/transport.ts",
+    "sha256": "bfef9b444173d6aaed4af5e3e6dfa269c4f4daee13f72a486faf74930d07e9cc"
+  },
+  {
+    "path": "core/simulation/turns.ts",
+    "sha256": "755a6e1e5f61c5977d929d67d25738e001021dafe67760f7464c0b65a7f66af3"
+  },
+  {
+    "path": "core/simulation/water.ts",
+    "sha256": "bc59e19d7b06e7f6ece5203c6553d7546376288f5d3b399a6f0a6a5e67db5847"
+  },
+  {
+    "path": "core/simulation/wonders.ts",
+    "sha256": "883822b62e473b6aa76130467819ae14790c6fca74f47883597bb9f2a620fc4f"
+  },
+  {
+    "path": "core/simulation/world.ts",
+    "sha256": "d3ff12a22b7e3066ad1329b86e4fd30020949527807ec2fb489851905467364e"
+  },
+  {
+    "path": "core/types.ts",
+    "sha256": "c88d799d6b33f088320c410abf3d79c1d8b089cfcddeccda9d209409c4070549"
+  },
+  {
+    "path": "core/validation.ts",
+    "sha256": "041eba7506f51397910a7e7393f10e2cbccab32297184e8e63c7a550c4cd9347"
+  },
+  {
+    "path": "reviews/culture-production-bindings.md",
+    "sha256": "5e874b50f0c927493f8f35440fddd4e895f67c00ee838532124b4cc1765addcc"
+  },
+  {
+    "path": "reviews/culture-production-implementation.md",
+    "sha256": "c0f8651969037aee81805e8571560d639245cc351971e620193b254df8fd65ed"
+  },
+  {
+    "path": "reviews/culture-production-loop-review.md",
+    "sha256": "ab4c7b18f05471e8790eb0c09736c9e0e300314ead4606056198565cfd9b51df"
+  },
+  {
+    "path": "reviews/culture-production-persistence.md",
+    "sha256": "6e43bb029699a2a2d8d2daaa81c2d4b739478199c426f24b0dcf1b2adebdbbcb"
+  },
+  {
+    "path": "reviews/foundry-prefix.md",
+    "sha256": "171fb0a71bee05f4c660461d04c4c48fd1e9777a2fa1e62337d1bb383e3ea9ca"
+  },
+  {
+    "path": "reviews/foundry-production-bindings.md",
+    "sha256": "ed051f5852c068d63a1885a6900e10ff6a7fa1b5d4df6f792247c82d72987b96"
+  },
+  {
+    "path": "reviews/foundry-production-implementation.md",
+    "sha256": "e7434a9a34da81bb5febfaeace676ab1465a2fddbcf844b9be5249ae9f39d613"
+  },
+  {
+    "path": "reviews/foundry-production-loop-review.md",
+    "sha256": "12b431866ff9d9642544c10ad33f2a8d238c09a7f631354fd7b95b0b80b57d33"
+  },
+  {
+    "path": "reviews/foundry-production-persistence.md",
+    "sha256": "944a4dd25bb39a1d20373b46a21da32cb81d565361008de03d0502c313c0b3fe"
+  },
+  {
+    "path": "reviews/observatory-learning-implementation.md",
+    "sha256": "d469f12ed48d49345223dc37fc60806012ce8786036b31baf19ee6dbcbfa151b"
+  },
+  {
+    "path": "reviews/observatory-learning-persistence.md",
+    "sha256": "2c1ae814bf48dc06d5ded9bb55cc26826616169518a61539857b0ea320d67d44"
+  },
+  {
+    "path": "reviews/observatory-learning-review.md",
+    "sha256": "825d4720f252d435ecba39988ed07097b0f2544b84b10f980d9ad51535de8e6c"
+  },
+  {
+    "path": "reviews/observatory-prefix.md",
+    "sha256": "f724ab32a00aa85d9bbb205fd71e3335a746e0df0412221f8ae94987157558c9"
+  },
+  {
+    "path": "tests/culture-production-contract.test.ts",
+    "sha256": "b66699518d12035ab6c726d803fb9217154b73714fb426b59e7b3b2c23211d00"
+  },
+  {
+    "path": "tests/culture-production-hosting.test.ts",
+    "sha256": "96a3183c3f108ed404eada8855d33d4b8fd72bd9bcb85b0107ef93783fa0bcba"
+  },
+  {
+    "path": "tests/culture-production.test.ts",
+    "sha256": "fbf357f56093261f86a915be3ce7c7b7a774ca83f29df2c5537427bc3b35e436"
+  },
+  {
+    "path": "tests/fixtures/culture-production-journey.ts",
+    "sha256": "8599b1cd286dabc04aeb294ab8e552fe9192d319ec953e655837624454f67ab5"
+  },
+  {
+    "path": "tests/fixtures/foundry-prefix.ts",
+    "sha256": "ee79d39764aab5df3bdc6e0971ab036ad7a146db0873868bb37ee2ffd3c2285d"
+  },
+  {
+    "path": "tests/fixtures/foundry-production-journey.ts",
+    "sha256": "4b205a59643eb1494daea7b4f05122d856250bc2b2bf908db98e423133d56506"
+  },
+  {
+    "path": "tests/fixtures/observatory-learning-journey.ts",
+    "sha256": "d4622e170b05c3f8f1c077fec6f5984f6c572e82e26161ad042a991c5cf821b7"
+  },
+  {
+    "path": "tests/fixtures/observatory-prefix.ts",
+    "sha256": "8f88833ee5a3bfdfbbd5a05f441a4356f20f2426d56d0a82b4ee45aa8278fd5f"
+  },
+  {
+    "path": "tests/foundry-prefix.test.ts",
+    "sha256": "ffe6850456e9e6b0395afbb11c0780a8e5451cd373cc50f2cbbeae6dfc624dd0"
+  },
+  {
+    "path": "tests/foundry-production-contract.test.ts",
+    "sha256": "699265d4a5f72fc237a50f88410a770539650299534e280cd394c405f5021bd4"
+  },
+  {
+    "path": "tests/foundry-production-hosting.test.ts",
+    "sha256": "b131c4cc0c5fd0219e3fa1fbe2ca6660c87779e8942e416b4452f711f379cbbc"
+  },
+  {
+    "path": "tests/foundry-production.test.ts",
+    "sha256": "fa8ad8f732a162c2b9f6d26090bbe7c004f3d1837d24bb40bbba17e55137b19e"
+  },
+  {
+    "path": "tests/observatory-learning-hosting.test.ts",
+    "sha256": "039eb78b39b8e5bca62e0f895e289163d90fd17777eadcbaba9bd1f659518469"
+  },
+  {
+    "path": "tests/observatory-learning.test.ts",
+    "sha256": "db2fc92067744dd1c596466107a8d03d6979344dfb4b905b3c872707caff0d1e"
+  },
+  {
+    "path": "tests/observatory-prefix.test.ts",
+    "sha256": "10290930dd9f9db0e763c10b8365a64808bc582d9eb2fbea0498adfe32ebb3ea"
+  }
+]

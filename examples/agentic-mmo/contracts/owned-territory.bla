@@ -1,0 +1,38 @@
+state adopted: bool
+state old_ownership_unchanged: bool
+state exact_beneficiary: bool
+state paid_once: bool
+state connected_path_retained: bool
+state actual_owner_changed: bool
+state same_town_worked: bool
+state later_staffed_output: bool
+state retained_resource_unchanged: bool
+state history_retained: bool
+state refused: bool
+state no_effects: bool
+
+action adopt_territory()
+action purchase_exact_land()
+action work_purchased_resource()
+action work_new_extent_land()
+action refuse_territory_action()
+action replay_territory_history()
+
+when adopt_territory {
+    expect "adoption-preserves-owned-world": after.adopted and after.old_ownership_unchanged
+}
+when purchase_exact_land {
+    expect "one-price-one-bound-town": after.exact_beneficiary and after.paid_once and after.connected_path_retained and after.actual_owner_changed
+}
+when work_purchased_resource {
+    expect "retained-resource-becomes-useful": after.same_town_worked and after.later_staffed_output and after.retained_resource_unchanged
+}
+when work_new_extent_land {
+    expect "new-world-land-supports-local-work": after.same_town_worked and after.later_staffed_output
+}
+when refuse_territory_action {
+    expect "invalid-purchase-has-no-effects": not after.refused or after.no_effects
+}
+when replay_territory_history {
+    expect "ownership-price-and-beneficiary-survive": after.history_retained
+}

@@ -1,3 +1,4 @@
+import { purchasedSiteBlock } from './site-binding.ts';
 import { DISTRICT_RULES, IMPROVEMENT_RULES, RESOURCE_IDS } from '../content.ts';
 import type { BuildingDefinition, City, Resource, Resources, WorldState } from '../types.ts';
 import { hexDistance } from './geography.ts';
@@ -21,6 +22,7 @@ export function districtSiteBlock(state: WorldState, city: City, building: Build
   const center = state.tiles.find(tile => tile.id === city.tileId);
   if (!Number.isSafeInteger(tileId) || !site || !center) return 'The exact district site is missing';
   if (site.owner !== city.civId) return 'The district site must already belong to this civilization';
+  const binding = purchasedSiteBlock(state, city, tileId); if (binding) return binding;
   if (site.terrain === 'ocean' || site.terrain === 'mountain') return 'The district requires a buildable land site';
   if (hexDistance(center, site) > building.district.range) return `The district site must be within ${building.district.range} hexes of this town`;
   if (state.cities.some(candidate => candidate.tileId === tileId)) return 'A city center occupies this site';
@@ -34,7 +36,7 @@ export function availableDistrictSites(state: WorldState, city: City, building: 
 }
 
 export interface DistrictAdjacencyFacts {
-  source: 'terrain' | 'improvement';
+  source: 'terrain' | 'improvement' | 'wonder';
   tileIds: number[];
   resource: Resource;
   amount: number;
@@ -46,9 +48,11 @@ export function districtAdjacencyFacts(state: WorldState, building: BuildingDefi
   const rule = building.district?.adjacency;
   const site = state.tiles.find(tile => tile.id === tileId);
   if (!rule || !site || !hasFeatures(state, [DISTRICT_RULES.featureId])) return null;
-  const installations = rule.improvement === undefined ? null : new Set(state.cities.flatMap(city => Object.values(city.improvements ?? {}).filter(improvement => improvement.improvementId === rule.improvement).map(improvement => improvement.tileId)));
+  const installations = rule.wonder === true
+    ? new Set(Object.values(state.wonders ?? {}).map(wonder => wonder.completion.tileId))
+    : rule.improvement === undefined ? null : new Set(state.cities.flatMap(city => Object.values(city.improvements ?? {}).filter(improvement => improvement.improvementId === rule.improvement).map(improvement => improvement.tileId)));
   const tileIds = state.tiles.filter(tile => hexDistance(site, tile) === 1 && (installations ? installations.has(tile.id) : tile.terrain === rule.terrain)).map(tile => tile.id).toSorted((left, right) => left - right);
-  return { source: installations ? 'improvement' : 'terrain', tileIds, resource: rule.resource, amount: rule.amount, maximum: rule.maximum, bonus: Math.min(rule.maximum, tileIds.length * rule.amount) };
+  return { source: rule.wonder === true ? 'wonder' : installations ? 'improvement' : 'terrain', tileIds, resource: rule.resource, amount: rule.amount, maximum: rule.maximum, bonus: Math.min(rule.maximum, tileIds.length * rule.amount) };
 }
 
 export function buildingBaseProduction(state: WorldState, city: City, building: BuildingDefinition, tileId = city.districtSites?.[building.id]): Partial<Resources> {

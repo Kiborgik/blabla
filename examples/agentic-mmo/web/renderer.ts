@@ -1,3 +1,4 @@
+import { selectedAcquiredLand } from '../visuals/territory-visuals.ts';
 import { allocateMapHierarchy, mapContentWindow } from '../visuals/map-hierarchy.ts';
 import { MAP_ZOOM } from './viewer-state.ts';
 import { PASTORAL_MARK_PATH, CATCHMENT_MARK_PATH, pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
@@ -24,7 +25,7 @@ import { cameraShiftForAnchor } from './inspection-camera.ts';
 import type { CameraView, ScreenPoint } from './inspection-camera.ts';
 import { createSettlementMeshes, createDistrictMeshes, createImprovementMeshes, createDepositMeshes, createWonderMeshes } from './settlement-three.ts';
 import { LUMBER_MARK_PATH, improvementLabel } from '../visuals/improvement-visuals.ts';
-import { districtAdjacencySummary, districtLabel } from '../visuals/district-visuals.ts';
+import { districtAdjacencySummary, districtMark, districtLabel } from '../visuals/district-visuals.ts';
 import { createWorldCues } from './world-cues.ts';
 import { mapHierarchyAnchors, mapHierarchyObstacles } from './map-labels.ts';
 
@@ -133,6 +134,9 @@ export function createAtlasRenderer(
   const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
   const roofGeometry = new THREE.ConeGeometry(0.74, 0.5, 4);
   const borders = new THREE.Group();
+  const acquired = new THREE.Group();
+  const acquiredMaterials: LineMaterial[] = [];
+  borders.add(acquired);
   const routes = new THREE.Group();
   const tileLookup = new Map(world.tiles.map((tile) => [`${tile.q},${tile.r}`, tile]));
   const addMesh = (
@@ -249,7 +253,7 @@ export function createAtlasRenderer(
   const wonderMeshes = createWonderMeshes(world, material);
   const sites = [
     ...(world.catchments ?? []).map(site => ({ ...site, mark: 'catchment' as const, label: `Aqueduct mountain source${site.status === 'building' ? ' · Building' : ''}` })),
-    ...(world.districts ?? []).map(site => ({ ...site, mark: site.buildingId === 'industrial-zone' ? 'industry' as const : site.buildingId === 'commercial-hub' ? 'commerce' as const : 'campus' as const, label: districtLabel(site) })),
+    ...(world.districts ?? []).map(site => ({ ...site, mark: districtMark(site), label: districtLabel(site) })),
     ...(world.improvements ?? []).map(site => ({ ...site, mark: site.improvementId === 'pasture' ? 'pasture' as const : site.improvementId === 'lumber-mill' ? 'lumber' as const : 'mine' as const, workId: site.status === 'building' ? `active:${site.construction?.id ?? ''}` : String(site.tileId), label: improvementLabel(site) })),
     ...(world.wonders ?? []).map(site => ({ ...site, mark: 'wonder' as const, label: wonderSiteLabel(site) })),
   ];
@@ -364,10 +368,30 @@ export function createAtlasRenderer(
   );
   ring.rotation.x = -Math.PI / 2;
   scene.add(ring);
+  const drawAcquired = (): void => {
+    for (const child of acquired.children) if (child instanceof Line2) { child.geometry.dispose(); child.material.dispose(); }
+    acquired.clear(); acquiredMaterials.length = 0;
+    const color = world.cities.find(city => cityKey(city) === selected)?.color ?? '#e7bf69';
+    for (const plot of selectedAcquiredLand(world.acquiredLand ?? [], selected)) {
+      if (!plot.point) continue;
+      const center = hexPosition(plot.point.q, plot.point.r);
+      const positions = Array.from({ length: 7 }, (_, index) => {
+        const angle = Math.PI / 3 * index + Math.PI / 6;
+        return [center.x + Math.cos(angle) * .88, plot.point ? plot.point.height + .09 : .5, center.z + Math.sin(angle) * .88];
+      }).flat();
+      for (const [lineColor, linewidth, order] of [['#173a3c', 5, 2], [color, 2.5, 3]] as const) {
+        const geometry = new LineGeometry(); geometry.setPositions(positions);
+        const appearance = new LineMaterial({ color: lineColor, linewidth, depthTest: false });
+        appearance.resolution.set(container.clientWidth, container.clientHeight); acquiredMaterials.push(appearance);
+        const outline = new Line2(geometry, appearance); outline.renderOrder = order; acquired.add(outline);
+      }
+    }
+  };
   const select = (id: string): void => {
     const city = world.cities.find((candidate) => cityKey(candidate) === id);
     if (!city) return;
     selected = id;
+    drawAcquired();
     const point = hexPosition(city.q, city.r);
     ring.position.set(point.x, 0.58, point.z);
     for (const label of cityLabels) {
@@ -381,6 +405,7 @@ export function createAtlasRenderer(
     const height = container.clientHeight;
     if (!width || !height) return;
     renderer.setSize(width, height, false);
+    for (const appearance of acquiredMaterials) appearance.resolution.set(width, height);
     const aspect = width / height;
     const halfHeight = width < 700 ? 24 : 17.3;
     camera.left = -halfHeight * aspect;

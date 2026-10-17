@@ -1,3 +1,4 @@
+import type { AcquiredLandView } from '../visuals/territory-visuals.ts';
 import { retainedCoordinateShift } from '../visuals/map-hierarchy.ts';
 import type { PastoralSiteView, CatchmentSiteView } from '../visuals/pastoral-visuals.ts';
 import type { WonderSiteView } from '../visuals/wonder-visuals.ts';
@@ -41,6 +42,7 @@ export interface AtlasTile {
 }
 
 export interface AtlasWorld {
+  acquiredLand?: AcquiredLandView[];
   tiles: AtlasTile[];
   cities: AtlasCivilization[];
   routes: RouteView[];

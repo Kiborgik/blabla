@@ -1,3 +1,4 @@
+import { createTerritoryPlanner } from './simulation/territory.ts';
 import { researchBoostFacts, wonderSiteBlock } from './simulation/wonders.ts';
 import { improvementSiteBlock } from './simulation/improvements.ts';
 import { districtSiteBlock } from './simulation/districts.ts';
@@ -61,6 +62,8 @@ function integer(value: unknown, maximum = Number.MAX_SAFE_INTEGER): value is nu
 export function isGameAction(value: unknown): value is GameAction {
   if (!record(value)) return false;
   switch (value.type) {
+    case 'acquire-tile':
+      return fields(value, ['type', 'cityId', 'tileId']) && text(value.cityId, 128) && integer(value.tileId);
     case 'focus':
       return FOCUS_IDS.some((focus) => focus === value.focus) && (fields(value, ['type', 'focus']) || (fields(value, ['type', 'focus', 'cityId']) && text(value.cityId, 128)));
     case 'research':
@@ -174,6 +177,11 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
   if (specialized && (action.type === 'focus' || action.type === 'build') && !cities.some((city) => city.id === action.cityId))
     return invalidated('This release requires an explicit existing owned city target; review and choose the exact city');
   switch (action.type) {
+    case 'acquire-tile': {
+      if (!cities.some(city => city.id === action.cityId)) return invalidated('The exact owned acquisition town is missing');
+      const tile = state.tiles.find(candidate => candidate.id === action.tileId);
+      return !tile || tile.owner !== null ? invalidated('The acquisition tile is missing or already owned') : null;
+    }
     case 'research':
       if (!TECHNOLOGIES.some((technology) => technology.id === action.technology)) return invalidated(`Technology ${action.technology} no longer exists`);
       if (civilization?.technologies.includes(action.technology)) return invalidated(`Technology ${action.technology} is already known`);
@@ -293,6 +301,7 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
 }
 
 function unavailableReason(state: WorldState, seat: number, action: GameAction): string {
+  if (action.type === 'acquire-tile') return createTerritoryPlanner(state).assess(seat, action.cityId, action.tileId).blocker ?? 'Review the current acquisition context';
   if (action.type === 'apply-research-boost') {
     const facts = researchBoostFacts(state, seat, action.wonderId);
     return facts.blocker ?? (facts.quote?.technologyId !== action.technology ? 'The exact named discovery is not the current eligible active target' : 'Review current boost admission');

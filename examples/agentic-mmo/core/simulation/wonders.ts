@@ -1,3 +1,4 @@
+import { purchasedSiteBlock } from './site-binding.ts';
 import { RESOURCE_IDS, TECHNOLOGIES, WONDERS, WONDER_RULES } from '../content.ts';
 import type { ActionOption, City, ConstructionOrder, GameAction, GameEvent, Resources, WonderConstructionOrder, WonderDefinition, WorldState } from '../types.ts';
 import type { CapabilityEligibility } from './capabilities.ts';
@@ -16,6 +17,7 @@ export function wonderSiteBlock(state: WorldState, city: City, definition: Wonde
   const center = state.tiles.find(tile => tile.id === city.tileId);
   if (!Number.isSafeInteger(tileId) || !site || !center) return 'The exact wonder site is missing';
   if (site.owner !== city.civId) return 'The wonder site must already belong to this civilization';
+  const binding = purchasedSiteBlock(state, city, tileId); if (binding) return binding;
   if (site.terrain === 'ocean' || site.terrain === 'mountain') return 'The wonder requires buildable land';
   if (hexDistance(center, site) > definition.siteRange) return `The wonder site must be within ${definition.siteRange} hexes of its town`;
   if (state.cities.some(town => town.tileId === tileId)) return 'A town center occupies this site';

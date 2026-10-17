@@ -50,3 +50,11 @@ draft behavior "contracts/metal-learning.bla"
 
 
 draft behavior "contracts/manufacturing.bla"
+
+draft behavior "contracts/owned-territory.bla"
+
+draft behavior "contracts/culture-production.bla"
+
+draft behavior "contracts/foundry-production.bla"
+
+draft behavior "contracts/observatory-learning.bla"

@@ -1,3 +1,4 @@
+import { strategicResourceAmounts, type StrategicAmount } from './strategic-resource-visuals.ts';
 import { RESOURCE_IDS } from '../core/content.ts';
 import type { BuildingOperation, BuildingOperationResult, Resource, Resources } from '../core/types.ts';
 import { METRIC_LABELS } from './visual-language.ts';
@@ -12,6 +13,8 @@ export interface OperationVisual {
     status: BuildingOperationResult['status'];
     label: string;
     paid: ResourceAmount[];
+    strategicPaid?: StrategicAmount[];
+    strategicShortages?: BuildingOperationResult['strategicShortages'];
     produced: ResourceAmount[];
     shortages: BuildingOperationResult['shortages'];
     residents?: BuildingOperationResult['residents'];
@@ -31,11 +34,13 @@ export function operationVisual(operation: BuildingOperation | undefined): Opera
   const produced = resourceAmounts(result?.produced ?? {});
   const positiveOutput = produced.some((entry) => entry.amount > 0);
   const supportBlocked = result?.status === 'blocked' && result.residents && result.residents.available < result.residents.required;
-  const blockedLabel = supportBlocked ? result.shortages.length ? 'Not enough support or supplies' : 'Not enough local support' : 'Short of inputs';
+  const blockedLabel = supportBlocked ? result.shortages.length || result.strategicShortages?.length ? 'Not enough support or supplies' : 'Not enough local support' : 'Short of inputs';
   const last = result ? {
     round: result.round, status: result.status,
     label: result.status === 'blocked' ? blockedLabel : result.status === 'paused' ? 'Paused' : positiveOutput ? 'Supplies made' : 'No output',
     paid: resourceAmounts(result.paid), produced, shortages: result.shortages.map((shortage) => ({ ...shortage })),
+    ...(result.strategicPaid !== undefined ? { strategicPaid: strategicResourceAmounts(result.strategicPaid) } : {}),
+    ...(result.strategicShortages !== undefined ? { strategicShortages: result.strategicShortages.map(shortage => ({ ...shortage })) } : {}),
     ...(result.residents ? { residents: { ...result.residents } } : {}),
   } : null;
   return {

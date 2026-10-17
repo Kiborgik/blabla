@@ -1,3 +1,4 @@
+import { selectedCampusHighGround } from './observatory.ts';
 import { availableImprovementSites, constructionTarget } from './improvements.ts';
 import { availableDistrictSites, districtCapacity, districtCount } from './districts.ts';
 import { isCoastalSite } from './coastal.ts';
@@ -15,6 +16,7 @@ export type CapabilityBlocker =
   | { kind: 'resource'; resource: typeof RESOURCE_IDS[number]; required: number; available: number }
   | { kind: 'coastal-site'; cityId: string }
   | { kind: 'mountain-catchment'; cityId: string }
+  | { kind: 'campus-high-ground'; cityId: string }
   | { kind: 'building'; buildingId: string; cityId: string }
   | { kind: 'district-site'; cityId: string }
   | { kind: 'improvement-site'; cityId: string; improvementId: string }
@@ -72,6 +74,7 @@ export function buildingEligibility(state: WorldState, civilizationId: number, b
   else if (specialized && !state.tiles.some(tile => tile.id === city.tileId)) blockers.push({ kind: 'missing-site', cityId: city.id });
   else if (!specialized && cityId !== undefined && !city.buildings.includes(building.id) && first && first.id !== city.id) blockers.push({ kind: 'legacy-target', cityId: first.id });
   if (city?.civId === civilizationId && building.siteRequirement === 'coastal' && !isCoastalSite(state, city.tileId)) blockers.push({ kind: 'coastal-site', cityId: city.id });
+  if (city?.civId === civilizationId && building.siteRequirement === 'campus-high-ground' && selectedCampusHighGround(state, city) === undefined) blockers.push({ kind: 'campus-high-ground', cityId: city.id });
   if (city?.civId === civilizationId && building.siteRequirement === 'mountain-catchment' && selectedMountainCatchment(state, city) === undefined) blockers.push({ kind: 'mountain-catchment', cityId: city.id });
   if (city?.civId === civilizationId) {
     for (const buildingId of building.requiresBuildings ?? []) {

@@ -19,7 +19,7 @@ export const CIVILIZATIONS: CivilizationDefinition[] = [
 
 export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, perPaidRecipe: 3 } as const;
 
-export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { observatory: 14, foundry: 14, 'theater-square': 10, 'printing-house': 14, 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
 
 export const LOCAL_GROWTH_RULES = { ruleVersion: 1, featureId: 'local-growth', legacyBaseCapacity: 20, foundedBaseCapacity: 8, baseFoodCost: 6, populationPerFoodCost: 4, researchMultiplier: 3 } as const;
 
@@ -39,6 +39,8 @@ export const CONNECTED_RESEARCH_PACING = { ruleVersion: 1, featureId: 'learning-
 
 export const MANUFACTURING_RESEARCH_PACING = { ruleVersion: 1, featureId: 'manufacturing', multiplier: 3, baseCosts: { 'iron-working': 48, apprenticeship: 68 } } as const;
 
+export const TERRITORY_RULES = { ruleVersion: 1, featureId: 'owned-territory', range: 3, baseCredits: 12, creditsPerDistance: 4, creditsPerPriorPurchase: 2 } as const;
+
 export const WORLD_EXPANSION_RULES = { ruleVersion: 1, featureId: 'world-expansion', fromWidth: 18, fromHeight: 12, width: 18, height: 24, algorithm: 'append-seeded-rows' } as const;
 
 export const PASTORAL_RULES = { ruleVersion: 1, featureId: 'water-land', resource: 'horses', revealTechnology: 'animal-husbandry', placement: { id: 'pastoral-sites-1', maximumSites: 10, frontierMinimumDistance: 2, ownedSiteRange: 3, seedMultiplier: 0x9e3779b1, mixMultipliers: [0x7feb352d, 0x846ca68b], seedSalt: 0x50415354 } } as const;
@@ -48,6 +50,10 @@ export const METAL_RULES = { ruleVersion: 1, featureId: 'finite-metals', resourc
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'observatory-learning', name: 'Learning from the sky', description: 'Sailing and Celestial navigation connect Mathematics to Astronomy and a locally staffed Observatory beside its own completed high-ground Campus. Harbor, fishing, ships and great-person systems remain planned.' },
+  { id: 'foundry-production', name: 'Iron supports local industry', description: 'Military engineering, Gunpowder and Metal casting connect existing discoveries to a locally staffed Foundry that consumes actual iron and energy. Niter, forts and military units remain planned.' },
+  { id: 'culture-production', name: 'Culture in inhabited places', description: 'Construction and Printing connect exact Theater sites near completed wonders to locally staffed Printing houses. Tourism, civic Amphitheaters and great-person systems remain planned.' },
+  { id: 'owned-territory', name: 'Land for each town', description: 'Purchase exact connected nearby land for one town, retaining payment and beneficiary. Existing ownership and resource geography remain unchanged until an actual purchase.' },
   { id: 'world-expansion', name: 'A wider inhabited world', description: 'Append new playable rows while retaining every existing tile, settlement, route and historical identity. New towns still own only their actual claimed center.' },
   { id: 'forest-production', name: 'Work standing forests', description: 'Archery and Machinery connect existing land and engineering discoveries to resident-supported Lumber mills. Military units remain planned.' },
   { id: 'water-land', name: 'Work land and supply growing towns', description: 'Animal husbandry reveals useful horse pastures; Wheel and Engineering connect completed Irrigation and actual mountain catchments to productive Water mills and local housing.' },
@@ -99,6 +105,7 @@ export const FEATURES: FeatureDefinition[] = [
 ];
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  'acquire-tile': ['owned-territory'],
   'build-wonder': ['unique-wonders', 'recurring-decisions'],
   'apply-research-boost': ['unique-wonders', 'settlement-research'],
   improve: ['worked-land', 'mining', 'recurring-decisions', 'resident-capacity'],
@@ -114,6 +121,14 @@ export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
+  { id: 'sailing', name: 'Sailing', requiredFeatures: ['observatory-learning'], era: 0, cost: 72, requires: ['water-management'], capability: 'Connect water knowledge to Celestial navigation and the useful Astronomy branch. Fishing, Lighthouse and ships remain planned.' },
+  { id: 'celestial-navigation', name: 'Celestial navigation', requiredFeatures: ['observatory-learning'], era: 1, cost: 132, requires: ['sailing', 'writing'], capability: 'Connect written navigation and Mathematics to Astronomy. Harbor remains planned.' },
+  { id: 'astronomy', name: 'Astronomy', requiredFeatures: ['observatory-learning'], era: 2, cost: 360, requires: ['mathematics', 'celestial-navigation'], capability: 'Operate an Observatory at an own completed Campus with adjacent mountain or hill, using two Credits and three local residents for Science.' },
+  { id: 'military-engineering', name: 'Military engineering', requiredFeatures: ['foundry-production'], era: 1, cost: 240, requires: ['construction', 'iron-working'], capability: 'Connect existing engineering and iron knowledge to Gunpowder and the useful Foundry branch. Niter and Forts remain planned.' },
+  { id: 'gunpowder', name: 'Gunpowder', requiredFeatures: ['foundry-production'], era: 2, cost: 390, requires: ['military-engineering', 'apprenticeship'], capability: 'Connect practical engineering and skilled industry to Metal casting; military units remain planned.' },
+  { id: 'metal-casting', name: 'Metal casting', requiredFeatures: ['foundry-production'], era: 2, cost: 450, requires: ['gunpowder', 'machinery'], capability: 'Operate a same-town Foundry using one Iron, two Energy and three residents for useful Materials.' },
+  { id: 'construction', name: 'Construction', requiredFeatures: ['culture-production'], era: 1, cost: 150, requires: ['engineering'], capability: 'Choose an exact owned Theater square site; actual completed neighboring wonders add useful Culture.' },
+  { id: 'printing', name: 'Printing', requiredFeatures: ['culture-production'], era: 2, cost: 330, requires: ['education', 'machinery'], capability: 'Support a Printing house in this town’s completed Theater with one Material and three local residents for Culture. Tourism remains planned.' },
   { id: 'archery', name: 'Archery', requiredFeatures: ['forest-production'], era: 0, cost: 72, requires: ['animal-husbandry'], capability: 'Develop the practical techniques that lead to Machinery and productive forest work. Archer units remain planned.' },
   { id: 'machinery', name: 'Machinery', requiredFeatures: ['forest-production'], era: 1, cost: 234, requires: ['engineering', 'archery'], capability: 'Build a timed Lumber mill on an exact owned standing forest, then allocate a local resident to useful Materials production.' },
   { id: 'animal-husbandry', name: 'Animal husbandry', requiredFeatures: ['water-land'], era: 0, cost: 60, requires: ['agriculture'], capability: 'Reveal retained horse sites and assign one local resident to a useful Pasture. Finite horse extraction and mounted units remain planned.' },
@@ -162,6 +177,10 @@ export const IMPROVEMENTS: ImprovementDefinition[] = [
 ];
 
 export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'observatory', name: 'Observatory', requiredFeatures: ['observatory-learning', 'building-operations', 'resident-capacity', 'district-planning'], minEra: 2, cost: { materials: 30, credits: 16 }, requires: ['astronomy'], requiresBuildings: ['campus'], effects: [], operatingInputs: { credits: 2 }, production: { science: 7 }, siteRequirement: 'campus-high-ground', description: 'Retain this town’s completed Campus and an actual adjacent mountain or hill. Two Credits and three local residents support Science on a later season; great-person points remain planned.' },
+  { id: 'foundry', name: 'Foundry', requiredFeatures: ['foundry-production', 'finite-metals', 'building-operations', 'resident-capacity'], minEra: 2, cost: { materials: 32, credits: 16 }, requires: ['metal-casting'], requiresBuildings: ['industrial-zone'], effects: [], operatingInputs: { energy: 2 }, strategicInputs: { iron: 1 }, production: { materials: 8 }, description: 'Reserve one Iron, two Energy and three opening local residents together for Materials. A shortage or pause spends nothing; iron arriving later this season funds a later operation.' },
+  { id: 'theater-square', name: 'Theater square', requiredFeatures: ['culture-production', 'district-planning'], minEra: 1, cost: { materials: 20, credits: 10 }, requires: ['construction'], effects: [], production: { culture: 2 }, district: { range: 3, adjacency: { wonder: true, resource: 'culture', amount: 2, maximum: 4 } }, description: 'Reserve an exact owned site for shared culture. Completed adjacent wonders add two base Culture each, capped at four; unfinished contenders do not count. Amphitheaters and great-person systems remain planned.' },
+  { id: 'printing-house', name: 'Printing house', requiredFeatures: ['culture-production', 'building-operations', 'resident-capacity'], minEra: 2, cost: { materials: 30, credits: 16 }, requires: ['printing'], requiresBuildings: ['theater-square'], effects: [], operatingInputs: { materials: 1 }, production: { culture: 6 }, description: 'Use one Material and three local residents to support this town’s Printing house. Tourism and other influence adjuncts remain planned.' },
   { id: 'water-mill', name: 'Water mill', requiredFeatures: ['water-land'], minEra: 0, cost: { materials: 16, credits: 6 }, requires: ['wheel'], requiresBuildings: ['irrigation'], effects: [], production: { food: 1, materials: 2 }, description: 'Use this town’s completed Irrigation infrastructure to make food and materials after construction. No river is implied.' },
   { id: 'aqueduct', name: 'Aqueduct', requiredFeatures: ['water-land', 'local-growth'], minEra: 1, cost: { materials: 22, credits: 8 }, requires: ['engineering'], effects: [], production: {}, housing: 6, siteRequirement: 'mountain-catchment', description: 'Retain an exact adjacent mountain catchment to add six local housing spaces. Later food-funded growth is still required; no residents arrive at completion.' },
   { id: 'granary', name: 'Granary', requiredFeatures: ['local-growth'], minEra: 0, cost: { materials: 14, credits: 6 }, requires: ['masonry'], effects: [], production: { food: 2 }, housing: 4, description: 'Add four housing spaces and later food production in this town. Residents still need food-funded growth before they can support additional work. Spoilage protection remains planned.' },
@@ -271,13 +290,14 @@ export interface ContentCatalog {
   residentCapacityRules: typeof RESIDENT_CAPACITY_RULES;
   metalRules: typeof METAL_RULES;
   pastoralRules: typeof PASTORAL_RULES;
+  territoryRules: typeof TERRITORY_RULES;
 }
 
 export const CONTENT: ContentCatalog = {
   civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
   wonders: WONDERS, wonderRules: WONDER_RULES,
   buildings: BUILDINGS, improvements: IMPROVEMENTS, improvementRules: IMPROVEMENT_RULES, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
-  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES, metalRules: METAL_RULES, pastoralRules: PASTORAL_RULES,
+  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES, metalRules: METAL_RULES, pastoralRules: PASTORAL_RULES, territoryRules: TERRITORY_RULES,
   tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES, landTransportRules: LAND_TRANSPORT_RULES, publicProjectRecipes: PUBLIC_PROJECT_RECIPES, publicProjectRules: PUBLIC_PROJECT_RULES, siteOutputs: SETTLEMENT_SITE_OUTPUTS,
 };
 
@@ -309,6 +329,8 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
   };
   if (catalog.landTransportRules.ruleVersion !== 1 || !Number.isSafeInteger(catalog.landTransportRules.edgesPerBeat) || catalog.landTransportRules.edgesPerBeat < 1) errors.push('land transport: invalid version or pace');
   if (Object.keys(catalog.landTransportRules.passable).length !== 6 || ['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].some(terrain => typeof Reflect.get(catalog.landTransportRules.passable, terrain) !== 'boolean')) errors.push('land transport: invalid terrain passability');
+  const territory = catalog.territoryRules;
+  if (territory.ruleVersion !== 1 || territory.featureId !== 'owned-territory' || !features.has(territory.featureId) || territory.range !== 3 || ![territory.baseCredits, territory.creditsPerDistance, territory.creditsPerPriorPurchase].every(value => Number.isSafeInteger(value) && value >= 0) || territory.baseCredits < 1) errors.push('territory: invalid version, feature, bounded range or price basis');
   const pastoral = catalog.pastoralRules;
   if (pastoral.ruleVersion !== 1 || !features.has(pastoral.featureId) || pastoral.featureId !== 'water-land' || pastoral.resource !== 'horses' || pastoral.revealTechnology !== 'animal-husbandry' || !catalog.technologies.some(technology => technology.id === pastoral.revealTechnology)) errors.push('pastoral sites: invalid version, feature, resource or reveal technology');
   if (pastoral.placement.id !== 'pastoral-sites-1' || pastoral.placement.seedSalt !== 0x50415354 || pastoral.placement.seedMultiplier !== 0x9e3779b1 || pastoral.placement.mixMultipliers[0] !== 0x7feb352d || pastoral.placement.mixMultipliers[1] !== 0x846ca68b || ![pastoral.placement.maximumSites, pastoral.placement.frontierMinimumDistance, pastoral.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('pastoral sites: invalid versioned placement');
@@ -445,17 +467,24 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     resources(`${building.id} production`, building.production);
     if (building.housing !== undefined && (!Number.isSafeInteger(building.housing) || building.housing <= 0 || !building.requiredFeatures.includes('local-growth'))) errors.push(`building ${building.id}: housing requires a positive integer and local-growth feature`);
     resources(`${building.id} operating inputs`, building.operatingInputs ?? {});
+    if (building.strategicInputs !== undefined) {
+      if (!Object.values(building.strategicInputs).some(positive) || Object.entries(building.strategicInputs).some(([resource, amount]) => resource !== 'iron' || !Number.isSafeInteger(amount) || amount < 0)) errors.push(`building ${building.id}: invalid strategic operating inputs`);
+      if (!['foundry-production', 'finite-metals', 'building-operations', 'resident-capacity'].every(feature => building.requiredFeatures.includes(feature))) errors.push(`building ${building.id}: strategic operating inputs require released ledger and operation gates`);
+    }
     if (Object.values(building.operatingInputs ?? {}).some(positive) && !building.requiredFeatures.includes('building-operations')) errors.push(`building ${building.id}: operating inputs require the building-operations feature`);
     const capabilities = building.capabilities ?? [];
     for (const capability of capabilities) if (!Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability)) errors.push(`building ${building.id}: unknown capability ${capability}`);
     if (new Set(capabilities).size !== capabilities.length) errors.push(`building ${building.id}: duplicate capabilities`);
-    if (building.siteRequirement !== undefined && !['coastal', 'mountain-catchment'].includes(building.siteRequirement)) errors.push(`building ${building.id}: unknown site requirement`);
+    if (building.siteRequirement !== undefined && !['coastal', 'mountain-catchment', 'campus-high-ground'].includes(building.siteRequirement)) errors.push(`building ${building.id}: unknown site requirement`);
+    if (building.siteRequirement === 'campus-high-ground' && (!building.requiredFeatures.includes('observatory-learning') || !building.requiresBuildings?.includes('campus'))) errors.push(`building ${building.id}: Campus high ground requires Observatory feature and own Campus`);
     if (building.siteRequirement === 'mountain-catchment' && !building.requiredFeatures.includes(pastoral.featureId)) errors.push(`building ${building.id}: mountain catchment requires water-land feature`);
     if (building.district) {
       const { range, adjacency } = building.district;
       if (!building.requiredFeatures.includes('district-planning')) errors.push(`building ${building.id}: district requires district-planning feature`);
       if (!Number.isSafeInteger(range) || range < 1) errors.push(`building ${building.id}: invalid district range`);
-      if (adjacency && ((adjacency.terrain !== undefined) === (adjacency.improvement !== undefined))) errors.push(`building ${building.id}: district adjacency requires exactly one selector`);
+      if (adjacency && [adjacency.terrain, adjacency.improvement, adjacency.wonder].filter(selector => selector !== undefined).length !== 1) errors.push(`building ${building.id}: district adjacency requires exactly one selector`);
+      const wonderSelector: unknown = adjacency ? Reflect.get(adjacency, 'wonder') : undefined;
+      if (wonderSelector !== undefined && wonderSelector !== true) errors.push(`building ${building.id}: invalid district wonder selector`);
       if (adjacency?.terrain !== undefined && !['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].includes(adjacency.terrain)) errors.push(`building ${building.id}: invalid district terrain`);
       if (adjacency?.improvement !== undefined && !catalog.improvements.some(improvement => improvement.id === adjacency.improvement)) errors.push(`building ${building.id}: invalid district improvement`);
       if (adjacency && !RESOURCE_IDS.includes(adjacency.resource)) errors.push(`building ${building.id}: invalid district resource`);

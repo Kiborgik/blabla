@@ -255,7 +255,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1', 'settlement-territory-1', 'settlement-culture-production-1', 'settlement-foundry-1', 'settlement-observatory-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -265,7 +265,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1', 'settlement-territory-1', 'settlement-culture-production-1', 'settlement-foundry-1', 'settlement-observatory-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -562,3 +562,84 @@ await test('forest and append-only extent are explicit compatible successors', a
   assert.deepEqual(RELEASES.find(item => item.id === 'settlement-forest-production-1')?.compatibleFrom, ['settlement-water-land-1']);
   assert.deepEqual(RELEASES.find(item => item.id === 'settlement-world-expansion-1')?.compatibleFrom, ['settlement-forest-production-1']);
 });
+
+await test('owned territory retains an explicit price basis and compatible feature gate', async () => {
+  const { TERRITORY_RULES } = await import('../core/content.ts');
+  assert.deepEqual(validateContent(), []);
+  assert.deepEqual(TERRITORY_RULES, { ruleVersion: 1, featureId: 'owned-territory', range: 3, baseCredits: 12, creditsPerDistance: 4, creditsPerPriorPurchase: 2 });
+  assert.deepEqual(ACTION_FEATURES['acquire-tile'], ['owned-territory']);
+  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-territory-1')?.compatibleFrom, ['settlement-world-expansion-1']);
+  for (const [key, value] of [['range', 4], ['baseCredits', -1], ['creditsPerDistance', 0.5], ['featureId', 'missing']] as const) {
+    const broken = structuredClone(CONTENT); Reflect.set(broken.territoryRules, key, value);
+    assert.ok(validateContent(broken).some(error => error.startsWith('territory:')));
+  }
+});
+
+await test('culture catalogue declares meaningful exact districts and paid local consumers', () => {
+  const theater = required(BUILDINGS.find(item => item.id === 'theater-square'));
+  const house = required(BUILDINGS.find(item => item.id === 'printing-house'));
+  assert.deepEqual(theater.district?.adjacency, { wonder: true, resource: 'culture', amount: 2, maximum: 4 });
+  assert.deepEqual(house.requiresBuildings, ['theater-square']);
+  assert.deepEqual(house.operatingInputs, { materials: 1 });
+  assert.deepEqual(house.production, { culture: 6 });
+  for (const change of [{ wonder: false }, { wonder: 'great-library' }, { wonder: true, terrain: 'mountain' }, { wonder: true, improvement: 'mine' }]) {
+    const catalog = structuredClone(CONTENT);
+    const target = required(catalog.buildings.find(item => item.id === 'theater-square'));
+    assert.ok(target.district?.adjacency);
+    Object.assign(target.district.adjacency, change);
+    assert.ok(validateContent(catalog).some(error => error.includes('district')));
+  }
+});
+
+await test('foundry catalogue preserves the connected prerequisite chain and useful mixed recipe', () => {
+  assert.deepEqual(validateContent(), []);
+  for (const [id, cost, requires] of [
+    ['military-engineering', 240, ['construction', 'iron-working']],
+    ['gunpowder', 390, ['military-engineering', 'apprenticeship']],
+    ['metal-casting', 450, ['gunpowder', 'machinery']],
+  ] as const) {
+    const technology = required(TECHNOLOGIES.find(item => item.id === id));
+    assert.equal(technology.cost, cost);
+    assert.deepEqual(technology.requires, requires);
+  }
+  const foundry = required(BUILDINGS.find(item => item.id === 'foundry'));
+  assert.deepEqual(foundry.requiresBuildings, ['industrial-zone']);
+  assert.deepEqual(foundry.strategicInputs, { iron: 1 });
+  assert.deepEqual(foundry.operatingInputs, { energy: 2 });
+  assert.deepEqual(foundry.production, { materials: 8 });
+  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-foundry-1')?.compatibleFrom, ['settlement-culture-production-1']);
+});
+
+await test('foundry catalogue refuses empty unknown fractional or ungated strategic inputs', () => {
+  for (const inputs of [{}, { iron: -1 }, { iron: 0.5 }, { horses: 1 }]) {
+    const catalog = structuredClone(CONTENT);
+    Reflect.set(required(catalog.buildings.find(item => item.id === 'foundry')), 'strategicInputs', inputs);
+    assert.ok(validateContent(catalog).some(error => error.includes('strategic operating inputs')));
+  }
+  for (const gate of ['foundry-production', 'finite-metals', 'building-operations', 'resident-capacity']) {
+    const catalog = structuredClone(CONTENT);
+    const foundry = required(catalog.buildings.find(item => item.id === 'foundry'));
+    foundry.requiredFeatures = foundry.requiredFeatures.filter(feature => feature !== gate);
+    assert.ok(validateContent(catalog).some(error => error.includes('strategic operating inputs')));
+  }
+});
+
+await test('observatory catalogue connects paid local learning to the retained Campus high ground', () => {
+  for (const [id, cost, requires] of [
+    ['sailing', 72, ['water-management']],
+    ['celestial-navigation', 132, ['sailing', 'writing']],
+    ['astronomy', 360, ['mathematics', 'celestial-navigation']],
+  ] as const) {
+    const technology = required(TECHNOLOGIES.find(item => item.id === id));
+    assert.equal(technology.cost, cost);
+    assert.deepEqual(technology.requires, requires);
+  }
+  const observatory = required(BUILDINGS.find(item => item.id === 'observatory'));
+  assert.deepEqual(observatory.requiresBuildings, ['campus']);
+  assert.equal(observatory.siteRequirement, 'campus-high-ground');
+  assert.deepEqual(observatory.operatingInputs, { credits: 2 });
+  assert.deepEqual(observatory.production, { science: 7 });
+  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-observatory-1')?.compatibleFrom, ['settlement-foundry-1']);
+  assert.deepEqual(validateContent(), []);
+});
+

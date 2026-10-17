@@ -1,8 +1,9 @@
+import { territoryPage, type TownTerritoryView, type TerritorySiteView } from '../visuals/territory-visuals.ts';
 import type { observedPastoralSites } from '../core/simulation/pastoral.ts';
 import { pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
 import { wonderWorkRows, type TownDevelopmentFacts, type WonderWorkRow } from '../visuals/wonder-visuals.ts';
 import { exactNumber, numberElement } from './number-format.ts';
-import { extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
+import { strategicResourceAmounts, SITE_MARK_PATHS, type StrategicAmount, extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
 import type { observedStrategicResources } from '../core/simulation/metals.ts';
 import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
 import { damageCondition } from '../visuals/damage-visuals.ts';
@@ -23,13 +24,15 @@ function text<K extends keyof HTMLElementTagNameMap>(tag: K, value: string, clas
   return element;
 }
 
-function amountLine(label: string, amounts: ResourceAmount[]): HTMLElement {
+function amountLine(label: string, amounts: Array<ResourceAmount | StrategicAmount>): HTMLElement {
   const line = text('p', '', 'operation-amounts');
   line.append(text('strong', `${label}: `));
   if (!amounts.length) line.append(document.createTextNode('None'));
   for (const entry of amounts) {
     const item = text('span', `${exactNumber(entry.amount)} ${entry.label}`);
-    item.prepend(visualIcon(entry.resource));
+    const icon = visualIcon(entry.resource === 'iron' ? 'materials' : entry.resource);
+    if (entry.resource === 'iron') icon.querySelector('path')?.setAttribute('d', SITE_MARK_PATHS.iron);
+    item.prepend(icon);
     line.append(item);
   }
   return line;
@@ -81,7 +84,68 @@ function wonderCard(row: WonderWorkRow): HTMLElement {
   return card;
 }
 
-export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts): void {
+function territorySiteName(site: TerritorySiteView | null): string {
+  return site?.work?.name ?? (site?.resources.map(resource => resource.name).join(' / ') || (site ? site.terrain.charAt(0).toUpperCase() + site.terrain.slice(1) : 'Site unavailable'));
+}
+
+export function renderTerritoryInspection(host: HTMLElement, territory: TownTerritoryView, retained = { view: 'purchases', page: 0 }): void {
+  if (territory.status !== 'available') return;
+  const details = townDisclosure('land', `Land · ${territory.purchases.length} acquired plots`);
+  details.classList.add('territory-detail');
+  details.firstElementChild?.addEventListener('click', () => {
+    if (!details.open) requestAnimationFrame(() => { if (details.open) details.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'instant' }); });
+  });
+  const selector = text('select', '', 'territory-view');
+  selector.setAttribute('aria-label', 'Land information'); selector.dataset['inspectionFocus'] = 'land-view';
+  for (const [value, label] of [['purchases', 'Recorded purchases'], ['available', 'Land options now'], ['blocked', 'Unavailable land now']]) {
+    if (!value || !label) continue;
+    const option = text('option', label); option.value = value; selector.append(option);
+  }
+  selector.value = ['purchases', 'available', 'blocked'].includes(retained.view) ? retained.view : 'purchases';
+  const context = text('p', '', 'territory-note'); const list = text('ul', '', 'territory-records');
+  const navigation = text('div', '', 'territory-pagination');
+  const previous = text('button', 'Previous'); const next = text('button', 'Next'); const position = text('span', '');
+  for (const [button, key] of [[previous, 'land-previous'], [next, 'land-next']] as const) { button.type = 'button'; button.dataset['inspectionFocus'] = key; }
+  navigation.append(previous, position, next);
+  const meaning = townDisclosure('land-meaning', 'How acquired land works');
+  meaning.append(text('p', 'Outlined plots are this town’s recorded purchases. A retained ownership connection is not a road. Buying land does not construct a worked site, add residents or make supplies.'));
+  details.append(selector, context, list, navigation, meaning); host.append(details);
+  let page = retained.page;
+  const draw = (): void => {
+    list.replaceChildren(); details.dataset['landView'] = selector.value;
+    const rows: Array<TownTerritoryView['purchases'][number] | TownTerritoryView['available'][number] | TownTerritoryView['blocked'][number]> = selector.value === 'available' ? territory.available : selector.value === 'blocked' ? territory.blocked : territory.purchases.toSorted((left, right) => Number(!!right.site?.work) - Number(!!left.site?.work) || left.receipt.tileId - right.receipt.tileId);
+    const current = territoryPage(rows, page); page = current.page; details.dataset['landPage'] = String(page);
+    context.hidden = selector.value === 'purchases';
+    context.textContent = `Current options · Revision ${territory.revision}. Actor timing is separate.`;
+    for (const entry of current.rows) {
+      const row = text('li', '', 'territory-record');
+      if ('receipt' in entry) {
+        const site = entry.site; const record = entry.receipt;
+        row.append(text('strong', `${territorySiteName(site)} · Tile ${record.tileId}`));
+        const resource = site?.resources.map(item => item.name).join(' / ') || (site?.terrain === 'forest' ? 'Forest' : '');
+        const work = site?.work;
+        row.append(text('p', [resource, work ? work.status === 'building' ? `Under construction · ${exactNumber(work.construction?.workDone ?? 0)} / ${exactNumber(work.construction?.workRequired ?? 0)} work` : `Built · ${work.installed?.operation.enabled === false ? 'Paused now' : 'On now'}` : 'Acquired · No worked site'].filter(Boolean).join(' · ')));
+        if (work?.installed?.operation.lastResult) {
+          const result = work.installed.operation.lastResult;
+          row.append(text('span', `Last recorded season ${result.round} · ${improvementLastLabel(result)}`, 'work-record-round'), vectorLine('Made', result.produced), text('p', `Assigned then: ${result.residents.allocated} resident${result.residents.allocated === 1 ? '' : 's'}.`));
+        } else if (work?.status === 'built') row.append(text('p', 'No operating record yet.'));
+        const receipt = townDisclosure(`land-record:${record.tileId}`, `Purchase record · ${exactNumber(record.paid.credits)} Credits`);
+        receipt.append(text('p', `${territory.cityName ?? 'Recorded town'} acquired Tile ${record.tileId} in round ${record.acquiredRound}. Paid once: ${exactNumber(record.paid.credits)} Credits.`),
+          text('p', `Recorded ownership connection: ${record.pathTileIds.join(' → ')}.`), text('p', `Current owner: ${site?.owner === territory.civilizationId ? 'this civilization' : site?.owner === null ? 'unowned' : site ? 'another civilization' : 'unavailable'}.`), text('p', `Event ${record.eventId}`, 'territory-note'));
+        row.append(receipt);
+      } else if ('quote' in entry) row.append(text('strong', `${territorySiteName(entry.site)} · Tile ${entry.quote.tileId}`), text('p', `Cost now: ${exactNumber(entry.quote.paid.credits)} Credits. No payment has been made.`));
+      else row.append(text('strong', `Tile ${entry.tileId}`), text('p', entry.reason));
+      list.append(row);
+    }
+    if (!rows.length) list.append(text('li', selector.value === 'purchases' ? 'No acquired plots recorded for this town.' : selector.value === 'available' ? 'No land acquisition options now.' : 'No blocked land candidates recorded.'));
+    previous.disabled = page === 0; next.disabled = page + 1 === current.pages; navigation.hidden = current.pages === 1;
+    position.textContent = `Page ${page + 1} of ${current.pages}`;
+  };
+  selector.addEventListener('change', () => { page = 0; draw(); });
+  previous.addEventListener('click', () => { page--; draw(); }); next.addEventListener('click', () => { page++; draw(); }); draw();
+}
+
+export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }): void {
   host.replaceChildren();
   const city = cities.find((entry) => entry.id === selectedId) ?? cities[0];
   if (!city) return;
@@ -97,6 +161,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
   people.prepend(visualIcon('population'));
   host.append(heading, people, text('p', `Focus: ${city.focus} · ${city.damage}% damage`, 'settlement-facts'));
   if (townPicker) host.append(townPicker);
+  if (territory) renderTerritoryInspection(host, territory, retainedTerritory);
   if (development?.growth) {
     const growth = development.growth;
     const housing = townDisclosure('housing', `Next population growth · ${exactNumber(growth.nextGrowthFoodCost)} Food`);
@@ -153,6 +218,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     const site = text('section', '', 'building-card');
     site.dataset['workId'] = `active:${activeDistrict.id}`;
     site.append(text('h4', `${definition?.name ?? activeDistrict.buildingId} · Under construction`));
+    if (activeDistrict.highGround) site.append(text('p', `Retained high ground · Campus Tile ${activeDistrict.highGround.campusTileId} · Source Tile ${activeDistrict.highGround.sourceTileId}`, 'building-summary'));
     if (activeDistrict.catchmentTileId !== undefined) site.append(text('p', `Retained mountain source · Tile ${activeDistrict.catchmentTileId}`, 'building-summary'));
     if (definition?.housing) site.append(text('p', `After completion: +${definition.housing} housing. No residents are added immediately.`, 'building-summary'));
     if (parent) {
@@ -211,20 +277,22 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     card.className = 'building-card';
     card.dataset['building'] = id;
     const name = text('h4', definition?.name ?? id);
-    name.prepend(visualIcon(appearance?.icon ?? 'infrastructure'));
+    name.prepend(visualIcon(appearance?.icon ?? (id === 'foundry' ? 'kiln' : id === 'observatory' ? 'science' : definition?.production.culture ? 'culture' : 'infrastructure')));
     card.append(name);
     const parent = definition?.district ? definition : BUILDINGS.find(item => item.district && definition?.requiresBuildings?.includes(item.id));
     if (parent) {
       const siteId = city.districtSites?.[parent.id];
       card.append(text('p', siteId === undefined ? `Exact ${parent.name} site unavailable` : `${parent.id === id ? 'Exact district site' : `At this town’s ${parent.name}`} · Tile ${siteId}`, 'building-summary'));
     }
+    const highGround = city.buildingHighGround?.[id];
+    if (highGround) card.append(text('p', `Retained high ground · Campus Tile ${highGround.campusTileId} · Source Tile ${highGround.sourceTileId}. The Observatory is at the Campus, not on the source tile.`, 'building-summary'));
     if (!definition?.operatingInputs) {
       card.append(text('p', 'Built', 'building-current'));
       if (definition?.housing) card.append(text('p', `Adds ${definition.housing} housing capacity. Population grows only in a later eligible season with food.`, 'building-summary'));
       const source = city.buildingCatchments?.[id];
       if (source !== undefined) card.append(text('p', `Retained mountain source · Tile ${source}. This is a source, not an occupied district or a pipe route.`, 'building-summary'));
       if (definition?.requiresBuildings?.length) card.append(text('p', `Built with this town’s ${definition.requiresBuildings.map(required => BUILDINGS.find(item => item.id === required)?.name ?? required).join(' and ')}.`, 'building-summary'));
-      if (definition && Object.values(definition.production).some(amount => amount > 0)) card.append(amountLine('Base before town productivity', RESOURCE_IDS.flatMap(resource => { const amount = definition.production[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })), text('p', 'Later town production includes this contribution. No separate per-building output receipt is recorded.', 'building-summary'));
+      if (definition && Object.values(definition.production).some(amount => amount > 0)) card.append(amountLine(definition.district ? 'Building base before site bonus' : 'Base before town productivity', RESOURCE_IDS.flatMap(resource => { const amount = definition.production[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })), text('p', `${definition.district ? 'Research & buildings shows the exact site base and nearby sources. ' : ''}Later town production includes this contribution. No separate per-building output receipt is recorded.`, 'building-summary'));
       if (definition?.capabilities?.includes('coastal-departure')) card.append(text('p', 'Coastal departure site. With Navigation, existing residents can found a new coastal town. This building has no operating output.', 'building-summary'));
       host.append(card);
       continue;
@@ -245,11 +313,12 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
           text('p', `Population at start: ${residents.openingPopulation} · Community reserve: ${residents.communityReserve}`),
           text('p', 'This is the recorded allocation for that round. Support is assigned again each season.'));
       } else if (support) receipt.append(text('p', 'Resident support was not recorded for this result.'));
-      receipt.append(amountLine('Paid', view.last.paid), amountLine('Made', view.last.produced));
+      receipt.append(amountLine('Paid', [...view.last.paid, ...view.last.strategicPaid ?? []]), amountLine('Made', view.last.produced));
       for (const shortage of view.last.shortages) {
         receipt.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${shortage.required}; ${shortage.available} left in opening stock at round ${view.last.round}.`, 'operation-shortage'));
       }
-      if (view.last.status === 'blocked' && !view.last.paid.length && !view.last.produced.length) receipt.append(text('p', 'Nothing was paid or made in that record.', 'operation-shortage'));
+      for (const shortage of view.last.strategicShortages ?? []) receipt.append(text('p', `Iron needed ${exactNumber(shortage.required)}; ${exactNumber(shortage.available)} left in opening stock at round ${view.last.round}.`, 'operation-shortage'));
+      if (view.last.status === 'blocked' && !view.last.strategicPaid?.length && !view.last.paid.length && !view.last.produced.length) receipt.append(text('p', 'Nothing was paid or made in that record.', 'operation-shortage'));
       card.append(receipt);
     }
     host.append(card);
@@ -288,8 +357,11 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
         preview.append(text('span', `Last recorded season · ${last.round}`, 'work-record-round'));
         const results = text('div', '', 'work-key-results');
         results.append(amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
-          amountLine('Used', RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
+          amountLine('Used', [...RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; }), ...strategicResourceAmounts('strategicPaid' in last ? last.strategicPaid : undefined)]));
         preview.append(results);
+        if (last.status === 'blocked' && 'shortages' in last) for (const shortage of last.shortages) preview.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
+        if ('strategicShortages' in last) for (const shortage of last.strategicShortages ?? []) preview.append(text('p', `Iron needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
+        if (last.status === 'blocked' && operation) preview.append(text('p', operationVisual(operation).last?.label ?? 'Could not operate', 'work-record-round'));
         if (last.status !== 'operated') preview.append(text('span', last.status === 'paused' ? 'Paused in that season' : 'Could not operate in that season', 'work-record-round'));
       } else {
         const definition = BUILDINGS.find(item => item.id === key);

@@ -1,4 +1,5 @@
 import type { HierarchyAnchor, ScreenBox } from '../visuals/map-hierarchy.ts';
+import { districtLabel } from '../visuals/district-visuals.ts';
 import { damageMapLabel } from '../visuals/damage-visuals.ts';
 import { routeLabelKey, routeMapLabel } from '../visuals/route-visuals.ts';
 import { routeMapAnchor, type AtlasWorld } from './atlas.ts';
@@ -34,8 +35,8 @@ export function mapHierarchyAnchors(world: AtlasWorld, selected: string, selecte
   });
   for (const site of [...world.catchments ?? [], ...world.districts ?? [], ...world.improvements ?? [], ...world.wonders ?? []]) {
     const wonder = 'record' in site;
-    const label = 'name' in site ? site.name ?? 'Campus' : 'Aqueduct source';
-    anchors.push({ id: site.id, kind: wonder ? 'wonder' : 'site', label: `${label}${site.status === 'building' ? ' · Building' : ''}`,
+    const label = 'library' in site ? districtLabel(site) : 'name' in site ? site.name ?? 'Campus' : 'Aqueduct source';
+    anchors.push({ id: site.id, kind: wonder ? 'wonder' : 'site', label: `${label}${site.status === 'building' && !('library' in site) ? ' · Building' : ''}${site.cityId === selected && world.acquiredLand?.some(plot => plot.receipt.cityId === selected && plot.receipt.tileId === site.tileId) ? ` · Tile ${site.tileId}` : ''}`,
       ...project(site.q, site.r, site.height + .4), tileId: site.tileId, related: site.cityId === selected, completed: wonder && site.status === 'built' });
   }
   for (const site of world.pastoralSites ?? []) anchors.push({ id: site.id, kind: 'resource', label: 'Horses', ...project(site.q, site.r, site.height + .4), tileId: site.tileId,

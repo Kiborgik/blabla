@@ -1,10 +1,10 @@
 import { exactNumber } from './number-format.ts';
-import { extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
+import { strategicResourceAmounts, extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
 import { constructionTarget } from '../core/simulation/improvements.ts';
 import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
 import type { CapabilityCatalogue, CapabilityProjection, CapabilityBlocker } from '../core/capabilities.ts';
 import { RESOURCE_IDS } from '../core/content.ts';
-import type { DecisionBlocker, DecisionObligation, GameEvent, Resources } from '../core/types.ts';
+import type { DecisionBlocker, DecisionObligation, GameEvent, Resources, StrategicResources } from '../core/types.ts';
 import { resourceGuide } from './viewer-appearance.ts';
 import { visualIcon } from './world-cues.ts';
 import { researchProgressPresentation } from './research-progress.ts';
@@ -47,8 +47,8 @@ const STATUS_LABELS = { done: 'Done', available: 'Available', locked: 'Locked', 
 
 function number(value: number): string { return exactNumber(value); }
 
-function amounts(values: Partial<Resources>): string {
-  return RESOURCE_IDS.flatMap(resource => values[resource] === undefined ? [] : [`${number(values[resource])} ${resourceGuide(resource).label}`]).join(' · ') || 'None';
+function amounts(values: Partial<Resources>, strategic?: StrategicResources): string {
+  return [...RESOURCE_IDS.flatMap(resource => values[resource] === undefined ? [] : [`${number(values[resource])} ${resourceGuide(resource).label}`]), ...strategicResourceAmounts(strategic).map(entry => `${number(entry.amount)} ${entry.label}`)].join(' · ') || 'None';
 }
 
 function capabilityName(input: CapabilityTreeInput, id: string): string {
@@ -71,6 +71,7 @@ function blockerText(blocker: CapabilityBlocker, input: CapabilityTreeInput): st
     case 'wonder-site': return `${town(blocker.cityId)} needs an available wonder site`;
     case 'wonder-contender': return `This civilization already has a contender for ${capabilityName(input, blocker.wonderId)}`;
     case 'wonder-completed': return `${capabilityName(input, blocker.wonderId)} has a recorded world winner: civilization ${blocker.civilizationId}`;
+    case 'campus-high-ground': return `${town(blocker.cityId)} needs a Campus next to a hill or mountain`;
     case 'mountain-catchment': return `${town(blocker.cityId)} needs an adjacent mountain source`;
     case 'coastal-site': return 'Needs a coastal town';
     case 'building': return `Build ${capabilityName(input, blocker.buildingId)} in ${town(blocker.cityId)}`;
@@ -138,8 +139,8 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
       ] : [
         { label: 'Build once', value: amounts(definition.cost) },
         ...(definition.capabilities?.includes('coastal-departure') ? [{ label: 'Enables', value: 'Coastal departure with Navigation; no operating output' }, { label: 'Site', value: 'A coastal town' }] : [
-          { label: 'Uses each operating season', value: amounts(definition.operatingInputs ?? {}) },
-          { label: definition.district?.adjacency?.improvement ? 'Building base before nearby Mines' : definition.district ? 'Building base before nearby terrain' : 'Base production before productivity', value: amounts(definition.production) },
+          { label: 'Uses each operating season', value: amounts(definition.operatingInputs ?? {}, definition.strategicInputs) },
+          { label: definition.district?.adjacency?.improvement ? 'Building base before nearby Mines' : definition.district?.adjacency?.wonder ? 'Building base before nearby wonders' : definition.district ? 'Building base before nearby terrain' : 'Base production before productivity', value: amounts(definition.production) },
         ]),
       ];
     const wonder = input.projection.wonders?.find(entry => entry.nodeId === id);
@@ -176,6 +177,12 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
       if (sites) facts.push({ label: 'Horse sites known to this civilization', value: sites.length ? sites.map(site => `Tile ${site.tileId}`).join(' · ') : 'None revealed' },
         { label: 'Meaning', value: 'Revealed geography. No horse stock or extraction is recorded. Pasture food requires a later staffed season.' });
     }
+    if (row?.highGround) {
+      const retained = row.highGround.retained;
+      facts.push({ label: 'Retained high ground', value: retained ? `Campus Tile ${retained.campusTileId} · Source Tile ${retained.sourceTileId}` : 'No source retained yet' });
+      if (!retained) facts.push({ label: 'Current high-ground options', value: row.highGround.available.map(site => `Campus Tile ${site.campusTileId} · Source Tile ${site.sourceTileId}`).join(' · ') || 'None' });
+      facts.push({ label: 'Source meaning', value: 'The Observatory belongs to this Campus. Nearby high ground qualifies the site; it is not another occupied district.' });
+    }
     if (row?.catchment) {
       facts.push({ label: 'Mountain source', value: row.catchment.retainedTileId === null ? 'No source retained yet' : `Tile ${row.catchment.retainedTileId} · Recorded for this town` });
       if (row.catchment.retainedTileId === null) facts.push({ label: 'Current source options', value: row.catchment.availableTileIds.map(tile => `Tile ${tile}`).join(' · ') || 'None' });
@@ -195,13 +202,18 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
       const district = row.district;
       facts.push({ label: 'District slots', value: `${district.used} used / ${district.capacity} capacity` });
       if (district.siteId !== null) facts.push({ label: row.construction ? 'Reserved site' : 'Built site', value: `Tile ${district.siteId}` });
-      if (district.siteBaseProduction) facts.push({ label: district.siteAdjacency?.source === 'improvement' ? 'Site base with nearby Mines' : 'Site base with nearby terrain', value: amounts(district.siteBaseProduction) });
+      if (district.siteBaseProduction) facts.push({ label: district.siteAdjacency?.source === 'improvement' ? 'Site base with nearby Mines' : district.siteAdjacency?.source === 'wonder' ? 'Site base with nearby wonders' : 'Site base with nearby terrain', value: amounts(district.siteBaseProduction) });
       if (district.siteAdjacency?.source === 'improvement') {
         const adjacency = district.siteAdjacency;
         facts.push({ label: 'Completed nearby Mines', value: adjacency.tileIds.length ? adjacency.tileIds.map(tile => `Tile ${tile}`).join(' · ') : 'None' },
           { label: 'Mine bonus before productivity', value: `${amounts({ [adjacency.resource]: adjacency.bonus })} · Maximum ${adjacency.maximum}. Paused Mines count; unfinished Mines do not.` });
       }
-      for (const site of district.availableSites) facts.push({ label: `Available site ${site.tileId}`, value: `${amounts(site.baseProduction)} base before town productivity${site.adjacency?.source === 'improvement' ? ` · Completed nearby Mine sites: ${site.adjacency.tileIds.join(', ') || 'None'} · Bonus ${amounts({ [site.adjacency.resource]: site.adjacency.bonus })}` : ''}` });
+      if (district.siteAdjacency?.source === 'wonder') {
+        const adjacency = district.siteAdjacency;
+        facts.push({ label: 'Completed nearby wonders', value: adjacency.tileIds.length ? adjacency.tileIds.map(tile => `Tile ${tile}`).join(' · ') : 'None' },
+          { label: 'Wonder bonus before productivity', value: `${amounts({ [adjacency.resource]: adjacency.bonus })} · Maximum ${adjacency.maximum}. Unfinished wonders do not count.` });
+      }
+      for (const site of district.availableSites) facts.push({ label: `Available site ${site.tileId}`, value: `${amounts(site.baseProduction)} base before town productivity${site.adjacency?.source === 'wonder' ? ` · Completed nearby wonder sites: ${site.adjacency.tileIds.join(', ') || 'None'} · Bonus ${amounts({ [site.adjacency.resource]: site.adjacency.bonus })}` : site.adjacency?.source === 'improvement' ? ` · Completed nearby Mine sites: ${site.adjacency.tileIds.join(', ') || 'None'} · Bonus ${amounts({ [site.adjacency.resource]: site.adjacency.bonus })}` : ''}` });
     }
     if (row?.operation) facts.push({ label: 'Operating now', value: row.operation.enabled ? 'On' : 'Paused' });
     if (row?.construction) facts.push(

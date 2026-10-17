@@ -2,7 +2,7 @@ import { isWonderOrder, resolveWonderConstruction } from './wonders.ts';
 import { installImprovement, isImprovementOrder } from './improvements.ts';
 import { buildingBaseProduction, describeDistrictProduction } from './districts.ts';
 import { BUILDINGS, CONSTRUCTION_RULES, RESOURCE_IDS } from '../content.ts';
-import type { BuildingDefinition, City, GameEvent, WorldState } from '../types.ts';
+import type { CampusHighGroundSite, BuildingDefinition, City, GameEvent, WorldState } from '../types.ts';
 import { applyEffects } from './effects.ts';
 import { emitEvent } from './events.ts';
 import { hasFeatures } from './history.ts';
@@ -18,7 +18,12 @@ export function requiredConstructionWork(buildingId: string): number {
   return specified?.[1] ?? CONSTRUCTION_RULES.defaultRequiredWork;
 }
 
-export function installBuilding(state: WorldState, city: City, definition: BuildingDefinition, events: GameEvent[], tileId?: number, catchmentTileId?: number): GameEvent {
+export function installBuilding(state: WorldState, city: City, definition: BuildingDefinition, events: GameEvent[], tileId?: number, catchmentTileId?: number, highGround?: CampusHighGroundSite): GameEvent {
+  if (definition.siteRequirement === 'campus-high-ground') {
+    if (highGround === undefined) throw new RangeError('Building completion requires its retained Campus high ground');
+    city.buildingHighGround ??= {};
+    city.buildingHighGround[definition.id] = structuredClone(highGround);
+  }
   if (definition.siteRequirement === 'mountain-catchment') {
     if (catchmentTileId === undefined) throw new RangeError('Building completion requires its retained mountain catchment');
     city.buildingCatchments ??= {};
@@ -50,7 +55,9 @@ export function installBuilding(state: WorldState, city: City, definition: Build
       ...(definition.capabilities ?? []).map(capability => `Completed capability ${capability}`),
       ...(definition.housing && hasFeatures(state, ['water-land']) ? [`Completed housing capacity +${definition.housing}`] : []),
       ...(catchmentTileId === undefined ? [] : [`Retained mountain catchment ${catchmentTileId}`]),
+      ...(highGround === undefined ? [] : [`Retained Campus ${highGround.campusTileId} high ground ${highGround.sourceTileId}`]),
       ...RESOURCE_IDS.filter(resource => (definition.operatingInputs?.[resource] ?? 0) > 0).map(resource => `Operating input ${resource} ${definition.operatingInputs?.[resource]} per funded beat`),
+      ...Object.entries(definition.strategicInputs ?? {}).filter(([, amount]) => amount > 0).map(([resource, amount]) => `Operating input ${resource} ${amount} per funded beat`),
       ...RESOURCE_IDS.filter(resource => (production[resource] ?? 0) > 0).map(resource => `Seasonal ${resource} +${production[resource]}${paidRecipe(definition) ? ' when the complete operating recipe is funded' : ''}`),
     ],
     importance: 4,
@@ -78,12 +85,13 @@ export function resolveConstruction(state: WorldState, opening: ReadonlyMap<stri
     }
     const definition = BUILDINGS.find(building => building.id === order.buildingId);
     if (!definition || city.buildings.includes(order.buildingId)) throw new RangeError('Construction completion requires its exact unbuilt definition');
-    const event = installBuilding(state, city, definition, events, order.tileId, order.catchmentTileId);
+    const event = installBuilding(state, city, definition, events, order.tileId, order.catchmentTileId, order.highGround);
     construction.lastCompleted = {
       orderId: order.id, cityId: city.id, buildingId: order.buildingId,
       startedRound: order.startedRound, completedRound: state.round,
       ...(order.tileId === undefined ? {} : { tileId: order.tileId }),
       ...(order.catchmentTileId === undefined ? {} : { catchmentTileId: order.catchmentTileId }),
+      ...(order.highGround === undefined ? {} : { highGround: structuredClone(order.highGround) }),
       paid: structuredClone(order.paid), workRequired: order.workRequired, eventId: event.id,
     };
     construction.active = null;

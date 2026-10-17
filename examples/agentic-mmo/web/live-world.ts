@@ -1,3 +1,4 @@
+import { projectAcquiredLand } from '../visuals/territory-visuals.ts';
 import { projectPastoralSites, projectCatchmentSites } from '../visuals/pastoral-visuals.ts';
 import { projectWonderSites } from '../visuals/wonder-visuals.ts';
 import { projectRevealedDeposits } from '../visuals/strategic-resource-visuals.ts';
@@ -90,7 +91,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
         status: built ? 'built' : 'building', library: attachments.find(item => item.buildingId === 'library')?.status ?? 'absent',
         construction: active && (active.buildingId === definition.id || attachments.some(item => item.buildingId === active.buildingId)) ? structuredClone(active) : null,
         baseProduction: buildingBaseProduction(state, city, definition, tile.id),
-        ...(definition.district?.adjacency?.improvement ? { adjacency: districtAdjacencyFacts(state, definition, tile.id) } : {}) }];
+        ...((definition.district?.adjacency?.improvement || definition.district?.adjacency?.wonder) ? { adjacency: districtAdjacencyFacts(state, definition, tile.id) } : {}) }];
     });
   }).toSorted((a, b) => a.tileId - b.tileId || a.id.localeCompare(b.id));
   const improvements = state.cities.flatMap((city): ImprovementView[] => {
@@ -123,6 +124,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
   }));
   return {
     illustrative: false,
+    acquiredLand: projectAcquiredLand(state),
     cities,
     districts,
     pastoralSites: projectPastoralSites(state),

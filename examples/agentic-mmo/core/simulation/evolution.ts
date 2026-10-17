@@ -1,3 +1,4 @@
+import { TERRITORY_RULES } from '../content.ts';
 import { expandMapExtent, mapExpansionBlock } from './map-expansion.ts';
 import { initializeCityHousing } from './growth.ts';
 import { WORLD_EXPANSION_RULES, LOCAL_GROWTH_RULES, DISTRICT_RULES, IMPROVEMENT_RULES, FEATURES, METAL_RULES, PASTORAL_RULES, RESEARCH_INVESTMENT_RULES, WONDER_RULES } from '../content.ts';
@@ -152,7 +153,7 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
     (command.timestamp === undefined || parseUtcTimestamp(command.timestamp) === null)
   )
     return rejected(state, 'Independent release activation requires an explicit UTC epoch');
-  if ([WORLD_EXPANSION_RULES.featureId, PASTORAL_RULES.featureId, LOCAL_GROWTH_RULES.featureId, 'resident-capacity', RESEARCH_INVESTMENT_RULES.featureId, DISTRICT_RULES.featureId, IMPROVEMENT_RULES.featureId, METAL_RULES.featureId, WONDER_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
+  if ([TERRITORY_RULES.featureId, WORLD_EXPANSION_RULES.featureId, PASTORAL_RULES.featureId, LOCAL_GROWTH_RULES.featureId, 'resident-capacity', RESEARCH_INVESTMENT_RULES.featureId, DISTRICT_RULES.featureId, IMPROVEMENT_RULES.featureId, METAL_RULES.featureId, WONDER_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
     const timingError = strategyTimingError(state, command.timestamp);
     if (timingError) return rejected(state, timingError);
   }
@@ -167,6 +168,7 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
   next.releaseId = target.id;
   next.unlockedFeatures = [...target.featureIds];
   if (expandsMap) expandMapExtent(next);
+  if (target.featureIds.includes(TERRITORY_RULES.featureId) && !source.featureIds.includes(TERRITORY_RULES.featureId)) next.tileAcquisitions = {};
   if (target.featureIds.includes(METAL_RULES.featureId) && !source.featureIds.includes(METAL_RULES.featureId)) {
     next.strategicDeposits = createStrategicDeposits(next);
     for (const civilization of next.civilizations) civilization.strategicResources = {};

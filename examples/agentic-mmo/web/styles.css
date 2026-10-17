@@ -1334,7 +1334,7 @@ dialog h2 {
 }
 
 @media (max-width: 1000px) {
-  .live-observatory .inspection[data-inspection-view='work'] { max-height: min(66svh, calc(100% - 144px)); }
+  .live-observatory .inspection[data-inspection-view='work'] { max-height: min(66svh, calc(100% - 120px)); }
   .live-observatory[data-inspection='true']:has(.inspection[data-inspection-view='work']) .world-heading { display: none; }
 }
 
@@ -1411,3 +1411,16 @@ dialog h2 {
 #history-dialog .release-entry time { font-size: 12px; }
 #history-dialog .release-entry li { font-size: 13px; line-height: 1.6; margin-bottom: 9px; }
 #history-dialog :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+.territory-detail { border-inline-start: 3px solid var(--civ-color, #bda361); padding-inline-start: 10px; }
+.territory-detail > summary { font-weight: 700; }
+.territory-view { width: 100%; min-height: 44px; font: inherit; margin: 6px 0; }
+.territory-note { font-size: 12px; line-height: 1.45; }
+.territory-records { list-style: none; margin: 0; padding: 0; }
+.territory-record { padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+.territory-record > strong { display: block; font-size: 14px; }
+.territory-record > p { margin: 5px 0; font-size: 13px; line-height: 1.45; }
+.territory-pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.territory-pagination[hidden] { display: none; }
+.territory-pagination button { min-width: 44px; min-height: 44px; font: inherit; }
+.territory-detail > summary { min-height: 56px; padding-right: 80px; }

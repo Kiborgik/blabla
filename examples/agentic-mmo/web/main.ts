@@ -1,3 +1,4 @@
+import { projectTownTerritory } from '../visuals/territory-visuals.ts';
 import { observedPastoralSites } from '../core/simulation/pastoral.ts';
 import { townDevelopmentFacts } from '../visuals/wonder-visuals.ts';
 import { exactNumber, numberPresentation } from './number-format.ts';
@@ -191,12 +192,15 @@ function renderInspection(): void {
   panel.style.setProperty('--civ-color', civ.color);
   const development = snapshot && preferences.selectedCity ? townDevelopmentFacts(snapshot.state, preferences.selectedCity) : undefined;
   const pastoral = snapshot && actual ? observedPastoralSites(snapshot.state, actual.id) : undefined;
-  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
+  const territory = state && actual && observedAt ? projectTownTerritory(state, projectCapabilities(state, actual.id, preferences.selectedCity, observedAt)) : undefined;
+  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, territory, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
   if (fingerprint === inspectionFingerprint) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
   const previousScroll = sameCity && !pendingInspectionWork ? panel.scrollTop : 0;
   const selectedSection = pendingInspectionWork ? 'work' : sameCity ? panel.dataset['inspectionView'] ?? 'overview' : 'overview';
   const selectedWork = pendingInspectionWork ?? (sameCity ? panel.querySelector<HTMLElement>('.city-details')?.dataset['selectedWork'] ?? '' : '');
+  const landElement = sameCity ? panel.querySelector<HTMLElement>('.territory-detail') : null;
+  const retainedTerritory = { view: landElement?.dataset['landView'] ?? 'purchases', page: Number(landElement?.dataset['landPage'] ?? 0) };
   pendingInspectionWork = undefined;
   const focusedInspection = sameCity && document.activeElement instanceof HTMLElement ? document.activeElement.dataset['inspectionFocus'] : undefined;
   const expandedBuildings = new Set([...panel.querySelectorAll<HTMLElement>('.building-card')].filter((card) => sameCity && card.querySelector<HTMLDetailsElement>('details')?.open).map((card) => card.dataset['building']));
@@ -258,7 +262,7 @@ function renderInspection(): void {
   if (pastoral) renderPastoralInspection(panel, pastoral);
   if (snapshot && actual) renderStrategicInspection(panel, observedStrategicResources(snapshot.state, actual.id));
   const settlement = panel.querySelector<HTMLElement>('.city-details');
-  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork, development);
+  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork, development, territory, retainedTerritory);
   const overview = settlement?.querySelector<HTMLElement>('.town-overview');
   if (overview) panel.insertBefore(overview, panel.querySelector('.research-detail'));
   const aim = panel.querySelector('.ambition'); if (aim) panel.append(aim);

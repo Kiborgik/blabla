@@ -1,3 +1,5 @@
+import { availableCampusHighGround } from './simulation/observatory.ts';
+import { observedTerritory } from './simulation/territory.ts';
 import { cityGrowthFacts } from './simulation/growth.ts';
 import { availableWonderSites, isWonderOrder, observedWonders, wonderEligibility } from './simulation/wonders.ts';
 import { availableImprovementSites, isImprovementOrder, orderedImprovements } from './simulation/improvements.ts';
@@ -5,7 +7,7 @@ import { availableDistrictSites, buildingBaseProduction, districtCapacity, distr
 import { BUILDINGS, LOCAL_GROWTH_RULES, IMPROVEMENTS, WONDERS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
 import { RELEASES } from './release.ts';
 import type { ActionPlan } from './planning.ts';
-import type { ActionOption, CityGrowthFacts, CityImprovement, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, Resources, WonderObservation, WorldState } from './types.ts';
+import type { CampusHighGroundSite, ActionOption, CityGrowthFacts, CityImprovement, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, Resources, WonderObservation, WorldState } from './types.ts';
 import { buildingEligibility, improvementEligibility, researchEligibility, type CapabilityBlocker, type CapabilityEligibility } from './simulation/capabilities.ts';
 import { admissionError, turnAdmission } from './simulation/turns.ts';
 import { hasFeatures, milestoneEligible } from './simulation/history.ts';
@@ -27,6 +29,7 @@ export interface CapabilityRow {
   research?: { progress: number; cost: number };
   operation?: BuildingOperation;
   construction?: ConstructionOrder;
+  highGround?: { available: CampusHighGroundSite[]; retained: CampusHighGroundSite | null };
   catchment?: { availableTileIds: number[]; retainedTileId: number | null };
   district?: { capacity: number; used: number; siteId: number | null; siteBaseProduction: Partial<Resources> | null; siteAdjacency?: DistrictAdjacencyFacts | null; availableSites: Array<{ tileId: number; baseProduction: Partial<Resources>; adjacency?: DistrictAdjacencyFacts | null }> };
 }
@@ -49,6 +52,7 @@ export interface CapabilityChoiceContext {
 }
 
 export interface CapabilityProjection {
+  territory?: ReturnType<typeof observedTerritory>;
   growth?: CityGrowthFacts | null;
   strategic?: ReturnType<typeof observedStrategicResources>;
   pastoral?: ReturnType<typeof observedPastoralSites>;
@@ -123,8 +127,8 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     const active = city?.construction?.active;
     const construction = active && !('kind' in active) && active.buildingId === building.id ? active : null;
     const districtSiteId = city?.districtSites?.[building.id] ?? construction?.tileId;
-    const improvementAdjacency = building.district?.adjacency?.improvement !== undefined && hasFeatures(state, building.requiredFeatures);
-    return { ...row(`building:${building.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), ...(operation ? { operation } : {}), ...(city && building.siteRequirement === 'mountain-catchment' && hasFeatures(state, building.requiredFeatures) ? { catchment: { availableTileIds: availableMountainCatchments(state, city), retainedTileId: city.buildingCatchments?.[building.id] ?? construction?.catchmentTileId ?? null } } : {}), ...(city && building.district ? { district: { capacity: districtCapacity(city), used: districtCount(city), siteId: districtSiteId ?? null, ...(improvementAdjacency ? { siteAdjacency: districtSiteId === undefined ? null : districtAdjacencyFacts(state, building, districtSiteId) } : {}), siteBaseProduction: districtSiteId === undefined ? null : buildingBaseProduction(state, city, building, districtSiteId), availableSites: eligibility.completed || eligibility.blockers.length ? [] : availableDistrictSites(state, city, building).map(tileId => ({ tileId, baseProduction: buildingBaseProduction(state, city, building, tileId), ...(improvementAdjacency ? { adjacency: districtAdjacencyFacts(state, building, tileId) } : {}) })) } } : {}) };
+    const installationAdjacency = (building.district?.adjacency?.improvement !== undefined || building.district?.adjacency?.wonder === true) && hasFeatures(state, building.requiredFeatures);
+    return { ...row(`building:${building.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), ...(operation ? { operation } : {}), ...(city && building.siteRequirement === 'campus-high-ground' && hasFeatures(state, building.requiredFeatures) ? { highGround: { available: availableCampusHighGround(state, city), retained: city.buildingHighGround?.[building.id] ?? construction?.highGround ?? null } } : {}), ...(city && building.siteRequirement === 'mountain-catchment' && hasFeatures(state, building.requiredFeatures) ? { catchment: { availableTileIds: availableMountainCatchments(state, city), retainedTileId: city.buildingCatchments?.[building.id] ?? construction?.catchmentTileId ?? null } } : {}), ...(city && building.district ? { district: { capacity: districtCapacity(city), used: districtCount(city), siteId: districtSiteId ?? null, ...(installationAdjacency ? { siteAdjacency: districtSiteId === undefined ? null : districtAdjacencyFacts(state, building, districtSiteId) } : {}), siteBaseProduction: districtSiteId === undefined ? null : buildingBaseProduction(state, city, building, districtSiteId), availableSites: eligibility.completed || eligibility.blockers.length ? [] : availableDistrictSites(state, city, building).map(tileId => ({ tileId, baseProduction: buildingBaseProduction(state, city, building, tileId), ...(installationAdjacency ? { adjacency: districtAdjacencyFacts(state, building, tileId) } : {}) })) } } : {}) };
   });
   const improvements: ImprovementCapabilityRow[] = IMPROVEMENTS.map(definition => {
     const eligibility = improvementEligibility(state, civilizationId, definition, cityId);
@@ -162,6 +166,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     wonders,
     ...(hasFeatures(state, ['finite-metals']) ? { strategic: observedStrategicResources(state, civilizationId) } : {}),
     ...(hasFeatures(state, ['water-land']) ? { pastoral: observedPastoralSites(state, civilizationId) } : {}),
+    ...(hasFeatures(state, ['owned-territory']) ? { territory: observedTerritory(state, civilizationId, cityId) } : {}),
     legalActions,
     recordedIntent: state.actionPlans?.[civilizationId] ?? null,
     ...(hasFeatures(state, ['recurring-decisions']) ? {

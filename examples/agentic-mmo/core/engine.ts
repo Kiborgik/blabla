@@ -1,3 +1,4 @@
+import { observedTerritory } from './simulation/territory.ts';
 import { cityGrowthFacts } from './simulation/growth.ts';
 import { observedWonders } from './simulation/wonders.ts';
 import type { TradePresentation } from './simulation/trade.ts';
@@ -177,6 +178,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
     civilization,
     ...observedStrategicResources(state, seat),
     ...observedPastoralSites(state, seat),
+    ...(hasFeatures(state, ['owned-territory']) ? { territory: observedTerritory(state, seat) } : {}),
     ...(hasFeatures(state, ['unique-wonders']) ? { wonders: observedWonders(state, seat) } : {}),
     cities: director ? state.cities : citiesOf(state, seat),
     rivals: state.civilizations

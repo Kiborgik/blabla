@@ -1,3 +1,4 @@
+import { selectedAcquiredLand } from '../visuals/territory-visuals.ts';
 import { allocateMapHierarchy, fitMapOverview, mapContentWindow } from '../visuals/map-hierarchy.ts';
 import { MAP_ZOOM } from './viewer-state.ts';
 import { PASTORAL_MARK_PATH, CATCHMENT_MARK_PATH, pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
@@ -22,7 +23,7 @@ import { flatSceneFaces } from './settlement-parts.ts';
 import { createWorldCues } from './world-cues.ts';
 import { mapHierarchyAnchors, mapHierarchyObstacles } from './map-labels.ts';
 import { LUMBER_MARK_PATH, improvementLabel, improvementParts } from '../visuals/improvement-visuals.ts';
-import { districtAdjacencySummary, districtLabel, districtParts } from '../visuals/district-visuals.ts';
+import { districtAdjacencySummary, districtMark, districtLabel, districtParts } from '../visuals/district-visuals.ts';
 
 export function cityScreenMetrics(pixelsPerUnit: number): { targetRadius: number; markerRadius: number; markerFont: number; labelFont: number; labelY: number } {
   const scale = Math.max(0.01, pixelsPerUnit);
@@ -57,6 +58,8 @@ export function createFlatAtlasRenderer(
   const land = node('g', {});
   const terrain = node('g', { 'pointer-events': 'none', class: 'landscape-parts' });
   const borders = node('g', { 'pointer-events': 'none' });
+  const acquired = node('g', { class: 'acquired-land', 'pointer-events': 'none' });
+  borders.append(acquired);
   const routes = node('g', { class: 'flat-routes' });
   let selectedRoute: string | null = null;
   let routeLabel: { element: SVGGElement; title: SVGTextElement; x: number; z: number; id: string } | null = null;
@@ -68,7 +71,7 @@ export function createFlatAtlasRenderer(
   const depositNodes: Array<{ parts: SVGGElement; mark: SVGGElement; label: SVGTextElement; index: number }> = [];
   const sites = [
     ...(world.catchments ?? []).map(site => ({ ...site, kind: 'catchment', mark: 'catchment' as const, caption: 'Aqueduct source', label: `Aqueduct mountain source${site.status === 'building' ? ' · Building' : ''}`, parts: (_level: DetailLevel) => [] })),
-    ...(world.districts ?? []).map(site => ({ ...site, kind: 'district', mark: site.buildingId === 'industrial-zone' ? 'industry' as const : site.buildingId === 'commercial-hub' ? 'commerce' as const : 'campus' as const, caption: site.name ?? 'Campus', label: districtLabel(site), parts: (level: DetailLevel) => districtParts(site, level) })),
+    ...(world.districts ?? []).map(site => ({ ...site, kind: 'district', mark: districtMark(site), caption: site.name ?? 'Campus', label: districtLabel(site), parts: (level: DetailLevel) => districtParts(site, level) })),
     ...(world.improvements ?? []).map(site => ({ ...site, kind: 'improvement', mark: site.improvementId === 'pasture' ? 'pasture' as const : site.improvementId === 'lumber-mill' ? 'lumber' as const : 'mine' as const, workId: site.status === 'building' ? `active:${site.construction?.id ?? ''}` : String(site.tileId), caption: site.name, label: improvementLabel(site), parts: (level: DetailLevel) => improvementParts(site, level) })),
     ...(world.wonders ?? []).map(site => ({ ...site, kind: 'wonder', mark: 'wonder' as const, caption: site.name, label: wonderSiteLabel(site), parts: (level: DetailLevel) => greatLibraryVisual(site.record, level).parts })),
   ];
@@ -328,8 +331,23 @@ export function createFlatAtlasRenderer(
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   resize();
+  const drawAcquired = (): void => {
+    acquired.replaceChildren();
+    const color = world.cities.find(city => cityKey(city) === selected)?.color ?? '#e7bf69';
+    for (const plot of selectedAcquiredLand(world.acquiredLand ?? [], selected)) {
+      if (!plot.point) continue;
+      const center = hexPosition(plot.point.q, plot.point.r);
+      const points = Array.from({ length: 6 }, (_, index) => {
+        const angle = Math.PI / 3 * index + Math.PI / 6;
+        return `${center.x + Math.cos(angle) * .88},${center.z + Math.sin(angle) * .88}`;
+      }).join(' ');
+      acquired.append(node('polygon', { points, fill: 'none', stroke: '#173a3c', 'stroke-width': '5', 'vector-effect': 'non-scaling-stroke' }),
+        node('polygon', { points, fill: 'none', stroke: color, 'stroke-width': '2.5', 'vector-effect': 'non-scaling-stroke', 'data-acquired-tile': String(plot.receipt.tileId) }));
+    }
+  };
   const select = (id: string): void => {
     selected = id;
+    drawAcquired();
     for (const city of cityNodes) {
       city.element.classList.toggle('selected', city.id === id);
       city.element.setAttribute('aria-pressed', String(city.id === id));

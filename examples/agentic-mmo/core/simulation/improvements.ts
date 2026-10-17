@@ -1,3 +1,4 @@
+import { purchasedSiteBlock } from './site-binding.ts';
 import { IMPROVEMENTS, IMPROVEMENT_RULES, RESIDENT_CAPACITY_RULES, RESOURCE_IDS } from '../content.ts';
 import type { City, CityImprovement, ConstructionCompletion, ConstructionOrder, GameAction, GameEvent, HexTile, ImprovementConstructionOrder, ImprovementDefinition, WorldState } from '../types.ts';
 import { districtSiteOccupied } from './districts.ts';
@@ -28,6 +29,7 @@ export function improvementSiteBlock(state: WorldState, city: City, definition: 
   const center = state.tiles.find(tile => tile.id === city.tileId);
   if (!Number.isSafeInteger(tileId) || !site || !center) return 'The exact improvement site is missing';
   if (site.owner !== city.civId) return 'The improvement site must already belong to this civilization';
+  const binding = purchasedSiteBlock(state, city, tileId); if (binding) return binding;
   if (definition.siteRequirement === 'hill' && !isHillSite(site)) return 'The improvement requires a buildable hill site';
   if (definition.siteRequirement === 'forest' && site.terrain !== 'forest') return 'The improvement requires a current forest site';
   if (definition.siteRequirement === 'revealed-horse-site' && (site.terrain !== 'grassland' || !revealedHorseSite(state, city.civId, tileId))) return 'The improvement requires this civilization’s revealed grassland horse site';
