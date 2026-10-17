@@ -1,3 +1,4 @@
+import { retainedCoordinateShift } from '../visuals/map-hierarchy.ts';
 import type { PastoralSiteView, CatchmentSiteView } from '../visuals/pastoral-visuals.ts';
 import type { WonderSiteView } from '../visuals/wonder-visuals.ts';
 import type { RouteResultCue } from '../visuals/route-cues.ts';
@@ -206,4 +207,9 @@ export function createPreviewWorld(): AtlasWorld {
         active: false, damage: 0, volume: 0, ownerName: origin.name, partnerName: destination.name, illustrative: true, fromTown: sampleTown(origin), toTown: sampleTown(destination) };
     }),
   };
+}
+
+export function atlasCoordinateShift(before: AtlasWorld, after: AtlasWorld): { x: number; z: number } | null {
+  const points = (world: AtlasWorld) => world.tiles.flatMap(tile => tile.id === undefined ? [] : [{ id: tile.id, ...hexPosition(tile.q, tile.r) }]);
+  return retainedCoordinateShift(points(before), points(after));
 }

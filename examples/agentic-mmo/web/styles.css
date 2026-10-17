@@ -1334,9 +1334,80 @@ dialog h2 {
 }
 
 @media (max-width: 1000px) {
-  .live-observatory .inspection[data-inspection-view='work'] { max-height: min(66svh, calc(100% - 116px)); }
+  .live-observatory .inspection[data-inspection-view='work'] { max-height: min(66svh, calc(100% - 144px)); }
+  .live-observatory[data-inspection='true']:has(.inspection[data-inspection-view='work']) .world-heading { display: none; }
 }
 
 .resource-rail .resource-amount { font-size: 12px; line-height: 1.25; letter-spacing: 0; }
 .wonder-work-preview .work-record-round { display: block; margin-top: 5px; }
 .wonder-boost-receipt { border-inline-start: 2px solid var(--gold); padding-inline-start: 8px; }
+
+.live-observatory:not([data-inspection='true']) .inspection { display: none; }
+.sheet-close { display: block; position: sticky; float: right; top: 0; min-width: 74px; min-height: 44px; padding: 8px 10px; margin: -4px -4px 0 8px; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; z-index: 2; }
+.map-caption { position: absolute; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0 4px; min-width: 0; min-height: 0; background: #173a3ce8; border: 0; border-radius: 3px; color: #fff5d8; font: 12px Arial, sans-serif; white-space: nowrap; text-align: center; transform: none; pointer-events: none; }
+.city-label.map-town-mark { transform: none; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; box-shadow: none; }
+.city-label.map-town-mark[hidden] { display: none; }
+.city-label.map-town-mark::after { display: none; }
+.map-town-badge { width: var(--symbol-size, 22px); height: var(--symbol-size, 22px); border: 2px solid var(--civ-color); border-radius: 50%; background: #173a3c; color: #fff5d8; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+.map-town-mark.selected .map-town-badge { background: #466c5c; box-shadow: 0 0 0 2px #fff5d833; }
+.map-town-mark:focus-visible { outline: 2px solid #fff5d8; outline-offset: 2px; }
+.site-map-mark svg { box-sizing: border-box; width: var(--symbol-size, 20px); height: var(--symbol-size, 20px); }
+.site-base-bonus { display: none; }
+.deposit-map-mark { width: 15px; height: 15px; transform: translate(-50%, -50%); }
+.route-map-label.map-route-mark { width: 44px; min-width: 44px; height: 44px; padding: 0; transform: none; }
+.flat-city.selected > .city-marker, .flat-city:focus > .city-marker { stroke-width: 2px; vector-effect: non-scaling-stroke; }
+@media (min-width: 1001px) {
+  .live-observatory .inspection-title { padding-top: 8px; }
+  .live-observatory:not([data-inspection='true']) .chronicle { max-width: 450px; width: min(450px, calc(100% - 360px)); }
+}
+@media (max-width: 1000px) {
+  #app { grid-template-rows: 48px minmax(0, 1fr) auto; }
+  .masthead { height: 48px; }
+  .live-observatory .map { transform: none; }
+  .live-observatory .world-heading { top: 5px; left: 8px; right: 148px; padding: 4px 5px; }
+  .live-observatory .world-heading h1 { font-size: 18px; margin-bottom: 1px; }
+  .live-observatory .world-heading p { font-size: 10px; line-height: 1.25; }
+  .live-observatory .map-tools { top: 5px; right: 8px; }
+  .live-observatory .civilization-panel { height: 52px; }
+  .live-observatory .civilization-list { padding-block: 2px; }
+  .live-observatory .civilization-row { flex-direction: row; gap: 3px; }
+  .live-observatory .civilization-row .civ-emblem { width: 18px; height: 22px; font-size: 12px; }
+  .live-observatory .civilization-row strong { font-size: 10px; }
+  .live-observatory .chronicle, .live-observatory .chronicle:has(.story-deltas:not(:empty)) { bottom: 56px; padding: 5px 8px; border-radius: 5px; }
+  .live-observatory .chronicle .eyebrow, .live-observatory .chronicle:has(.story-deltas:not(:empty)) .eyebrow { display: none; }
+  .live-observatory .chronicle #event-title { font-size: 12px; line-height: 1.3; }
+  .live-observatory .chronicle .story-deltas { margin-top: 3px; gap: 5px; }
+  .live-observatory .chronicle .visual-delta { padding: 2px 4px; }
+  .live-observatory .chronicle .visual-delta > strong { font-size: 11px; }
+  .live-observatory .inspection { bottom: 58px; }
+  .live-observatory[data-inspection='true'] .map-tools { top: 5px; }
+}
+
+.map-caption[hidden], .site-map-mark[hidden], .deposit-map-mark[hidden], .map-route-mark[hidden] { display: none; }
+@media (min-width: 1001px) {
+  html, body { height: 100%; overflow: hidden; }
+  #app { height: 100svh; display: grid; grid-template-rows: 72px minmax(0, 1fr) 44px; }
+  .masthead { height: 72px; padding-inline: 24px; gap: 32px; }
+  .live-observatory { height: 100%; min-height: 0; }
+  .footer { height: 44px; padding-inline: 24px; }
+}
+@media (min-width: 1001px) and (max-height: 850px) {
+  .live-observatory .civilization-panel { top: 140px; width: 190px; }
+  .live-observatory .civilization-row { min-height: 48px; padding-block: 5px; }
+  .live-observatory .civilization-panel .panel-heading { padding: 10px 12px; }
+  .live-observatory .director { padding-block: 8px; }
+}
+
+#history-dialog .dialog-top { position: sticky; top: -16px; z-index: 1; background: var(--paper); }
+#history-dialog h2 { margin-top: 12px; }
+.history-current { font-size: 13px; line-height: 1.5; color: var(--muted); }
+.history-pages { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin: 12px 0; }
+.history-pages button { min-width: 64px; min-height: 44px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--ink); }
+.history-pages button:disabled { opacity: .45; }
+.history-pages span { font-size: 12px; }
+#history-dialog .release-entry { padding: 14px 0; }
+#history-dialog summary { min-height: 44px; font-size: 14px; line-height: 1.5; cursor: pointer; }
+#history-dialog .release-version { display: inline-block; margin: 0 7px 5px 0; font-size: 12px; }
+#history-dialog .release-entry time { font-size: 12px; }
+#history-dialog .release-entry li { font-size: 13px; line-height: 1.6; margin-bottom: 9px; }
+#history-dialog :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }

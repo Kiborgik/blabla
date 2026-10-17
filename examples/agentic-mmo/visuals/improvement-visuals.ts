@@ -38,6 +38,7 @@ export function improvementLastLabel(result: CityImprovement['operation']['lastR
 }
 
 export function improvementParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
+  if (view.improvementId === 'lumber-mill') return lumberParts(view, detail);
   if (view.improvementId === 'pasture') return pastureParts(view, detail);
   if (view.improvementId !== 'mine') return [];
   const parts: VisualPart[] = [];
@@ -82,6 +83,30 @@ function pastureParts(view: ImprovementView, detail: DetailLevel): VisualPart[] 
       for (const x of [-.7, .7]) for (const z of [-.6, .6]) add(`pasture-post-${x}-${z}`, 'box', 'timber', [x, .25, z], [.08, .5, .08]);
     }
     if (detail === 'close') add('pasture-trough', 'box', 'stone', [.35, .11, -.3], [.45, .2, .22]);
+  }
+  return parts.slice(0, IMPROVEMENT_PART_BUDGETS[detail]);
+}
+
+export const LUMBER_MARK_PATH = 'M3 19L9 5L15 19ZM7 13H11M9 19V23M14 16L18 12L22 16V22H14ZM16 18H20';
+
+function lumberParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
+  const parts: VisualPart[] = [];
+  const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale'], rotation = 0): void => { parts.push({ id: `${view.id}:${id}`, shape, material, position, scale, rotation }); };
+  add('lumber-platform', 'box', 'timber', [0, .08, 0], [1.5, .14, 1.15]);
+  add('lumber-identity', 'box', 'identity', [-.77, .12, 0], [.06, .1, 1.15]);
+  if (view.status === 'building') {
+    for (const x of [-.55, .55]) add(`lumber-survey-${x}`, 'box', 'timber', [x, .35, -.35], [.1, .55, .1]);
+    add('lumber-survey-beam', 'box', 'grain', [0, .6, -.35], [1.2, .06, .08]);
+  } else {
+    add('lumber-roof', 'gable', 'roof', [-.1, .8, -.17], [1.25, .4, .85]);
+    add('lumber-saw', 'box', 'metal', [.45, .42, .35], [.08, .55, .48]);
+    add('lumber-bench', 'box', 'timber', [.23, .25, .38], [.8, .3, .35]);
+    for (const x of [-.6, .4]) add(`lumber-post-${x}`, 'box', 'timber', [x, .4, -.4], [.1, .65, .1]);
+    if (detail !== 'far') {
+      add('lumber-wall', 'box', 'timber', [-.1, .4, -.55], [1.1, .65, .08]);
+      for (const z of [.25, .5]) add(`lumber-stack-${z}`, 'box', 'timber', [-.55, .24, z], [.5, .18, .13]);
+    }
+    if (detail === 'close') for (const x of [-.4, -.12, .16]) add(`lumber-joist-${x}`, 'box', 'grain', [x, .17, -.1], [.06, .04, 1.1]);
   }
   return parts.slice(0, IMPROVEMENT_PART_BUDGETS[detail]);
 }

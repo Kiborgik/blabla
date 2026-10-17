@@ -19,6 +19,7 @@ import { acceptsSnapshot, activityLabel, capabilityName, formatYear, latestMeani
 import { CIVILIZATIONS, createPreviewWorld, hexPosition } from '../web/atlas.ts';
 import {
   DEFAULT_PREFERENCES,
+  MAP_ZOOM,
   parsePreferences,
   parseRelease,
   shouldReload,
@@ -54,7 +55,7 @@ await test('viewer preferences reject incompatible and malformed persisted value
     speed: 2,
     paused: true,
   });
-  assert.equal(preferences.zoom, 2.2);
+  assert.equal(preferences.zoom, MAP_ZOOM.maximum);
   assert.equal(preferences.x, 4);
   assert.equal(preferences.selected, 2);
   assert.equal(preferences.paused, true);
@@ -525,7 +526,7 @@ await test('damage labels retain readable screen metrics and real repair cues an
 
 await test('compact desktop story is height-scoped and retains scrolling numbers and a large history target', () => {
   const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
-  const compactStart = css.lastIndexOf('@media (min-width: 1001px) and (max-height: 850px)');
+  const compactStart = css.indexOf('@media (min-width: 1001px) and (max-height: 850px)');
   const compact = css.slice(compactStart, css.indexOf('\n}', compactStart) + 2);
   const declarations = (selector: string): Map<string, string> => {
     const start = compact.indexOf(`${selector} {`);
@@ -594,4 +595,64 @@ await test('explicit selected-town zoom reuses inspection framing while direct p
   assert.match(zoom, /atlas\?\.zoom\(factor\); frameInspection\(\);/);
   assert.doesNotMatch(zoom, /inspectionCamera\.release/);
   assert.match(main, /Math\.hypot[\s\S]*?inspectionCamera\.release\(\)/);
+});
+
+await test('overview and close zoom bounds persist with old compatible preferences', () => {
+  for (const zoom of [.25, .65, 1, 2.2, 4]) assert.equal(parsePreferences({ ...DEFAULT_PREFERENCES, zoom }).zoom, zoom);
+  assert.equal(parsePreferences({ ...DEFAULT_PREFERENCES, zoom: -5 }).zoom, MAP_ZOOM.minimum);
+  assert.equal(parsePreferences({ ...DEFAULT_PREFERENCES, zoom: Infinity }).zoom, 1);
+});
+
+await test('shared map hierarchy keeps exact town, constructed site and selected civilization reveal identity', async () => {
+  const { mapHierarchyAnchors } = await import('../web/map-labels.ts');
+  const world = createPreviewWorld();
+  const first = world.cities[0]; assert.ok(first);
+  world.cities[0] = { ...first, cityId: 'exact-town', population: 12 };
+  world.pastoralSites = [{ id: 'horses:5', tileId: 5, q: 0, r: 0, height: 0, revealedTo: [1] }];
+  const before = structuredClone(world);
+  const anchors = mapHierarchyAnchors(world, 'exact-town', null, (q, r) => ({ x: q, y: r }));
+  assert.equal(anchors.find(item => item.id === 'exact-town')?.selected, true);
+  assert.equal(anchors.find(item => item.id === 'horses:5')?.revealed, false);
+  assert.deepEqual(world, before);
+});
+
+await test('retained atlas tile identities carry only a uniform projection recentering', async () => {
+  const { atlasCoordinateShift } = await import('../web/atlas.ts');
+  const before = createPreviewWorld(); before.tiles.forEach((tile, index) => { tile.id = index; });
+  const after = structuredClone(before); after.tiles.forEach(tile => { tile.r -= 6; });
+  const shift = atlasCoordinateShift(before, after); assert.ok(shift);
+  assert.ok(Math.abs(shift.x + Math.sqrt(3) * 3) < 1e-8); assert.equal(shift.z, -9);
+  const first = after.tiles[0]; assert.ok(first); assert.equal(before.tiles[0]?.r, first.r + 6);
+});
+
+await test('the version-labelled Changelog control opens the existing history dialog', () => {
+  const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /id="world-info-open"[^>]*data-open-changelog/);
+  assert.doesNotMatch(main, /id="changelog-open"/);
+  assert.match(main, /releaseHistoryOpener\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(main, /querySelectorAll<HTMLButtonElement>\('\[data-open-changelog\]'\)/);
+  assert.doesNotMatch(main, /element\('#world-info-open'\)\.addEventListener\('click', \(\) => \{ window.location.hash = 'about'/);
+});
+
+await test('release history keeps six newest-first records per page without mutating or losing older entries', async () => {
+  const { releaseHistoryPage } = await import('../web/viewer-state.ts');
+  const entries = Array.from({ length: 23 }, (_, index) => ({ version: 23 - index }));
+  const before = structuredClone(entries);
+  assert.deepEqual(releaseHistoryPage(entries, 0).entries.map(entry => entry.version), [23, 22, 21, 20, 19, 18]);
+  assert.deepEqual(releaseHistoryPage(entries, 1).entries.map(entry => entry.version), [17, 16, 15, 14, 13, 12]);
+  const last = releaseHistoryPage(entries, 100);
+  assert.equal(last.page, 3);
+  assert.deepEqual(last.entries.map(entry => entry.version), [5, 4, 3, 2, 1]);
+  assert.equal(releaseHistoryPage(entries, -5).page, 0);
+  assert.equal(releaseHistoryPage(entries, NaN).page, 0);
+  assert.deepEqual(releaseHistoryPage([], 9), { page: 0, pages: 1, total: 0, start: 0, end: 0, entries: [] });
+  assert.deepEqual(entries, before);
+});
+
+await test('narrow Work leaves a selected-town window and culled site geometry is not a phantom control', () => {
+  const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /inspection\[data-inspection-view='work'\]\s*\{[^}]*calc\(100% - 144px\)/);
+  assert.match(css, /:has\(\.inspection\[data-inspection-view='work'\]\) \.world-heading\s*\{ display: none/);
+  const flat = readFileSync(new URL('../web/flat-renderer.ts', import.meta.url), 'utf8');
+  assert.match(flat, /entry\.element\.setAttribute\('aria-hidden', String\(!mark\)\)/);
 });

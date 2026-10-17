@@ -13,14 +13,16 @@ import { researchProgressPresentation } from './research-progress.ts';
 import releaseData from '../public/version.json';
 import changelog from '../public/changelog.json';
 import { RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
-import { createPreviewWorld } from './atlas.ts';
+import { createPreviewWorld, atlasCoordinateShift } from './atlas.ts';
+import { mapContentWindow } from '../visuals/map-hierarchy.ts';
+import { mapHierarchyObstacles } from './map-labels.ts';
 import type { AtlasWorld } from './atlas.ts';
 import { createAtlasRenderer } from './renderer.ts';
 import type { AtlasRenderer } from './renderer.ts';
 import { createFlatAtlasRenderer } from './flat-renderer.ts';
 import { acceptsSnapshot, activityLabel, capabilityName, formatYear, parseWorldRead, projectWorld, uniqueCivilizations } from './live-world.ts';
 import type { LiveSnapshot } from './live-world.ts';
-import { parseRelease } from './viewer-state.ts';
+import { parseRelease, releaseHistoryPage } from './viewer-state.ts';
 import { createViewerUpdates, preferencesAfterUpdate } from './viewer-updates.ts';
 import { createInspectionSession, inspectionAnchor } from './inspection-camera.ts';
 import { eventVisual } from '../visuals/world-visuals.ts';
@@ -72,8 +74,8 @@ app.innerHTML = `
     <div class="map-hint" id="map-hint">Drag to explore · Use + and − to zoom · Tap a city or route</div>
     <div id="connection-actions" class="connection-actions"><button id="sample-open" type="button" hidden>View sample atlas</button><button id="live-open" type="button" hidden>Return to live world</button><span id="render-mode"></span></div>
   </main>
-  <footer class="footer"><span class="footer-status">A shared world. An open future.</span><div class="release-links"><button id="world-info-open" type="button" aria-label="About this world and viewer version">v${currentRelease.version}</button><button id="changelog-open" type="button">Changelog</button><a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">Built with <strong>BlaBla</strong></a></div></footer>
-  <dialog id="history-dialog" aria-labelledby="history-title"><div class="dialog-top"><span class="eyebrow">THE WORLD KEEPS GROWING</span><button class="dialog-close" type="button" aria-label="Close update history">×</button></div><h2 id="history-title">What changed</h2><div class="release-history">${changelog.map((entry, index) => `<details class="release-entry" ${index === 0 ? 'open' : ''}><summary><span class="release-version">v${escapeText(entry.version)}</span> <strong>${escapeText(entry.title)}</strong></summary><time datetime="${escapeText(entry.date)}">${escapeText(entry.date)}</time><ul>${entry.changes.map((change) => `<li>${escapeText(change)}</li>`).join('')}</ul></details>`).join('')}</div></dialog>
+  <footer class="footer"><span class="footer-status">A shared world. An open future.</span><div class="release-links"><button id="world-info-open" data-open-changelog type="button" aria-haspopup="dialog" aria-controls="history-dialog" aria-label="View changelog for version ${currentRelease.version}">v${currentRelease.version} · Changelog</button><a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">Built with <strong>BlaBla</strong></a></div></footer>
+  <dialog id="history-dialog" aria-labelledby="history-title"><div class="dialog-top"><span class="eyebrow">VIEWER UPDATES</span><button class="dialog-close" type="button" aria-label="Close update history">×</button></div><h2 id="history-title">Changelog</h2><p class="history-current">Current viewer <strong>v${currentRelease.version}</strong> · Newest first</p><nav class="history-pages" aria-label="Update history pages"><button id="history-newer" type="button">Newer</button><span id="history-range" role="status"></span><button id="history-older" type="button">Older</button></nav><div class="release-history"></div></dialog>
   <dialog id="about-dialog" aria-labelledby="about-title"><div class="dialog-top"><span class="eyebrow">A WORLD THAT KEEPS GROWING</span><button class="dialog-close" type="button" aria-label="Close world information">×</button></div><h2 id="about-title">The world, without us.</h2><p class="dialog-intro">Five AI civilizations. A sixth AI World Director. Humans watch the story unfold.</p><div class="about-body"><p>Settlements grow through research, construction, production and consenting trade. The applied world release determines which branches are available; inspect the tree for current requirements.</p><h3>Many ways forward</h3><p>The horizon includes scientific, cultural, economic, political and military success. Their systems arrive through future expansions; they are not all available today.</p><p>Fast choices shape slower projects and lasting commitments. The calendar has its own regular rhythm, with deliberate turning points as the world grows.</p><p>Viewer version ${currentRelease.version}. A connected view shows committed server state. It does not claim the agents are acting continuously. Sample mode is clearly labeled and never changes the shared world.</p><p>Development is organized with <a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">BlaBla</a>.</p></div></dialog>
   <dialog id="events-dialog" aria-labelledby="events-title"><div class="dialog-top"><span class="eyebrow">THE WORLD STORY</span><button class="dialog-close" type="button" aria-label="Close recent events">×</button></div><h2 id="events-title">What changed</h2><p class="dialog-intro">Key events first. Filter by civilization or kind, then open a record for details.</p><button id="events-refresh" type="button" hidden>New events available · Refresh</button><ol id="event-list"></ol></dialog>
   <dialog id="capability-dialog"></dialog>
@@ -89,6 +91,7 @@ function element(selector: string): HTMLElement {
 }
 
 let atlas: AtlasRenderer | null = null;
+let initialOverview = preferences.selectedCity === null && preferences.zoom === 1 && preferences.x === 0 && preferences.z === 0;
 let selectedRoute: string | null = null;
 let routeListPage = 0;
 let mapFingerprint = '';
@@ -282,7 +285,7 @@ function renderInspection(): void {
 }
 
 function frameInspection(): void {
-  if (!atlas || !narrowLayout.matches || !inspectionCamera.active()) return;
+  if (!atlas || !inspectionCamera.active()) return;
   const route = displayed.routes.find((entry) => entry.id === selectedRoute);
   if (route && routeInspectionCity(route) === null) return;
   const map = element('#map').getBoundingClientRect();
@@ -290,21 +293,23 @@ function frameInspection(): void {
   if (!sheet.height || !map.height) return;
   const heading = element('.world-heading').getBoundingClientRect();
   const tools = element('.map-tools').getBoundingClientRect();
-  atlas.frameCity(preferences.selectedCity ?? '', inspectionAnchor(map, heading.bottom, sheet.top, tools.left));
+  const window = narrowLayout.matches ? null : mapContentWindow(map.width, map.height, mapHierarchyObstacles(element('#map')));
+  atlas.frameCity(preferences.selectedCity ?? '', window ? { x: (window.left + window.width / 2) / map.width, y: (window.top + window.height / 2) / map.height } : inspectionAnchor(map, heading.bottom, sheet.top, tools.left));
 }
 
 function setInspectionOpen(open: boolean): void {
   const closedRoute = !open ? selectedRoute : null;
   if (closedRoute) { selectedRoute = null; atlas?.selectRoute(null); renderInspection(); }
   element('.observatory').dataset['inspection'] = String(open);
-  if (open && narrowLayout.matches && atlas) {
+  if (open && atlas) {
     inspectionCamera.begin(atlas.snapshot());
     frameInspection();
   } else {
     const restore = inspectionCamera.end();
     if (restore) atlas?.restoreCamera(restore);
   }
-  if (!open && narrowLayout.matches) {
+  atlas?.select(preferences.selectedCity ?? '');
+  if (!open) {
     document.querySelector<HTMLButtonElement>(`[data-civ="${preferences.selected}"]`)?.focus({ preventScroll: true });
   }
   if (closedRoute && !narrowLayout.matches) {
@@ -361,7 +366,8 @@ function selectCivilization(id: number): void {
   if (city) selectCity(cityKey(city));
 }
 
-function renderWorld(world: AtlasWorld): void {
+function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
+  const shift = retainCoordinates ? atlasCoordinateShift(displayed, world) : null;
   displayed = world;
   if (!world.routes.some((route) => route.id === selectedRoute)) selectedRoute = null;
   preferences = { ...preferences, ...resolveCitySelection(world, preferences) };
@@ -377,6 +383,11 @@ function renderWorld(world: AtlasWorld): void {
   const fingerprint = JSON.stringify(world);
   if (fingerprint !== mapFingerprint) {
     savePreferences();
+    if (shift && (shift.x || shift.z)) {
+      preferences = { ...preferences, x: preferences.x + shift.x, z: preferences.z + shift.z };
+      const framing = inspectionCamera.active(); inspectionCamera.release();
+      if (framing) inspectionCamera.begin(preferences);
+    }
     atlas?.dispose();
     atlas = null;
     element('#city-labels').replaceChildren();
@@ -389,6 +400,7 @@ function renderWorld(world: AtlasWorld): void {
       element('#city-labels').replaceChildren();
       atlas = createFlatAtlasRenderer(element('#map'), world, preferences, selectCity, selectRoute);
     }
+    if (initialOverview && world.tiles.length) { atlas.reset(); initialOverview = false; }
     mapFingerprint = fingerprint;
     viewerSettings.refresh();
   }
@@ -460,6 +472,7 @@ async function readWorld(): Promise<void> {
     if (sampleActive()) return;
     const read = parseWorldRead(value);
     if (read.kind === 'live' && response.ok && acceptsSnapshot(snapshot, read.snapshot)) {
+      const retainCoordinates = snapshot?.identity === read.snapshot.identity && mode !== 'sample';
       if (snapshot?.identity !== read.snapshot.identity) { selectedRoute = null; routeListPage = 0; observedRouteResults = []; }
       snapshot = read.snapshot;
       mode = 'live';
@@ -469,7 +482,7 @@ async function readWorld(): Promise<void> {
       const quiet = document.hidden || dialogs.get('events')?.open || capabilityDialog?.open;
       const cues = eventCues.observe({ identity: snapshot.identity, revision: snapshot.state.revision, mode: quiet ? 'history' : 'live', events: snapshot.state.events, routes: world.routes }, element('#map').clientWidth < 700 ? 1 : 3);
       if (cues.routeResults.length) observedRouteResults = [...cues.routeResults, ...observedRouteResults].slice(0, 3);
-      renderWorld(world);
+      renderWorld(world, retainCoordinates);
       if (!quiet) atlas?.showEvents(cues.events);
     } else { mode = read.kind === 'uninitialized' ? 'uninitialized' : 'offline'; }
   } catch { if (!sampleActive()) mode = 'offline'; }
@@ -477,7 +490,7 @@ async function readWorld(): Promise<void> {
 }
 
 for (const [id, factor] of [['#zoom-in', 1.2], ['#zoom-out', 1 / 1.2]] as const) element(id).addEventListener('click', () => { atlas?.zoom(factor); frameInspection(); savePreferences(); });
-element('#reset-camera').addEventListener('click', () => { inspectionCamera.release(); atlas?.reset(); savePreferences(); });
+element('#reset-camera').addEventListener('click', () => { setInspectionOpen(false); inspectionCamera.release(); atlas?.reset(); savePreferences(); });
 let mapPointer: { id: number; x: number; y: number } | null = null;
 element('#map').addEventListener('pointerdown', (event) => {
   if (event.target instanceof Element && event.target.closest('.flat-city, .city-label, .flat-route, .route-map-label')) return;
@@ -492,12 +505,8 @@ const inspectionResize = new ResizeObserver(frameInspection);
 inspectionResize.observe(element('#map'));
 inspectionResize.observe(element('.inspection'));
 narrowLayout.addEventListener('change', () => {
-  if (!narrowLayout.matches) {
-    const restore = inspectionCamera.end();
-    if (restore) atlas?.restoreCamera(restore);
-  } else if (element('.observatory').dataset['inspection'] === 'true' && atlas) {
-    inspectionCamera.begin(atlas.snapshot());
-    frameInspection();
+  if (element('.observatory').dataset['inspection'] === 'true' && atlas) {
+    inspectionCamera.begin(atlas.snapshot()); frameInspection();
   }
 });
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-layer]')) button.addEventListener('click', () => {
@@ -523,6 +532,18 @@ for (const [name, selector] of [['changelog', '#history-dialog'], ['about', '#ab
   if (!dialog) throw new Error('A spectator dialog is missing');
   dialogs.set(name, dialog);
 }
+let releaseHistoryIndex = 0;
+function renderReleaseHistory(): void {
+  const page = releaseHistoryPage(changelog, releaseHistoryIndex);
+  releaseHistoryIndex = page.page;
+  element('.release-history').innerHTML = page.entries.map((entry, index) => `<details class="release-entry" ${index === 0 ? 'open' : ''}><summary><span class="release-version">v${escapeText(entry.version)}</span><strong>${escapeText(entry.title)}</strong></summary><time datetime="${escapeText(entry.date)}">${escapeText(entry.date)}</time><ul>${entry.changes.map(change => `<li>${escapeText(change)}</li>`).join('')}</ul></details>`).join('');
+  element('#history-range').textContent = page.total ? `${page.start + 1}–${page.end} of ${page.total}` : 'No updates recorded';
+  const newer = element('#history-newer');
+  const older = element('#history-older');
+  if (!(newer instanceof HTMLButtonElement) || !(older instanceof HTMLButtonElement)) throw new Error('Update history navigation is missing');
+  newer.disabled = page.page === 0;
+  older.disabled = page.page + 1 === page.pages;
+}
 function renderEventHistory(): void {
   const events = snapshot?.state.events;
   eventHistoryCaptured = events !== undefined;
@@ -541,6 +562,7 @@ function syncDialog(): void {
   for (const [name, dialog] of dialogs) {
     if (name === active && !dialog.open) {
       if (name === 'events') { quietCues(); renderEventHistory(); }
+      if (name === 'changelog') { releaseHistoryIndex = 0; renderReleaseHistory(); }
       dialog.showModal();
     }
     if (name !== active && dialog.open) {
@@ -551,11 +573,13 @@ function syncDialog(): void {
 }
 let helpResource: Resource | null = null;
 let eventHistoryOpener: HTMLButtonElement | null = null;
+let releaseHistoryOpener: HTMLButtonElement | null = null;
 function closeDialog(): void {
   const name = window.location.hash.slice(1);
   const dialog = dialogs.get(name);
   dialog?.close();
   if (name === 'events') { eventHistoryCaptured = false; eventHistoryOpener?.focus({ preventScroll: true }); }
+  if (name === 'changelog') releaseHistoryOpener?.focus({ preventScroll: true });
   history.replaceState(history.state as unknown, '', `${location.pathname}${location.search}`);
   if (helpResource) document.querySelector<HTMLButtonElement>(`[data-resource="${helpResource}"]`)?.focus({ preventScroll: true });
   helpResource = null;
@@ -582,8 +606,16 @@ element('.inspection').addEventListener('click', (event) => {
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !document.querySelector('dialog[open]')) setInspectionOpen(false);
 });
-element('#world-info-open').addEventListener('click', () => { window.location.hash = 'about'; });
-element('#changelog-open').addEventListener('click', () => { window.location.hash = 'changelog'; });
+for (const button of document.querySelectorAll<HTMLButtonElement>('[data-open-changelog]')) button.addEventListener('click', () => { releaseHistoryOpener = button; window.location.hash = 'changelog'; });
+for (const [id, step] of [['history-newer', -1], ['history-older', 1]] as const) element(`#${id}`).addEventListener('click', () => {
+  releaseHistoryIndex += step;
+  renderReleaseHistory();
+  const historyDialog = element('#history-dialog');
+  historyDialog.scrollTop = 0;
+  const heading = element('#history-title');
+  heading.tabIndex = -1;
+  heading.focus({ preventScroll: true });
+});
 for (const button of document.querySelectorAll<HTMLButtonElement>('.about-button')) button.addEventListener('click', () => { window.location.hash = 'about'; });
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-open-events]')) button.addEventListener('click', () => { eventHistoryOpener = button; window.location.hash = 'events'; });
 element('#events-refresh').addEventListener('click', () => { renderEventHistory(); const heading = element('#events-dialog h2'); heading.tabIndex = -1; heading.focus({ preventScroll: true }); });

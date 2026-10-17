@@ -159,6 +159,7 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
     }
     const worked = input.projection.improvements?.find(entry => entry.nodeId === id);
     if (worked) {
+      if (id === 'improvement:lumber-mill') facts.push({ label: 'Worked forest', value: 'The installed mill uses one resident when supplied. The forest remains; Materials made belong to a recorded season.' });
       for (const site of worked.availableSites) facts.push({ label: `Available site ${site.tileId}`, value: `${amounts(site.baseProduction)} base before town productivity` });
       if (worked.construction?.tileId !== undefined) facts.push({ label: 'Reserved site', value: `Tile ${worked.construction.tileId}` });
       for (const site of worked.installed) {

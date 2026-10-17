@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-live.24",
+    "date": "2026-10-17",
+    "title": "A wider, clearer world",
+    "changes": [
+      "Town and site markers take priority over crowded labels. Selected towns remain visible, compact controls leave more map space, and Home fits the actual world extent.",
+      "Archery and Machinery lead to a paid Lumber mill on an exact standing forest, with later resident-supported Materials. A compatible larger-world release appends playable rows from18 by12 to18 by24 while preserving existing tile identities and history.",
+      "The version control opens a short newest-first changelog directly. Older changes remain available through bounded pages, with keyboard close and focus return.",
+      "Website publication prepares separate compatible forest and world-expansion activation. Newly founded towns own only their centers; paid surrounding territory remains a later capability.",
+      "Illustrative preview, legal local desktop/360/400 CSS-width fixtures and actual model play remain distinct. Public-origin browser access is blocked; physical touch, hardware WebGL and complete map comprehension remain unverified."
+    ]
+  },
+  {
     "version": "0.1.0-live.23",
     "date": "2026-10-17",
     "title": "Work nearby land and supply growing towns",

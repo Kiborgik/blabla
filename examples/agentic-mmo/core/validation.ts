@@ -545,7 +545,8 @@ function constructionIdentity(value: Record<string, unknown>, settlement: City, 
     && WONDERS.some(definition => definition.id === value.wonderId);
   if (value.kind === 'improvement') return features.includes(IMPROVEMENT_RULES.featureId) && integer(value.tileId)
     && IMPROVEMENTS.some(definition => definition.id === value.improvementId)
-    && (value.improvementId !== 'pasture' || features.includes('water-land'));
+    && (value.improvementId !== 'pasture' || features.includes('water-land'))
+    && (value.improvementId !== 'lumber-mill' || features.includes('forest-production'));
   return !Object.hasOwn(value, 'kind') && typeof value.buildingId === 'string'
     && BUILDINGS.some(building => building.id === value.buildingId)
     && settlement.buildings.includes(value.buildingId) === completed
@@ -638,7 +639,8 @@ function improvementRecords(cities: City[], tiles: HexTile[], events: GameEvent[
           || !constructionCompletion(value.completion, settlement, features, round, revision)
           || !('kind' in value.completion) || value.completion.kind !== 'improvement' || value.completion.improvementId !== value.improvementId || value.completion.tileId !== value.tileId
           || !record(value.operation) || !exactKeys(value.operation, ['enabled', 'lastResult']) || typeof value.operation.enabled !== 'boolean'
-          || value.operation.lastResult !== null && !improvementResult(value.operation.lastResult, value.completion.completedRound, round, features)) return false;
+          || value.operation.lastResult !== null && !improvementResult(value.operation.lastResult, value.completion.completedRound, round, features)
+          || value.improvementId !== 'mine' && record(value.operation.lastResult) && Object.hasOwn(value.operation.lastResult, 'extraction')) return false;
         const completion = value.completion;
         const event = events.find(item => item.id === completion.eventId);
         if (event && (event.type !== 'improvement-completed' || event.round !== completion.completedRound || event.tileId !== completion.tileId
@@ -1098,6 +1100,7 @@ export function isWorldState(
   const round = value.round;
   const features = value.unlockedFeatures;
   const counts = value.eventCounts;
+  if (features.includes('world-expansion') && (width !== 18 || height !== 24)) return false;
   if (
     tiles.length !== width * height ||
     !tiles.every(

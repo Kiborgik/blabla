@@ -1,5 +1,6 @@
+import { expandMapExtent, mapExpansionBlock } from './map-expansion.ts';
 import { initializeCityHousing } from './growth.ts';
-import { LOCAL_GROWTH_RULES, DISTRICT_RULES, IMPROVEMENT_RULES, FEATURES, METAL_RULES, PASTORAL_RULES, RESEARCH_INVESTMENT_RULES, WONDER_RULES } from '../content.ts';
+import { WORLD_EXPANSION_RULES, LOCAL_GROWTH_RULES, DISTRICT_RULES, IMPROVEMENT_RULES, FEATURES, METAL_RULES, PASTORAL_RULES, RESEARCH_INVESTMENT_RULES, WONDER_RULES } from '../content.ts';
 import { createStrategicDeposits } from './metals.ts';
 import { createPastoralSites } from './pastoral.ts';
 import { RELEASES } from '../release.ts';
@@ -151,15 +152,21 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
     (command.timestamp === undefined || parseUtcTimestamp(command.timestamp) === null)
   )
     return rejected(state, 'Independent release activation requires an explicit UTC epoch');
-  if ([PASTORAL_RULES.featureId, LOCAL_GROWTH_RULES.featureId, 'resident-capacity', RESEARCH_INVESTMENT_RULES.featureId, DISTRICT_RULES.featureId, IMPROVEMENT_RULES.featureId, METAL_RULES.featureId, WONDER_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
+  if ([WORLD_EXPANSION_RULES.featureId, PASTORAL_RULES.featureId, LOCAL_GROWTH_RULES.featureId, 'resident-capacity', RESEARCH_INVESTMENT_RULES.featureId, DISTRICT_RULES.featureId, IMPROVEMENT_RULES.featureId, METAL_RULES.featureId, WONDER_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
     const timingError = strategyTimingError(state, command.timestamp);
     if (timingError) return rejected(state, timingError);
+  }
+  const expandsMap = target.featureIds.includes(WORLD_EXPANSION_RULES.featureId) && !source.featureIds.includes(WORLD_EXPANSION_RULES.featureId);
+  if (expandsMap) {
+    const blocker = mapExpansionBlock(state);
+    if (blocker) return rejected(state, blocker);
   }
   const next = structuredClone(state);
   const events: GameEvent[] = [];
   next.revision += 1;
   next.releaseId = target.id;
   next.unlockedFeatures = [...target.featureIds];
+  if (expandsMap) expandMapExtent(next);
   if (target.featureIds.includes(METAL_RULES.featureId) && !source.featureIds.includes(METAL_RULES.featureId)) {
     next.strategicDeposits = createStrategicDeposits(next);
     for (const civilization of next.civilizations) civilization.strategicResources = {};

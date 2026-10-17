@@ -255,7 +255,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -265,7 +265,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -547,4 +547,18 @@ await test('water land catalogue refuses invalid retained placement and ungated 
     mutate(broken);
     assert.ok(validateContent(broken).length > 0);
   }
+});
+
+await test('forest and append-only extent are explicit compatible successors', async () => {
+  const { WORLD_EXPANSION_RULES } = await import('../core/content.ts');
+  assert.deepEqual(validateContent(), []);
+  assert.equal(TECHNOLOGIES.find(item => item.id === 'archery')?.cost, 72);
+  assert.deepEqual(TECHNOLOGIES.find(item => item.id === 'machinery')?.requires, ['engineering', 'archery']);
+  const mill = CONTENT.improvements.find(item => item.id === 'lumber-mill');
+  assert.equal(mill?.requiredWork, 6); assert.equal(mill?.residentsRequired, 1);
+  assert.deepEqual(mill?.production, { materials: 4 }); assert.equal(mill?.siteRequirement, 'forest');
+  assert.equal(WORLD_EXPANSION_RULES.fromHeight, 12); assert.equal(WORLD_EXPANSION_RULES.height, 24);
+  assert.equal(WORLD_EXPANSION_RULES.fromWidth, WORLD_EXPANSION_RULES.width);
+  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-forest-production-1')?.compatibleFrom, ['settlement-water-land-1']);
+  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-world-expansion-1')?.compatibleFrom, ['settlement-forest-production-1']);
 });

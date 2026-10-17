@@ -29,6 +29,7 @@ export function improvementSiteBlock(state: WorldState, city: City, definition: 
   if (!Number.isSafeInteger(tileId) || !site || !center) return 'The exact improvement site is missing';
   if (site.owner !== city.civId) return 'The improvement site must already belong to this civilization';
   if (definition.siteRequirement === 'hill' && !isHillSite(site)) return 'The improvement requires a buildable hill site';
+  if (definition.siteRequirement === 'forest' && site.terrain !== 'forest') return 'The improvement requires a current forest site';
   if (definition.siteRequirement === 'revealed-horse-site' && (site.terrain !== 'grassland' || !revealedHorseSite(state, city.civId, tileId))) return 'The improvement requires this civilization’s revealed grassland horse site';
   if (hexDistance(center, site) > definition.siteRange) return `The improvement site must be within ${definition.siteRange} hexes of this town`;
   if (state.cities.some(candidate => candidate.tileId === tileId)) return 'A city center occupies this site';

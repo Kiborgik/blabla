@@ -20,6 +20,8 @@ export interface ViewerPreferences {
   effects: 'calm' | 'rich' | 'cinematic';
 }
 
+export const MAP_ZOOM = { minimum: .25, maximum: 4 } as const;
+
 export const DEFAULT_PREFERENCES: ViewerPreferences = {
   schemaVersion: 1,
   zoom: 1,
@@ -56,7 +58,7 @@ export function parsePreferences(value: unknown): ViewerPreferences {
   const selectedCity = data['selectedCity'];
   return {
     schemaVersion: 1,
-    zoom: bounded(data['zoom'], 1, 0.65, 2.2),
+    zoom: bounded(data['zoom'], 1, MAP_ZOOM.minimum, MAP_ZOOM.maximum),
     x: bounded(data['x'], 0, -100, 100),
     z: bounded(data['z'], 0, -100, 100),
     selected:
@@ -109,4 +111,12 @@ export function shouldReload(
     Date.parse(remote.publishedAt) > Date.parse(current.publishedAt) &&
     !attempted.includes(remote.buildId)
   );
+}
+
+export function releaseHistoryPage<T>(entries: readonly T[], requestedPage: number): { page: number; pages: number; total: number; start: number; end: number; entries: T[] } {
+  const size = 6;
+  const pages = Math.max(1, Math.ceil(entries.length / size));
+  const page = Math.min(pages - 1, Math.max(0, Number.isFinite(requestedPage) ? Math.floor(requestedPage) : 0));
+  const start = page * size;
+  return { page, pages, total: entries.length, start, end: Math.min(entries.length, start + size), entries: entries.slice(start, start + size) };
 }
