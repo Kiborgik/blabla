@@ -87,5 +87,5 @@ import { isWorldState } from '../core/validation.ts';
 import { RELEASES } from '../core/release.ts';
 void test('every supported old release excludes Industrialization and the new catalogue validates', () => {
   assert.deepEqual(validateContent(), []);
-  assert.ok(RELEASES.filter(release => release.id !== 'settlement-industrial-steam-1').every(release => !release.featureIds.includes('industrialization')));
+  assert.ok(RELEASES.filter(release => !release.featureIds.includes('industrial-steam')).every(release => !release.featureIds.includes('industrialization')));
 });

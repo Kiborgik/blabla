@@ -54,7 +54,7 @@ export class IndustrialSteamProbe {
         const before = structuredClone(state); const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: path.adopted.releaseId, timestamp: time(state) });
         refused &&= !result.ok; unchanged &&= equal(state, before) && equal(result.state, before) && result.events.length === 0; this.controls++;
       }
-      this.predicates = { legacy_technology_refused: refused && RELEASES.filter(release => release.id !== path.adopted.releaseId).every(release => !release.featureIds.includes('industrialization')), no_effects: unchanged };
+      this.predicates = { legacy_technology_refused: refused && RELEASES.filter(release => !release.featureIds.includes('industrial-steam')).every(release => !release.featureIds.includes('industrialization')), no_effects: unchanged };
     } else if (action === 'complete_connected_research') {
       const expected = [['scientific-method', 150, ['printing', 'astronomy']], ['shipbuilding', 66, ['sailing', 'celestial-navigation']], ['industrialization', 220, ['apprenticeship', 'metal-casting', 'scientific-method']], ['steam-power', 240, ['industrialization', 'shipbuilding']]] as const;
       let currentOnly = true; let explicit = true;

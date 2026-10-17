@@ -31,7 +31,9 @@ export const CIVILIZATIONS: CivilizationDefinition[] = [
 
 export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, perPaidRecipe: 3 } as const;
 
-export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { observatory: 14, foundry: 14, 'theater-square': 10, 'printing-house': 14, 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
+export const LOCAL_POWER_RULES = { ruleVersion: 1, featureId: 'local-power' } as const;
+
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { 'coal-plant': 18, factory: 18, observatory: 14, foundry: 14, 'theater-square': 10, 'printing-house': 14, 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
 
 export const LOCAL_GROWTH_RULES = { ruleVersion: 1, featureId: 'local-growth', legacyBaseCapacity: 20, foundedBaseCapacity: 8, baseFoodCost: 6, populationPerFoodCost: 4, researchMultiplier: 3 } as const;
 
@@ -67,6 +69,7 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'local-power', name: 'Local Coal power supplies productive Factories', description: 'Opening Coal and residents generate expiring same-town Power for atomically staffed Factories. Emissions are receipt-only; industrial-project work remains planned.' },
   { id: 'industrial-steam', name: 'Finite Coal powers useful rail exchanges', description: 'Connected productive research reveals finite hill Coal, funds exact owned rail edges and enables newly consented fuel-paid steam delivery.' },
   { id: 'civic-bootstrap', name: 'Culture shapes government', description: 'Actual current Culture funds explicitly chosen civics. Chiefdom and a chosen Urban planning policy improve the next working season.' },
   { id: 'observatory-learning', name: 'Learning from the sky', description: 'Sailing and Celestial navigation connect Mathematics to Astronomy and a locally staffed Observatory beside its own completed high-ground Campus. Harbor, fishing, ships and great-person systems remain planned.' },
@@ -202,6 +205,8 @@ export const IMPROVEMENTS: ImprovementDefinition[] = [
 ];
 
 export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'coal-plant', name: 'Coal power plant', requiredFeatures: ['local-power', 'industrial-steam', 'building-operations', 'resident-capacity'], minEra: 3, cost: { materials: 38, credits: 22 }, requires: ['industrialization'], requiresBuildings: ['industrial-zone'], effects: [], strategicInputs: { coal: 2 }, localPowerOutput: 8, emissionsPerOperation: 4, production: {}, description: 'Reserve two opening Coal and three local residents to generate eight same-town Power before consumers. Unspent Power expires; four emissions are recorded per paid operation. No ordinary Energy is generated.' },
+  { id: 'factory', name: 'Factory', requiredFeatures: ['local-power', 'building-operations', 'resident-capacity'], minEra: 3, cost: { materials: 40, credits: 24 }, requires: ['industrialization'], requiresBuildings: ['industrial-zone'], effects: [], localPowerInput: 3, production: { materials: 12 }, description: 'Reserve three same-town Power and three residents together for twelve base Materials under existing output modifiers. An unpowered Factory spends nothing. The undefined industrial-project work bonus remains planned.' },
   { id: 'observatory', name: 'Observatory', requiredFeatures: ['observatory-learning', 'building-operations', 'resident-capacity', 'district-planning'], minEra: 2, cost: { materials: 30, credits: 16 }, requires: ['astronomy'], requiresBuildings: ['campus'], effects: [], operatingInputs: { credits: 2 }, production: { science: 7 }, siteRequirement: 'campus-high-ground', description: 'Retain this town’s completed Campus and an actual adjacent mountain or hill. Two Credits and three local residents support Science on a later season; great-person points remain planned.' },
   { id: 'foundry', name: 'Foundry', requiredFeatures: ['foundry-production', 'finite-metals', 'building-operations', 'resident-capacity'], minEra: 2, cost: { materials: 32, credits: 16 }, requires: ['metal-casting'], requiresBuildings: ['industrial-zone'], effects: [], operatingInputs: { energy: 2 }, strategicInputs: { iron: 1 }, production: { materials: 8 }, description: 'Reserve one Iron, two Energy and three opening local residents together for Materials. A shortage or pause spends nothing; iron arriving later this season funds a later operation.' },
   { id: 'theater-square', name: 'Theater square', requiredFeatures: ['culture-production', 'district-planning'], minEra: 1, cost: { materials: 20, credits: 10 }, requires: ['construction'], effects: [], production: { culture: 2 }, district: { range: 3, adjacency: { wonder: true, resource: 'culture', amount: 2, maximum: 4 } }, description: 'Reserve an exact owned site for shared culture. Completed adjacent wonders add two base Culture each, capped at four; unfinished contenders do not count. Amphitheaters and great-person systems remain planned.' },
@@ -527,8 +532,11 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     resources(`${building.id} operating inputs`, building.operatingInputs ?? {});
     if (building.strategicInputs !== undefined) {
       if (!Object.values(building.strategicInputs).some(positive) || Object.entries(building.strategicInputs).some(([resource, amount]) => !STRATEGIC_RESOURCE_IDS.some(id => id === resource) || !Number.isSafeInteger(amount) || amount < 0)) errors.push(`building ${building.id}: invalid strategic operating inputs`);
-      if (!['foundry-production', 'finite-metals', 'building-operations', 'resident-capacity'].every(feature => building.requiredFeatures.includes(feature))) errors.push(`building ${building.id}: strategic operating inputs require released ledger and operation gates`);
+      if (![...STRATEGIC_RESOURCE_IDS.filter(resource => (building.strategicInputs?.[resource] ?? 0) > 0).map(resource => STRATEGIC_RESOURCE_RULES[resource].featureId), ...((building.strategicInputs.iron ?? 0) > 0 ? ['foundry-production'] : []), 'building-operations', 'resident-capacity'].every(feature => building.requiredFeatures.includes(feature))) errors.push(`building ${building.id}: strategic operating inputs require released ledger and operation gates`);
     }
+    const powerInput = building.localPowerInput ?? 0; const powerOutput = building.localPowerOutput ?? 0; const emissions = building.emissionsPerOperation ?? 0;
+    if (![powerInput, powerOutput, emissions].every(value => Number.isSafeInteger(value) && value >= 0) || (powerInput > 0 && powerOutput > 0) || (emissions > 0 && powerOutput === 0)) errors.push(`building ${building.id}: invalid local Power recipe`);
+    if ((powerInput > 0 || powerOutput > 0) && ![LOCAL_POWER_RULES.featureId, 'building-operations', 'resident-capacity'].every(feature => building.requiredFeatures.includes(feature))) errors.push(`building ${building.id}: local Power requires released operation and resident gates`);
     if (Object.values(building.operatingInputs ?? {}).some(positive) && !building.requiredFeatures.includes('building-operations')) errors.push(`building ${building.id}: operating inputs require the building-operations feature`);
     const capabilities = building.capabilities ?? [];
     for (const capability of capabilities) if (!Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability)) errors.push(`building ${building.id}: unknown capability ${capability}`);
@@ -556,7 +564,7 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
       else if (prerequisite.minEra > building.minEra) errors.push(`building ${building.id}: future building prerequisite ${id}`);
     }
     if (capabilities.includes('coastal-departure') && (building.siteRequirement !== 'coastal' || !building.requiredFeatures.includes('coastal-founding'))) errors.push(`building ${building.id}: coastal departure requires coastal site and feature`);
-    if (building.effects.length === 0 && !Object.values(building.production).some(positive) && !positive(building.housing ?? 0) && !capabilities.some(capability => Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability))) errors.push(`building ${building.id}: no production or world effect`);
+    if (!positive(powerOutput) && building.effects.length === 0 && !Object.values(building.production).some(positive) && !positive(building.housing ?? 0) && !capabilities.some(capability => Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability))) errors.push(`building ${building.id}: no production or world effect`);
     effects(building.id, building.effects);
     for (const required of building.requires) {
       const technology = technologies.get(required);

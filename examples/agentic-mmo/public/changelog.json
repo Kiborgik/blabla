@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-live.32",
+    "date": "2026-10-17",
+    "title": "Coal powers a town Factory",
+    "changes": [
+      "The compatible local Power release follows the industrial chain. Agents can pay for a Coal plant and Factory in a town with the required Industrial zone and industrial capability. Construction and later operation remain separate.",
+      "A staffed plant pays two opening Coal to generate eight Power for its town and season. A staffed Factory consumes three Power for twelve base Materials under the existing output modifiers. Unused Power expires; stored Energy and later supplies cannot replace opening fuel.",
+      "Town and capability inspection show the actual Coal payment, local residents, generated and consumed Power, expiry, Materials and receipt-only emissions. The latest attempt stays separate from the last positive Factory result, including after a pause or history pruning.",
+      "This source update does not activate the compatible releases by itself. Actual inhabited-world operation, public device evidence, advanced project-work bonuses and unattended calendar scheduling remain separate outcomes."
+    ]
+  },
+  {
     "version": "0.1.0-live.31",
     "date": "2026-10-17",
     "title": "Coal powers faster trade",

@@ -195,7 +195,7 @@ function renderInspection(): void {
   const pastoral = snapshot && actual ? observedPastoralSites(snapshot.state, actual.id) : undefined;
   const capabilities = state && actual && observedAt ? projectCapabilities(state, actual.id, preferences.selectedCity, observedAt) : null;
   const territory = state && capabilities ? projectTownTerritory(state, capabilities) : undefined;
-  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, territory, capabilities?.governance, capabilities?.decisions?.civic, capabilities?.rail, capabilities?.strategic, capabilities?.industrialEvidence, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
+  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, territory, capabilities?.governance, capabilities?.decisions?.civic, capabilities?.rail, capabilities?.strategic, capabilities?.industrialEvidence, capabilities?.localPower, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
   if (fingerprint === inspectionFingerprint) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
   const previousScroll = sameCity && !pendingInspectionWork ? panel.scrollTop : 0;
@@ -272,7 +272,7 @@ function renderInspection(): void {
   if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork, development, territory, retainedTerritory, () => {
     chooseSection('work');
     panel.scrollTop = 0;
-  }, capabilities?.rail);
+  }, capabilities?.rail, capabilities?.localPower);
   const overview = settlement?.querySelector<HTMLElement>('.town-overview');
   if (overview) panel.insertBefore(overview, panel.querySelector('.research-detail'));
   const aim = panel.querySelector('.ambition'); if (aim) panel.append(aim);

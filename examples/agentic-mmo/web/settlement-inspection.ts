@@ -10,7 +10,7 @@ import { damageCondition } from '../visuals/damage-visuals.ts';
 import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
 import { hasFeatures } from '../core/simulation/history.ts';
 import { observedResidentCapacity } from '../core/simulation/operations.ts';
-import type { City, WorldState, ResidentCapacityObservation, Resources, RailObservation, RailConstructionOrder, RailCompletion } from '../core/types.ts';
+import type { City, WorldState, ResidentCapacityObservation, Resources, RailObservation, RailConstructionOrder, RailCompletion, CityLocalPower, LocalPowerBeatReceipt, BuildingOperationResult } from '../core/types.ts';
 import { buildingAppearance } from '../visuals/building-visuals.ts';
 import { operationVisual } from '../visuals/operation-visuals.ts';
 import type { ResourceAmount } from '../visuals/operation-visuals.ts';
@@ -162,7 +162,79 @@ export function railWorkRows(city: Pick<City, 'id' | 'civId' | 'construction'>, 
   }));
 }
 
-export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }, onInspectWork?: () => void, rail?: RailObservation): void {
+export function localPowerResultLines(result: BuildingOperationResult): string[] {
+  const flow = result.localPower;
+  if (!flow) return ['Local Power flow was not recorded.'];
+  const residents = result.residents;
+  return [
+    `${result.status === 'operated' ? 'Operated' : result.status === 'paused' ? 'Paused' : 'Blocked'} in round ${result.round}`,
+    `Local Power · Generated ${exactNumber(flow.generated)} · Used ${exactNumber(flow.consumed)}`,
+    `Power needed ${exactNumber(flow.required)} · Available before this attempt ${exactNumber(flow.availableBefore)} · Shortfall ${exactNumber(flow.shortage)}`,
+    ...(residents ? [`Assigned ${exactNumber(residents.allocated)} residents · Needed ${exactNumber(residents.required)} · Available then ${exactNumber(residents.available)}`, `Opening population ${exactNumber(residents.openingPopulation)} · Community reserve ${exactNumber(residents.communityReserve)}`] : ['Resident allocation was not recorded.']),
+    ...(result.emissionsProduced === undefined ? [] : [`Emissions recorded for this operation · ${exactNumber(result.emissionsProduced)}`]),
+    ...result.shortages.map(shortage => `${METRIC_LABELS[shortage.resource]} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`),
+    ...(result.strategicShortages ?? []).map(shortage => `${strategicResourceLabel(shortage.resource)} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`),
+    ...(result.operationEventId ? [`Operation event ${result.operationEventId}`] : []),
+  ];
+}
+
+export function localPowerPresentation(city: Pick<City, 'id' | 'buildings' | 'buildingOperations' | 'localPower'>, power: CityLocalPower | undefined = city.localPower) {
+  if (!power) return null;
+  const receipt = (record: LocalPowerBeatReceipt | null) => record?.cityId === city.id ? {
+    record: structuredClone(record),
+    balance: `Generated ${exactNumber(record.generated)} Power · Used ${exactNumber(record.consumed)} · Expired ${exactNumber(record.expired)}`,
+    identity: `Town ${record.cityId} · Recorded civilization ${record.civId} · Round ${record.round} · Event ${record.eventId}`,
+  } : null;
+  return {
+    current: city.buildings.flatMap(id => {
+      const definition = BUILDINGS.find(building => building.id === id);
+      if (!definition || !(definition.localPowerInput || definition.localPowerOutput)) return [];
+      const operation = city.buildingOperations?.[id];
+      return [`${definition.name} · ${operation ? operation.enabled ? 'On now' : 'Paused now' : 'Current state unavailable'}`];
+    }),
+    latest: receipt(power.lastBeat),
+    productive: receipt(power.lastProductiveBeat),
+    meaning: 'Power is used only in this town during that same season. Unused Power expires. It is not stored, traded or ordinary Energy. Emissions are operation records; no climate or calendar effect is recorded here.',
+  };
+}
+
+function appendPowerResult(host: HTMLElement, result: BuildingOperationResult): void {
+  for (const line of localPowerResultLines(result)) host.append(text('p', line));
+  host.append(vectorLine('Ordinary supplies paid', result.paid), amountLine('Strategic supplies paid', strategicResourceAmounts(result.strategicPaid)), vectorLine('Actual ordinary output', result.produced));
+}
+
+function powerBeatDetails(record: LocalPowerBeatReceipt, key: string, label: string): HTMLDetailsElement {
+  const details = townDisclosure(key, `${label} · Round ${record.round}`);
+  details.classList.add('local-power-record');
+  details.append(text('p', `Town ${record.cityId} · Recorded civilization ${record.civId} · Event ${record.eventId}`),
+    text('strong', `Generated ${exactNumber(record.generated)} Power · Used ${exactNumber(record.consumed)} · Expired ${exactNumber(record.expired)}`));
+  for (const entry of record.operations) {
+    const section = text('section', '', 'local-power-operation');
+    section.append(text('h5', `${BUILDINGS.find(building => building.id === entry.buildingId)?.name ?? entry.buildingId} · ${entry.phase === 'generator' ? 'Generator' : 'Powered consumer'}`));
+    appendPowerResult(section, entry.result);
+    const recipe = townDisclosure(`${key}:recipe:${entry.buildingId}`, `Recipe recorded then · Version ${entry.recipe.ruleVersion}`);
+    recipe.append(vectorLine('Ordinary inputs', entry.recipe.inputs), amountLine('Strategic inputs', strategicResourceAmounts(entry.recipe.strategicInputs)), vectorLine('Base ordinary output before modifiers', entry.recipe.baseOutputs),
+      text('p', `Requires ${exactNumber(entry.recipe.residentsRequired)} residents · Power input ${exactNumber(entry.recipe.localPowerInput)} · Power output ${exactNumber(entry.recipe.localPowerOutput)} · Emissions per paid operation ${exactNumber(entry.recipe.emissionsPerOperation)}`));
+    section.append(recipe); details.append(section);
+  }
+  return details;
+}
+
+export function createLocalPowerInspection(city: Pick<City, 'id' | 'buildings' | 'buildingOperations' | 'localPower'>, power: CityLocalPower | undefined = city.localPower): HTMLElement | null {
+  const view = localPowerPresentation(city, power);
+  if (!view) return null;
+  const section = text('section', '', 'local-power-inspection'); section.setAttribute('aria-label', 'Town local Power');
+  section.append(text('h4', 'Local Power'));
+  for (const line of view.current) section.append(text('p', line, 'local-power-current'));
+  if (view.latest) section.append(text('strong', view.latest.balance, 'local-power-balance'), powerBeatDetails(view.latest.record, 'local-power-latest', 'Latest town Power attempt'));
+  else section.append(text('p', 'No town Power attempt recorded yet. Completion does not generate Power or operate a Factory.'));
+  if (view.productive) section.append(powerBeatDetails(view.productive.record, 'local-power-productive', 'Last positive powered output'));
+  else section.append(text('p', 'No positive powered output recorded yet. Generation alone is not a productive Factory result.'));
+  section.append(text('p', view.meaning, 'local-power-meaning'));
+  return section;
+}
+
+export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }, onInspectWork?: () => void, rail?: RailObservation, power?: CityLocalPower): void {
   host.replaceChildren();
   const city = cities.find((entry) => entry.id === selectedId) ?? cities[0];
   if (!city) return;
@@ -303,6 +375,20 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     }
     const highGround = city.buildingHighGround?.[id];
     if (highGround) card.append(text('p', `Retained high ground · Campus Tile ${highGround.campusTileId} · Source Tile ${highGround.sourceTileId}. The Observatory is at the Campus, not on the source tile.`, 'building-summary'));
+    if (definition?.localPowerInput || definition?.localPowerOutput) {
+      const operation = city.buildingOperations?.[id];
+      card.append(text('p', `Built · ${operation ? operation.enabled ? 'On now' : 'Paused now' : 'Current state unavailable'}`, 'building-current'));
+      if (operation?.lastResult) appendPowerResult(card, operation.lastResult);
+      else card.append(text('p', 'No operating result recorded yet. A later season needs complete supplies, local Power where required, and residents.'));
+      const productive = (power ?? city.localPower)?.lastProductiveBeat;
+      const historical = productive?.cityId === city.id ? productive.operations.find(entry => entry.buildingId === id && entry.phase === 'consumer') : undefined;
+      if (historical) {
+        const retained = townDisclosure(`power-positive:${id}`, `Last positive powered output · Round ${productive?.round}`);
+        appendPowerResult(retained, historical.result); card.append(retained);
+      }
+      card.append(text('p', 'Generated Power expires in the same town and season if unused. These records are not spendable stock.', 'building-summary'));
+      host.append(card); continue;
+    }
     if (!definition?.operatingInputs) {
       card.append(text('p', 'Built', 'building-current'));
       if (definition?.housing) card.append(text('p', `Adds ${definition.housing} housing capacity. Population grows only in a later eligible season with food.`, 'building-summary'));
@@ -374,7 +460,12 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     const operation = key ? city.buildingOperations?.[key] : undefined;
     const wonder = wonderRows.find(row => row.key === key);
     const railway = rails.find(row => row.key === key);
-    if (railway) preview.append(text('strong', railway.state), text('p', railway.heading), text('p', railway.progress));
+    if (operation?.lastResult?.localPower) {
+      preview.append(text('strong', `Built · ${operation.enabled ? 'On' : 'Paused'} now`));
+      for (const line of localPowerResultLines(operation.lastResult).slice(0, 2)) preview.append(text('p', line));
+      preview.append(vectorLine('Actual ordinary output', operation.lastResult.produced));
+    }
+    else if (railway) preview.append(text('strong', railway.state), text('p', railway.heading), text('p', railway.progress));
     else if (wonder) preview.append(wonderPreview(wonder));
     else if (key?.startsWith('active:') && activeDistrict) {
       preview.append(text('strong', 'Under construction'), text('p', `${exactNumber(activeDistrict.workDone)} / ${exactNumber(activeDistrict.workRequired)} work · Not built yet`));
@@ -414,6 +505,8 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     onInspectWork?.();
     picker.focus({ preventScroll: true });
   });
+  const localPower = createLocalPowerInspection(city, power ?? city.localPower);
+  if (localPower) overview.prepend(localPower);
   if (production) overview.prepend(production);
 }
 

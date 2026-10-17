@@ -1456,3 +1456,12 @@ dialog h2 {
 .civic-record > summary { min-height: 44px; padding-block: 10px; cursor: pointer; overflow-wrap: anywhere; }
 .civic-record > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .civic-pending { padding-inline-start: 10px; border-inline-start: 2px solid var(--gold); }
+
+.local-power-inspection { margin: 12px 0; padding: 10px; border: 1px solid var(--border); border-radius: 6px; min-width: 0; }
+.local-power-inspection h4, .local-power-operation h5 { margin: 5px 0; font-size: 13px; }
+.local-power-inspection p, .local-power-balance { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.local-power-balance { display: block; }
+.local-power-meaning { color: var(--muted); }
+.local-power-record > summary { min-height: 44px; padding-block: 10px; box-sizing: border-box; cursor: pointer; overflow-wrap: anywhere; }
+.local-power-operation { margin: 8px 0; padding-block: 6px; border-top: 1px solid var(--border); }
+.local-power-inspection summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }

@@ -3,6 +3,7 @@ import {
   COAL_RULES,
   INDUSTRIAL_RULES,
   LAND_TRANSPORT_RULES,
+  LOCAL_POWER_RULES,
   RESIDENT_CAPACITY_RULES,
   STRATEGIC_RESOURCE_IDS,
   STRATEGIC_RESOURCE_RULES,
@@ -39,6 +40,9 @@ import {
   GAME_VERSION,
   SCHEMA_VERSION,
   type City,
+  type BuildingDefinition,
+  type LocalPowerBeatReceipt,
+  type LocalPowerOperationResult,
   type CivicState,
   type GovernmentState,
   type ConstructionCompletion,
@@ -686,17 +690,150 @@ function operationResult(value: unknown, round: number, features: string[], stra
       && (resources.length > 0 || strategic.length > 0 || residents !== null && residents.available < residents.required));
 }
 
+function powerParticipant(building: BuildingDefinition | undefined): boolean {
+  return !!building && ((building.localPowerInput ?? 0) > 0 || (building.localPowerOutput ?? 0) > 0);
+}
+
+function powerOperation(value: unknown, building: BuildingDefinition | undefined, round: number): value is LocalPowerOperationResult {
+  if (!building || !record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages', 'strategicPaid', 'strategicShortages', 'residents', 'localPower', 'emissionsProduced', 'operationEventId'])
+    || !integer(value.round, 0, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
+    || !strategicResources(value.strategicPaid) || !Array.isArray(value.shortages) || !Array.isArray(value.strategicShortages)
+    || !residentAllocation(value.residents) || value.residents.required !== RESIDENT_CAPACITY_RULES.perPaidRecipe
+    || value.residents.communityReserve !== RESIDENT_CAPACITY_RULES.communityReserve || !record(value.localPower)
+    || !exactKeys(value.localPower, ['ruleVersion', 'required', 'availableBefore', 'consumed', 'generated', 'shortage'])
+    || value.localPower.ruleVersion !== LOCAL_POWER_RULES.ruleVersion
+    || !['required', 'availableBefore', 'consumed', 'generated', 'shortage'].every(key => integer(value.localPower && record(value.localPower) ? value.localPower[key] : undefined))
+    || !integer(value.emissionsProduced) || completionRevision(value.operationEventId, Number.MAX_SAFE_INTEGER) === null) return false;
+  const power = value.localPower;
+  if (power.required !== (building.localPowerInput ?? 0) || !integer(power.availableBefore)
+    || power.shortage !== Math.max(0, (building.localPowerInput ?? 0) - power.availableBefore)) return false;
+  const ordinary: string[] = []; const strategic: string[] = [];
+  for (const [shortages, inputs, ids] of [[value.shortages, building.operatingInputs ?? {}, ordinary], [value.strategicShortages, building.strategicInputs ?? {}, strategic]] as const) {
+    for (const shortage of shortages) {
+      if (!record(shortage) || !exactKeys(shortage, ['resource', 'required', 'available']) || typeof shortage.resource !== 'string'
+        || !Object.hasOwn(inputs, shortage.resource) || shortage.required !== Reflect.get(inputs, shortage.resource)
+        || !finite(shortage.available) || !finite(shortage.required, Number.MIN_VALUE) || shortage.available >= shortage.required) return false;
+      ids.push(shortage.resource);
+    }
+    if (!unique(ids)) return false;
+  }
+  const residents = value.residents;
+  if (value.status === 'operated') return sameSnapshot(value.paid, { ...building.operatingInputs })
+    && sameSnapshot(value.strategicPaid, { ...building.strategicInputs })
+    && Object.keys(value.produced).every(resource => Object.hasOwn(building.production, resource))
+    && ordinary.length === 0 && strategic.length === 0 && power.shortage === 0
+    && power.consumed === (building.localPowerInput ?? 0) && power.generated === (building.localPowerOutput ?? 0)
+    && value.emissionsProduced === (building.emissionsPerOperation ?? 0)
+    && residents.allocated === residents.required && residents.available >= residents.required;
+  return sameSnapshot(value.paid, {}) && sameSnapshot(value.produced, {}) && sameSnapshot(value.strategicPaid, {})
+    && residents.allocated === 0 && power.consumed === 0 && power.generated === 0 && value.emissionsProduced === 0
+    && (value.status === 'paused' ? ordinary.length === 0 && strategic.length === 0 : value.status === 'blocked'
+      && (ordinary.length > 0 || strategic.length > 0 || power.shortage > 0 || residents.available < residents.required));
+}
+
+function powerBeat(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is LocalPowerBeatReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'cityId', 'civId', 'round', 'eventId', 'openingPopulation', 'communityReserve', 'operations', 'generated', 'consumed', 'expired'])
+    || value.ruleVersion !== LOCAL_POWER_RULES.ruleVersion || !boundedText(value.cityId) || !integer(value.civId, 0, CIV_COUNT - 1)
+    || !integer(value.round, 0, round) || completionRevision(value.eventId, revision) === null
+    || !integer(value.openingPopulation, 1) || value.communityReserve !== RESIDENT_CAPACITY_RULES.communityReserve
+    || !Array.isArray(value.operations) || value.operations.length === 0 || value.operations.length > BUILDINGS.filter(powerParticipant).length
+    || !integer(value.generated) || !integer(value.consumed) || !integer(value.expired)) return false;
+  const beatRevision = completionRevision(value.eventId, revision); const beatIndex = Number(String(value.eventId).split(':')[1]);
+  let availablePower = 0; let availableResidents = Math.max(0, value.openingPopulation - value.communityReserve);
+  let generated = 0; let consumed = 0; let previous = ''; const ids: string[] = []; const eventIds: string[] = [];
+  for (const operation of value.operations) {
+    if (!record(operation) || !exactKeys(operation, ['buildingId', 'phase', 'recipe', 'result'])) return false;
+    const building = BUILDINGS.find(item => item.id === operation.buildingId);
+    if (!building || !powerParticipant(building)) return false;
+    const generator = (building.localPowerOutput ?? 0) > 0;
+    const key = `${generator ? 0 : 1}:${building.id}`;
+    if (key <= previous || operation.phase !== (generator ? 'generator' : 'consumer')
+      || !sameSnapshot(operation.recipe, { ruleVersion: LOCAL_POWER_RULES.ruleVersion, inputs: { ...building.operatingInputs }, strategicInputs: { ...building.strategicInputs }, baseOutputs: { ...building.production }, residentsRequired: RESIDENT_CAPACITY_RULES.perPaidRecipe, localPowerInput: building.localPowerInput ?? 0, localPowerOutput: building.localPowerOutput ?? 0, emissionsPerOperation: building.emissionsPerOperation ?? 0 })
+      || !powerOperation(operation.result, building, value.round)) return false;
+    const result = operation.result;
+    if (result.round !== value.round || result.residents.openingPopulation !== value.openingPopulation
+      || result.residents.communityReserve !== value.communityReserve || result.residents.available > availableResidents
+      || generator && result.residents.available !== availableResidents || result.localPower.availableBefore !== availablePower
+      || completionRevision(result.operationEventId, revision) !== beatRevision || Number(result.operationEventId.split(':')[1]) >= beatIndex) return false;
+    availableResidents = result.residents.available - result.residents.allocated;
+    generated += result.localPower.generated; consumed += result.localPower.consumed;
+    availablePower += result.localPower.generated - result.localPower.consumed;
+    if (availablePower < 0) return false;
+    previous = key; ids.push(building.id); eventIds.push(result.operationEventId);
+  }
+  return unique(ids) && unique(eventIds) && value.generated === generated && value.consumed === consumed && value.expired === availablePower;
+}
+
+function productivePower(value: LocalPowerBeatReceipt): boolean {
+  return value.operations.some(operation => operation.phase === 'consumer' && operation.result.status === 'operated'
+    && operation.result.localPower.consumed > 0 && Object.values(operation.result.produced).some(amount => amount > 0));
+}
+
+function powerEvent(value: Record<string, unknown>): boolean {
+  if (!Object.hasOwn(value, 'localPower')) return value.type !== 'local-power-beat';
+  return powerBeat(value.localPower) && value.type === 'local-power-beat' && value.localPower.eventId === value.id
+    && value.localPower.round === value.round && value.localPower.civId === value.actor && value.actor === value.target && integer(value.tileId);
+}
+
+function powerRecords(cities: City[], events: GameEvent[], features: string[], round: number, revision: number): boolean {
+  const enabled = features.includes(LOCAL_POWER_RULES.featureId);
+  const valid = (receipt: LocalPowerBeatReceipt, settlement: City): boolean => {
+    if (!powerBeat(receipt, revision, round) || receipt.cityId !== settlement.id
+      || receipt.operations.some(operation => !settlement.buildings.includes(operation.buildingId))) return false;
+    const retained = events.find(event => event.id === receipt.eventId);
+    if (retained && (retained.tileId !== settlement.tileId || !sameSnapshot(retained.localPower, receipt))) return false;
+    return receipt.operations.every(operation => {
+      const result = operation.result; const event = events.find(item => item.id === result.operationEventId);
+      if (!event) return true;
+      return event.type === 'building-operation' && event.round === receipt.round && event.actor === receipt.civId && event.target === receipt.civId
+        && event.tileId === settlement.tileId && event.detail === `${settlement.id}/${operation.buildingId} at strategic round ${receipt.round}`
+        && event.title.endsWith(` ${result.status}`)
+        && event.effects.includes(`Residents: required ${result.residents.required}, opening capacity remaining ${result.residents.available}, allocated ${result.residents.allocated}; population is not consumed`)
+        && event.effects.includes(`Local Power: required ${result.localPower.required}, available ${result.localPower.availableBefore}, consumed ${result.localPower.consumed}, generated ${result.localPower.generated}`)
+        && event.effects.includes(`Receipt-only emissions ${result.emissionsProduced}`)
+        && Object.entries(result.paid).every(([resource, amount]) => amount === 0 || event.effects.includes(`Paid ${amount} ${resource}`))
+        && Object.entries(result.strategicPaid).every(([resource, amount]) => amount === 0 || event.effects.includes(`Paid ${amount} ${resource}`))
+        && Object.entries(result.produced).every(([resource, amount]) => amount === 0 || event.effects.includes(`Produced ${amount} ${resource}`));
+    });
+  };
+  for (const settlement of cities) {
+    const participants = BUILDINGS.filter(building => settlement.buildings.includes(building.id) && powerParticipant(building));
+    if (!enabled || participants.length === 0) { if (Object.hasOwn(settlement, 'localPower') || participants.length > 0) return false; continue; }
+    const ledger: unknown = settlement.localPower;
+    if (!record(ledger) || !exactKeys(ledger, ['ruleVersion', 'lastBeat', 'lastProductiveBeat']) || ledger.ruleVersion !== LOCAL_POWER_RULES.ruleVersion
+      || ledger.lastBeat !== null && (!powerBeat(ledger.lastBeat, revision, round) || !valid(ledger.lastBeat, settlement))
+      || ledger.lastProductiveBeat !== null && (!powerBeat(ledger.lastProductiveBeat, revision, round) || !valid(ledger.lastProductiveBeat, settlement) || !productivePower(ledger.lastProductiveBeat))) return false;
+    const latest = ledger.lastBeat; const productive = ledger.lastProductiveBeat;
+    if (latest === null) { if (productive !== null || participants.some(building => settlement.buildingOperations?.[building.id]?.lastResult !== null)) return false; continue; }
+    if (productive !== null && (!powerBeat(productive) || !powerBeat(latest) || productive.round > latest.round)
+      || !powerBeat(latest) || productivePower(latest) && !sameSnapshot(latest, productive)) return false;
+    for (const building of participants) {
+      const result = settlement.buildingOperations?.[building.id]?.lastResult;
+      const retained = latest.operations.find(operation => operation.buildingId === building.id);
+      if (result !== null && (!result || !retained || !sameSnapshot(result, retained.result)) || result === null && retained) return false;
+    }
+    for (const event of events) if (event.localPower?.cityId === settlement.id) {
+      if (!valid(event.localPower, settlement) || event.round > latest.round
+        || event.round === latest.round && !sameSnapshot(event.localPower, latest)
+        || productivePower(event.localPower) && (!powerBeat(productive) || event.round > productive.round
+          || event.round === productive.round && !sameSnapshot(event.localPower, productive))) return false;
+    }
+  }
+  return events.every(event => !event.localPower || enabled && cities.some(settlement => settlement.id === event.localPower?.cityId && valid(event.localPower, settlement)));
+}
+
 function buildingOperations(value: City, round: number, features: string[]): boolean {
   const definitions = BUILDINGS.filter((building) => value.buildings.includes(building.id)
-    && (RESOURCE_IDS.some((resource) => (building.operatingInputs?.[resource] ?? 0) > 0) || (building.strategicInputs?.iron ?? 0) > 0));
+    && (RESOURCE_IDS.some((resource) => (building.operatingInputs?.[resource] ?? 0) > 0) || STRATEGIC_RESOURCE_IDS.some(resource => (building.strategicInputs?.[resource] ?? 0) > 0) || powerParticipant(building)));
   const paid = definitions.map((building) => building.id);
   if (!Object.hasOwn(value, 'buildingOperations')) return paid.length === 0;
   const operations: unknown = value.buildingOperations;
   if (!features.includes('building-operations') || !record(operations) || !exactKeys(operations, paid)) return false;
   return Object.entries(operations).every(([id, operation]) => record(operation)
     && exactKeys(operation, ['enabled', 'lastResult']) && typeof operation.enabled === 'boolean'
-    && (operation.lastResult === null || operationResult(operation.lastResult, round, features,
-      (definitions.find(building => building.id === id)?.strategicInputs?.iron ?? 0) > 0)));
+    && (operation.lastResult === null || (powerParticipant(definitions.find(building => building.id === id))
+      ? features.includes(LOCAL_POWER_RULES.featureId) && powerOperation(operation.lastResult, definitions.find(building => building.id === id), round)
+      : operationResult(operation.lastResult, round, features, (definitions.find(building => building.id === id)?.strategicInputs?.iron ?? 0) > 0))));
 }
 
 function orderRevision(value: unknown, revision: number): number | null {
@@ -1382,7 +1519,7 @@ export function isGameEvent(value: unknown): value is GameEvent {
     (value.tileId === null || integer(value.tileId)) &&
     strings(value.effects) &&
     value.effects.length > 0 &&
-    finite(value.importance) && wonderEvent(value) && industrialEvent(value) &&
+    finite(value.importance) && wonderEvent(value) && industrialEvent(value) && powerEvent(value) &&
     (!Object.hasOwn(value, 'populationGrowth') || (populationGrowth(value.populationGrowth) && value.type === 'population-growth'
       && value.populationGrowth.eventId === value.id && value.populationGrowth.round === value.round
       && value.populationGrowth.civId === value.actor && value.actor === value.target && integer(value.tileId))) &&
@@ -1536,6 +1673,7 @@ export function isWorldState(
     ) ||
     !unique(cities.map((item) => item.tileId)) ||
     !cities.every((item) => buildingOperations(item, round, features)) ||
+    !powerRecords(cities, value.events, features, round, value.revision) ||
     !growthRecords(cities, value.events, features, round, value.revision) ||
     !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
     !civicRecords(value.civilizations, value.events, features, round, value.revision) ||

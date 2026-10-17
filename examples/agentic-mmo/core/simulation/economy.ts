@@ -1,3 +1,4 @@
+import { recordLocalPower } from './local-power.ts';
 import { recordIndustrialFoundry } from './industrial-evidence.ts';
 import { governmentModifiers, resolveGovernmentTransitions } from './government.ts';
 import { resolveCivics } from './civics.ts';
@@ -167,6 +168,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
     for (const city of cities) {
       const production = produceCity(state, city);
       emitOperations(state, city, events);
+      recordLocalPower(state, city, events);
       recordIndustrialFoundry(state, city, events);
       emitImprovements(state, city, events);
       culture += production.culture;

@@ -55,6 +55,7 @@ export interface CapabilityChoiceContext {
 }
 
 export interface CapabilityProjection {
+  localPower?: NonNullable<WorldState['cities'][number]['localPower']>;
   rail?: ReturnType<typeof observedRail>;
   industrialEvidence?: WorldState['industrialEvidence'];
   governance?: ReturnType<typeof observedGovernment> & { cityConstructionWork: number | null };
@@ -165,6 +166,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     return { ...row(`wonder:${definition.id}`, eligibility, choiceRefs), ...(construction ? { status: 'available' as const, blockers: [], construction } : {}), availableSites: city && !eligibility.blockers.length ? availableWonderSites(state, city, definition).map(tileId => ({ tileId, baseProduction: { ...definition.production } })) : [], facts };
   });
   return structuredClone({
+    ...(hasFeatures(state, ['local-power']) && city?.localPower ? { localPower: city.localPower } : {}),
     ...(hasFeatures(state, ['civic-bootstrap']) ? { governance: { ...observedGovernment(state, civilizationId), cityConstructionWork: city ? constructionWork(state, city) : null } } : {}),
     ...(hasFeatures(state, [INDUSTRIAL_RULES.featureId]) ? { rail: observedRail(state, civilizationId, cityId), industrialEvidence: state.industrialEvidence } : {}),
     choiceReferenceState: choices ? 'provided' : 'not-provided',

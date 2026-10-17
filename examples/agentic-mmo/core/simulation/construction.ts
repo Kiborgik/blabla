@@ -1,3 +1,4 @@
+import { initializeLocalPower } from './local-power.ts';
 import { installRail, isRailOrder, railSiteBlock } from './rail.ts';
 import { governmentModifiers } from './government.ts';
 import { isWonderOrder, resolveWonderConstruction } from './wonders.ts';
@@ -37,6 +38,7 @@ export function installBuilding(state: WorldState, city: City, definition: Build
     city.districtSites[definition.id] = tileId;
   }
   city.buildings.push(definition.id);
+  initializeLocalPower(state, city, definition);
   if (paidRecipe(definition)) {
     city.buildingOperations ??= {};
     city.buildingOperations[definition.id] = { enabled: true, lastResult: null };
@@ -60,6 +62,8 @@ export function installBuilding(state: WorldState, city: City, definition: Build
       ...(highGround === undefined ? [] : [`Retained Campus ${highGround.campusTileId} high ground ${highGround.sourceTileId}`]),
       ...RESOURCE_IDS.filter(resource => (definition.operatingInputs?.[resource] ?? 0) > 0).map(resource => `Operating input ${resource} ${definition.operatingInputs?.[resource]} per funded beat`),
       ...Object.entries(definition.strategicInputs ?? {}).filter(([, amount]) => amount > 0).map(([resource, amount]) => `Operating input ${resource} ${amount} per funded beat`),
+      ...((definition.localPowerOutput ?? 0) > 0 ? [`Generates ${definition.localPowerOutput} same-town Power and records ${definition.emissionsPerOperation ?? 0} emissions when fully staffed and funded; unused Power expires`] : []),
+      ...((definition.localPowerInput ?? 0) > 0 ? [`Operating input ${definition.localPowerInput} same-town Power per funded beat`] : []),
       ...RESOURCE_IDS.filter(resource => (production[resource] ?? 0) > 0).map(resource => `Seasonal ${resource} +${production[resource]}${paidRecipe(definition) ? ' when the complete operating recipe is funded' : ''}`),
     ],
     importance: 4,

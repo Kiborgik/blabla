@@ -141,7 +141,7 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
       ] : [
         { label: 'Build once', value: amounts(definition.cost) },
         ...(definition.capabilities?.includes('coastal-departure') ? [{ label: 'Enables', value: 'Coastal departure with Navigation; no operating output' }, { label: 'Site', value: 'A coastal town' }] : [
-          { label: 'Uses each operating season', value: amounts(definition.operatingInputs ?? {}, definition.strategicInputs) },
+          { label: definition.localPowerInput || definition.localPowerOutput ? 'Ordinary and strategic inputs' : 'Uses each operating season', value: amounts(definition.operatingInputs ?? {}, definition.strategicInputs) },
           { label: definition.district?.adjacency?.improvement ? 'Building base before nearby Mines' : definition.district?.adjacency?.wonder ? 'Building base before nearby wonders' : definition.district ? 'Building base before nearby terrain' : 'Base production before productivity', value: amounts(definition.production) },
         ]),
       ];
@@ -218,6 +218,17 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
       for (const site of district.availableSites) facts.push({ label: `Available site ${site.tileId}`, value: `${amounts(site.baseProduction)} base before town productivity${site.adjacency?.source === 'wonder' ? ` · Completed nearby wonder sites: ${site.adjacency.tileIds.join(', ') || 'None'} · Bonus ${amounts({ [site.adjacency.resource]: site.adjacency.bonus })}` : site.adjacency?.source === 'improvement' ? ` · Completed nearby Mine sites: ${site.adjacency.tileIds.join(', ') || 'None'} · Bonus ${amounts({ [site.adjacency.resource]: site.adjacency.bonus })}` : ''}` });
     }
     if (row?.operation) facts.push({ label: 'Operating now', value: row.operation.enabled ? 'On' : 'Paused' });
+    if ('localPowerInput' in definition || 'localPowerOutput' in definition) {
+      facts.push({ label: 'Same-town Power recipe', value: `${number(definition.localPowerInput ?? 0)} Power required · ${number(definition.localPowerOutput ?? 0)} Power generated · Unused Power expires that season` },
+        { label: 'Power meaning', value: 'Power is local to one town and season. It is not stored or ordinary Energy. Construction alone does not operate the building.' },
+        { label: 'Emissions per paid operation', value: `${number(definition.emissionsPerOperation ?? 0)} recorded · No climate or calendar effect` });
+      const last = row?.operation?.lastResult;
+      if (last?.localPower) facts.push({ label: 'Actual latest attempt', value: `Round ${last.round} · ${last.status} · Generated ${number(last.localPower.generated)} Power · Used ${number(last.localPower.consumed)} · Paid ${amounts(last.paid, last.strategicPaid)} · Made ${amounts(last.produced)} · Emissions ${last.emissionsProduced === undefined ? 'not recorded' : number(last.emissionsProduced)}` });
+      else facts.push({ label: 'Actual latest attempt', value: 'No local Power operation recorded yet' });
+      const retained = input.projection.localPower?.lastProductiveBeat;
+      const positive = retained?.cityId === input.projection.cityId ? retained.operations.find(entry => entry.buildingId === definition.id && entry.phase === 'consumer') : undefined;
+      if (positive) facts.push({ label: 'Last positive powered output', value: `Round ${retained?.round} · Made ${amounts(positive.result.produced)} · Used ${number(positive.result.localPower.consumed)} Power · Event ${positive.result.operationEventId}` });
+    }
     if (row?.construction) facts.push(
       { label: 'Construction work', value: `${number(row.construction.workDone)} / ${number(row.construction.workRequired)}` },
       { label: 'Already paid for this order', value: amounts(row.construction.paid) },

@@ -1,0 +1,75 @@
+state compatible_empty_adoption: bool
+state prior_world_preserved: bool
+state no_clock_era_or_milestone_change: bool
+state exact_catalogue_admission: bool
+state exact_start_cost_and_work: bool
+state one_owned_town_lane: bool
+state paid_and_installed_once: bool
+state first_operation_later: bool
+state stable_town_and_phase_order: bool
+state complete_opening_generator_reservation: bool
+state fixed_coal_power_and_emissions: bool
+state blocked_generator_has_no_effects: bool
+state later_supply_cannot_refuel: bool
+state complete_atomic_consumer_allocation: bool
+state same_town_same_beat_power: bool
+state exact_modified_materials: bool
+state blocked_consumer_has_no_effects: bool
+state no_energy_substitution: bool
+state ordinary_multipliers_exclude_power: bool
+state power_conserved_and_expired: bool
+state unused_generation_remains_paid: bool
+state no_spendable_receipt_or_carryover: bool
+state toggles_only_affect_future_opening: bool
+state toggles_preserve_receipts: bool
+state exact_versioned_operation_snapshots: bool
+state historical_identity_and_residents: bool
+state latest_attempt_distinct_from_productive: bool
+state positive_consumer_required: bool
+state bounded_self_contained_retention: bool
+state retained_events_cross_checked: bool
+state emissions_are_receipt_only: bool
+state legal_unedited_consumer_journey: bool
+state replay_exact: bool
+state refused_actions_have_no_effects: bool
+state legacy_behavior_preserved: bool
+
+action adopt_local_power()
+action construct_power_building()
+action operate_local_generator()
+action operate_powered_consumer()
+action expire_local_power()
+action change_power_operation()
+action retain_local_power_receipt()
+action replay_local_power()
+
+when adopt_local_power {
+    expect "local-power-adoption-adds-no-stock-operation-or-historical-credit": after.compatible_empty_adoption and after.prior_world_preserved and after.no_clock_era_or_milestone_change
+}
+when construct_power_building {
+    expect "local-power-buildings-use-exact-owned-town-catalogue-commitments": after.exact_catalogue_admission and after.exact_start_cost_and_work and after.one_owned_town_lane
+    expect "local-power-installation-pays-once-and-first-operates-on-a-later-beat": after.paid_and_installed_once and after.first_operation_later
+}
+when operate_local_generator {
+    expect "local-generators-reserve-full-opening-fuel-and-residents-before-consumers": after.stable_town_and_phase_order and after.complete_opening_generator_reservation and after.fixed_coal_power_and_emissions
+    expect "blocked-or-paused-generators-never-partly-pay-or-refuel-later-in-the-beat": after.blocked_generator_has_no_effects and after.later_supply_cannot_refuel
+}
+when operate_powered_consumer {
+    expect "local-powered-consumers-allocate-full-same-town-power-inputs-and-residents-atomically": after.complete_atomic_consumer_allocation and after.same_town_same_beat_power and after.blocked_consumer_has_no_effects and after.no_energy_substitution
+    expect "factory-materials-use-existing-quantized-contribution-with-fixed-power-conversion": after.exact_modified_materials and after.ordinary_multipliers_exclude_power
+}
+when expire_local_power {
+    expect "all-local-generation-is-consumed-or-expires-without-refunds-or-carryover": after.power_conserved_and_expired and after.unused_generation_remains_paid and after.no_spendable_receipt_or_carryover
+}
+when change_power_operation {
+    expect "local-power-pause-and-resume-only-change-future-opening-eligibility": after.toggles_only_affect_future_opening and after.toggles_preserve_receipts
+}
+when retain_local_power_receipt {
+    expect "local-power-history-retains-exact-versioned-operation-and-opening-resident-facts": after.exact_versioned_operation_snapshots and after.historical_identity_and_residents and after.retained_events_cross_checked
+    expect "local-power-latest-attempt-does-not-replace-the-last-positive-consumer-with-generation": after.latest_attempt_distinct_from_productive and after.positive_consumer_required and after.bounded_self_contained_retention
+    expect "local-power-emissions-remain-paid-operation-receipts-without-climate-or-calendar-effects": after.emissions_are_receipt_only and after.no_clock_era_or_milestone_change
+}
+when replay_local_power {
+    expect "a-legal-industrial-continuation-funds-a-real-same-town-factory-consumer": after.legal_unedited_consumer_journey and after.same_town_same_beat_power and after.exact_modified_materials
+    expect "local-power-replays-and-refusals-preserve-once-only-effects-and-legacy-history": after.replay_exact and after.refused_actions_have_no_effects and after.legacy_behavior_preserved and after.bounded_self_contained_retention
+}

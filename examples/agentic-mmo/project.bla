@@ -62,3 +62,5 @@ draft behavior "contracts/observatory-learning.bla"
 draft behavior "contracts/civic-bootstrap.bla"
 
 draft behavior "contracts/industrial-steam.bla"
+
+draft behavior "contracts/local-power.bla"
