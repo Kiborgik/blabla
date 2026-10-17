@@ -1,12 +1,13 @@
+import { wonderWorkRows, type TownDevelopmentFacts, type WonderWorkRow } from '../visuals/wonder-visuals.ts';
 import { exactNumber, numberElement } from './number-format.ts';
 import { extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
 import type { observedStrategicResources } from '../core/simulation/metals.ts';
 import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
 import { damageCondition } from '../visuals/damage-visuals.ts';
-import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS } from '../core/content.ts';
+import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
 import { hasFeatures } from '../core/simulation/history.ts';
 import { observedResidentCapacity } from '../core/simulation/operations.ts';
-import type { City, WorldState, ResidentCapacityObservation } from '../core/types.ts';
+import type { City, WorldState, ResidentCapacityObservation, Resources } from '../core/types.ts';
 import { buildingAppearance } from '../visuals/building-visuals.ts';
 import { operationVisual } from '../visuals/operation-visuals.ts';
 import type { ResourceAmount } from '../visuals/operation-visuals.ts';
@@ -44,7 +45,41 @@ function townDisclosure(key: string, label: string): HTMLDetailsElement {
   return details;
 }
 
-export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = ''): void {
+function vectorLine(label: string, vector: Partial<Resources>): HTMLElement {
+  return amountLine(label, RESOURCE_IDS.flatMap(resource => { const amount = vector[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; }));
+}
+
+function wonderPreview(row: WonderWorkRow): HTMLElement {
+  const preview = text('div', '', 'wonder-work-preview');
+  if (row.kind === 'building') preview.append(text('strong', 'Under construction · Competing for the world wonder'), text('p', `${exactNumber(row.order.workDone)} / ${exactNumber(row.order.workRequired)} work · Not completed`), text('span', `${row.facts.contenders.length} recorded contenders · Tile ${row.order.tileId}`, 'work-record-round'));
+  else if (row.kind === 'lost') preview.append(text('strong', 'Contest ended · Another town completed the wonder'), vectorLine('Refund received', row.receipt.refund), text('span', `No wonder installed here · Round ${row.receipt.resolvedRound}`, 'work-record-round'));
+  else {
+    preview.append(text('strong', 'Completed · World wonder'), text('p', `${row.facts.boost.remaining} unused research boosts`));
+    const quote = row.facts.boost.quote;
+    preview.append(text('span', quote ? `Available for ${TECHNOLOGIES.find(tech => tech.id === quote.technologyId)?.name ?? 'active research'}: ${exactNumber(quote.amount)} work. Requires an actor choice.` : row.facts.boost.blocker ?? 'No eligible research now', 'work-record-round'));
+  }
+  return preview;
+}
+
+function wonderCard(row: WonderWorkRow): HTMLElement {
+  const card = text('section', '', 'building-card wonder-card'); card.dataset['workId'] = row.key;
+  const receipt = row.kind === 'building' ? row.order : row.kind === 'lost' ? row.receipt : row.completed.completion;
+  card.append(text('h4', `${row.name} · ${row.kind === 'building' ? 'Under construction' : row.kind === 'lost' ? 'Contest ended' : 'World wonder'}`), text('p', `Exact site · Tile ${receipt.tileId}`, 'building-current'), vectorLine('Paid once for this order', receipt.paid));
+  if (row.kind === 'building') card.append(text('p', `${exactNumber(receipt.workRequired)} work required. Completion must be recorded before this becomes a world wonder.`));
+  else if (row.kind === 'lost') card.append(text('p', `${exactNumber(row.receipt.workDone)} / ${exactNumber(row.receipt.workRequired)} work recorded. This ended reservation has no installed landmark.`), vectorLine('Recorded refund', row.receipt.refund), text('p', `Winner order ${row.receipt.winnerOrderId} · Event ${row.receipt.eventId}`, 'settlement-facts'));
+  else {
+    card.append(text('p', `Completed in round ${row.completed.completion.completedRound} · Event ${row.completed.completion.eventId}`, 'settlement-facts'));
+    const definition = WONDERS.find(wonder => wonder.id === row.facts.wonderId);
+    if (definition) card.append(vectorLine('Base for later productive seasons', definition.production));
+    card.append(text('p', 'Completion does not record goods made. Actual town production is recorded separately.'));
+    for (const boost of row.completed.boosts) card.append(text('p', `${TECHNOLOGIES.find(tech => tech.id === boost.technologyId)?.name ?? 'Recorded discovery'} · Applied ${exactNumber(boost.amount)} research work · ${exactNumber(boost.progressBefore)} → ${exactNumber(boost.progressAfter)} · Unused part ${exactNumber(boost.unusedAmount)} · Round ${boost.round}`, 'wonder-boost-receipt'));
+    if (!row.completed.boosts.length) card.append(text('p', 'No boost has been applied.'));
+    for (const loss of row.completed.losses) card.append(text('p', `Other contender · Tile ${loss.tileId} · Recorded refund ${RESOURCE_IDS.flatMap(resource => loss.refund[resource] === undefined ? [] : [`${exactNumber(loss.refund[resource] ?? 0)} ${METRIC_LABELS[resource]}`]).join(', ') || 'None'} · Round ${loss.resolvedRound}`));
+  }
+  return card;
+}
+
+export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts): void {
   host.replaceChildren();
   const city = cities.find((entry) => entry.id === selectedId) ?? cities[0];
   if (!city) return;
@@ -56,10 +91,22 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     picker.value = city.id; picker.addEventListener('change', () => onSelect(picker.value)); label.append(picker); townPicker = label;
   }
   const heading = text('h3', city.name, 'town-heading');
-  const people = text('p', `${city.population} people · ${city.wellbeing}% wellbeing`, 'settlement-facts');
+  const people = text('p', `${city.population}${development?.growth ? ` / ${development.growth.capacity} housing` : ' people'} · ${city.wellbeing}% wellbeing`, 'settlement-facts');
   people.prepend(visualIcon('population'));
   host.append(heading, people, text('p', `Focus: ${city.focus} · ${city.damage}% damage`, 'settlement-facts'));
   if (townPicker) host.append(townPicker);
+  if (development?.growth) {
+    const growth = development.growth;
+    const housing = townDisclosure('housing', `Next population growth · ${exactNumber(growth.nextGrowthFoodCost)} Food`);
+    housing.append(text('p', `Housing capacity: ${growth.baseCapacity} base${growth.sources.map(source => ` + ${source.capacity} from ${BUILDINGS.find(building => building.id === source.buildingId)?.name ?? source.buildingId}`).join('')} = ${growth.capacity}.`), text('p', 'Housing allows growth. A later productive season still needs food and the other growth conditions. Capacity does not add residents immediately.'));
+    host.append(housing);
+    if (development.lastGrowth) {
+      const record = development.lastGrowth;
+      const last = townDisclosure('last-growth', `Last growth · ${record.populationBefore} → ${record.populationAfter} residents`);
+      last.append(text('p', `Paid ${exactNumber(record.foodPaid)} Food · Housing capacity then ${record.capacity} · Round ${record.round}.`), text('p', 'This is the recorded growth payment, not current food stock. The larger population can support work in later seasons.'));
+      host.append(last);
+    }
+  }
   const capacity = support?.cities.find(entry => entry.cityId === city.id);
   if (support && capacity) {
     const line = text('p', `Local work capacity: ${capacity.capacity} residents`, 'settlement-support');
@@ -196,13 +243,15 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     }
     host.append(card);
   }
+  const wonderRows = wonderWorkRows(development?.wonders ?? [], city.id);
+  for (const row of wonderRows) host.append(wonderCard(row));
   const cards = [...host.children].filter((node): node is HTMLElement => node instanceof HTMLElement && node !== overview);
   const work = text('section', '', 'town-work'); work.dataset['inspectionSection'] = 'work';
   const label = text('label', ''); label.append(text('span', 'Inspect work & buildings', 'sr-only'));
   const picker = text('select', '', 'work-picker'); picker.setAttribute('aria-label', 'Inspect work or building'); picker.dataset['inspectionFocus'] = 'work-picker';
   const detail = text('div', '', 'work-detail');
   for (const [index, card] of cards.entries()) {
-    const key = card.dataset['building'] ?? card.dataset['improvementTile'] ?? `active:${index}`;
+    const key = card.dataset['workId'] ?? card.dataset['building'] ?? card.dataset['improvementTile'] ?? `active:${index}`;
     card.dataset['workId'] = key;
     const option = text('option', card.querySelector('h4')?.textContent ?? 'No buildings yet'); option.value = key; picker.append(option);
   }
@@ -215,7 +264,9 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     const key = selected.dataset['workId'];
     const worked = Object.values(city.improvements ?? {}).find(site => String(site.tileId) === key);
     const operation = key ? city.buildingOperations?.[key] : undefined;
-    if (key?.startsWith('active:') && activeDistrict) {
+    const wonder = wonderRows.find(row => row.key === key);
+    if (wonder) preview.append(wonderPreview(wonder));
+    else if (key?.startsWith('active:') && activeDistrict) {
       preview.append(text('strong', 'Under construction'), text('p', `${exactNumber(activeDistrict.workDone)} / ${exactNumber(activeDistrict.workRequired)} work · Not built yet`));
     } else {
       preview.append(text('strong', operation || worked ? `Built · ${(operation ?? worked?.operation)?.enabled ? 'On' : 'Paused'} now` : 'Built'));

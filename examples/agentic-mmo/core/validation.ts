@@ -48,6 +48,7 @@ import {
   type WonderCompletion,
   type WonderLossReceipt,
   type ResearchBoostReceipt,
+  type PopulationGrowthReceipt,
   type WorldState,
 } from './types.ts';
 
@@ -857,6 +858,35 @@ function treaty(value: unknown): value is Treaty {
   );
 }
 
+function populationGrowth(value: unknown): value is PopulationGrowthReceipt {
+  return record(value) && exactKeys(value, ['ruleVersion', 'cityId', 'civId', 'round', 'eventId', 'populationBefore', 'populationAfter', 'capacity', 'foodPaid'])
+    && value.ruleVersion === 1 && text(value.cityId) && integer(value.civId, 0, CIV_COUNT - 1) && integer(value.round)
+    && completionRevision(value.eventId, Number.MAX_SAFE_INTEGER) !== null
+    && integer(value.populationBefore, 1) && integer(value.populationAfter, 1) && value.populationAfter === value.populationBefore + 1
+    && integer(value.capacity, value.populationAfter) && value.foodPaid === 6 + Math.floor(value.populationBefore / 4);
+}
+
+function growthRecords(cities: City[], events: GameEvent[], features: string[], round: number, revision: number): boolean {
+  const enabled = features.includes('local-growth');
+  for (const settlement of cities) {
+    if (Object.hasOwn(settlement, 'housing') !== enabled) return false;
+    if (!enabled) continue;
+    const housing: unknown = settlement.housing;
+    if (!record(housing) || !exactKeys(housing, ['ruleVersion', 'baseCapacity', 'establishedRound', 'origin'])
+      || housing.ruleVersion !== 1 || !integer(housing.establishedRound, 0, round)
+      || !(housing.origin === 'founded' && housing.baseCapacity === 8 || housing.origin === 'legacy-adoption' && integer(housing.baseCapacity, 20))) return false;
+  }
+  for (const event of events) {
+    if (!Object.hasOwn(event, 'populationGrowth')) continue;
+    const receipt = event.populationGrowth;
+    if (!enabled || !populationGrowth(receipt) || completionRevision(receipt.eventId, revision) === null) return false;
+    const settlement = cities.find(candidate => candidate.id === receipt.cityId);
+    if (!settlement || settlement.civId !== receipt.civId || settlement.tileId !== event.tileId
+      || !settlement.housing || receipt.round < settlement.housing.establishedRound) return false;
+  }
+  return true;
+}
+
 export function isGameEvent(value: unknown): value is GameEvent {
   return (
     record(value) &&
@@ -869,6 +899,9 @@ export function isGameEvent(value: unknown): value is GameEvent {
     strings(value.effects) &&
     value.effects.length > 0 &&
     finite(value.importance) && wonderEvent(value) &&
+    (!Object.hasOwn(value, 'populationGrowth') || (populationGrowth(value.populationGrowth) && value.type === 'population-growth'
+      && value.populationGrowth.eventId === value.id && value.populationGrowth.round === value.round
+      && value.populationGrowth.civId === value.actor && value.actor === value.target && integer(value.tileId))) &&
     (value.type !== 'coastal-founded' || Object.hasOwn(value, 'coastalFounding')) &&
     (!Object.hasOwn(value, 'coastalFounding') || (coastalReceipt(value.coastalFounding) && value.type === 'coastal-founded'
       && value.coastalFounding.eventId === value.id && value.coastalFounding.foundedRound === value.round && value.coastalFounding.destinationTileId === value.tileId
@@ -1014,6 +1047,7 @@ export function isWorldState(
     ) ||
     !unique(cities.map((item) => item.tileId)) ||
     !cities.every((item) => buildingOperations(item, round, features)) ||
+    !growthRecords(cities, value.events, features, round, value.revision) ||
     !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
     !districtRecords(cities, tiles, value.events, features) ||
     !improvementRecords(cities, tiles, value.events, features, round, value.revision) ||

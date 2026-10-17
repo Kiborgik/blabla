@@ -1,7 +1,7 @@
 import { exactNumber } from './number-format.ts';
 import { extractionFacts } from '../visuals/strategic-resource-visuals.ts';
 import type { GameEvent, Resources } from '../core/types.ts';
-import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
+import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
 import { eventVisual, type VisualDelta } from '../visuals/event-visuals.ts';
 import type { VisualIcon } from '../visuals/visual-language.ts';
 import { METRIC_LABELS } from '../visuals/visual-language.ts';
@@ -21,6 +21,7 @@ export interface EventLogEntry {
   exchanges: Array<{ from: string; to: string; cargo: string; upkeep: string; commerce: string }>;
 }
 const GROUPS: ReadonlyArray<{ prefix: string; category: string; family: string; icon: VisualIcon }> = [
+  { prefix: 'wonder', category: 'World wonder', family: 'building', icon: 'discovery' },
   { prefix: 'research', category: 'Research', family: 'research', icon: 'science' },
   { prefix: 'trade', category: 'Trade result', family: 'trade', icon: 'cargo' },
   { prefix: 'public-project', category: 'Shared project', family: 'trade', icon: 'influence' },
@@ -72,6 +73,10 @@ function namedStory(event: GameEvent, options: EventLogOptions): { title: string
   const actor = participant(event.actor, options).name;
   const target = participant(event.target, options).name;
   const technology = TECHNOLOGIES.find(candidate => candidate.id === event.detail);
+  if (event.populationGrowth?.eventId === event.id) { const growth = event.populationGrowth; return { title: event.title, category: 'Population grew', summary: `${growth.populationBefore} → ${growth.populationAfter} residents. Paid ${exactNumber(growth.foodPaid)} Food. Housing capacity then ${growth.capacity}.` }; }
+  if (event.wonderCompletion?.eventId === event.id) return { title: `${actor} completed ${WONDERS.find(wonder => wonder.id === event.wonderCompletion?.wonderId)?.name ?? 'a world wonder'}`, category: 'World wonder completed', summary: `Tile ${event.wonderCompletion.tileId}. Research boosts are available for an explicit choice; production comes in later seasons.` };
+  if (event.wonderLoss?.eventId === event.id) return { title: `${actor} ended its ${WONDERS.find(wonder => wonder.id === event.wonderLoss?.wonderId)?.name ?? 'wonder'} attempt`, category: 'Contest ended', summary: `Another town completed the wonder. Refund received: ${amounts(event.wonderLoss.refund)}. No landmark installed at tile ${event.wonderLoss.tileId}.` };
+  if (event.researchBoost?.eventId === event.id) { const boost = event.researchBoost; return { title: `${actor} boosted ${TECHNOLOGIES.find(tech => tech.id === boost.technologyId)?.name ?? 'its recorded discovery'}`, category: 'Research boost used', summary: `Applied ${exactNumber(boost.amount)} work · ${exactNumber(boost.progressBefore)} → ${exactNumber(boost.progressAfter)}. Unused part: ${exactNumber(boost.unusedAmount)}.` }; }
   if (event.type === 'earthquake' && event.title === `The earth moves: ${target}`) return { title: `Earthquake hit ${target}`, summary: '' };
   if (event.type === 'research-started' && technology) return { title: `${actor} began ${technology.name}`, category: 'Researching', summary: '' };
   if (event.type === 'research-completed') return { title: event.title.replace(' discovers ', ' discovered '), category: 'Discovery', summary: 'Research completed.' };

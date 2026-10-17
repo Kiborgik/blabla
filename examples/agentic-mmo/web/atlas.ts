@@ -1,3 +1,4 @@
+import type { WonderSiteView } from '../visuals/wonder-visuals.ts';
 import type { RouteResultCue } from '../visuals/route-cues.ts';
 import type { VisualEvent } from '../visuals/world-visuals.ts';
 import type { RouteView } from '../visuals/route-visuals.ts';
@@ -41,6 +42,7 @@ export interface AtlasWorld {
   tiles: AtlasTile[];
   cities: AtlasCivilization[];
   routes: RouteView[];
+  wonders?: WonderSiteView[];
   districts?: DistrictView[];
   improvements?: ImprovementView[];
   deposits?: DepositView[];

@@ -1,3 +1,4 @@
+import { greatLibraryVisual } from '../visuals/wonder-landmark.ts';
 import { depositParts } from '../visuals/strategic-resource-visuals.ts';
 import * as THREE from 'three';
 import type { AtlasWorld } from './atlas.ts';
@@ -95,6 +96,16 @@ export function createDepositMeshes(world: AtlasWorld, material: (color: string)
     const origin = hexPosition(site.q, site.r);
     return depositParts(site, detail).map(part => ({
       color: part.material === 'identity' ? VISUAL_PALETTE.metal : VISUAL_PALETTE[part.material],
+      part: { ...part, position: [origin.x + part.position[0], site.height + part.position[1], origin.z + part.position[2]] },
+    }));
+  }), material);
+}
+
+export function createWonderMeshes(world: AtlasWorld, material: (color: string) => THREE.Material): ReturnType<typeof createPartMeshes> {
+  return createPartMeshes(detail => (world.wonders ?? []).flatMap(site => {
+    const origin = hexPosition(site.q, site.r);
+    return greatLibraryVisual(site.record, detail).parts.map(part => ({
+      color: part.material === 'identity' ? site.color : VISUAL_PALETTE[part.material],
       part: { ...part, position: [origin.x + part.position[0], site.height + part.position[1], origin.z + part.position[2]] },
     }));
   }), material);

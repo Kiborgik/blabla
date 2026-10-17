@@ -1,3 +1,4 @@
+import { projectWonderSites } from '../visuals/wonder-visuals.ts';
 import { projectRevealedDeposits } from '../visuals/strategic-resource-visuals.ts';
 import { projectRoutePath, mapTileHeight } from '../visuals/route-paths.ts';
 import { BUILDINGS, ERAS, IMPROVEMENTS } from '../core/content.ts';
@@ -123,6 +124,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
     illustrative: false,
     cities,
     districts,
+    wonders: projectWonderSites(state),
     improvements,
     deposits: projectRevealedDeposits(state),
     tiles: state.tiles.flatMap((tile) => tile.terrain === 'ocean' ? [] : [{

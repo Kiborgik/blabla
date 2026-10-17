@@ -1,8 +1,9 @@
+import { cityGrowthFacts } from './growth.ts';
 import { wonderBaseProduction } from './wonders.ts';
 import { completeResearch } from './research.ts';
 import { emitImprovements, orderedImprovements } from './improvements.ts';
 import { buildingBaseProduction } from './districts.ts';
-import { ECONOMY_RULES, IMPROVEMENTS, IMPROVEMENT_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
+import { ECONOMY_RULES, LOCAL_GROWTH_RULES, IMPROVEMENTS, IMPROVEMENT_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
 import type { City, GameEvent, Resources, WorldState } from '../types.ts';
 import { siteProduction } from './sites.ts';
 import { emitEvent } from './events.ts';
@@ -65,22 +66,23 @@ function produceCity(
 
 function supplyCity(state: WorldState, city: City, events: GameEvent[]): boolean {
   const civilization = civilizationById(state, city.civId);
+  const growth = cityGrowthFacts(state, city);
   const upkeep = quantize(city.population * ECONOMY_RULES.populationFoodUpkeep);
   const supplied = civilization.resources.food >= upkeep;
   if (supplied) {
     civilization.resources.food = quantize(civilization.resources.food - upkeep);
     city.wellbeing = clamp(city.wellbeing + ECONOMY_RULES.suppliedWellbeingGain, 0, 100);
     if (
-      city.population < ECONOMY_RULES.growth.cityPopulationCap &&
+      city.population < growth.capacity &&
       city.wellbeing >= ECONOMY_RULES.growth.wellbeing &&
       civilization.resources.food >=
-        ECONOMY_RULES.growth.foodReserve + ECONOMY_RULES.growth.foodCost
+        ECONOMY_RULES.growth.foodReserve + growth.nextGrowthFoodCost
     ) {
       civilization.resources.food = quantize(
-        civilization.resources.food - ECONOMY_RULES.growth.foodCost,
+        civilization.resources.food - growth.nextGrowthFoodCost,
       );
       city.population += ECONOMY_RULES.growth.populationGain;
-      emitEvent(state, events, {
+      const event = emitEvent(state, events, {
         type: 'population-growth',
         title: `${city.name} grows`,
         detail: 'A supplied settlement invested its food reserve in new households',
@@ -90,10 +92,14 @@ function supplyCity(state: WorldState, city: City, events: GameEvent[]): boolean
         cause: `Wellbeing ${city.wellbeing} and a food surplus met growth requirements`,
         effects: [
           `Population +${ECONOMY_RULES.growth.populationGain}`,
-          `Food -${ECONOMY_RULES.growth.foodCost}`,
+          `Food -${growth.nextGrowthFoodCost}`,
         ],
         importance: 2,
       });
+      if (hasFeatures(state, [LOCAL_GROWTH_RULES.featureId])) event.populationGrowth = {
+        ruleVersion: LOCAL_GROWTH_RULES.ruleVersion, cityId: city.id, civId: city.civId, round: state.round, eventId: event.id,
+        populationBefore: growth.population, populationAfter: city.population, capacity: growth.capacity, foodPaid: growth.nextGrowthFoodCost,
+      };
     }
     return true;
   }

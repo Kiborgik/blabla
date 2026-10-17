@@ -1258,8 +1258,8 @@ dialog h2 {
 .coastal-source { min-height: 44px; padding: 8px 12px; margin-bottom: 8px; }
 .resident-allocation { font-weight: 700; }
 .flat-district { cursor: pointer; }
-.flat-district:focus-visible { outline: none; }
-.flat-district:focus-visible .district-hit { stroke: #fff3b6; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.flat-district:focus { outline: none; }
+.flat-district:focus .district-hit { stroke: #fff3b6; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .district-label { min-width: 44px; min-height: 44px; font-size: 12px; }
 
 .site-map-mark { position: absolute; width: 44px; height: 44px; min-width: 44px; padding: 10px; transform: translate(-50%, -50%); background: transparent; border: 0; z-index: 2; pointer-events: auto; }
@@ -1336,3 +1336,7 @@ dialog h2 {
 @media (max-width: 1000px) {
   .live-observatory .inspection[data-inspection-view='work'] { max-height: min(66svh, calc(100% - 116px)); }
 }
+
+.resource-rail .resource-amount { font-size: 12px; line-height: 1.25; letter-spacing: 0; }
+.wonder-work-preview .work-record-round { display: block; margin-top: 5px; }
+.wonder-boost-receipt { border-inline-start: 2px solid var(--gold); padding-inline-start: 8px; }

@@ -1,3 +1,4 @@
+import { initializeCityHousing } from './growth.ts';
 import { districtSiteOccupied } from './districts.ts';
 import { ACTION_FEATURES, BUILDINGS, COASTAL_FOUNDING_RULES, ECONOMY_RULES, RESOURCE_IDS } from '../content.ts';
 import type { ActionOption, BuildingCapability, City, CoastalFoundingQuote, GameEvent, HexTile, Resources, WorldState } from '../types.ts';
@@ -38,6 +39,7 @@ export function foundSettlement(state: WorldState, seat: number, tile: HexTile, 
     civId: seat, tileId: tile.id, ...ECONOMY_RULES.initialCity,
     population: ECONOMY_RULES.settle.population, focus: source?.focus ?? 'growth', buildings: [],
   };
+  initializeCityHousing(state, city, 'founded');
   state.cities.push(city);
   return city;
 }

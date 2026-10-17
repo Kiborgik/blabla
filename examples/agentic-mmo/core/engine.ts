@@ -1,8 +1,9 @@
+import { cityGrowthFacts } from './simulation/growth.ts';
 import { observedWonders } from './simulation/wonders.ts';
 import type { TradePresentation } from './simulation/trade.ts';
 import { observedRecipes, observedResidentCapacity } from './simulation/operations.ts';
 import { observedStrategicResources } from './simulation/metals.ts';
-import { CIVILIZATIONS, ECONOMY_RULES, validateContent } from './content.ts';
+import { CIVILIZATIONS, ECONOMY_RULES, LOCAL_GROWTH_RULES, validateContent } from './content.ts';
 import { CURRENT_RELEASE } from './release.ts';
 import { completeAttachedPlan, observeActionPlan, validateAttachedPlan } from './planning.ts';
 import {
@@ -171,6 +172,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
     ...(!director && hasFeatures(state, ['recurring-decisions']) ? { decisions: decisionObligations(state, seat) } : {}),
     ...(hasFeatures(state, ['building-operations']) ? { buildingRecipes: observedRecipes(director ? state.cities : citiesOf(state, seat)) } : {}),
     ...(hasFeatures(state, ['resident-capacity']) ? { residentCapacity: observedResidentCapacity(director ? state.cities : citiesOf(state, seat)) } : {}),
+    ...(hasFeatures(state, [LOCAL_GROWTH_RULES.featureId]) ? { growth: (director ? state.cities : citiesOf(state, seat)).map(city => cityGrowthFacts(state, city)) } : {}),
     civilization,
     ...observedStrategicResources(state, seat),
     ...(hasFeatures(state, ['unique-wonders']) ? { wonders: observedWonders(state, seat) } : {}),

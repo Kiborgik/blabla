@@ -255,7 +255,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -265,7 +265,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -471,4 +471,28 @@ await test('wonder declarations reject invalid gates work prerequisites and bene
     mutate(invalid);
     assert.ok(validateContent(invalid).some(error => error.includes('wonder')));
   }
+});
+
+await test('local growth data declares a gated paid housing consequence without rewriting legacy rules', () => {
+  const masonry = required(TECHNOLOGIES.find(technology => technology.id === 'masonry'));
+  const granary = required(BUILDINGS.find(building => building.id === 'granary'));
+  assert.equal(masonry.cost, 84);
+  assert.deepEqual(masonry.requires, ['mining']);
+  assert.deepEqual(granary.cost, { materials: 14, credits: 6 });
+  assert.equal(granary.housing, 4);
+  assert.deepEqual(granary.production, { food: 2 });
+  assert.equal(granary.operatingInputs, undefined);
+  assert.equal(ECONOMY_RULES.growth.cityPopulationCap, 20);
+  assert.equal(ECONOMY_RULES.growth.foodCost, 6);
+  const release = required(RELEASES.find(item => item.id === 'settlement-growth-1'));
+  assert.deepEqual(release.compatibleFrom, ['settlement-wonders-1']);
+  assert.ok(release.featureIds.includes('local-growth'));
+  for (const housing of [-1, 0, 1.5, Number.NaN]) {
+    const broken = structuredClone(CONTENT);
+    required(broken.buildings.find(item => item.id === 'granary')).housing = housing;
+    assert.ok(validateContent(broken).some(error => error.includes('housing')));
+  }
+  const ungated = structuredClone(CONTENT);
+  required(ungated.buildings.find(item => item.id === 'granary')).requiredFeatures = ['settlement-production'];
+  assert.ok(validateContent(ungated).some(error => error.includes('housing')));
 });

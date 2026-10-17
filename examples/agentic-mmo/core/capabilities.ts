@@ -1,10 +1,11 @@
+import { cityGrowthFacts } from './simulation/growth.ts';
 import { availableWonderSites, isWonderOrder, observedWonders, wonderEligibility } from './simulation/wonders.ts';
 import { availableImprovementSites, isImprovementOrder, orderedImprovements } from './simulation/improvements.ts';
 import { availableDistrictSites, buildingBaseProduction, districtCapacity, districtCount, districtAdjacencyFacts, type DistrictAdjacencyFacts } from './simulation/districts.ts';
-import { BUILDINGS, IMPROVEMENTS, WONDERS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
+import { BUILDINGS, LOCAL_GROWTH_RULES, IMPROVEMENTS, WONDERS, ERAS, FEATURES, HISTORICAL_MILESTONES, TECHNOLOGIES } from './content.ts';
 import { RELEASES } from './release.ts';
 import type { ActionPlan } from './planning.ts';
-import type { ActionOption, CityImprovement, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, Resources, WonderObservation, WorldState } from './types.ts';
+import type { ActionOption, CityGrowthFacts, CityImprovement, BuildingOperation, ConstructionOrder, ConstructionCompletion, DecisionObligations, ResearchCompletion, Resources, WonderObservation, WorldState } from './types.ts';
 import { buildingEligibility, improvementEligibility, researchEligibility, type CapabilityBlocker, type CapabilityEligibility } from './simulation/capabilities.ts';
 import { admissionError, turnAdmission } from './simulation/turns.ts';
 import { hasFeatures, milestoneEligible } from './simulation/history.ts';
@@ -45,6 +46,7 @@ export interface CapabilityChoiceContext {
 }
 
 export interface CapabilityProjection {
+  growth?: CityGrowthFacts | null;
   strategic?: ReturnType<typeof observedStrategicResources>;
   choiceReferenceState: 'not-provided' | 'provided';
   revision: number;
@@ -148,6 +150,7 @@ export function projectCapabilities(state: WorldState, civilizationId: number, c
     unlockedFeatures: state.unlockedFeatures,
     civilizationId,
     cityId,
+    ...(hasFeatures(state, [LOCAL_GROWTH_RULES.featureId]) ? { growth: city ? cityGrowthFacts(state, city) : null } : {}),
     admission: { ...turnAdmission(state, civilizationId), reason: state.outcome ? 'The world has reached an outcome' : admissionError(state, civilizationId, timestamp) },
     technologies,
     buildings,

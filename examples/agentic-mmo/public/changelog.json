@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-live.22",
+    "date": "2026-10-16",
+    "title": "Great landmarks and room for growing towns",
+    "changes": [
+      "Exact wonder sites now distinguish competing foundations, the retained winner and cleared losing orders. Town Work shows actual paid work, loss refunds, available boosts and recorded chosen boosts.",
+      "Masonry opens a paid Granary that adds four housing spaces. Completed housing creates no residents: later food-funded growth and the next opening allocation make extra local work possible. Existing towns retain their capacity; newly founded towns begin with eight housing spaces.",
+      "Town details separate current population and housing from actual growth receipts. Desktop and360px local captures show the selected wonder and its recorded consequences; crowded map recognition remains a partial outcome.",
+      "Compact stocks retain readable spacing for three-digit decimal values as well as large grouped totals. Exact values stay available on inspection.",
+      "Website publication prepares separately applied wonder and growth releases. Illustrative preview and legal local fixtures remain distinct from actual model play. Public-origin browser verification, physical touch and WebGL remain blocked or unproved; the broader research pool and empire map remain unfinished."
+    ]
+  },
+  {
     "version": "0.1.0-live.21",
     "date": "2026-10-16",
     "title": "A focused view of each civilization",

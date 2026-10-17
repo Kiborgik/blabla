@@ -19,7 +19,9 @@ export const CIVILIZATIONS: CivilizationDefinition[] = [
 
 export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, perPaidRecipe: 3 } as const;
 
-export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
+
+export const LOCAL_GROWTH_RULES = { ruleVersion: 1, featureId: 'local-growth', legacyBaseCapacity: 20, foundedBaseCapacity: 8, baseFoodCost: 6, populationPerFoodCost: 4, researchMultiplier: 3 } as const;
 
 export const WONDER_RULES = { ruleVersion: 1, featureId: 'unique-wonders', loserMaterialRefundPercent: 50, boostLimit: 2, boostPercent: 20, boostMaximumEra: 1 } as const;
 
@@ -42,6 +44,7 @@ export const METAL_RULES = { ruleVersion: 1, featureId: 'finite-metals', resourc
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'local-growth', name: 'Housing and local growth', description: 'Masonry opens Granaries that add real town housing; later food-funded residents support work on a following season.' },
   { id: 'unique-wonders', name: 'World wonders', description: 'Exact towns compete to complete a unique landmark; real winners, losses, refunds and chosen research boosts remain in history.' },
   { id: 'manufacturing', name: 'Connected local manufacturing', description: 'Iron working and Apprenticeship connect real worked Mine sites to Industrial zones and resident-supported Guild workshops.' },
   { id: 'finite-metals', name: 'Finite useful deposits', description: 'Bronze working reveals finite iron on existing hills; staffed Mines extract it for consensual exchange.' },
@@ -104,6 +107,7 @@ export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
+  { id: 'masonry', name: 'Masonry', requiredFeatures: ['local-growth'], era: 0, cost: 84, requires: ['mining'], capability: 'Build a Granary for food and four additional local housing spaces. Walls, quarries and spoilage protection remain planned.' },
   { id: 'iron-working', name: 'Iron working', requiredFeatures: ['manufacturing'], era: 1, cost: 144, requires: ['bronze-working'], capability: 'Prepare Apprenticeship and local manufacturing supported by worked land. Military units remain planned.' },
   { id: 'apprenticeship', name: 'Apprenticeship', requiredFeatures: ['manufacturing'], era: 1, cost: 204, requires: ['currency', 'iron-working'], capability: 'Build an exact Industrial zone near completed Mines and operate its own Guild workshop.' },
   { id: 'bronze-working', name: 'Bronze working', requiredFeatures: ['finite-metals'], era: 1, cost: 108, requires: ['mining'], capability: 'Reveal finite iron at existing hills and extract it with a staffed Mine for useful exchange.' },
@@ -144,6 +148,7 @@ export const IMPROVEMENTS: ImprovementDefinition[] = [
 ];
 
 export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'granary', name: 'Granary', requiredFeatures: ['local-growth'], minEra: 0, cost: { materials: 14, credits: 6 }, requires: ['masonry'], effects: [], production: { food: 2 }, housing: 4, description: 'Add four housing spaces and later food production in this town. Residents still need food-funded growth before they can support additional work. Spoilage protection remains planned.' },
   { id: 'industrial-zone', name: 'Industrial zone', requiredFeatures: ['district-planning', 'manufacturing'], minEra: 1, cost: { materials: 24, credits: 12 }, requires: ['apprenticeship'], effects: [], production: { materials: 2 }, district: { range: 3, adjacency: { improvement: 'mine', resource: 'materials', amount: 1, maximum: 3 } }, description: 'Commit an exact owned site to local manufacturing. Completed adjacent Mines add up to 3 base materials, even while paused; unfinished orders do not count. Quarry and great-person systems remain planned.' },
   { id: 'guild-workshop', name: 'Guild workshop', requiredFeatures: ['manufacturing', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 26, credits: 12 }, requires: ['apprenticeship'], requiresBuildings: ['industrial-zone'], effects: [], operatingInputs: { energy: 2 }, production: { materials: 6 }, description: 'Use two energy and three local residents to operate a workshop in this town’s completed Industrial zone. First output follows completion on a later season.' },
   { id: 'commercial-hub', name: 'Commercial hub', requiredFeatures: ['district-planning', 'learning-commerce'], minEra: 1, cost: { materials: 20, credits: 10 }, requires: ['currency'], effects: [], production: { credits: 2 }, district: { range: 3 }, description: 'Reserve an exact owned site for local commerce. River and Harbor adjacency await those actual systems.' },
@@ -416,6 +421,7 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     if (!eraValid(building.minEra)) errors.push(`building ${building.id}: invalid era`);
     resources(`${building.id} cost`, building.cost);
     resources(`${building.id} production`, building.production);
+    if (building.housing !== undefined && (!Number.isSafeInteger(building.housing) || building.housing <= 0 || !building.requiredFeatures.includes('local-growth'))) errors.push(`building ${building.id}: housing requires a positive integer and local-growth feature`);
     resources(`${building.id} operating inputs`, building.operatingInputs ?? {});
     if (Object.values(building.operatingInputs ?? {}).some(positive) && !building.requiredFeatures.includes('building-operations')) errors.push(`building ${building.id}: operating inputs require the building-operations feature`);
     const capabilities = building.capabilities ?? [];

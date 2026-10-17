@@ -1,4 +1,5 @@
-import { DISTRICT_RULES, IMPROVEMENT_RULES, FEATURES, METAL_RULES, RESEARCH_INVESTMENT_RULES, WONDER_RULES } from '../content.ts';
+import { initializeCityHousing } from './growth.ts';
+import { LOCAL_GROWTH_RULES, DISTRICT_RULES, IMPROVEMENT_RULES, FEATURES, METAL_RULES, RESEARCH_INVESTMENT_RULES, WONDER_RULES } from '../content.ts';
 import { createStrategicDeposits } from './metals.ts';
 import { RELEASES } from '../release.ts';
 import {
@@ -149,7 +150,7 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
     (command.timestamp === undefined || parseUtcTimestamp(command.timestamp) === null)
   )
     return rejected(state, 'Independent release activation requires an explicit UTC epoch');
-  if (['resident-capacity', RESEARCH_INVESTMENT_RULES.featureId, DISTRICT_RULES.featureId, IMPROVEMENT_RULES.featureId, METAL_RULES.featureId, WONDER_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
+  if ([LOCAL_GROWTH_RULES.featureId, 'resident-capacity', RESEARCH_INVESTMENT_RULES.featureId, DISTRICT_RULES.featureId, IMPROVEMENT_RULES.featureId, METAL_RULES.featureId, WONDER_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
     const timingError = strategyTimingError(state, command.timestamp);
     if (timingError) return rejected(state, timingError);
   }
@@ -163,6 +164,8 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
     for (const civilization of next.civilizations) civilization.strategicResources = {};
   }
   if (target.featureIds.includes(WONDER_RULES.featureId) && !source.featureIds.includes(WONDER_RULES.featureId)) next.wonders = {};
+  if (target.featureIds.includes(LOCAL_GROWTH_RULES.featureId) && !source.featureIds.includes(LOCAL_GROWTH_RULES.featureId))
+    for (const city of next.cities) initializeCityHousing(next, city, 'legacy-adoption');
   if (startsIndependent && command.timestamp !== undefined)
     next.independentTurns = createIndependentTurns(command.timestamp);
   if (target.featureIds.includes('bounded-plans') && !source.featureIds.includes('bounded-plans'))

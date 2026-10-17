@@ -1,0 +1,40 @@
+state preserved: bool
+state eligible_funded_growth: bool
+state grew: bool
+state exact_local_capacity: bool
+state paid_exact_food: bool
+state conserved_old_people: bool
+state completion_no_population: bool
+state growth_uses_old_opening_allocation: bool
+state next_opening_supports_recipe: bool
+state complete_recipe_inputs: bool
+state correct_founded_capacity: bool
+state refused: bool
+state no_effects: bool
+
+action adopt_local_housing()
+action complete_granary()
+action grow_with_food()
+action allocate_later_resident()
+action found_housed_town()
+action refuse_invalid_growth()
+
+when adopt_local_housing {
+    expect "local-housing-adoption-preserves-world": after.preserved and after.conserved_old_people
+}
+when complete_granary {
+    expect "granary-completion-adds-no-people": after.exact_local_capacity and after.completion_no_population
+}
+when grow_with_food {
+    expect "eligible-food-funded-growth-happens": not before.eligible_funded_growth or after.grew
+    expect "growth-pays-exact-food-under-local-capacity": not after.grew or (after.exact_local_capacity and after.paid_exact_food and after.growth_uses_old_opening_allocation)
+}
+when allocate_later_resident {
+    expect "later-opening-can-fund-new-recipe": after.next_opening_supports_recipe and after.complete_recipe_inputs
+}
+when found_housed_town {
+    expect "new-town-housing-preserves-conserved-founding": after.correct_founded_capacity and after.conserved_old_people
+}
+when refuse_invalid_growth {
+    expect "invalid-growth-has-no-effects": not after.refused or after.no_effects
+}

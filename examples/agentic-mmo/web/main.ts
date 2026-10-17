@@ -1,3 +1,4 @@
+import { townDevelopmentFacts } from '../visuals/wonder-visuals.ts';
 import { exactNumber, numberPresentation } from './number-format.ts';
 import { observedStrategicResources } from '../core/simulation/metals.ts';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
@@ -101,6 +102,7 @@ let lastRead = '';
 let observedAt = '';
 const catalogue = capabilityCatalogue();
 let inspectionFingerprint = '';
+let pendingInspectionWork: string | undefined;
 let inspectedCivilization = -1;
 let inspectedCity: string | null = null;
 const narrowLayout = window.matchMedia('(max-width: 1000px)');
@@ -183,12 +185,14 @@ function renderInspection(): void {
     project: technology ? { name: technology.name, cost: technology.cost, progress: actual.researchProgress } : null,
   }) : null;
   panel.style.setProperty('--civ-color', civ.color);
-  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, preferences.selectedCity, displayed.routes, routeListPage, mode]);
+  const development = snapshot && preferences.selectedCity ? townDevelopmentFacts(snapshot.state, preferences.selectedCity) : undefined;
+  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
   if (fingerprint === inspectionFingerprint) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
-  const previousScroll = sameCity ? panel.scrollTop : 0;
-  const selectedSection = sameCity ? panel.dataset['inspectionView'] ?? 'overview' : 'overview';
-  const selectedWork = sameCity ? panel.querySelector<HTMLElement>('.city-details')?.dataset['selectedWork'] ?? '' : '';
+  const previousScroll = sameCity && !pendingInspectionWork ? panel.scrollTop : 0;
+  const selectedSection = pendingInspectionWork ? 'work' : sameCity ? panel.dataset['inspectionView'] ?? 'overview' : 'overview';
+  const selectedWork = pendingInspectionWork ?? (sameCity ? panel.querySelector<HTMLElement>('.city-details')?.dataset['selectedWork'] ?? '' : '');
+  pendingInspectionWork = undefined;
   const focusedInspection = sameCity && document.activeElement instanceof HTMLElement ? document.activeElement.dataset['inspectionFocus'] : undefined;
   const expandedBuildings = new Set([...panel.querySelectorAll<HTMLElement>('.building-card')].filter((card) => sameCity && card.querySelector<HTMLDetailsElement>('details')?.open).map((card) => card.dataset['building']));
   const focusedRoute = document.activeElement instanceof HTMLElement ? document.activeElement.dataset['routeFocus'] : undefined;
@@ -248,7 +252,7 @@ function renderInspection(): void {
   }
   if (snapshot && actual) renderStrategicInspection(panel, observedStrategicResources(snapshot.state, actual.id));
   const settlement = panel.querySelector<HTMLElement>('.city-details');
-  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork);
+  if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork, development);
   const overview = settlement?.querySelector<HTMLElement>('.town-overview');
   if (overview) panel.insertBefore(overview, panel.querySelector('.research-detail'));
   const aim = panel.querySelector('.ambition'); if (aim) panel.append(aim);
@@ -329,7 +333,7 @@ function selectRoute(id: string): void {
   element('.inspection').querySelector<HTMLButtonElement>('.route-close')?.focus({ preventScroll: true });
 }
 
-function selectCity(id: string): void {
+function selectCity(id: string, workId?: string): void {
   const fromRoute = selectedRoute !== null;
   const city = displayed.cities.find((entry) => cityKey(entry) === id);
   if (!city) return;
@@ -338,6 +342,7 @@ function selectCity(id: string): void {
   preferences = { ...preferences, selected: city.id, selectedCity: id };
   for (const row of document.querySelectorAll<HTMLElement>('[data-civ]')) row.setAttribute('aria-pressed', String(Number(row.dataset['civ']) === city.id));
   atlas?.select(id);
+  pendingInspectionWork = workId;
   renderInspection();
   setInspectionOpen(true);
   if (fromRoute) {

@@ -1,3 +1,5 @@
+import { wonderSiteLabel } from '../visuals/wonder-visuals.ts';
+import { greatLibraryVisual, WONDER_MARK_PATH } from '../visuals/wonder-landmark.ts';
 import { depositParts, depositLabel, SITE_MARK_PATHS, placeSiteMarks } from '../visuals/strategic-resource-visuals.ts';
 import { visibleRoutePaths } from '../visuals/route-paths.ts';
 import { routeLabelKey, routeLabelPlacement, routeTitle, routeVisual, routeMapLabel } from '../visuals/route-visuals.ts';
@@ -44,7 +46,7 @@ export function createFlatAtlasRenderer(
   container: HTMLElement,
   world: AtlasWorld,
   preferences: ViewerPreferences,
-  onSelect: (id: string) => void,
+  onSelect: (id: string, workId?: string) => void,
   onRoute: (id: string) => void,
 ): AtlasRenderer {
   const svg = node('svg', { class: 'flat-atlas', role: 'group', 'aria-label': `${world.illustrative ? 'Sample' : 'Committed world'} two dimensional map. Select a city to inspect.` });
@@ -56,12 +58,14 @@ export function createFlatAtlasRenderer(
   let selectedRoute: string | null = null;
   let routeLabel: { element: SVGGElement; x: number; z: number; id: string } | null = null;
   const cities = node('g', {});
+  const settlementShapes = node('g', { class: 'flat-settlement-shapes', 'pointer-events': 'none' });
   const districts = node('g', { class: 'flat-districts' });
   const deposits = node('g', { class: 'flat-deposits', 'pointer-events': 'none' });
   const depositNodes: Array<{ parts: SVGGElement; mark: SVGGElement; index: number }> = [];
   const sites = [
     ...(world.districts ?? []).map(site => ({ ...site, kind: 'district', mark: site.buildingId === 'industrial-zone' ? 'industry' as const : site.buildingId === 'commercial-hub' ? 'commerce' as const : 'campus' as const, caption: site.name ?? 'Campus', label: districtLabel(site), parts: (level: DetailLevel) => districtParts(site, level) })),
     ...(world.improvements ?? []).map(site => ({ ...site, kind: 'improvement', mark: 'mine' as const, caption: site.name, label: improvementLabel(site), parts: (level: DetailLevel) => improvementParts(site, level) })),
+    ...(world.wonders ?? []).map(site => ({ ...site, kind: 'wonder', mark: 'wonder' as const, caption: site.name, label: wonderSiteLabel(site), parts: (level: DetailLevel) => greatLibraryVisual(site.record, level).parts })),
   ];
   const districtNodes: Array<{ element: SVGGElement; parts: SVGGElement; hit: SVGCircleElement; label: SVGTextElement; leader: SVGLineElement; mark: SVGGElement; markLeader: SVGLineElement; index: number; placed: boolean }> = [];
   const settlements: Array<{ element: SVGGElement; index: number }> = [];
@@ -135,7 +139,7 @@ export function createFlatAtlasRenderer(
     const leader = node('line', { x1: '0', y1: '0', stroke: district.color, 'stroke-width': '1', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
     label.textContent = district.caption;
     const mark = node('g', { 'pointer-events': 'none', 'aria-hidden': 'true' });
-    mark.append(node('circle', { r: '12', fill: '#173a3c', stroke: district.color, 'stroke-width': '2', 'stroke-dasharray': district.status === 'building' ? '3 2' : 'none' }), node('path', { d: SITE_MARK_PATHS[district.mark], transform: 'translate(-9 -9) scale(.75)', fill: 'none', stroke: '#fff3c6', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+    mark.append(node('circle', { r: '12', fill: '#173a3c', stroke: district.color, 'stroke-width': '2', 'stroke-dasharray': district.status === 'building' ? '3 2' : 'none' }), node('path', { d: district.mark === 'wonder' ? WONDER_MARK_PATH : SITE_MARK_PATHS[district.mark], transform: 'translate(-9 -9) scale(.75)', fill: 'none', stroke: '#fff3c6', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
     if ('adjacency' in district && district.adjacency?.source === 'improvement') {
       const bonus = node('text', { x: '0', y: '25', 'text-anchor': 'middle', 'font-size': '11', 'font-family': 'Arial, sans-serif', fill: '#fff3c6', stroke: '#173a3c', 'stroke-width': '3', 'paint-order': 'stroke' });
       bonus.textContent = `+${district.adjacency.bonus} base`;
@@ -143,8 +147,8 @@ export function createFlatAtlasRenderer(
     }
     const markLeader = node('line', { stroke: district.color, 'stroke-width': '1.5', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
     group.append(leader, parts, markLeader, hit, mark, label);
-    group.addEventListener('click', () => onSelect(district.cityId));
-    group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(district.cityId); } });
+    group.addEventListener('click', () => onSelect(district.cityId, 'workId' in district ? district.workId : undefined));
+    group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(district.cityId, 'workId' in district ? district.workId : undefined); } });
     districts.append(group);
     districtNodes.push({ element: group, parts, hit, label, leader, mark, markLeader, index, placed: false });
   }
@@ -160,9 +164,10 @@ export function createFlatAtlasRenderer(
     const group = node('g', { class: 'flat-city', 'data-city-id': cityKey(city), transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${damageMapLabel(city.capital, city.settlement?.damage ?? 0)}, ${city.name}` });
     const hit = node('circle', { class: 'city-hit', r: '2.2' });
     const ring = node('circle', { class: 'city-marker', r: '0.85', fill: '#193a3c', stroke: city.color, 'stroke-width': '0.15' });
-    const settlement = node('g', { class: 'settlement-parts' });
+    const settlement = node('g', { class: 'settlement-parts', transform: `translate(${point.x} ${point.z})` });
     settlements.push({ element: settlement, index });
-    group.append(settlement, hit, ring);
+    settlementShapes.append(settlement);
+    group.append(hit, ring);
     const marker = node('text', { 'text-anchor': 'middle', y: '0.24', fill: '#fff5d8', 'font-size': '0.7', 'font-family': 'Arial, sans-serif' });
     marker.textContent = city.name.slice(0, 1);
     group.append(marker);
@@ -177,7 +182,7 @@ export function createFlatAtlasRenderer(
   }
   borders.style.display = preferences.borders ? '' : 'none';
   routes.style.display = preferences.routes ? '' : 'none';
-  svg.append(coast, land, borders, terrain, routes, deposits, districts, cities);
+  svg.append(coast, land, borders, terrain, routes, deposits, settlementShapes, districts, cities);
   container.prepend(svg);
   const cues = createWorldCues(container, world, (px, pz) => {
     const box = svg.viewBox.baseVal;
@@ -194,7 +199,7 @@ export function createFlatAtlasRenderer(
     if (nextDetail !== detail) {
       detail = nextDetail;
       svg.dataset['detail'] = detail;
-      paintParts(terrain, projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? []), ...(world.improvements ?? [])], detail).parts, VISUAL_PALETTE.stone);
+      paintParts(terrain, projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? []), ...(world.improvements ?? []), ...(world.wonders ?? [])], detail).parts, VISUAL_PALETTE.stone);
       for (const entry of depositNodes) { const deposit = world.deposits?.[entry.index]; if (deposit) paintParts(entry.parts, depositParts(deposit, detail), VISUAL_PALETTE.metal); }
       for (const entry of districtNodes) {
         const district = sites[entry.index];
