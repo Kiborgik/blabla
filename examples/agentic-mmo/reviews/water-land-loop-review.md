@@ -1,0 +1,42 @@
+# Water and worked-land loop: independent review
+
+Actual reviewer: gpt-6-astra/xhigh, Creative Director, 17 October 2026. Scope is the frozen Core4/Server3/seam2/prefix4 packet and its separately sourced delivery claims. This is a source and local repository review; no water-land public or applied-world outcome is inferred.
+
+## Bounded verdict
+
+Accept the bounded source and durable implementation, with all broader player/viewer/pool outcomes remaining Partial. The one finding was a reached-output coverage gap, not a runtime defect. Core corrected the existing named Mill/Aqueduct case without changing runtime. The legal next-beat Mill result is compared with an explicitly synthetic control removing only that completed Mill before the same beat; shared opening productivity1.95 gives positive Food1.95 and Materials3.9 deltas, with identical population outcomes. The inspected correction closes finding1 substantively. The orchestrator owns its formal resolution and source-stage acceptance.
+
+## Mechanics and compatibility
+
+- Animal husbandry60 requires Agriculture; Wheel84 retains Animal husbandry and Kiln firing; Engineering144 retains Wheel and Masonry. Technology era is metadata, while Aqueduct construction requires era1. Values are accepted project adaptations, not asserted Firaxis values.
+- The caught-up compatible migration creates the immutable pastoral-sites-1 layer once. It does not alter terrain, old food markers, ownership, cities, stocks, RNG or the old eight-site iron layer. Ranking is stateless and salted; the balanced owned-site pass may honestly skip a civilization without a suitable site. Maximum10 and separation2 apply. The legal217 predecessor selects47,149,175,81,38,164,33,79,84,44; actual inhabited occupancy can produce a different list.
+- Canonical observation/projection reveals detached horse-site facts only after the selected civilization's actual discovery. A revealed marker grants neither ownership nor stock. Pasture eligibility shares exact ownership, town range3 and global reserved/completed occupation. It requires current grassland and a revealed retained site.
+- Pasture pays6materials/3credits once for3 work. Opening local residents are allocated after paid buildings and then in numeric site order shared with Mines. One resident is reserved, never consumed. Paused, unstaffed or newly ineligible sites allocate0 and produce nothing. Completion occurs after production; actual first later operation at round174 records food3.3 and one resident. Separate population/terrain edits are explicitly synthetic controls.
+- Water mill pays16materials/6credits for8 work and requires its own town's completed Irrigation. Another town's or an unfinished Irrigation cannot satisfy the shared predicate. Completed paused Irrigation is intentionally sufficient infrastructure. Its declared free base1food/2materials enters existing parent-town productivity and aggregate rounding; no river or new water ledger is implied.
+- Aqueduct pays22materials/8credits for12 work, snapshots the lowest actual adjacent mountain at start and uses the existing town lane. It consumes no specialty-district slot, owns no mountain and may share a source. Active/completed/installed catchment identity is retained after later construction replaces lastCompleted. The source is historical after commitment; later terrain or owner changes do not reroute it.
+- The real262-frame journey installs catchment5 at261:14/round199 and raises capacity20→26 without adding residents. Later round200 growth pays11food and reaches21. Opening-resident staffing continues to use the existing next-beat rule. This Aqueduct journey directly establishes later paid growth; the previously accepted growth217 witness supplies the separate staffing boundary rather than pretending this fixture proves a new University output.
+
+## Durable and public-record boundary
+
+Read strict validator and the full seventeen-case hosted source/log. Exact layer keys, supported version/placement/seed, dense unique known IDs, canonical dictionary keys, matching list/map and iron disjointness are checked without replaying mutable placement tuning. Horse sites cannot carry a finite reserve or an extraction result. New fields are refused before their feature.
+
+Catchments occur only on Aqueduct building records, identify a known adjacent noncenter tile and agree with installed mapping. When its event is still retained, completion must match event ID/type/round/actor/target/town-center tile. Human-readable effect prose is not parsed as authority. Old cost/work/population and current geography do not rewrite history; normal feed trimming remains valid. Installed source survives later real Farm/Granary commitments.
+
+The actual file-backed SQLite journey starts from initialization and executes all262 canonical transitions, then reopens and exactly replays bounded three-entry pages. Concurrent duplicates at adoption, starts and completions return original accepted revisions with no second payment. Four insertion-trigger failures cover state/transition/receipt transaction rollback at Pasture start and Aqueduct completion, followed by exact reopened retry. Unsupported sites, foreign towns, missing own Irrigation, absent mountains and caller-supplied catchment refuse with candidate upkeep uncommitted. The CAS hook inserts a real legal competing state but is explicitly a synthetic race seam, not a fully persisted competing-actor history.
+
+Local bounded public pages retain exact completion events and historical town detail retains the source without invented rationale or private actor/request data. Malformed saved records explicitly refuse as corrupt_or_incompatible_world after reopen and perform no repair writes. No endpoint, authentication, SQL schema or generic transaction authority changed. These local reads do not prove public viewer consumption.
+
+## Reused evidence and provenance
+
+- Core final14/14, web types and strict scoped lint: `.blabla/scratch/implement-water-land-branch/evidence-2-2-1792194979885617046.log`, full log read.
+- Server final17/17 and strict lint: `.blabla/scratch/persist-water-land-branch/evidence-1-2-1792194956976004748.log`, full log read.
+- Original prefix4/4: `.blabla/scratch/prepare-water-land-prefix/evidence-1-27-1792193759898950539.log`, full log read. Current epoch4 existence receipt reuses those unchanged files and their execution inside Core/Server; it is not another semantic run.
+- Seam epoch2 report-existence receipt is bookkeeping only. Its historical before-half language remains dated; current claims accurately point to separately READY runtime.
+- Core correction1/1: `.blabla/scratch/implement-water-land-branch/evidence-3-2-1792195965165161688.log`, full log read; explicit Food1.95/Materials3.9 diagnostic. The original14-case run lacked that direct comparison and is not retroactively credited.
+- The review captures its sole full fourteen-case source check against these final targets. Its recorded child exit and full log decide the current result. No global, hosted or predecessor rerun is claimed.
+
+## Source-specific delivery accounting and next outcomes
+
+Core's four Partial claims correctly describe exact site/production/housing and detached facts, retaining integration/application, actors, Art and finite-pool residuals. Server's four Partial claims correctly distinguish durable recovery and local public history from applied use and viewport comprehension. The seam's two claims cover the useful explicit adaptation/interface; the prefix's two cover unchanged genuine geography and its actual use by the after-half. None is whole-goal Delivered. Their current independent verdicts must bind each named source, not merely the primary Core record.
+
+Water-land is not applied to the inhabited world at this review boundary. Actual growth831, Pelagos Masonry842 and Great library contender844 are separate live follow-through. Live Pasture/Mill/Aqueduct choices, progress, useful output and public readability remain with the orchestrator, actual actors and Art. Horse inventory/extraction/mounted use, real rivers and spoilage remain Planned. At current Pelagos39.45science the Masonry/water branch has only about12 fixed-output completion beats; the assigned Archery/Machinery/Lumber mill continuation must remain ahead. The owner's small/unclear-map complaint requires the separately assigned compatible extent and readable empire outcome, not a claim that ten local horse markers enlarge the world.

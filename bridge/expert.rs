@@ -61,6 +61,7 @@ impl Fixture {
         };
         let tree = project::snapshot(root.path(), &project.ignore);
         task.evidence.push(task::Evidence {
+            reuse: None,
             identity: task::declared_check(&task),
             acceptance_epoch: Some(task.acceptance_epoch),
             check: "fixture-check input.txt".into(),

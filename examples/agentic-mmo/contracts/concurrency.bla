@@ -1,0 +1,22 @@
+state independent_mode: bool
+state peer_eligible: bool
+state idle_actor: bool
+state actionable_plan_items: int
+state concurrent_last_valid: bool
+state concurrent_revision: int
+state concurrent_year: int
+
+action peer_action()
+action invalid_action()
+action update_plan(size: int)
+action feature_window()
+
+always "actionable-plan-is-bounded" { actionable_plan_items >= 0 and actionable_plan_items <= 2 }
+when peer_action {
+    expect "idle-civilization-does-not-block-peer": not before.independent_mode or not before.peer_eligible or after.concurrent_last_valid
+    expect "accepted-peer-action-commits-once": not after.concurrent_last_valid or after.concurrent_revision == before.concurrent_revision + 1
+    expect "tactical-action-does-not-move-calendar": after.concurrent_year == before.concurrent_year
+}
+when invalid_action {
+    expect "invalid-action-preserves-world": not after.concurrent_last_valid and after.concurrent_revision == before.concurrent_revision
+}

@@ -28,6 +28,8 @@ use structure "contracts/falsify.bla"
 
 use behavior "contracts/evaluator.bla"
 use behavior "contracts/assignment.bla"
+draft behavior "contracts/bounded-results.bla"
+use behavior "contracts/task-role-resolution.bla"
 use behavior "contracts/voice.bla"
 
 use behavior "contracts/lifecycle.bla"
@@ -47,3 +49,8 @@ verify behavior {
     timeout_ms 5000
     shrink_budget 256
 }
+
+draft behavior "contracts/ready-receipts.bla"
+draft behavior "contracts/goal-delivery.bla"
+
+draft behavior "contracts/development-effort.bla"

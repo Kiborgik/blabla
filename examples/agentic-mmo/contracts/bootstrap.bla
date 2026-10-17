@@ -1,0 +1,8 @@
+module types "core/types.ts"
+require "shared-state-schema": symbol types::WorldState
+require "shared-command-schema": symbol types::Command
+require "shared-event-schema": symbol types::GameEvent
+require "replay-identifies-its-source": symbol types::CampaignReplay
+require "schema-is-versioned": symbol types::SCHEMA_VERSION
+forbid "schema-does-not-import-rendering": dependency types -> "three"
+forbid "schema-does-not-import-node-process": dependency types -> "node:process"

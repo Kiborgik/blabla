@@ -40,7 +40,7 @@ pub fn relevant_revision(
             })
         })
         .collect();
-    let assignment = serde_json::json!({
+    let mut assignment = serde_json::json!({
         "review_of": task.review_of,
         "statement": task.statement,
         "role": task.role,
@@ -54,6 +54,28 @@ pub fn relevant_revision(
         "decisions": task.decisions,
         "findings": findings,
     });
+    if !task.delivery_review_targets.is_empty() {
+        assignment["delivery_review_targets"] =
+            serde_json::to_value(&task.delivery_review_targets).expect("review targets serialize");
+    }
+    if !task.delivery_obligations.is_empty() {
+        assignment["delivery_obligations"] = serde_json::to_value(
+            task.delivery_obligations
+                .iter()
+                .map(|(id, obligation)| {
+                    (
+                        id,
+                        (
+                            &obligation.basis,
+                            &obligation.goal,
+                            &obligation.goal_fingerprint,
+                        ),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>(),
+        )
+        .expect("delivery assignments serialize");
+    }
     let relevant_tree = tree
         .iter()
         .filter(|(path, _)| {

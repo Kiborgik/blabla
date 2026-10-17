@@ -1,0 +1,44 @@
+state revision: int
+state round: int
+state year: int
+state phase: int
+state civilizations: int
+state maximum_era: int
+state population: int
+state routes: int
+state active_routes: int
+state treaties: int
+state mars_population: int
+state finished: bool
+state outcome: string
+state last_valid: bool
+
+action play(seat: int, choice: int)
+action hold()
+action restart()
+action legacy_cycle()
+
+always "five-civilizations" { civilizations == 5 }
+always "six-actor-turn-order" { phase >= 0 and phase <= 5 }
+always "nonnegative-population" { population >= 5 }
+always "route-integrity" { active_routes >= 0 and active_routes <= routes }
+always "bounded-era" { maximum_era >= 0 and maximum_era <= 5 }
+when play {
+    expect "accepted-command-advances-once": not after.last_valid or after.revision == before.revision + 1
+    expect "refused-command-preserves-revision": after.last_valid or after.revision == before.revision
+    expect "accepted-command-belongs-to-current-seat": not after.last_valid or input.seat == before.phase
+    expect "round-never-rewinds": after.round >= before.round
+    expect "turns-do-not-advance-calendar": after.year == before.year
+}
+when hold {
+    expect "hold-is-a-real-accepted-turn": after.last_valid and after.revision == before.revision + 1
+    expect "hold-does-not-advance-calendar": after.year == before.year
+    expect "hold-never-rewinds-round": after.round >= before.round
+}
+when restart {
+    expect "restart-preserves-world": after.revision == before.revision and after.round == before.round and after.population == before.population
+}
+when legacy_cycle {
+    expect "legacy-cycle-resolves-one-round": after.round == before.round + 1 and after.phase == before.phase
+    expect "legacy-cycle-preserves-calendar": after.year == before.year
+}

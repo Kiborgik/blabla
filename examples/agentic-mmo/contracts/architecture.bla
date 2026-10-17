@@ -1,0 +1,49 @@
+module engine "core/engine.ts"
+module content "core/content.ts"
+module release "core/release.ts"
+module choices "core/simulation/choices.ts"
+module commands "core/simulation/commands.ts"
+module effects "core/simulation/effects.ts"
+module economy "core/simulation/economy.ts"
+module history "core/simulation/history.ts"
+module clock "core/simulation/clock.ts"
+module policies "core/policies.ts"
+module store "cli/store.ts"
+module adapter "cli/adapter.ts"
+
+require "content-owns-feature-availability": symbol content::ACTION_FEATURES
+require "content-owns-effect-definitions": symbol content::DIRECTOR_EVENTS
+require "content-owns-production-rules": symbol content::ECONOMY_RULES
+require "content-owns-clock-policy": symbol content::DIRECTOR_CLOCK_RULES
+require "content-validates-its-catalogue": symbol content::validateContent
+require "release-identifies-delivered-features": symbol release::CURRENT_RELEASE
+require "engine-delegates-legality": dependency engine -> choices
+require "engine-delegates-command-effects": dependency engine -> commands
+require "engine-delegates-history": dependency engine -> history
+require "command-effects-share-one-interpreter": dependency commands -> effects
+require "choices-use-authored-content": dependency choices -> content
+require "production-uses-authored-content": dependency economy -> content
+require "clock-uses-authored-policy": dependency clock -> content
+require "policies-use-authoritative-engine": dependency policies -> engine
+require "durable-store-uses-authoritative-engine": dependency store -> engine
+require "adapter-uses-durable-store": dependency adapter -> store
+forbid "content-does-not-import-engine": dependency content -> engine
+forbid "content-does-not-import-renderer": dependency content -> "three"
+forbid "engine-does-not-import-renderer": dependency engine -> "three"
+forbid "engine-does-not-import-filesystem": dependency engine -> "node:fs"
+forbid "engine-does-not-import-policies": dependency engine -> policies
+forbid "history-does-not-import-policies": dependency history -> policies
+
+module evolution "core/simulation/evolution.ts"
+module validation "core/validation.ts"
+module host "server/repository.ts"
+module hostValidation "server/validation.ts"
+module liveProjection "web/live-world.ts"
+require "release-upgrades-use-registered-definitions": dependency evolution -> release
+require "history-advancement-has-one-engine-operation": symbol evolution::applyHistoryAdvance
+require "compatible-release-has-one-engine-operation": symbol evolution::applyRelease
+require "host-uses-authoritative-transitions": dependency host -> engine
+require "host-reuses-canonical-validation": dependency hostValidation -> validation
+require "live-view-reuses-canonical-validation": dependency liveProjection -> validation
+forbid "evolution-is-independent-of-rendering": dependency evolution -> "three"
+forbid "evolution-is-independent-of-storage": dependency evolution -> "node:fs"

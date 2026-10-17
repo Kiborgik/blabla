@@ -1,0 +1,40 @@
+state strategy_action_eligible: bool
+state strategy_action_succeeded: bool
+state strategy_action_world_unchanged: bool
+state strategy_action_storage_unchanged: bool
+state strategy_action_exact: bool
+state strategy_action_ticks: int
+state strategy_action_due_ticks: int
+state strategy_action_actor_actions: int
+state strategy_action_calendar_unchanged: bool
+state strategy_action_replay_exact: bool
+state strategy_action_receipt_exact: bool
+state strategy_action_rejected_before_access: bool
+state strategy_action_backlog_bounded: bool
+
+action strategy_action_fixture(kind: int)
+action submit_strategy_action()
+action repeat_strategy_action()
+action submit_invalid_strategy_action()
+action submit_malformed_strategy_action()
+action drain_strategy_only()
+
+when submit_strategy_action {
+    expect "eligible-exact-action-survives-due-upkeep": not before.strategy_action_eligible or after.strategy_action_succeeded
+    expect "success-contains-due-beats-and-one-exact-action": not after.strategy_action_succeeded or (after.strategy_action_exact and after.strategy_action_ticks == before.strategy_action_due_ticks and after.strategy_action_actor_actions == 1)
+    expect "combined-transition-replays-and-receipts-exactly": not after.strategy_action_succeeded or (after.strategy_action_replay_exact and after.strategy_action_receipt_exact)
+    expect "upkeep-work-is-bounded": after.strategy_action_backlog_bounded
+    expect "combined-action-does-not-advance-calendar": after.strategy_action_calendar_unchanged
+}
+when submit_invalid_strategy_action {
+    expect "refusal-commits-neither-upkeep-nor-action": not after.strategy_action_succeeded and after.strategy_action_world_unchanged and after.strategy_action_storage_unchanged
+}
+when repeat_strategy_action {
+    expect "duplicate-combined-request-is-once-only": after.strategy_action_receipt_exact and after.strategy_action_world_unchanged and after.strategy_action_storage_unchanged
+}
+when submit_malformed_strategy_action {
+    expect "malformed-combined-request-refuses-before-storage": after.strategy_action_rejected_before_access and not after.strategy_action_succeeded
+}
+when drain_strategy_only {
+    expect "explicit-upkeep-does-not-spend-actor-action": after.strategy_action_actor_actions == 0 and after.strategy_action_calendar_unchanged and after.strategy_action_backlog_bounded
+}

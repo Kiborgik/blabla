@@ -1,0 +1,28 @@
+state capability_nodes_complete: bool
+state capability_status_exact: bool
+state capability_blockers_exact: bool
+state capability_read_only: bool
+state capability_detached: bool
+state capability_actions_preserved: bool
+state capability_temporal_state_separate: bool
+state capability_selected_city_exact: bool
+state capability_reason_recorded: bool
+state capability_delta_recorded: bool
+
+action capability_fixture(kind: int)
+action inspect_capability_tree()
+action compare_capability_actions()
+action inspect_recorded_decision()
+
+when inspect_capability_tree {
+    expect "status-follows-canonical-availability": after.capability_nodes_complete and after.capability_status_exact and after.capability_blockers_exact
+    expect "inspection-never-mutates-the-world": after.capability_read_only and after.capability_detached
+    expect "temporary-admission-is-not-a-prerequisite": after.capability_temporal_state_separate
+    expect "building-status-keeps-the-selected-town": after.capability_selected_city_exact
+}
+when compare_capability_actions {
+    expect "shared-eligibility-preserves-exact-actions": after.capability_actions_preserved
+}
+when inspect_recorded_decision {
+    expect "reasons-and-deltas-have-recorded-evidence": after.capability_reason_recorded and after.capability_delta_recorded
+}

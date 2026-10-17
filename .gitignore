@@ -21,3 +21,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+/examples/agentic-mmo/node_modules/
+/examples/agentic-mmo/dist/
+/examples/agentic-mmo/playwright-report/
+/examples/agentic-mmo/test-results/

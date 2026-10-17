@@ -1,0 +1,33 @@
+state completed: bool
+state exact_owned_forest: bool
+state materials_made: bool
+state no_completion_output: bool
+state no_effects: bool
+state no_payment_or_output: bool
+state paid_once: bool
+state paused_or_ineligible: bool
+state refused: bool
+state shared_numeric_allocation: bool
+state staffed: bool
+
+action start_lumber_mill()
+action complete_lumber_mill()
+action work_lumber_mill()
+action pause_forest_work()
+action refuse_forest_action()
+
+when start_lumber_mill {
+    expect "exact-standing-forest-paid-once": after.exact_owned_forest and after.paid_once
+}
+when complete_lumber_mill {
+    expect "completion-precedes-output": after.completed and after.no_completion_output
+}
+when work_lumber_mill {
+    expect "staffed-forest-makes-materials": after.staffed and after.materials_made and after.shared_numeric_allocation
+}
+when pause_forest_work {
+    expect "inactive-forest-preserves-inputs": after.paused_or_ineligible and after.no_payment_or_output
+}
+when refuse_forest_action {
+    expect "invalid-forest-action-has-no-effects": not after.refused or after.no_effects
+}

@@ -1,0 +1,31 @@
+state expanded_dimensions: bool
+state history_unchanged: bool
+state later_base_output: bool
+state new_site_reachable: bool
+state new_town_founded: bool
+state no_effects: bool
+state old_tiles_unchanged: bool
+state only_claimed_center_owned: bool
+state paid_once: bool
+state population_conserved: bool
+state refused: bool
+state retained_deposits_unchanged: bool
+state rng_unchanged: bool
+
+action apply_world_expansion()
+action found_new_extent_town()
+action operate_new_extent_town()
+action refuse_extent_action()
+
+when apply_world_expansion {
+    expect "append-preserves-inhabited-world": after.expanded_dimensions and after.old_tiles_unchanged and after.history_unchanged and after.retained_deposits_unchanged and after.rng_unchanged
+}
+when found_new_extent_town {
+    expect "reachable-new-town-conserves-people": after.new_site_reachable and after.new_town_founded and after.population_conserved and after.paid_once and after.only_claimed_center_owned
+}
+when operate_new_extent_town {
+    expect "new-land-supports-later-production": after.later_base_output
+}
+when refuse_extent_action {
+    expect "invalid-extent-action-has-no-effects": not after.refused or after.no_effects
+}

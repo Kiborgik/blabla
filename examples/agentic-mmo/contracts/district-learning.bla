@@ -1,0 +1,35 @@
+state eligible_start: bool
+state started: bool
+state exact_owned_site: bool
+state one_reservation: bool
+state paid_once: bool
+state refused_unchanged: bool
+state completion_due: bool
+state completed: bool
+state no_completion_beat_output: bool
+state site_binding_retained: bool
+state eligible_production: bool
+state produced: bool
+state actual_adjacency_applied_once: bool
+state library_uses_own_completed_campus: bool
+state inputs_and_residents_atomic: bool
+state old_replay_preserved: bool
+state exact_next_choices: bool
+
+action start_district_commitment()
+action resolve_district_work()
+action resolve_learning_output()
+
+when start_district_commitment {
+    expect "eligible-exact-campus-start-succeeds": not before.eligible_start or after.started
+    expect "district-start-reserves-one-owned-site-and-pays-once": not after.started or (after.exact_owned_site and after.one_reservation and after.paid_once)
+    expect "invalid-district-start-has-no-effects": before.eligible_start or (not after.started and after.refused_unchanged)
+}
+when resolve_district_work {
+    expect "due-district-completes-at-its-retained-site": not before.completion_due or (after.completed and after.site_binding_retained)
+    expect "completion-does-not-produce-retroactively": after.no_completion_beat_output and after.exact_next_choices and after.old_replay_preserved
+}
+when resolve_learning_output {
+    expect "eligible-local-learning-produces": not before.eligible_production or after.produced
+    expect "learning-uses-real-adjacency-and-own-campus": after.actual_adjacency_applied_once and after.library_uses_own_completed_campus and after.inputs_and_residents_atomic
+}

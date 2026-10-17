@@ -1,0 +1,17 @@
+# Forest and extent standalone contract bindings
+
+Actual gpt-6-astra/high, 17 October 2026. This standalone probe binds the five forest and four extent draft actions. Shared dispatch and draft promotion remain separate owner decisions.
+
+## Genuine boundaries
+
+The lazily cached pure helpers begin at the real initialized world and retain every legal predecessor. Named positive actions replay their exact recorded engine input, compare the complete TransitionResult and check canonical output plus input immutability. No synthetic append candidate supplies a positive migration or founding. Reset discards the observed state without reconstructing either journey; untouched observation does not initialize a fixture. It still allocates ordinary JavaScript objects. Unknown action names raise an adapter error before setup; engine refusal is separately derived from actual `ok:false`.
+
+Forest start checks the exact owned standing forest56 and actual legal action, then compares the complete owner resource-vector debit with the retained order payment. Completion matches the installed site and originating order. Its no-early-output comparison runs the same actual beat on a detached synthetic copy with only the unfinished order removed. Later work reads the actual Materials receipt, one opening local resident and zero operation input debit. Shared allocation is recomputed by the real allocator on the exact opening state and compared for every paid building and improvement. Pause submits the real toggle and then one real strategic beat; zero payment/output refers to that recipe receipt, not the whole economy's stocks. Missing-town refusals operate on the exact observed state and require unchanged state plus no events.
+
+Extent adoption replays the actual compatible expansion after the real forest release. It checks18×12→18×24, every original tile, retained deposits/pastoral sites, actors/towns/routes/clock/RNG and retained history under the existing96-event window. The new release event and normal trimming are allowed; historical records are not rewritten. New218 founding uses the actual reachable old199 frontier, complete canonical founding debit, conserved total people, and changed ownership only at the claimed new center. It does not claim surrounding worked-resource access. Later output runs the exact real beat and compares all resource deltas with an explicitly synthetic detached control removing only that new town. Positive Materials contribution from the empty new town is the bounded useful production witness; ordinary upkeep, growth and other resource deltas remain visible rather than being mislabeled production.
+
+Every action resets terminal/control observations. Named positives intentionally prepare their own retained legal boundary; refusal actions never replace an already observed fixture. Two instances remain isolated, snapshots are detached, and reset/reordered positives are deterministic. No live action, durable SQLite behavior, map pixels, public access, universal performance budget or full campaign is established by this adapter.
+
+## Evidence
+
+Prospective `/tmp/forest-extent-binding-red.log` is the genuine missing-module failure before implementation. It demonstrates the absent binding surface, not reached downstream assertions. Four focused cases cover lazy/error/reset, all forest expectations, all extent expectations, repeat refusal and two-way isolation. The final declared receipt also runs strict scoped lint. Existing runtime/host/source evidence is reused, not rerun as a global suite.

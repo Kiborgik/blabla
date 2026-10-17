@@ -807,6 +807,7 @@ fn library_task() -> (task::Task, BTreeMap<String, String>) {
         changed_at_acceptance: None,
     });
     work.evidence.push(Evidence {
+        reuse: None,
         identity: task::declared_check(&work),
         acceptance_epoch: Some(work.acceptance_epoch),
         check: "check".to_owned(),

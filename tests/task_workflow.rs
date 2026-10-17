@@ -34,6 +34,7 @@ fn accepted() -> (task::Task, BTreeMap<String, String>) {
 
 fn evidence(task: &mut task::Task, tree: &BTreeMap<String, String>) {
     task.evidence.push(Evidence {
+        reuse: None,
         identity: task::declared_check(task),
         acceptance_epoch: Some(task.acceptance_epoch),
         check: "check".to_owned(),
@@ -107,6 +108,7 @@ fn a_new_directory_deliverable_has_a_digest_and_child_changes_stale_its_evidence
     tree.insert("generated/a.py".to_owned(), "first".to_owned());
     assert!(task::observed_digest(&tree, "generated").is_some());
     task.evidence.push(Evidence {
+        reuse: None,
         identity: task::declared_check(&task),
         acceptance_epoch: Some(task.acceptance_epoch),
         check: "check".to_owned(),

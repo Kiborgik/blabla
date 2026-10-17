@@ -2,9 +2,11 @@ use super::ignore::Ignore;
 use super::snapshot;
 use super::status::RECORD_DIRECTORY;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+pub mod delivery;
+pub mod effort;
 pub mod revision;
 pub mod store;
 
@@ -575,6 +577,37 @@ pub fn review_revision(
     identities: BTreeMap<String, String>,
 ) -> RelevantRevision {
     let mut revision = relevant_revision(&work_under_review(reviewed), tree, identities);
+    if reviewed.intent_disposition_required || !reviewed.intent_dispositions.is_empty() {
+        let mut fingerprint = super::Fnv::new();
+        fingerprint.write_str(&revision.task_digest);
+        fingerprint.write_str(
+            &serde_json::to_string(&(
+                reviewed.intent_disposition_required,
+                &reviewed.intent_identities,
+                &reviewed.intent_dispositions,
+            ))
+            .expect("intent dispositions serialize"),
+        );
+        revision.task_digest = fingerprint.finish();
+    }
+    if reviewed.goal_reflection_required || reviewed.goal_reflection.is_some() {
+        let mut fingerprint = super::Fnv::new();
+        fingerprint.write_str(&revision.task_digest);
+        fingerprint.write_str(
+            &serde_json::to_string(&(reviewed.goal_reflection_required, &reviewed.goal_reflection))
+                .expect("goal reflection serializes"),
+        );
+        revision.task_digest = fingerprint.finish();
+    }
+    if !reviewed.delivery_obligations.is_empty() || !reviewed.delivery_reviews.is_empty() {
+        let mut fingerprint = super::Fnv::new();
+        fingerprint.write_str(&revision.task_digest);
+        fingerprint.write_str(
+            &serde_json::to_string(&(&reviewed.delivery_obligations, &reviewed.delivery_reviews))
+                .expect("delivery records serialize"),
+        );
+        revision.task_digest = fingerprint.finish();
+    }
     for input in &review.check_inputs {
         revision
             .paths
@@ -592,10 +625,267 @@ pub fn review_current(
     review.accepted.is_some()
         && reviewed.state != "withdrawn"
         && review.name != reviewed.name
-        && review.review_of.as_ref().is_some_and(|target| {
-            target.task == reviewed.name
-                && target.revision == review_revision(review, reviewed, tree, identities)
+        && review
+            .review_of
+            .iter()
+            .chain(&review.delivery_review_targets)
+            .any(|target| {
+                target.task == reviewed.name
+                    && target.revision
+                        == review_revision(review, reviewed, tree, identities.clone())
+            })
+}
+
+pub const INTENT_DISPOSITIONS: [&str; 2] = ["updated", "confirmed-unchanged"];
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntentDisposition {
+    pub identity: String,
+    pub status: String,
+    pub reason: String,
+    pub model: String,
+    pub unix: u64,
+    pub revision: RelevantRevision,
+}
+
+pub fn intent_revision(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    identities: BTreeMap<String, String>,
+) -> RelevantRevision {
+    let mut revision = relevant_revision(task, tree, identities);
+    for path in &task.scope {
+        revision
+            .paths
+            .insert(path.clone(), observed_digest(tree, path));
+    }
+    revision
+}
+
+pub fn disposition_current(task: &Task, identity: &str, revision: &RelevantRevision) -> bool {
+    task.intent_dispositions
+        .iter()
+        .rev()
+        .find(|entry| entry.identity == identity)
+        .is_some_and(|entry| {
+            entry.revision == *revision
+                && task
+                    .accepted
+                    .as_ref()
+                    .is_some_and(|accepted| accepted.model == entry.model)
+                && INTENT_DISPOSITIONS.contains(&entry.status.as_str())
+                && !entry.reason.trim().is_empty()
         })
+}
+
+pub fn record_disposition(task: &mut Task, disposition: IntentDisposition) -> Result<(), String> {
+    write_disposition(task, disposition, "accepted")
+}
+
+pub fn refresh_ready_disposition(
+    task: &mut Task,
+    disposition: IntentDisposition,
+) -> Result<(), String> {
+    write_disposition(task, disposition, "ready")
+}
+
+fn write_disposition(
+    task: &mut Task,
+    disposition: IntentDisposition,
+    state: &str,
+) -> Result<(), String> {
+    if !task.intent_disposition_required {
+        return Err("this task did not opt into required affected-intent disposition".to_owned());
+    }
+    if task.state != state
+        || !task
+            .accepted
+            .as_ref()
+            .is_some_and(|accepted| accepted.model == disposition.model)
+    {
+        return Err(format!(
+            "an intent disposition must be recorded by the task's accepted model while it is {}",
+            state.to_uppercase()
+        ));
+    }
+    if !disposition
+        .revision
+        .identities
+        .contains_key(&disposition.identity)
+    {
+        return Err(format!(
+            "{} is not an affected intent identity of this task",
+            disposition.identity
+        ));
+    }
+    if !INTENT_DISPOSITIONS.contains(&disposition.status.as_str()) {
+        return Err("intent status must be updated or confirmed-unchanged".to_owned());
+    }
+    if disposition.reason.trim().is_empty() {
+        return Err("an intent disposition needs a concrete reason naming relevant implementation or evidence".to_owned());
+    }
+    task.intent_identities
+        .extend(disposition.revision.identities.keys().cloned());
+    task.intent_dispositions.push(disposition);
+    task.challenged = None;
+    Ok(())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum GoalReflectionOutcome {
+    Successor {
+        recommendation: String,
+        owner: String,
+        dependencies: Vec<String>,
+        observable_outcome: String,
+    },
+    Blocked {
+        blocker: String,
+        owner: String,
+        unblock_when: String,
+    },
+    CompletionRecommended,
+    NoUsefulSuccessor,
+}
+
+impl GoalReflectionOutcome {
+    pub fn word(&self) -> &'static str {
+        match self {
+            Self::Successor { .. } => "successor",
+            Self::Blocked { .. } => "blocked",
+            Self::CompletionRecommended => "completion-recommended",
+            Self::NoUsefulSuccessor => "no-useful-successor",
+        }
+    }
+
+    fn complete(&self) -> bool {
+        let nonblank = |value: &str| !value.trim().is_empty();
+        match self {
+            Self::Successor {
+                recommendation,
+                owner,
+                dependencies,
+                observable_outcome,
+            } => {
+                nonblank(recommendation)
+                    && nonblank(owner)
+                    && nonblank(observable_outcome)
+                    && dependencies.iter().all(|value| nonblank(value))
+            }
+            Self::Blocked {
+                blocker,
+                owner,
+                unblock_when,
+            } => nonblank(blocker) && nonblank(owner) && nonblank(unblock_when),
+            Self::CompletionRecommended | Self::NoUsefulSuccessor => true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoalReflection {
+    pub decision: String,
+    pub observation: String,
+    pub evidence_refs: Vec<String>,
+    pub reason: String,
+    pub outcome: GoalReflectionOutcome,
+    pub model: String,
+    pub unix: u64,
+    pub revision: RelevantRevision,
+}
+
+impl GoalReflection {
+    fn complete(&self) -> bool {
+        [&self.decision, &self.observation, &self.reason]
+            .iter()
+            .all(|value| !value.trim().is_empty())
+            && !self.evidence_refs.is_empty()
+            && self
+                .evidence_refs
+                .iter()
+                .all(|value| !value.trim().is_empty())
+            && self.outcome.complete()
+    }
+}
+
+pub fn goal_reflection_revision(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    identities: BTreeMap<String, String>,
+) -> RelevantRevision {
+    let mut revision = intent_revision(task, tree, identities);
+    let mut fingerprint = super::Fnv::new();
+    fingerprint.write_str(&revision.task_digest);
+    fingerprint.write_str(
+        &serde_json::to_string(&(
+            task.goal_reflection_required,
+            latest_evidence(task),
+            task.intent_disposition_required,
+            &task.intent_dispositions,
+        ))
+        .expect("reflection inputs serialize"),
+    );
+    revision.task_digest = fingerprint.finish();
+    revision
+}
+
+pub fn goal_reflection_current(task: &Task, revision: &RelevantRevision) -> bool {
+    task.goal
+        .as_ref()
+        .is_some_and(|goal| !goal.trim().is_empty())
+        && task.goal_reflection.as_ref().is_some_and(|reflection| {
+            reflection.revision == *revision
+                && reflection.complete()
+                && task
+                    .accepted
+                    .as_ref()
+                    .is_some_and(|accepted| accepted.model == reflection.model)
+        })
+}
+
+pub fn record_goal_reflection(task: &mut Task, reflection: GoalReflection) -> Result<(), String> {
+    write_goal_reflection(task, reflection, "accepted")
+}
+
+pub fn refresh_ready_goal_reflection(
+    task: &mut Task,
+    reflection: GoalReflection,
+) -> Result<(), String> {
+    write_goal_reflection(task, reflection, "ready")
+}
+
+fn write_goal_reflection(
+    task: &mut Task,
+    reflection: GoalReflection,
+    state: &str,
+) -> Result<(), String> {
+    if !task.goal_reflection_required || task.goal.is_none() {
+        return Err("goal reflection requires an opted-in task with a named goal".to_owned());
+    }
+    if task.state != state
+        || !task
+            .accepted
+            .as_ref()
+            .is_some_and(|accepted| accepted.model == reflection.model)
+    {
+        return Err(format!(
+            "a goal reflection must be recorded by the task's accepted model while it is {}",
+            state.to_uppercase()
+        ));
+    }
+    if !reflection.complete() {
+        return Err("a goal reflection needs a concrete decision, observation, evidence reference, causal reason and every field of its outcome".to_owned());
+    }
+    if state == "ready" {
+        task.intent_identities
+            .extend(reflection.revision.identities.keys().cloned());
+    }
+    task.goal_reflection = Some(reflection);
+    task.challenged = None;
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -645,7 +935,21 @@ pub fn evidence_matches(task: &Task, evidence: &Evidence) -> bool {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvidenceReuse {
+    pub original_index: usize,
+    pub original_digest: String,
+    pub original_epoch: u64,
+    pub original_log_digest: String,
+    pub model: String,
+    pub reason: String,
+    pub unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Evidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reuse: Option<EvidenceReuse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<CheckIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -703,8 +1007,11 @@ pub struct Attribution {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Resolution {
+    pub delivery_claims_pending: Vec<String>,
     pub knowledge_fingerprints: BTreeMap<String, String>,
     pub review_current: Option<bool>,
+    pub intent_disposition_pending: Option<Vec<String>>,
+    pub goal_reflection_current: Option<bool>,
     pub models: Vec<String>,
     pub lenses: Vec<String>,
     pub requirements: Vec<String>,
@@ -728,8 +1035,11 @@ pub fn resolve(
         .map(|(identity, _)| identity.clone())
         .collect();
     Resolution {
+        delivery_claims_pending: Vec::new(),
         knowledge_fingerprints: BTreeMap::new(),
         review_current: None,
+        intent_disposition_pending: None,
+        goal_reflection_current: None,
         models: models.to_vec(),
         lenses: lenses.to_vec(),
         requirements,
@@ -859,11 +1169,13 @@ pub fn apply(task: &mut Task, to: &str) -> bool {
 
 fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String {
     let mut record = task.clone();
+    record.work_intervals.clear();
     record.challenged = None;
     record.state.clear();
     record.closed_unix = None;
     record.closed_paths.clear();
     record.result = None;
+    record.result_basis = None;
     record.build = None;
     record
         .findings
@@ -947,7 +1259,7 @@ pub fn record_challenge(
     blockers: usize,
     unix: u64,
 ) -> bool {
-    if task.state != "accepted" {
+    if !matches!(task.state.as_str(), "accepted" | "ready") {
         return false;
     }
     task.challenged = None;
@@ -1103,6 +1415,7 @@ pub fn withdraw(
     });
     task.state = "withdrawn".to_owned();
     task.result = None;
+    task.result_basis = None;
     task.closed_unix = None;
     task.closed_paths.clear();
     task.challenged = None;
@@ -1474,10 +1787,40 @@ pub fn validate_scope(
     Ok(scopes)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ResultBasis {
+    Bounded {
+        reason: String,
+        project_state: String,
+        prior_run_id: String,
+        implementation_fingerprint: String,
+        revision: RelevantRevision,
+    },
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub work_intervals: Vec<effort::Interval>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub delivery_obligations: BTreeMap<String, delivery::Obligation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delivery_reviews: Vec<delivery::Review>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub goal_reflection_required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_reflection: Option<GoalReflection>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub intent_disposition_required: bool,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub intent_identities: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intent_dispositions: Vec<IntentDisposition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_of: Option<ReviewTarget>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delivery_review_targets: Vec<ReviewTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawal: Option<Withdrawal>,
     pub name: String,
@@ -1506,6 +1849,8 @@ pub struct Task {
     pub acceptance_epoch: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Acceptance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_basis: Option<ResultBasis>,
     #[serde(default)]
     pub assessments: Vec<Assessment>,
     #[serde(default)]
@@ -1540,6 +1885,10 @@ pub struct Task {
     pub falsifications: Vec<Falsification>,
 }
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 fn open_state() -> String {
     STATES[0].to_owned()
 }
@@ -1547,7 +1896,16 @@ fn open_state() -> String {
 impl Default for Task {
     fn default() -> Task {
         Task {
+            work_intervals: Vec::new(),
+            delivery_obligations: BTreeMap::new(),
+            delivery_reviews: Vec::new(),
+            goal_reflection_required: false,
+            goal_reflection: None,
+            intent_disposition_required: false,
+            intent_identities: BTreeSet::new(),
+            intent_dispositions: Vec::new(),
             review_of: None,
+            delivery_review_targets: Vec::new(),
             withdrawal: None,
             name: String::new(),
             role: String::new(),
@@ -1565,6 +1923,7 @@ impl Default for Task {
             accepted: None,
             acceptance_epoch: 0,
             result: None,
+            result_basis: None,
             assessments: Vec::new(),
             exceptions: Vec::new(),
             evidence: Vec::new(),

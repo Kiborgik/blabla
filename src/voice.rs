@@ -27,7 +27,15 @@ impl Voice {
     }
 }
 
-pub const BLUNT: [(&str, &str); 21] = [
+pub const BLUNT: [(&str, &str); 25] = [
+    (
+        "goal-delivery-claim-missing",
+        "Passing source checks does not deliver the user outcome. Account for what happened and what remains.",
+    ),
+    (
+        "goal-delivery-unmet",
+        "That outcome is still owed. Keep its owner and next decision visible until delivery is independently accepted.",
+    ),
     (
         "declared-check-failed",
         "This is not fucking ready. Fix the check or record the actual blocker.",
@@ -74,7 +82,7 @@ pub const BLUNT: [(&str, &str); 21] = [
     ),
     (
         "evidence-superseded",
-        "That evidence describes a tree that has moved. Run the declared check again.",
+        "That evidence describes a tree that has moved. Inspect task freshness, then run the declared check again.",
     ),
     (
         "attribution-unknown",
@@ -98,7 +106,7 @@ pub const BLUNT: [(&str, &str); 21] = [
     ),
     (
         "review-target-stale",
-        "That review no longer covers the current target. Reaccept and review it again; a CLOSED review is history, so open a new one.",
+        "That review no longer covers the current target. Inspect task freshness. Reaccept and review it again; a CLOSED review is history, so open a new one.",
     ),
     (
         "unobservable-task-input",
@@ -107,6 +115,14 @@ pub const BLUNT: [(&str, &str); 21] = [
     (
         "goal-outcome-unmet",
         "That goal is marked done, but the expectations it carries are not all held. Set it back to active or make every one GREEN.",
+    ),
+    (
+        "goal-reflection-missing",
+        "That required reflection is not current. Inspect task freshness. Record the observed result and justify the next decision or stop; a recommendation does not mark the goal done.",
+    ),
+    (
+        "intent-disposition-missing",
+        "Affected intent still lacks a current account. Inspect task freshness. Reassess each missing or stale identity and record a concrete reason before handing back.",
     ),
     (
         "check-not-falsified",

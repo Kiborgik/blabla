@@ -1,3 +1,10 @@
+mod bounded;
+pub(crate) mod delivery;
+pub(super) mod effort;
+pub(super) mod evidence_reuse;
+pub(super) mod freshness;
+mod ready_receipts;
+
 use super::{emit_error, error, recovery, write_json};
 use blabla::memory::goal::Outcome;
 use blabla::memory::{self, goal, knowledge, mission, process, system};
@@ -14,9 +21,14 @@ use std::io::{self, Write};
 
 #[derive(Serialize)]
 struct TaskView<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivery: Option<serde_json::Value>,
     task: &'a Task,
     review_accepted: Option<bool>,
     review_current: Option<bool>,
+    intent_disposition_current: Option<bool>,
+    goal_reflection_state: Option<&'static str>,
+    affected_intent: Vec<IntentView>,
     approval_current: Option<bool>,
     decisions: Vec<DecisionStateView<'a>>,
     assessment_current: Vec<bool>,
@@ -34,6 +46,284 @@ struct TaskView<'a> {
     on_disk: BTreeMap<String, String>,
     routes: Vec<&'static str>,
     authority: &'static str,
+}
+
+#[derive(Serialize)]
+struct IntentView {
+    identity: String,
+    state: &'static str,
+    disposition: Option<String>,
+    reason: Option<String>,
+    freshness: Option<IntentFreshness>,
+}
+
+#[derive(Serialize)]
+struct IntentFreshness {
+    acceptance_epoch: Option<EpochChange>,
+    assignment_digest_changed: bool,
+    changed_paths: Vec<PathFingerprintChange>,
+    changed_identities: Vec<IdentityFingerprintChange>,
+    own_identity_fingerprint_changed: bool,
+    claim_problems: Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct EpochChange {
+    recorded: u64,
+    current: u64,
+}
+
+#[derive(Serialize)]
+struct FingerprintChange {
+    change: &'static str,
+    recorded: Option<String>,
+    current: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PathFingerprintChange {
+    path: String,
+    #[serde(flatten)]
+    difference: FingerprintChange,
+}
+
+#[derive(Serialize)]
+struct IdentityFingerprintChange {
+    identity: String,
+    #[serde(flatten)]
+    difference: FingerprintChange,
+}
+
+fn fingerprint_change(
+    recorded: Option<Option<&str>>,
+    current: Option<Option<&str>>,
+) -> Option<FingerprintChange> {
+    if recorded == current {
+        return None;
+    }
+    Some(FingerprintChange {
+        change: match (recorded, current) {
+            (None, Some(_)) => "added",
+            (Some(_), None) => "removed",
+            _ => "changed",
+        },
+        recorded: recorded.flatten().map(str::to_owned),
+        current: current.flatten().map(str::to_owned),
+    })
+}
+
+fn intent_freshness(
+    task: &Task,
+    identity: &str,
+    receipt: &task::IntentDisposition,
+    current: &task::RelevantRevision,
+) -> IntentFreshness {
+    let recorded = &receipt.revision;
+    let changed_paths = recorded
+        .paths
+        .keys()
+        .chain(current.paths.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|path| {
+            fingerprint_change(
+                recorded.paths.get(path).map(|value| value.as_deref()),
+                current.paths.get(path).map(|value| value.as_deref()),
+            )
+            .map(|difference| PathFingerprintChange {
+                path: path.clone(),
+                difference,
+            })
+        })
+        .collect();
+    let changed_identities = recorded
+        .identities
+        .keys()
+        .chain(current.identities.keys())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter_map(|identity| {
+            fingerprint_change(
+                recorded
+                    .identities
+                    .get(identity)
+                    .map(|value| Some(value.as_str())),
+                current
+                    .identities
+                    .get(identity)
+                    .map(|value| Some(value.as_str())),
+            )
+            .map(|difference| IdentityFingerprintChange {
+                identity: identity.clone(),
+                difference,
+            })
+        })
+        .collect();
+    let mut claim_problems = Vec::new();
+    match &task.accepted {
+        None => claim_problems.push("acceptance-missing"),
+        Some(accepted) if accepted.model != receipt.model => {
+            claim_problems.push("accepted-model-mismatch")
+        }
+        Some(_) => {}
+    }
+    if !task::INTENT_DISPOSITIONS.contains(&receipt.status.as_str()) {
+        claim_problems.push("invalid-status");
+    }
+    if receipt.reason.trim().is_empty() {
+        claim_problems.push("blank-reason");
+    }
+    claim_problems.sort_unstable();
+    IntentFreshness {
+        acceptance_epoch: (recorded.acceptance_epoch != current.acceptance_epoch).then_some(
+            EpochChange {
+                recorded: recorded.acceptance_epoch,
+                current: current.acceptance_epoch,
+            },
+        ),
+        assignment_digest_changed: recorded.task_digest != current.task_digest,
+        changed_paths,
+        changed_identities,
+        own_identity_fingerprint_changed: recorded.identities.get(identity)
+            != current.identities.get(identity),
+        claim_problems,
+    }
+}
+
+fn write_intent_freshness(output: &mut impl Write, freshness: &IntentFreshness) -> io::Result<()> {
+    writeln!(output, "    Shared input changes:")?;
+    if let Some(epoch) = &freshness.acceptance_epoch {
+        writeln!(
+            output,
+            "      acceptance epoch: {} -> {}",
+            epoch.recorded, epoch.current
+        )?;
+    }
+    if freshness.assignment_digest_changed {
+        writeln!(
+            output,
+            "      assignment digest changed (includes the acceptance epoch)"
+        )?;
+    }
+    for entry in &freshness.changed_paths {
+        writeln!(
+            output,
+            "      path: {} ({})",
+            entry.path, entry.difference.change
+        )?;
+    }
+    for entry in &freshness.changed_identities {
+        writeln!(
+            output,
+            "      identity: {} ({})",
+            entry.identity, entry.difference.change
+        )?;
+    }
+    if freshness.acceptance_epoch.is_none()
+        && !freshness.assignment_digest_changed
+        && freshness.changed_paths.is_empty()
+        && freshness.changed_identities.is_empty()
+    {
+        writeln!(output, "      none")?;
+    }
+    writeln!(
+        output,
+        "    Own identity fingerprint: {}",
+        if freshness.own_identity_fingerprint_changed {
+            "changed"
+        } else {
+            "unchanged"
+        }
+    )?;
+    if !freshness.claim_problems.is_empty() {
+        writeln!(
+            output,
+            "    Claim problems: {}",
+            freshness.claim_problems.join(", ")
+        )?;
+    }
+    Ok(())
+}
+
+fn intent_revision(
+    project: &Project,
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> task::RelevantRevision {
+    let mut identities = review_identities(project, task);
+    for identity in task
+        .intent_identities
+        .iter()
+        .chain(task.intent_dispositions.iter().map(|entry| &entry.identity))
+    {
+        identities
+            .entry(identity.clone())
+            .or_insert_with(|| "absent".to_owned());
+    }
+    task::intent_revision(task, tree, identities)
+}
+
+fn goal_reflection_revision(
+    project: &Project,
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> task::RelevantRevision {
+    let identities = intent_revision(project, task, tree).identities;
+    task::goal_reflection_revision(task, tree, identities)
+}
+
+fn goal_reflection_state(
+    project: &Project,
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Option<&'static str> {
+    task.goal_reflection_required.then(|| {
+        if task.goal_reflection.is_none() {
+            "missing"
+        } else if task::goal_reflection_current(
+            task,
+            &goal_reflection_revision(project, task, tree),
+        ) {
+            "current"
+        } else {
+            "stale"
+        }
+    })
+}
+
+fn affected_intent(
+    project: &Project,
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Vec<IntentView> {
+    if !task.intent_disposition_required {
+        return Vec::new();
+    }
+    let revision = intent_revision(project, task, tree);
+    revision
+        .identities
+        .keys()
+        .map(|identity| {
+            let latest = task
+                .intent_dispositions
+                .iter()
+                .rev()
+                .find(|entry| &entry.identity == identity);
+            IntentView {
+                identity: identity.clone(),
+                state: if latest.is_none() {
+                    "missing"
+                } else if task::disposition_current(task, identity, &revision) {
+                    "current"
+                } else {
+                    "stale"
+                },
+                disposition: latest.map(|entry| entry.status.clone()),
+                reason: latest.map(|entry| entry.reason.clone()),
+                freshness: latest.map(|entry| intent_freshness(task, identity, entry, &revision)),
+            }
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -73,7 +363,14 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
         }
         _ => (Vec::new(), 0),
     };
+    let affected_intent = affected_intent(project, task, &tree);
     TaskView {
+        delivery: delivery::task_view(project, task, &tree),
+        goal_reflection_state: goal_reflection_state(project, task, &tree),
+        intent_disposition_current: task
+            .intent_disposition_required
+            .then(|| affected_intent.iter().all(|entry| entry.state == "current")),
+        affected_intent,
         review_accepted: task.review_of.as_ref().map(|_| task.accepted.is_some()),
         review_current,
         approval_current: review_current.map(|current| {
@@ -230,26 +527,88 @@ fn knowledge_fingerprints(project: &Project) -> BTreeMap<String, String> {
         .collect()
 }
 
+fn review_graph(project: &Project, review: &Task) -> Result<Vec<(Task, Task)>, String> {
+    fn visit(
+        project: &Project,
+        current: &Task,
+        active: &mut BTreeSet<String>,
+        done: &mut BTreeSet<String>,
+        edges: &mut Vec<(Task, Task)>,
+    ) -> Result<(), String> {
+        if active.contains(&current.name) {
+            return Err("recursive review cycle".into());
+        }
+        if done.contains(&current.name) {
+            return Ok(());
+        }
+        active.insert(current.name.clone());
+        let mut names = BTreeSet::new();
+        for target in current
+            .review_of
+            .iter()
+            .chain(&current.delivery_review_targets)
+        {
+            if !names.insert(&target.task) {
+                return Err("duplicate review target".into());
+            }
+            let reviewed = task::read(&project.manifest.root, &target.task)?
+                .ok_or_else(|| format!("no review target task {:?} exists", target.task))?;
+            if reviewed.state == "withdrawn" {
+                return Err(format!("review target {:?} is withdrawn", target.task));
+            }
+            edges.push((current.clone(), reviewed.clone()));
+            visit(project, &reviewed, active, done, edges)?;
+        }
+        active.remove(&current.name);
+        done.insert(current.name.clone());
+        Ok(())
+    }
+    let mut edges = Vec::new();
+    visit(
+        project,
+        review,
+        &mut BTreeSet::new(),
+        &mut BTreeSet::new(),
+        &mut edges,
+    )?;
+    Ok(edges)
+}
+
 fn review_target(project: &Project, name: &str, target: &str) -> Result<Task, String> {
-    let root = &project.manifest.root;
-    let reviewed = task::read(root, target)?
+    let reviewed = task::read(&project.manifest.root, target)?
         .ok_or_else(|| format!("no review target task {target:?} exists"))?;
     if reviewed.state == "withdrawn" {
         return Err(format!("review target {target:?} is withdrawn"));
     }
-    let mut visited = vec![name.to_owned()];
-    let mut next = Some(reviewed.clone());
-    while let Some(current) = next {
-        if visited.contains(&current.name) {
-            return Err(format!("review target {target:?} creates a review cycle"));
-        }
-        visited.push(current.name.clone());
-        next = match current.review_of {
-            Some(target) => task::read(root, &target.task)?,
-            None => None,
-        };
+    if reviewed.name == name
+        || review_graph(project, &reviewed)?
+            .iter()
+            .any(|(_, source)| source.name == name)
+    {
+        return Err(format!("review target {target:?} creates a review cycle"));
     }
     Ok(reviewed)
+}
+
+fn review_context(
+    project: &Project,
+    review: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, task::RelevantRevision>, String> {
+    Ok(review_graph(project, review)?
+        .into_iter()
+        .map(|(reviewer, source)| {
+            (
+                format!("{}::{}", reviewer.name, source.name),
+                task::review_revision(
+                    &reviewer,
+                    &source,
+                    tree,
+                    review_dependencies(project, &reviewer, &source),
+                ),
+            )
+        })
+        .collect())
 }
 
 fn review_dependencies(
@@ -265,29 +624,19 @@ fn review_dependencies(
 fn review_freshness(project: &Project, review: &Task) -> Option<bool> {
     review.review_of.as_ref()?;
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
-    let mut current = review.clone();
-    let mut visited = BTreeSet::new();
-    while let Some(target) = &current.review_of {
-        if !visited.insert(current.name.clone()) {
-            return Some(false);
-        }
-        let Ok(Some(reviewed)) = task::read(&project.manifest.root, &target.task) else {
-            return Some(false);
-        };
-        if task::tracking_error(&current, &project.manifest.root, &project.ignore).is_some()
-            || task::tracking_error(&reviewed, &project.manifest.root, &project.ignore).is_some()
-            || !task::review_current(
-                &current,
-                &reviewed,
+    let Ok(edges) = review_graph(project, review) else {
+        return Some(false);
+    };
+    Some(edges.iter().all(|(current, reviewed)| {
+        task::tracking_error(current, &project.manifest.root, &project.ignore).is_none()
+            && task::tracking_error(reviewed, &project.manifest.root, &project.ignore).is_none()
+            && task::review_current(
+                current,
+                reviewed,
                 &tree,
-                review_dependencies(project, &current, &reviewed),
+                review_dependencies(project, current, reviewed),
             )
-        {
-            return Some(false);
-        }
-        current = reviewed;
-    }
-    Some(true)
+    }))
 }
 
 fn review_identities(project: &Project, task: &Task) -> BTreeMap<String, String> {
@@ -407,6 +756,7 @@ fn review_identities(project: &Project, task: &Task) -> BTreeMap<String, String>
                 .unwrap_or_else(|| "unresolved".to_owned()),
         );
     }
+    identities.extend(delivery::identities(project, task));
     identities
 }
 
@@ -432,6 +782,60 @@ fn declared_role(project: &Project, role_name: &str) -> Option<blabla::memory::p
                     .cloned()
             })
         })
+}
+
+pub(super) fn validate_open_role(
+    project: &Project,
+    role_name: &str,
+    json: bool,
+) -> Result<(), i32> {
+    let Some(entry) = &project.manifest.process else {
+        return Ok(());
+    };
+    let memory = memory::read(
+        &entry.path,
+        &entry.display,
+        process::build,
+        process::validate,
+    );
+    let Some(process) = memory.present() else {
+        return Err(emit_error(
+            error(
+                "task",
+                format!(
+                    "cannot resolve task role {role_name:?}: registered process {} is {}: {}; repair the registered process before opening a task",
+                    entry.display,
+                    memory.state(),
+                    memory.problems().join("; ")
+                ),
+                None,
+            ),
+            json,
+            2,
+        ));
+    };
+    if !process.roles.is_empty() && !process.roles.iter().any(|role| role.name == role_name) {
+        let mut names = process
+            .roles
+            .iter()
+            .map(|role| role.name.as_str())
+            .collect::<Vec<_>>();
+        names.sort_unstable();
+        return Err(emit_error(
+            error(
+                "task",
+                format!(
+                    "task role {role_name:?} is not declared in {}; declared roles: {}; choose a declared role or ask the owner to declare the intended role",
+                    entry.display,
+                    names.join(", ")
+                ),
+                None,
+            ),
+            json,
+            2,
+        ));
+    }
+    Ok(())
 }
 
 fn unconsulted_lens(project: &Project, role_name: &str, lenses: &[String]) -> Option<String> {
@@ -615,17 +1019,88 @@ fn write_task_line(task: &Task) -> io::Result<()> {
         task.name,
         state_label(task),
         task.name
-    )
+    )?;
+    write_result_basis(&mut output, task)
 }
 
+fn write_result_basis(output: &mut impl Write, task: &Task) -> io::Result<()> {
+    if let Some(task::ResultBasis::Bounded {
+        reason,
+        prior_run_id,
+        implementation_fingerprint,
+        ..
+    }) = &task.result_basis
+    {
+        writeln!(
+            output,
+            "Bounded result accepted; project verification pending at acceptance.\n  Reason: {reason}\n  Prior canonical GREEN run: {prior_run_id}\n  Prior implementation fingerprint: {implementation_fingerprint}\n  This historical receipt does not replace current blabla status."
+        )?;
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+pub(super) struct OpenOptions {
+    pub delivery_goals: Vec<String>,
+    pub delivery_targets: Vec<String>,
+    pub falsify: Vec<String>,
+    pub require_intent_disposition: bool,
+    pub require_goal_reflection: bool,
+}
+
+#[cfg(test)]
 pub(super) fn open(
     project: &Project,
-    mut opening: Opening,
+    opening: Opening,
     falsify: Vec<String>,
+    require_intent_disposition: bool,
+    require_goal_reflection: bool,
     json: bool,
     swallowed: &[String],
 ) -> i32 {
+    open_with_targets(
+        project,
+        opening,
+        OpenOptions {
+            falsify,
+            require_intent_disposition,
+            require_goal_reflection,
+            ..Default::default()
+        },
+        json,
+        swallowed,
+    )
+}
+
+pub(super) fn open_with_targets(
+    project: &Project,
+    mut opening: Opening,
+    options: OpenOptions,
+    json: bool,
+    swallowed: &[String],
+) -> i32 {
+    let OpenOptions {
+        delivery_goals,
+        delivery_targets,
+        falsify,
+        require_intent_disposition,
+        require_goal_reflection,
+    } = options;
+    if let Err(exit) = validate_open_role(project, &opening.role, json) {
+        return exit;
+    }
     let name = &opening.name;
+    if require_goal_reflection && opening.goal.is_none() {
+        return emit_error(
+            error(
+                "task",
+                "required goal reflection needs a named --goal",
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     if !blabla::memory::syntax::is_identity_safe(name) {
         return emit_error(
             error(
@@ -638,6 +1113,26 @@ pub(super) fn open(
             json,
             2,
         );
+    }
+    if !delivery_targets.is_empty() && opening.review_of.is_none() {
+        return emit_error(
+            error(
+                "task",
+                "additional delivery review targets require a primary --review-of",
+                None,
+            ),
+            json,
+            2,
+        );
+    }
+    let mut declared_targets: BTreeSet<String> = opening.review_of.iter().cloned().collect();
+    for target in &delivery_targets {
+        if !declared_targets.insert(target.clone()) {
+            return emit_error(error("task", "duplicate review target", None), json, 2);
+        }
+        if let Err(message) = review_target(project, &opening.name, target) {
+            return emit_error(error("task", message, None), json, 2);
+        }
     }
     if let Some(target) = &opening.review_of
         && let Err(message) = review_target(project, &opening.name, target)
@@ -701,11 +1196,31 @@ pub(super) fn open(
         },
         now_unix(),
     );
+    recorded.delivery_review_targets = delivery_targets
+        .into_iter()
+        .map(|name| task::ReviewTarget {
+            task: name,
+            revision: task::RelevantRevision {
+                acceptance_epoch: 0,
+                task_digest: String::new(),
+                paths: BTreeMap::new(),
+                identities: BTreeMap::new(),
+            },
+        })
+        .collect();
+    if let Err(message) = delivery::pin(project, &mut recorded, &delivery_goals) {
+        return emit_error(error("task", message, None), json, 2);
+    }
     let falsify = match falsify_paths(project, &recorded, falsify) {
         Ok(paths) => paths,
         Err(message) => return emit_error(error("task", message, None), json, 2),
     };
     recorded.falsify = falsify;
+    recorded.goal_reflection_required = require_goal_reflection;
+    recorded.intent_disposition_required = require_intent_disposition;
+    if require_intent_disposition {
+        recorded.intent_identities = review_identities(project, &recorded).into_keys().collect();
+    }
     if let Err(exit) = require_tracking(project, &recorded, json) {
         return exit;
     }
@@ -1257,7 +1772,7 @@ fn widen_scope(project: &Project, task: &mut Task, add: &[String]) -> Result<(),
             task.scope.push(path);
         }
     }
-    Ok(())
+    delivery::pin(project, task, &[])
 }
 
 pub(super) fn widen(
@@ -1538,17 +2053,88 @@ pub(super) fn declare_check(
     store_with(project, &mut task, json, swallowed)
 }
 
-pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i32 {
-    let mut task = match mutate(project, name, json) {
-        Ok(task) => task,
+pub(super) fn close_bounded(
+    project: &Project,
+    name: &str,
+    model: &str,
+    reason: &str,
+    json: bool,
+) -> i32 {
+    bounded::close(project, name, model, reason, json)
+}
+
+struct CloseDecision {
+    task: Task,
+    model: String,
+    delivery_context: Option<String>,
+}
+
+fn record_close(project: &Project, mut decision: CloseDecision, json: bool) -> i32 {
+    let current = match delivery::recheck_close(
+        project,
+        &decision.task.name,
+        &decision.delivery_context,
+        &decision.model,
+        json,
+    ) {
+        Ok(current) => current,
         Err(exit) => return exit,
     };
-    if let Err(exit) = require_tracking(project, &task, json) {
-        return exit;
+    if let Some(current) = current {
+        let mut refreshed =
+            match inspect_close(&current, &decision.task.name, &decision.model, json) {
+                Ok(refreshed) => refreshed,
+                Err(exit) => return exit,
+            };
+        if refreshed.delivery_context != decision.delivery_context {
+            return emit_error(
+                error(
+                    "task",
+                    "delivery close context changed before result recording",
+                    None,
+                ),
+                json,
+                2,
+            );
+        }
+        return store_and_discard(&current, &mut refreshed.task, json);
     }
+    store_and_discard(project, &mut decision.task, json)
+}
+
+pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i32 {
+    match inspect_close(project, name, model, json) {
+        Ok(decision) => record_close(project, decision, json),
+        Err(exit) => exit,
+    }
+}
+
+#[cfg(test)]
+fn close_with_checkpoint(
+    project: &Project,
+    name: &str,
+    model: &str,
+    checkpoint: impl FnOnce(),
+) -> i32 {
+    let decision = match inspect_close(project, name, model, true) {
+        Ok(decision) => decision,
+        Err(exit) => return exit,
+    };
+    checkpoint();
+    record_close(project, decision, true)
+}
+
+fn inspect_close(
+    project: &Project,
+    name: &str,
+    model: &str,
+    json: bool,
+) -> Result<CloseDecision, i32> {
+    let mut task = mutate(project, name, json)?;
+    require_tracking(project, &task, json)?;
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     if task.state == "ready" && !task::challenge_current(&task, &tree) {
-        return emit_error(
+        return Err(emit_error(
             error(
                 "task",
                 format!(
@@ -1558,8 +2144,23 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
             ),
             json,
             2,
-        );
+        ));
     }
+    if !task.delivery_obligations.is_empty() || !task.delivery_reviews.is_empty() {
+        if model.trim().is_empty() {
+            return Err(emit_error(
+                error(
+                    "task",
+                    "delivery result acceptance requires an owner model",
+                    None,
+                ),
+                json,
+                2,
+            ));
+        }
+        validate_orchestrator_model(project, model, json)?;
+    }
+    let delivery_context = delivery::close_context(project, &task, json)?;
     let evaluation = super::project::evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let status = status_view(project, &evaluation, &structure);
@@ -1582,7 +2183,7 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
         model,
         now_unix(),
     ) {
-        return emit_error(
+        return Err(emit_error(
             error(
                 "task",
                 format!(
@@ -1603,9 +2204,13 @@ pub(super) fn close(project: &Project, name: &str, model: &str, json: bool) -> i
             ),
             json,
             2,
-        );
+        ));
     }
-    store_and_discard(project, &mut task, json)
+    Ok(CloseDecision {
+        task,
+        model: model.to_owned(),
+        delivery_context,
+    })
 }
 
 fn unconfirmed_guidance(task: &Task) -> String {
@@ -1687,10 +2292,23 @@ fn join_or(values: &[String], empty: &str) -> String {
 }
 
 pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> i32 {
-    let mut task = match mutate(project, name, json) {
+    let task = match mutate(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
     };
+    match prepare_acceptance(project, task, model, json) {
+        Ok(mut task) => store(project, &mut task, json),
+        Err(exit) => exit,
+    }
+}
+
+fn prepare_acceptance(
+    project: &Project,
+    mut task: Task,
+    model: &str,
+    json: bool,
+) -> Result<Task, i32> {
+    let name = task.name.clone();
     if !task::apply(&mut task, "accepted") {
         let reason = match task::unanswered_decision(&task) {
             Some(decision) => format!(
@@ -1707,13 +2325,13 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
                 state = task.state
             ),
         };
-        return emit_error(error("task", reason, None), json, 2);
+        return Err(emit_error(error("task", reason, None), json, 2));
     }
     let current_tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     if let Some(target) = task.review_of.as_ref().map(|target| target.task.clone()) {
-        let reviewed = match review_target(project, name, &target) {
+        let reviewed = match review_target(project, &name, &target) {
             Ok(reviewed) => reviewed,
-            Err(message) => return emit_error(error("task", message, None), json, 2),
+            Err(message) => return Err(emit_error(error("task", message, None), json, 2)),
         };
         let revision = task::review_revision(
             &task,
@@ -1726,8 +2344,28 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
             revision,
         });
     }
+    let mut additional = Vec::new();
+    for target in &task.delivery_review_targets {
+        let reviewed = match review_target(project, &name, &target.task) {
+            Ok(t) => t,
+            Err(message) => return Err(emit_error(error("task", message, None), json, 2)),
+        };
+        additional.push(task::ReviewTarget {
+            task: target.task.clone(),
+            revision: task::review_revision(
+                &task,
+                &reviewed,
+                &current_tree,
+                review_dependencies(project, &task, &reviewed),
+            ),
+        });
+    }
+    task.delivery_review_targets = additional;
+    if let Err(message) = delivery::pin(project, &mut task, &[]) {
+        return Err(emit_error(error("task", message, None), json, 2));
+    }
     task::record_acceptance(&mut task, &current_tree, &project.ignore, model, now_unix());
-    store(project, &mut task, json)
+    Ok(task)
 }
 
 pub(super) fn block(project: &Project, name: &str, reason: &str, json: bool) -> i32 {
@@ -1908,6 +2546,128 @@ pub(super) fn lens(
     store(project, &mut task, json)
 }
 
+pub(super) struct DispositionInput<'a> {
+    pub identity: &'a str,
+    pub status: &'a str,
+    pub reason: &'a str,
+}
+
+pub(super) fn disposition(
+    project: &Project,
+    name: &str,
+    input: DispositionInput<'_>,
+    model: &str,
+    refresh_ready: bool,
+    json: bool,
+) -> i32 {
+    let DispositionInput {
+        identity,
+        status,
+        reason,
+    } = input;
+    if refresh_ready {
+        return ready_receipts::refresh(
+            project,
+            name,
+            ready_receipts::Claim::Disposition {
+                identity: identity.to_owned(),
+                status: status.to_owned(),
+                reason: reason.to_owned(),
+                model: model.to_owned(),
+            },
+            json,
+        );
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    let revision = intent_revision(project, &task, &tree);
+    let record = task::IntentDisposition {
+        identity: identity.to_owned(),
+        status: status.to_owned(),
+        reason: reason.to_owned(),
+        model: model.to_owned(),
+        unix: now_unix(),
+        revision,
+    };
+    if let Err(message) = task::record_disposition(&mut task, record) {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    store(project, &mut task, json)
+}
+
+pub(super) struct ReflectionInput {
+    pub decision: String,
+    pub observation: String,
+    pub evidence_refs: Vec<String>,
+    pub reason: String,
+    pub outcome: task::GoalReflectionOutcome,
+}
+
+pub(super) fn reflect(
+    project: &Project,
+    name: &str,
+    input: ReflectionInput,
+    model: String,
+    refresh_ready: bool,
+    json: bool,
+) -> i32 {
+    let ReflectionInput {
+        decision,
+        observation,
+        evidence_refs,
+        reason,
+        outcome,
+    } = input;
+    if refresh_ready {
+        return ready_receipts::refresh(
+            project,
+            name,
+            ready_receipts::Claim::Reflection {
+                decision,
+                observation,
+                evidence_refs,
+                reason,
+                outcome,
+                model,
+            },
+            json,
+        );
+    }
+    let mut task = match mutate(project, name, json) {
+        Ok(task) => task,
+        Err(exit) => return exit,
+    };
+    if let Err(exit) = require_tracking(project, &task, json) {
+        return exit;
+    }
+    if let Some(goal) = &task.goal
+        && let Some(message) = super::project::undeclared_goal(project, goal)
+    {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    let reflection = task::GoalReflection {
+        decision,
+        observation,
+        evidence_refs,
+        reason,
+        outcome,
+        model,
+        unix: now_unix(),
+        revision: goal_reflection_revision(project, &task, &tree),
+    };
+    if let Err(message) = task::record_goal_reflection(&mut task, reflection) {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    store(project, &mut task, json)
+}
+
 pub(super) fn propose_model(
     project: &Project,
     name: &str,
@@ -2081,6 +2841,7 @@ fn record_evidence(
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     let inputs = task::evidence_inputs(task, &tree);
     task.evidence.push(task::Evidence {
+        reuse: None,
         identity: task::declared_check(task),
         acceptance_epoch: Some(task.acceptance_epoch),
         check,
@@ -2236,6 +2997,7 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         );
     }
     let evidence = task::Evidence {
+        reuse: None,
         identity,
         acceptance_epoch: Some(acceptance_epoch),
         check: argv.join(" "),
@@ -2590,7 +3352,17 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
     let blockers = report.assignment_blockers();
     let mut assignment_clear = None;
     if let Some(task) = selected.as_mut() {
-        if task.state == "accepted" {
+        if task.state == "ready"
+            && blockers.is_empty()
+            && task::tracked_readiness(task, root, &project.ignore, &tree).supported
+            && task::challenge_current(task, &tree)
+        {
+            assignment_clear = Some(true);
+        } else if task.state == "accepted"
+            || (task.state == "ready"
+                && task.challenged.is_none()
+                && (task.intent_disposition_required || task.goal_reflection_required))
+        {
             let recorded = task::record_challenge(task, &tree, blockers.len(), now_unix());
             if let Some(identity) = recovery::running() {
                 if let Some(message) = recovery::refuse_write(identity, task.build.as_deref()) {
@@ -2680,7 +3452,12 @@ pub(super) fn report_for(
         role: resolution.as_ref(),
         other_tasks: &other_tasks,
     };
-    skeptic::challenge_tracked_against(&evidence, goals, root, &project.ignore)
+    let mut report = skeptic::challenge_tracked_against(&evidence, goals, root, &project.ignore);
+    if selected.is_none() && goals.is_ok() {
+        let unmet = delivery::unmet_done(project);
+        skeptic::add_delivery_goal_challenge(&mut report, &unmet);
+    }
+    report
 }
 
 pub(super) fn standing(project: &Project, status: &StatusView) -> ChallengeReport {
@@ -2810,6 +3587,18 @@ fn write_evidence_receipt(output: &mut impl Write, evidence: &task::Evidence) ->
         epoch_label(evidence.acceptance_epoch),
         evidence.exit
     )?;
+    if let Some(reuse) = &evidence.reuse {
+        writeln!(
+            output,
+            "  original execution {}   explicitly reused {} by {}",
+            evidence.unix, reuse.unix, reuse.model
+        )?;
+        writeln!(
+            output,
+            "  original evidence {} epoch {}: {}",
+            reuse.original_index, reuse.original_epoch, reuse.reason
+        )?;
+    }
     if let Some(log) = &evidence.log {
         writeln!(output, "  log {log}")?;
     }
@@ -2854,6 +3643,20 @@ fn write_task(
             .map_or_else(|| path.clone(), Clone::clone)
     };
     writeln!(output, "task::{}   {}", task.name, state_label(task))?;
+    write_result_basis(&mut output, task)?;
+    if let Some(delivery) = &view.delivery {
+        writeln!(output, "\nApplicable delivery outcomes:")?;
+        for obligation in delivery["obligations"].as_array().into_iter().flatten() {
+            writeln!(
+                output,
+                "  {}: {} ({}) current {}",
+                obligation["goal"],
+                obligation["statement"],
+                obligation["basis"],
+                obligation["current"]
+            )?;
+        }
+    }
     writeln!(output, "\nStatement:\n  {}", task.statement)?;
     writeln!(output, "\nCarried by:\n  role::{}", task.role)?;
     if let Some(goal) = &task.goal {
@@ -2992,6 +3795,131 @@ fn write_task(
                 "  Reaccept an open review to inspect the changed target; a CLOSED review remains historical and new work needs a new review task"
             )?;
         }
+    }
+    if !task.delivery_review_targets.is_empty() {
+        writeln!(
+            output,
+            "  Additional explicit delivery sources: {}",
+            task.delivery_review_targets
+                .iter()
+                .map(|target| format!("task::{}", target.task))
+                .collect::<Vec<_>>()
+                .join("  ")
+        )?;
+    }
+    if task.state == "ready" && (task.intent_disposition_required || task.goal_reflection_required)
+    {
+        writeln!(
+            output,
+            "  Explicit --refresh-ready may renew one manual disposition/reflection with the same still-permitted model when check and recursive targets remain current; then run blabla challenge {}. Changed work requires reacceptance and evidence",
+            task.name
+        )?;
+    }
+    if task.intent_disposition_required {
+        writeln!(
+            output,
+            "\nAffected intent disposition: REQUIRED ({})",
+            if view.intent_disposition_current == Some(true) {
+                "CURRENT"
+            } else {
+                "INCOMPLETE"
+            }
+        )?;
+        for entry in &view.affected_intent {
+            writeln!(
+                output,
+                "  {}  {}",
+                entry.identity,
+                entry.state.to_uppercase()
+            )?;
+            if let Some(reason) = &entry.reason {
+                writeln!(
+                    output,
+                    "    {}: {reason}",
+                    entry.disposition.as_deref().unwrap_or("unrecorded")
+                )?;
+            }
+            if entry.state == "stale"
+                && let Some(freshness) = &entry.freshness
+            {
+                write_intent_freshness(&mut output, freshness)?;
+            }
+        }
+        writeln!(
+            output,
+            "  Assignment digests do not identify changed fields; directory fingerprints do not identify changed child files. Shared input changes do not establish a semantic change to each identity."
+        )?;
+        writeln!(
+            output,
+            "  blabla task disposition {} IDENTITY --status updated|confirmed-unchanged --reason TEXT --model MODEL",
+            task.name
+        )?;
+        writeln!(
+            output,
+            "  Reasons are accountable review claims; they never mark goals done or replace evidence, scope or contract authority."
+        )?;
+    }
+    if let Some(state) = view.goal_reflection_state {
+        writeln!(
+            output,
+            "\nGoal reflection: REQUIRED ({})",
+            state.to_uppercase()
+        )?;
+        if let Some(reflection) = &task.goal_reflection {
+            writeln!(
+                output,
+                "  {} by {}: {}",
+                reflection.outcome.word(),
+                reflection.model,
+                reflection.decision
+            )?;
+            writeln!(output, "  Observed: {}", reflection.observation)?;
+            writeln!(
+                output,
+                "  Evidence references: {}",
+                reflection.evidence_refs.join("; ")
+            )?;
+            writeln!(output, "  Why this follows now: {}", reflection.reason)?;
+            match &reflection.outcome {
+                task::GoalReflectionOutcome::Successor {
+                    recommendation,
+                    owner,
+                    dependencies,
+                    observable_outcome,
+                } => {
+                    writeln!(
+                        output,
+                        "  Recommended successor: {recommendation}\n  Proposed owner: {owner}\n  Dependencies: {}\n  Observable outcome: {observable_outcome}",
+                        if dependencies.is_empty() {
+                            "none stated".to_owned()
+                        } else {
+                            dependencies.join("; ")
+                        }
+                    )?;
+                }
+                task::GoalReflectionOutcome::Blocked {
+                    blocker,
+                    owner,
+                    unblock_when,
+                } => {
+                    writeln!(
+                        output,
+                        "  Blocker: {blocker}\n  Proposed owner: {owner}\n  Unblock when: {unblock_when}"
+                    )?;
+                }
+                task::GoalReflectionOutcome::CompletionRecommended
+                | task::GoalReflectionOutcome::NoUsefulSuccessor => {}
+            }
+        }
+        writeln!(
+            output,
+            "  blabla task reflect {} --outcome successor|blocked|completion-recommended|no-useful-successor --decision TEXT --observation TEXT --evidence-ref TEXT --reason TEXT --model MODEL",
+            task.name
+        )?;
+        writeln!(
+            output,
+            "  Recommendations and evidence references are accountable claims, not authenticated authority or semantic proof. Reflection never creates work, changes a goal or decides project completion."
+        )?;
     }
     write_questions(&mut output, task)?;
     write_decisions(&mut output, task, floor)?;
@@ -3440,8 +4368,25 @@ pub(super) fn resolved(project: &Project, task: &Task) -> task::Resolution {
     if !task.lenses.is_empty() {
         resolution.lenses.clone_from(&task.lenses);
     }
+    let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+    resolution.delivery_claims_pending = delivery::claims_pending(project, task, &tree);
     resolution.knowledge_fingerprints = knowledge_fingerprints(project);
     resolution.review_current = review_freshness(project, task);
+    if task.goal_reflection_required {
+        let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+        resolution.goal_reflection_current =
+            Some(goal_reflection_state(project, task, &tree) == Some("current"));
+    }
+    if task.intent_disposition_required {
+        let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
+        resolution.intent_disposition_pending = Some(
+            affected_intent(project, task, &tree)
+                .into_iter()
+                .filter(|entry| entry.state != "current")
+                .map(|entry| entry.identity)
+                .collect(),
+        );
+    }
     resolution
 }
 

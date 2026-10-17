@@ -616,6 +616,7 @@ fn record(project: &super::Project, report: serde_json::Value, fingerprint_value
         manifest: project.manifest.path.display().to_string(),
         project_identity: project.identity.clone(),
         implementation_fingerprint: fingerprint_value.into(),
+        implementation_inputs: None,
         fingerprinted_files: Vec::new(),
         application: vec!["python".into(), "app.py".into()],
         timeout_ms: 1000,

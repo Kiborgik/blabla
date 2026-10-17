@@ -1,0 +1,52 @@
+project AgenticCivilizations
+mission "mission.bla"
+system "system.bla"
+process "process.bla"
+goal "goals.bla"
+knowledge "../../knowledge/engineering.bla"
+knowledge "../../knowledge/testing.bla"
+knowledge "../../knowledge/reviewing.bla"
+knowledge "../../knowledge/design.bla"
+use structure "contracts/bootstrap.bla"
+use structure "contracts/spectator-preview.bla"
+use structure "contracts/architecture.bla"
+use behavior "contracts/campaign.bla"
+draft behavior "contracts/future-outcomes.bla"
+use behavior "contracts/concurrency.bla"
+use behavior "contracts/production.bla"
+use behavior "contracts/strategy.bla"
+use behavior "contracts/spectator.bla"
+use behavior "contracts/frontiers.bla"
+use behavior "contracts/recovery.bla"
+use behavior "contracts/public-projects.bla"
+draft behavior "contracts/trade-endpoints.bla"
+draft behavior "contracts/agent-observations.bla"
+draft behavior "contracts/action-receipts.bla"
+use behavior "contracts/land-transport.bla"
+draft behavior "contracts/operating-resource-exchange.bla"
+draft behavior "contracts/choice-pages.bla"
+draft behavior "contracts/route-map.bla"
+draft behavior "contracts/strategy-actions.bla"
+draft behavior "contracts/resident-capacity.bla"
+draft behavior "contracts/spectator-decisions.bla"
+draft behavior "contracts/required-decisions.bla"
+verify behavior {
+  command ["node", "cli/adapter.ts"]
+  seed 1701
+  cases 2
+  steps 256
+  timeout_ms 2000
+  shrink_budget 128
+}
+ignore from ".gitignore"
+
+draft behavior "contracts/coastal-founding.bla"
+
+draft behavior "contracts/research-investment.bla"
+draft behavior "contracts/district-learning.bla"
+draft behavior "contracts/worked-land.bla"
+
+draft behavior "contracts/metal-learning.bla"
+
+
+draft behavior "contracts/manufacturing.bla"

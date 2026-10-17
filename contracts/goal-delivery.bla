@@ -1,0 +1,88 @@
+state delivery_fixture_initialized: bool
+state delivery_accept_eligible: bool
+state delivery_claim_eligible: bool
+state delivery_review_eligible: bool
+state delivery_ready_eligible: bool
+state delivery_ordinary_close_eligible: bool
+state delivery_bounded_close_eligible: bool
+state delivery_resolution_eligible: bool
+state delivery_operation_succeeded: bool
+state delivery_records_unchanged: bool
+state delivery_applicable_goals_retained: bool
+state delivery_current_claims_complete: bool
+state delivery_current_reviews_accepted: bool
+state delivery_source_closed: bool
+state delivery_partial_or_blocked: bool
+state delivery_residual_expected: bool
+state delivery_residual_visible: bool
+state delivery_exact_origin_resolved: bool
+state delivery_other_origins_preserved: bool
+state delivery_history_preserved: bool
+state delivery_contract_authority_preserved: bool
+state delivery_views_agree: bool
+
+action delivery_fixture(kind: int)
+action accept_delivery_assignment()
+action record_delivery_claim()
+action record_delivery_review()
+action ready_delivery_task()
+action close_delivery_task(bounded: bool)
+action inspect_delivery_reminders()
+action resolve_delivery_origin()
+
+when delivery_fixture {
+    expect "explicit-fixture-is-observed": after.delivery_fixture_initialized
+}
+when accept_delivery_assignment {
+    expect "required-goals-follow-declared-write-systems": not before.delivery_accept_eligible or (after.delivery_operation_succeeded and after.delivery_applicable_goals_retained)
+    expect "invalid-applicability-refuses-before-writes": not before.delivery_fixture_initialized or before.delivery_accept_eligible or (not after.delivery_operation_succeeded and after.delivery_records_unchanged)
+}
+when record_delivery_claim {
+    expect "valid-current-claim-is-recorded": not before.delivery_claim_eligible or after.delivery_operation_succeeded
+    expect "missing-or-verification-only-delivery-refuses": not before.delivery_fixture_initialized or before.delivery_claim_eligible or (not after.delivery_operation_succeeded and after.delivery_records_unchanged)
+}
+when record_delivery_review {
+    expect "independent-current-review-is-recorded": not before.delivery_review_eligible or after.delivery_operation_succeeded
+    expect "invalid-review-authority-or-freshness-refuses": not before.delivery_fixture_initialized or before.delivery_review_eligible or (not after.delivery_operation_succeeded and after.delivery_records_unchanged)
+}
+when ready_delivery_task {
+    expect "ready-needs-every-current-applicable-claim": not after.delivery_operation_succeeded or after.delivery_current_claims_complete
+    expect "missing-ready-claim-has-no-effects": not before.delivery_fixture_initialized or before.delivery_ready_eligible or (not after.delivery_operation_succeeded and after.delivery_records_unchanged)
+}
+when close_delivery_task {
+    expect "both-close-modes-need-accepted-current-reviews": not after.delivery_source_closed or (after.delivery_current_claims_complete and after.delivery_current_reviews_accepted)
+    expect "eligible-reviewed-source-can-close": not ((not input.bounded and before.delivery_ordinary_close_eligible) or (input.bounded and before.delivery_bounded_close_eligible)) or after.delivery_source_closed
+    expect "eligible-partial-source-can-close-with-visible-residual": not ((not input.bounded and before.delivery_ordinary_close_eligible) or (input.bounded and before.delivery_bounded_close_eligible)) or not before.delivery_partial_or_blocked or (after.delivery_source_closed and after.delivery_residual_visible)
+    expect "refused-close-preserves-all-records": not before.delivery_fixture_initialized or ((not input.bounded and before.delivery_ordinary_close_eligible) or (input.bounded and before.delivery_bounded_close_eligible)) or (not after.delivery_operation_succeeded and after.delivery_records_unchanged)
+    expect "source-close-never-invents-goal-or-contract-completion": after.delivery_contract_authority_preserved
+}
+when inspect_delivery_reminders {
+    expect "unresolved-origins-survive-close-restart-and-green": not before.delivery_residual_expected or after.delivery_residual_visible
+    expect "bounded-text-and-json-retain-all-obligations": after.delivery_views_agree
+    expect "delivery-inspection-is-read-only": after.delivery_records_unchanged
+}
+when resolve_delivery_origin {
+    expect "accepted-exact-resolution-preserves-other-origins": not before.delivery_resolution_eligible or (after.delivery_operation_succeeded and after.delivery_exact_origin_resolved and after.delivery_other_origins_preserved and after.delivery_history_preserved)
+    expect "invalid-resolution-refuses-without-erasure": not before.delivery_fixture_initialized or before.delivery_resolution_eligible or (not after.delivery_operation_succeeded and after.delivery_records_unchanged)
+    expect "resolution-retains-existing-completion-authority": after.delivery_contract_authority_preserved
+}
+
+state delivery_batch_initialized: bool
+state delivery_selected_source_assigned: bool
+state delivery_selected_source_current: bool
+state delivery_selected_review_eligible: bool
+state delivery_selected_verdict_recorded: bool
+state delivery_other_source_verdicts_preserved: bool
+state delivery_source_records_unchanged: bool
+
+action delivery_batch_fixture(kind: int)
+action review_explicit_delivery_source()
+
+when delivery_batch_fixture {
+    expect "explicit-batch-fixture-is-observed": after.delivery_batch_initialized
+}
+when review_explicit_delivery_source {
+    expect "eligible-assigned-current-source-review-succeeds": not (before.delivery_selected_source_assigned and before.delivery_selected_source_current and before.delivery_selected_review_eligible) or (after.delivery_operation_succeeded and after.delivery_selected_verdict_recorded)
+    expect "unassigned-stale-or-ineligible-source-refuses-before-writes": not before.delivery_batch_initialized or (before.delivery_selected_source_assigned and before.delivery_selected_source_current and before.delivery_selected_review_eligible) or (not after.delivery_operation_succeeded and after.delivery_records_unchanged)
+    expect "explicit-source-review-preserves-other-sources-and-verdicts": after.delivery_other_source_verdicts_preserved and after.delivery_source_records_unchanged
+}

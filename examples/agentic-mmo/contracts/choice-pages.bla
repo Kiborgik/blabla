@@ -1,0 +1,42 @@
+state choice_page_complete: bool
+state choice_page_order_preserved: bool
+state choice_page_terms_preserved: bool
+state choice_page_context_resolves: bool
+state choice_page_within_count: bool
+state choice_page_world_unchanged: bool
+state choice_cursor_valid: bool
+state choice_view_current: bool
+state choice_page_succeeded: bool
+state choice_page_has_actions: bool
+state choice_page_before_access_refused: bool
+state choice_page_time_pinned: bool
+state choice_action_identity_exact: bool
+state choice_default_preserved: bool
+
+action choice_page_fixture(kind: int)
+action traverse_choice_pages()
+action read_choice_continuation()
+action read_malformed_choice_cursor()
+action compare_choice_action_identity()
+action read_unpaged_observation()
+
+when traverse_choice_pages {
+    expect "every-exact-choice-remains-reachable": after.choice_page_succeeded and after.choice_page_complete and after.choice_page_order_preserved
+    expect "page-zero-facts-and-consent-remain-exact": after.choice_page_context_resolves and after.choice_page_terms_preserved
+    expect "page-count-is-bounded-without-dropping-options": after.choice_page_within_count
+    expect "paging-never-mutates-the-world": after.choice_page_world_unchanged
+}
+when read_choice_continuation {
+    expect "stale-view-never-silently-restarts": before.choice_view_current or (not after.choice_page_succeeded and not after.choice_page_has_actions)
+    expect "eligible-continuation-retains-observation-time": not (before.choice_cursor_valid and before.choice_view_current) or (after.choice_page_succeeded and after.choice_page_time_pinned)
+    expect "continuation-never-mutates-the-world": after.choice_page_world_unchanged
+}
+when read_malformed_choice_cursor {
+    expect "malformed-cursor-refuses-before-world-access": after.choice_page_before_access_refused and not after.choice_page_succeeded
+}
+when compare_choice_action_identity {
+    expect "action-identity-binds-the-exact-intention": after.choice_action_identity_exact
+}
+when read_unpaged_observation {
+    expect "existing-unpaged-formats-remain-compatible": after.choice_default_preserved
+}
