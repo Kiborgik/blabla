@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-live.34",
+    "date": "2026-10-17",
+    "title": "Inhabited towns and powered research",
+    "changes": [
+      "Chiefdom and Autocracy offer different Food, original-capital construction and policy-slot choices. Inspection keeps the active government, pending transition, commitment and current work capacity separate from historical construction.",
+      "The map uses population-based residential density, broader completed Farm fields and Workshop yards, plus clearer ownership washes and borders. Terrain and exact sites remain factual; symbolic houses do not represent individual residents, and unfinished buildings are not drawn as completed.",
+      "Sanitation and Chemistry connect productive research to an era-three Research laboratory at the same town’s completed Campus. A Laboratory costs 42 Materials, 24 Credits and 18 construction work before it can operate.",
+      "A staffed Laboratory reserves two opening Credits, three local Power and three residents together for twelve base Science under existing output modifiers. Inspection shows actual Science, payments and allocations separately from base output. The town’s bounded last-positive record can be replaced by a later productive beat.",
+      "This source prepares a separate compatible activation. Actual agent government choices and Laboratory operation need their own live evidence. Matched public map views, narrow-screen use and physical-device checks remain open."
+    ]
+  },
+  {
     "version": "0.1.0-live.33",
     "date": "2026-10-17",
     "title": "A government choice for the capital",

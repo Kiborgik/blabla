@@ -33,16 +33,17 @@ const APPEARANCES: Record<string, { icon: VisualIcon; label: string; corePartIds
   farm: {
     icon: 'farm', label: 'Farm', corePartIds: ['farm-soil', 'farm-row-0'], parts: (detail) => {
       const rows = DETAIL_BUDGETS[detail].fieldRows;
-      return [part('farm-soil', 'box', 'soil', [1.02, .04, .35], [.78, .08, 1.12]),
-        ...Array.from({ length: rows }, (_, row) => part(`farm-row-${row}`, 'box', 'crop', [1.02 + ((row + .5) / rows - .5) * .7, .1, .35], [.58 / rows, .09, .98]))];
+      return [part('farm-soil', 'box', 'soil', [1.04, .035, .35], [.9, .07, 1.35]),
+        ...Array.from({ length: rows }, (_, row) => part(`farm-row-${row}`, 'box', row % 2 ? 'crop' : 'grain', [1.04, .1, .35 + ((row + .5) / rows - .5) * 1.23], [.78, .13, .91 / rows]))];
     },
   },
   workshop: {
     icon: 'workshop', label: 'Workshop', corePartIds: ['workshop-roof'], parts: (detail) => [
-      part('workshop-wall', 'box', 'timber', [-1.02, .25, .37], [.68, .5, .7]),
-      part('workshop-roof', 'gable', 'roof', [-1.02, .65, .37], [.78, .32, .8]),
-      ...(detail === 'far' ? [] : [part('workshop-chimney', 'box', 'stone', [-.77, .55, .55], [.15, 1.1, .15])]),
-      ...(detail === 'close' ? [part('workshop-stack-0', 'box', 'timber', [-1.1, .1, .96], [.42, .2, .18]), part('workshop-stack-1', 'box', 'grain', [-.8, .08, .96], [.18, .16, .18])] : []),
+      part('workshop-wall', 'box', 'timber', [-1.04, .24, .24], [.74, .48, .62]),
+      part('workshop-roof', 'gable', 'metal', [-1.04, .58, .24], [.86, .24, .74]),
+      part('workshop-chimney', 'box', 'stone', [-1.31, .55, .35], [.2, 1.1, .22]),
+      ...(detail === 'far' ? [] : [part('workshop-yard', 'box', 'soil', [-1.04, .025, .84], [.88, .05, .46]), part('workshop-stack-0', 'box', 'timber', [-1.05, .13, .85], [.6, .22, .19])]),
+      ...(detail === 'close' ? [part('workshop-stack-1', 'box', 'grain', [-.78, .09, .63], [.18, .16, .18])] : []),
     ],
   },
   irrigation: {

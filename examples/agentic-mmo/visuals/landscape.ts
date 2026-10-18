@@ -4,8 +4,10 @@ import type { DetailLevel, VisualPart } from './world-visuals.ts';
 export interface LandscapeTile { q: number; r: number; owner: number | null; terrain: 'grassland' | 'forest' | 'desert' | 'mountain' | 'tundra'; height: number }
 export interface LandscapeTown { q: number; r: number; population?: number }
 export interface LandscapeEdge { key: string; owner: number | null; from: readonly [number, number]; to: readonly [number, number]; height: number }
-export interface LandscapeProjection { coast: LandscapeEdge[]; borders: LandscapeEdge[]; parts: VisualPart[] }
+export interface LandscapeTerritory { key: string; owner: number; height: number; points: Array<readonly [number, number]> }
+export interface LandscapeProjection { coast: LandscapeEdge[]; borders: LandscapeEdge[]; territories: LandscapeTerritory[]; parts: VisualPart[] }
 export const LANDSCAPE_BUDGETS = { far: 384, mid: 768, close: 1152 } as const;
+export const TERRITORY_STYLE = { washOpacity: .24, borderWidth: .13, borderOpacity: .95 } as const;
 export const LANDSCAPE_COLORS = { grassland: '#94a773', forest: '#7e9863', desert: '#d3b077', mountain: '#9b9b84', tundra: '#b8bcb0', water: '#133f58', shallow: '#387c87', shore: '#c5be8a' } as const;
 const NEIGHBORS = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]] as const;
 const key = (tile: { q: number; r: number }): string => `${tile.q},${tile.r}`;
@@ -20,6 +22,20 @@ export function landscapeSurface(tile: LandscapeTile): string {
   const color = LANDSCAPE_COLORS[tile.terrain];
   const amount = (noise(tile.q, tile.r, 0) - .5) * .055;
   return `#${[1, 3, 5].map(offset => Math.round(Number.parseInt(color.slice(offset, offset + 2), 16) * (1 + amount)).toString(16).padStart(2, '0')).join('')}`;
+}
+
+export function territoryEdgeTriangles(edge: LandscapeEdge): number[] {
+  const dx = edge.to[0] - edge.from[0];
+  const dz = edge.to[1] - edge.from[1];
+  const length = Math.hypot(dx, dz);
+  if (!length) return [];
+  const ox = -dz / length * TERRITORY_STYLE.borderWidth / 2;
+  const oz = dx / length * TERRITORY_STYLE.borderWidth / 2;
+  const a = [edge.from[0] + ox, edge.height, edge.from[1] + oz];
+  const b = [edge.to[0] + ox, edge.height, edge.to[1] + oz];
+  const c = [edge.to[0] - ox, edge.height, edge.to[1] - oz];
+  const d = [edge.from[0] - ox, edge.height, edge.from[1] - oz];
+  return [...a, ...b, ...c, ...a, ...c, ...d];
 }
 
 function terrainParts(tile: LandscapeTile, detail: DetailLevel): VisualPart[] {
@@ -44,8 +60,14 @@ export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonl
   const townSites = new Set(towns.map(key));
   const coast: LandscapeEdge[] = [];
   const borders: LandscapeEdge[] = [];
+  const territories: LandscapeTerritory[] = [];
   for (const tile of ordered) {
     const { x, z } = hexPosition(tile.q, tile.r);
+    if (tile.owner !== null) territories.push({ key: key(tile), owner: tile.owner, height: tile.height + .012,
+      points: Array.from({ length: 6 }, (_, index) => {
+        const angle = index * Math.PI / 3 + Math.PI / 6;
+        return [x + Math.cos(angle) * .99, z + Math.sin(angle) * .99] as const;
+      }) });
     for (const [index, [dq, dr]] of NEIGHBORS.entries()) {
       const neighbor = lookup.get(`${tile.q + dq},${tile.r + dr}`);
       const a = index * Math.PI / 3 - Math.PI / 6;
@@ -54,7 +76,7 @@ export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonl
         from: [x + Math.cos(a), z + Math.sin(a)], to: [x + Math.cos(b), z + Math.sin(b)], height: Math.max(tile.height, neighbor?.height ?? 0) + .035 };
       if (!neighbor) coast.push(edge);
       if (tile.owner !== null && neighbor?.owner !== tile.owner) borders.push({ ...edge,
-        from: [x + Math.cos(a) * .95, z + Math.sin(a) * .95], to: [x + Math.cos(b) * .95, z + Math.sin(b) * .95] });
+        from: [x + Math.cos(a) * .98, z + Math.sin(a) * .98], to: [x + Math.cos(b) * .98, z + Math.sin(b) * .98] });
     }
   }
   const parts: VisualPart[] = towns.toSorted(order).flatMap((town): VisualPart[] => {
@@ -71,5 +93,5 @@ export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonl
       if (part && parts.length < LANDSCAPE_BUDGETS[detail]) parts.push(part);
     }
   }
-  return { coast, borders, parts };
+  return { coast, borders, territories, parts };
 }

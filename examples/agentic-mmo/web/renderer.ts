@@ -16,7 +16,7 @@ import { cityKey, selectedCity } from './city-selection.ts';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createLandscapeMeshes } from './landscape-three.ts';
-import { projectLandscape, landscapeSurface, LANDSCAPE_COLORS } from '../visuals/landscape.ts';
+import { projectLandscape, landscapeSurface, LANDSCAPE_COLORS, TERRITORY_STYLE, territoryEdgeTriangles } from '../visuals/landscape.ts';
 import { hexPosition, routeMapPositions, routeMapAnchor } from './atlas.ts';
 import type { AtlasCue, AtlasTile, AtlasWorld } from './atlas.ts';
 import type { ViewerPreferences } from './viewer-state.ts';
@@ -58,6 +58,34 @@ export function routeLineMeshes(route: RouteView, selected: boolean): readonly [
   line.computeLineDistances();
   line.userData['routeId'] = route.id;
   return [backing, line];
+}
+
+export function createTerritoryMeshes(world: Pick<AtlasWorld, 'tiles' | 'cities'>): THREE.Group {
+  const group = new THREE.Group();
+  const landscape = projectLandscape(world.tiles, [], 'far');
+  for (const owner of new Map(world.cities.map(city => [city.id, city])).values()) {
+    const territories = landscape.territories.filter(tile => tile.owner === owner.id);
+    if (!territories.length) continue;
+    const wash = new THREE.BufferGeometry();
+    wash.setAttribute('position', new THREE.Float32BufferAttribute(territories.flatMap(tile => tile.points.slice(1, -1).flatMap((point, index) => {
+      const first = tile.points[0];
+      const next = tile.points[index + 2];
+      return first && next ? [first[0], tile.height, first[1], point[0], tile.height, point[1], next[0], tile.height, next[1]] : [];
+    })), 3));
+    const surface = new THREE.Mesh(wash, new THREE.MeshBasicMaterial({ color: owner.color, transparent: true,
+      opacity: TERRITORY_STYLE.washOpacity, depthWrite: false, side: THREE.DoubleSide }));
+    surface.userData['territories'] = territories.map(tile => tile.key);
+    surface.userData['owner'] = owner.id;
+    const edges = landscape.borders.filter(edge => edge.owner === owner.id);
+    const outline = new THREE.BufferGeometry();
+    outline.setAttribute('position', new THREE.Float32BufferAttribute(edges.flatMap(territoryEdgeTriangles), 3));
+    const boundary = new THREE.Mesh(outline, new THREE.MeshBasicMaterial({ color: owner.color, transparent: true,
+      opacity: TERRITORY_STYLE.borderOpacity, depthWrite: false, side: THREE.DoubleSide }));
+    boundary.userData['boundaries'] = edges.map(edge => edge.key);
+    boundary.userData['owner'] = owner.id;
+    group.add(surface, boundary);
+  }
+  return group;
 }
 
 export function createAtlasRenderer(
@@ -133,7 +161,7 @@ export function createAtlasRenderer(
   const coastGeometry = new THREE.CylinderGeometry(1.07, 1.13, 0.13, 6);
   const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
   const roofGeometry = new THREE.ConeGeometry(0.74, 0.5, 4);
-  const borders = new THREE.Group();
+  const borders = createTerritoryMeshes(world);
   const acquired = new THREE.Group();
   const acquiredMaterials: LineMaterial[] = [];
   borders.add(acquired);
@@ -162,19 +190,6 @@ export function createAtlasRenderer(
     if (coastalTiles.has(`${tile.q},${tile.r}`)) addMesh(coastGeometry, LANDSCAPE_COLORS.shallow, x, -.12, z);
     addMesh(tileGeometry, landscapeSurface(tile), x, tile.height / 2, z, [1, tile.height, 1]);
   };
-  const boundaryPositions = new Map<number, number[]>();
-  for (const edge of landscape.borders) {
-    if (edge.owner === null) continue;
-    const positions = boundaryPositions.get(edge.owner) ?? [];
-    positions.push(edge.from[0], edge.height, edge.from[1], edge.to[0], edge.height, edge.to[1]);
-    boundaryPositions.set(edge.owner, positions);
-  }
-  for (const [ownerId, positions] of boundaryPositions) {
-    const owner = world.cities.find(city => city.id === ownerId);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    borders.add(new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: owner?.color ?? '#e7bf69', transparent: true, opacity: .85 })));
-  }
   for (const tile of world.tiles) addTile(tile);
   borders.visible = preferences.borders;
   scene.add(borders);

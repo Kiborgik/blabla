@@ -226,7 +226,7 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
       if (last?.localPower) facts.push({ label: 'Actual latest attempt', value: `Round ${last.round} · ${last.status} · Generated ${number(last.localPower.generated)} Power · Used ${number(last.localPower.consumed)} · Paid ${amounts(last.paid, last.strategicPaid)} · Made ${amounts(last.produced)} · Emissions ${last.emissionsProduced === undefined ? 'not recorded' : number(last.emissionsProduced)}` });
       else facts.push({ label: 'Actual latest attempt', value: 'No local Power operation recorded yet' });
       const retained = input.projection.localPower?.lastProductiveBeat;
-      const positive = retained?.cityId === input.projection.cityId ? retained.operations.find(entry => entry.buildingId === definition.id && entry.phase === 'consumer') : undefined;
+      const positive = retained?.cityId === input.projection.cityId ? retained.operations.find(entry => entry.buildingId === definition.id && entry.phase === 'consumer' && entry.result.status === 'operated' && Object.values(entry.result.produced).some(amount => amount > 0)) : undefined;
       if (positive) facts.push({ label: 'Last positive powered output', value: `Round ${retained?.round} · Made ${amounts(positive.result.produced)} · Used ${number(positive.result.localPower.consumed)} Power · Event ${positive.result.operationEventId}` });
     }
     if (row?.construction) facts.push(

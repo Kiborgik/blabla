@@ -381,7 +381,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
       if (operation?.lastResult) appendPowerResult(card, operation.lastResult);
       else card.append(text('p', 'No operating result recorded yet. A later season needs complete supplies, local Power where required, and residents.'));
       const productive = (power ?? city.localPower)?.lastProductiveBeat;
-      const historical = productive?.cityId === city.id ? productive.operations.find(entry => entry.buildingId === id && entry.phase === 'consumer') : undefined;
+      const historical = productive?.cityId === city.id ? productive.operations.find(entry => entry.buildingId === id && entry.phase === 'consumer' && entry.result.status === 'operated' && Object.values(entry.result.produced).some(amount => amount > 0)) : undefined;
       if (historical) {
         const retained = townDisclosure(`power-positive:${id}`, `Last positive powered output · Round ${productive?.round}`);
         appendPowerResult(retained, historical.result); card.append(retained);

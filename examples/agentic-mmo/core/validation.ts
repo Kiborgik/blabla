@@ -1,9 +1,11 @@
 import {
   BUILDINGS,
   COAL_RULES,
+  CONSTRUCTION_RULES,
   INDUSTRIAL_RULES,
   LAND_TRANSPORT_RULES,
   LOCAL_POWER_RULES,
+  POWERED_SCIENCE_RULES,
   RESIDENT_CAPACITY_RULES,
   STRATEGIC_RESOURCE_IDS,
   STRATEGIC_RESOURCE_RULES,
@@ -155,6 +157,50 @@ function civilization(value: unknown): value is Civilization {
     ) &&
     finite(value.legitimacy, 0, 100)
   );
+}
+
+function poweredScienceRecords(civilizations: Civilization[], cities: City[], events: GameEvent[], features: string[]): boolean {
+  const enabled = features.includes(POWERED_SCIENCE_RULES.featureId);
+  const branch = TECHNOLOGIES.filter(technology => technology.requiredFeatures.includes(POWERED_SCIENCE_RULES.featureId));
+  const available = (id: string, completed: string[]): boolean => {
+    const definition = branch.find(technology => technology.id === id);
+    return !!definition && definition.requiredFeatures.every(feature => features.includes(feature))
+      && definition.requires.every(required => completed.includes(required));
+  };
+  for (const actor of civilizations) {
+    for (const [index, id] of actor.technologies.entries())
+      if (branch.some(technology => technology.id === id) && !available(id, actor.technologies.slice(0, index))) return false;
+    const target = branch.find(technology => technology.id === actor.researchTarget);
+    if (target && (!available(target.id, actor.technologies) || actor.technologies.includes(target.id) || actor.researchProgress >= target.cost)) return false;
+    const completed = actor.lastResearchCompletion;
+    if (completed && branch.some(technology => technology.id === completed.technologyId)) {
+      const event = events.find(candidate => candidate.id === completed.eventId);
+      if (event && (event.type !== 'research-completed' || event.actor !== actor.id || event.target !== actor.id
+        || event.round !== completed.completedRound || !event.effects.includes(`Technology ${completed.technologyId} unlocked`))) return false;
+    }
+  }
+  const laboratory = BUILDINGS.find(building => building.id === 'research-lab');
+  if (!laboratory) return false;
+  for (const settlement of cities) {
+    const active = settlement.construction?.active;
+    const completed = settlement.construction?.lastCompleted;
+    const commitments = [active, completed].filter(order => order && !('kind' in order) && order.buildingId === laboratory.id);
+    const receipts = [settlement.localPower?.lastBeat, settlement.localPower?.lastProductiveBeat];
+    if (!enabled && (settlement.buildings.includes(laboratory.id) || commitments.length > 0
+      || receipts.some(receipt => receipt?.operations.some(operation => operation.buildingId === laboratory.id)))) return false;
+    for (const order of commitments) if (!order || !sameSnapshot(order.paid, laboratory.cost) || order.workRequired !== CONSTRUCTION_RULES.requiredWork['research-lab']) return false;
+    if (active && !('kind' in active) && active.buildingId === laboratory.id) {
+      const actor = civilizations.find(candidate => candidate.id === settlement.civId);
+      if (!actor || actor.era < laboratory.minEra || !laboratory.requires.every(id => actor.technologies.includes(id))
+        || !laboratory.requiredFeatures.every(feature => features.includes(feature))) return false;
+    }
+  }
+  return enabled || events.every(event => !event.localPower?.operations.some(operation => operation.buildingId === laboratory.id)
+    && !(event.type === 'building-operation' && event.detail.includes(`/${laboratory.id} at strategic round `))
+    && !(event.type === 'building-operation-changed' && event.detail.endsWith(`/${laboratory.id}`))
+    && !(event.type === 'building-completed' && event.title.endsWith(` builds ${laboratory.name}`))
+    && !(event.type === 'research-started' && branch.some(technology => technology.id === event.detail))
+    && !(event.type === 'research-completed' && branch.some(technology => event.effects.includes(`Technology ${technology.id} unlocked`))));
 }
 
 function civicDefinitionAvailable(definition: { requiredFeatures: readonly string[]; requires: string[] }, features: string[], completed: string[]): boolean {
@@ -1676,6 +1722,7 @@ export function isWorldState(
     !powerRecords(cities, value.events, features, round, value.revision) ||
     !growthRecords(cities, value.events, features, round, value.revision) ||
     !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
+    !poweredScienceRecords(value.civilizations, cities, value.events, features) ||
     !civicRecords(value.civilizations, value.events, features, round, value.revision) ||
     !districtRecords(cities, tiles, value.events, features) ||
     !observatoryRecords(cities, tiles, value.events, features) ||

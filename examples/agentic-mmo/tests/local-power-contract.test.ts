@@ -4,7 +4,7 @@ import { test } from 'node:test';
 
 void test('the approved local Power draft is registered before runtime and retains eight actions fourteen rules', () => {
   assert.match(readFileSync(new URL('../project.bla', import.meta.url), 'utf8'), /draft behavior "contracts\/local-power\.bla"/);
-  const contract = readFileSync(new URL('../contracts/local-power.bla', import.meta.url), 'utf8');
+  const contract = readFileSync(new URL('../contracts/local-power.bla', import.meta.url), 'utf8').split('state powered_science_compatible_adoption:')[0]; assert.ok(contract);
   assert.equal([...contract.matchAll(/^action /gm)].length, 8); assert.equal([...contract.matchAll(/    expect /g)].length, 14);
 });
 
@@ -12,7 +12,7 @@ import { LocalPowerProbe } from '../cli/local-power-probe.ts';
 void test('local Power probe derives all fourteen rules from genuine source transitions and labeled controls', context => {
   const probe = new LocalPowerProbe(); const initial = probe.snapshot();
   assert.equal(probe.observe().initialized, false); assert.throws(() => probe.call('invented'), RangeError); assert.deepEqual(probe.snapshot(), initial);
-  const contract = readFileSync(new URL('../contracts/local-power.bla', import.meta.url), 'utf8'); const failures: string[] = [];
+  const contract = readFileSync(new URL('../contracts/local-power.bla', import.meta.url), 'utf8').split('state powered_science_compatible_adoption:')[0]; assert.ok(contract); const failures: string[] = [];
   for (const match of contract.matchAll(/when (\w+) \{([\s\S]*?)\n\}/g)) {
     const action = match[1]; assert.ok(action); probe.call(action);
     context.diagnostic(`${action}: ${JSON.stringify(probe.observe())}`);

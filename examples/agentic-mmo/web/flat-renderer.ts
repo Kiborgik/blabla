@@ -9,7 +9,7 @@ import { visibleRoutePaths } from '../visuals/route-paths.ts';
 import { routeLabelKey, routeTitle, routeVisual, routeMapLabel } from '../visuals/route-visuals.ts';
 import { damageMapLabel } from '../visuals/damage-visuals.ts';
 import { cityKey, selectedCity } from './city-selection.ts';
-import { projectLandscape, landscapeSurface, LANDSCAPE_COLORS } from '../visuals/landscape.ts';
+import { projectLandscape, landscapeSurface, LANDSCAPE_COLORS, TERRITORY_STYLE } from '../visuals/landscape.ts';
 import { hexPosition, routeMapPositions, routeMapAnchor } from './atlas.ts';
 import type { RouteView } from '../visuals/route-visuals.ts';
 import type { AtlasWorld } from './atlas.ts';
@@ -46,6 +46,22 @@ function node<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<s
   return element;
 }
 
+export function createFlatTerritoryLayer(world: Pick<AtlasWorld, 'tiles' | 'cities'>): SVGGElement {
+  const group = node('g', { 'pointer-events': 'none', class: 'territory-layer' });
+  const landscape = projectLandscape(world.tiles, [], 'far');
+  for (const territory of landscape.territories) {
+    const owner = world.cities.find(city => city.id === territory.owner);
+    if (owner) group.append(node('polygon', { points: territory.points.map(point => point.join(',')).join(' '),
+      fill: owner.color, 'fill-opacity': String(TERRITORY_STYLE.washOpacity), 'data-territory': territory.key, 'data-owner': String(territory.owner) }));
+  }
+  for (const edge of landscape.borders) {
+    const owner = world.cities.find(city => city.id === edge.owner);
+    if (owner) group.append(node('path', { d: `M${edge.from.join(' ')}L${edge.to.join(' ')}`, fill: 'none', stroke: owner.color,
+      'stroke-opacity': String(TERRITORY_STYLE.borderOpacity), 'stroke-width': String(TERRITORY_STYLE.borderWidth), 'stroke-linecap': 'round', 'data-boundary': edge.key }));
+  }
+  return group;
+}
+
 export function createFlatAtlasRenderer(
   container: HTMLElement,
   world: AtlasWorld,
@@ -57,9 +73,8 @@ export function createFlatAtlasRenderer(
   const coast = node('g', { 'pointer-events': 'none' });
   const land = node('g', {});
   const terrain = node('g', { 'pointer-events': 'none', class: 'landscape-parts' });
-  const borders = node('g', { 'pointer-events': 'none' });
+  const borders = createFlatTerritoryLayer(world);
   const acquired = node('g', { class: 'acquired-land', 'pointer-events': 'none' });
-  borders.append(acquired);
   const routes = node('g', { class: 'flat-routes' });
   let selectedRoute: string | null = null;
   let routeLabel: { element: SVGGElement; title: SVGTextElement; x: number; z: number; id: string } | null = null;
@@ -96,10 +111,7 @@ export function createFlatAtlasRenderer(
   const coastPath = landscape.coast.map(edge => `M${edge.from.join(' ')}L${edge.to.join(' ')}`).join(' ');
   coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shallow, 'stroke-width': '.42', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
   coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shore, 'stroke-width': '.14', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
-  for (const edge of landscape.borders) {
-    const owner = world.cities.find(city => city.id === edge.owner);
-    if (owner) borders.append(node('path', { d: `M${edge.from.join(' ')}L${edge.to.join(' ')}`, fill: 'none', stroke: owner.color, 'stroke-opacity': '.9', 'stroke-width': '.09', 'stroke-linecap': 'round' }));
-  }
+  borders.append(acquired);
   const paintParts = (host: SVGGElement, parts: Parameters<typeof flatSceneFaces>[0], identity: string): void => {
     host.replaceChildren();
     for (const face of flatSceneFaces(parts)) {

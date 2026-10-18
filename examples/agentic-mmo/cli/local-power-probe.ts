@@ -1,3 +1,4 @@
+import { PoweredScienceProbe, POWERED_SCIENCE_ACTIONS } from './powered-science-probe.ts';
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { BUILDINGS, RESOURCE_IDS } from '../core/content.ts';
@@ -22,18 +23,20 @@ function emptyPayment(result: BuildingOperationResult | null | undefined): boole
 }
 
 export class LocalPowerProbe {
+  private successor: PoweredScienceProbe | null = null;
   private path: ReturnType<typeof localPowerJourney> | null = null;
   private state: WorldState | null = null;
   private predicates: Record<string, boolean> = {};
   private controls = 0;
   private replayedFrames = 0;
   private getPath() { this.path ??= localPowerJourney(); return this.path; }
-  reset(): void { this.state = null; this.predicates = {}; this.controls = 0; this.replayedFrames = 0; }
-  snapshot() { return structuredClone({ state: this.state, predicates: this.predicates, controls: this.controls, replayedFrames: this.replayedFrames }); }
-  observe() { return { initialized: this.state !== null, ...this.predicates, controls: this.controls, replayed_frames: this.replayedFrames, provenance: 'Genuine typed industrial-to-local-Power journey; detached shortage, synthetic contention/output and invalid-state controls are not live play' }; }
+  reset(): void { this.successor = null; this.state = null; this.predicates = {}; this.controls = 0; this.replayedFrames = 0; }
+  snapshot() { if (this.successor) return this.successor.snapshot(); return structuredClone({ state: this.state, predicates: this.predicates, controls: this.controls, replayedFrames: this.replayedFrames }); }
+  observe() { if (this.successor) return this.successor.observe(); return { initialized: this.state !== null, ...this.predicates, controls: this.controls, replayed_frames: this.replayedFrames, provenance: 'Genuine typed industrial-to-local-Power journey; detached shortage, synthetic contention/output and invalid-state controls are not live play' }; }
   call(action: string): void {
+    if (POWERED_SCIENCE_ACTIONS.some(item => item === action)) { this.successor ??= new PoweredScienceProbe(); this.successor.call(action); return; }
     if (!actions.includes(action)) throw new RangeError(`Unknown local Power action ${action}`);
-    const path = this.getPath(); this.state = structuredClone(path.state); this.predicates = {}; this.controls = 0; this.replayedFrames = 0;
+    this.successor = null; const path = this.getPath(); this.state = structuredClone(path.state); this.predicates = {}; this.controls = 0; this.replayedFrames = 0;
     const positive = town(path.productive, path.cityId).localPower?.lastProductiveBeat; assert.ok(positive);
     if (action === 'adopt_local_power') {
       const before = path.beforeRelease; const after = path.adopted;

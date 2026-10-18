@@ -6,6 +6,7 @@ import type {
 } from './types.ts';
 
 export const CIVIC_RULES = { ruleVersion: 1, featureId: 'civic-bootstrap', governmentCredits: 10, reslotCredits: 8, commitmentBeats: 4, transitionBeats: 2, transitionOutput: 0.75 } as const;
+export const POWERED_SCIENCE_RULES = { ruleVersion: 1, featureId: 'powered-science' } as const;
 export const SECOND_GOVERNMENT_RULES = { ruleVersion: 1, featureId: 'second-government' } as const;
 export const POLICY_SLOT_TYPES = ['military', 'economic', 'diplomatic', 'wildcard'] as const;
 export const CIVICS: CivicDefinition[] = [
@@ -40,7 +41,7 @@ export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, pe
 
 export const LOCAL_POWER_RULES = { ruleVersion: 1, featureId: 'local-power' } as const;
 
-export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { 'coal-plant': 18, factory: 18, observatory: 14, foundry: 14, 'theater-square': 10, 'printing-house': 14, 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { 'research-lab': 18, 'coal-plant': 18, factory: 18, observatory: 14, foundry: 14, 'theater-square': 10, 'printing-house': 14, 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
 
 export const LOCAL_GROWTH_RULES = { ruleVersion: 1, featureId: 'local-growth', legacyBaseCapacity: 20, foundedBaseCapacity: 8, baseFoodCost: 6, populationPerFoodCost: 4, researchMultiplier: 3 } as const;
 
@@ -76,6 +77,7 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'powered-science', name: 'Powered scientific laboratories', description: 'Sanitation and Chemistry lead to paid era-three local Campus laboratories using same-town Power, Credits and residents for productive Science.' },
   { id: 'local-power', name: 'Local Coal power supplies productive Factories', description: 'Opening Coal and residents generate expiring same-town Power for atomically staffed Factories. Emissions are receipt-only; industrial-project work remains planned.' },
   { id: 'industrial-steam', name: 'Finite Coal powers useful rail exchanges', description: 'Connected productive research reveals finite hill Coal, funds exact owned rail edges and enables newly consented fuel-paid steam delivery.' },
   { id: 'civic-bootstrap', name: 'Culture shapes government', description: 'Actual current Culture funds explicitly chosen civics. Chiefdom and a chosen Urban planning policy improve the next working season.' },
@@ -154,7 +156,9 @@ export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
 };
 
 export const TECHNOLOGIES: TechnologyDefinition[] = [
-  { id: 'scientific-method', name: 'Scientific method', requiredFeatures: ['industrial-steam'], era: 2, cost: 150, requires: ['printing', 'astronomy'], capability: 'Connect Printing and Astronomy to accepted Industrialization and finite Coal. Chemistry and later discoveries remain planned.' },
+  { id: 'sanitation', name: 'Sanitation', requiredFeatures: ['powered-science'], era: 2, cost: 140, requires: ['construction', 'education'], capability: 'Connect Construction and Education to Chemistry. Sewer housing and disease systems remain planned.' },
+  { id: 'chemistry', name: 'Chemistry', requiredFeatures: ['powered-science'], era: 3, cost: 260, requires: ['scientific-method', 'sanitation'], capability: 'Operate an era-three Research laboratory at this town’s completed Campus using three local Power, two Credits and three residents for Science. Knowledge points and other Chemistry successors remain planned.' },
+  { id: 'scientific-method', name: 'Scientific method', requiredFeatures: ['industrial-steam'], era: 2, cost: 150, requires: ['printing', 'astronomy'], capability: 'Connect Printing and Astronomy to accepted Industrialization and finite Coal. Chemistry additionally requires Sanitation and the powered Science release; later discoveries remain planned.' },
   { id: 'shipbuilding', name: 'Shipbuilding', requiredFeatures: ['industrial-steam'], era: 1, cost: 66, requires: ['sailing', 'celestial-navigation'], capability: 'Connect Sailing and Celestial navigation to Steam power. Shipyards and ships remain planned.' },
   { id: 'steam-power', name: 'Steam power', requiredFeatures: ['industrial-steam'], era: 3, cost: 240, requires: ['industrialization', 'shipbuilding'], capability: 'Pay for exact owned Rail edges and propose new immutable fuel-paid steam exchanges. Canals and physical ships remain planned.' },
   { id: 'sailing', name: 'Sailing', requiredFeatures: ['observatory-learning'], era: 0, cost: 72, requires: ['water-management'], capability: 'Connect water knowledge to Celestial navigation and the useful Astronomy branch. Fishing, Lighthouse and ships remain planned.' },
@@ -213,6 +217,7 @@ export const IMPROVEMENTS: ImprovementDefinition[] = [
 ];
 
 export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'research-lab', name: 'Research laboratory', requiredFeatures: ['powered-science', 'local-power', 'building-operations', 'resident-capacity', 'district-planning'], minEra: 3, cost: { materials: 42, credits: 24 }, requires: ['chemistry'], requiresBuildings: ['campus'], effects: [], operatingInputs: { credits: 2 }, localPowerInput: 3, production: { science: 12 }, description: 'Reserve two opening Credits, three same-town Power and three residents atomically for twelve base Science under ordinary output modifiers. Actual Science can fund an explicitly selected research target this season. Knowledge points remain planned.' },
   { id: 'coal-plant', name: 'Coal power plant', requiredFeatures: ['local-power', 'industrial-steam', 'building-operations', 'resident-capacity'], minEra: 3, cost: { materials: 38, credits: 22 }, requires: ['industrialization'], requiresBuildings: ['industrial-zone'], effects: [], strategicInputs: { coal: 2 }, localPowerOutput: 8, emissionsPerOperation: 4, production: {}, description: 'Reserve two opening Coal and three local residents to generate eight same-town Power before consumers. Unspent Power expires; four emissions are recorded per paid operation. No ordinary Energy is generated.' },
   { id: 'factory', name: 'Factory', requiredFeatures: ['local-power', 'building-operations', 'resident-capacity'], minEra: 3, cost: { materials: 40, credits: 24 }, requires: ['industrialization'], requiresBuildings: ['industrial-zone'], effects: [], localPowerInput: 3, production: { materials: 12 }, description: 'Reserve three same-town Power and three residents together for twelve base Materials under existing output modifiers. An unpowered Factory spends nothing. The undefined industrial-project work bonus remains planned.' },
   { id: 'observatory', name: 'Observatory', requiredFeatures: ['observatory-learning', 'building-operations', 'resident-capacity', 'district-planning'], minEra: 2, cost: { materials: 30, credits: 16 }, requires: ['astronomy'], requiresBuildings: ['campus'], effects: [], operatingInputs: { credits: 2 }, production: { science: 7 }, siteRequirement: 'campus-high-ground', description: 'Retain this town’s completed Campus and an actual adjacent mountain or hill. Two Credits and three local residents support Science on a later season; great-person points remain planned.' },

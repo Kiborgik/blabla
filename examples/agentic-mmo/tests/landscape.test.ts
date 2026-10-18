@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { projectLandscape, LANDSCAPE_BUDGETS } from '../visuals/landscape.ts';
+import { projectLandscape, LANDSCAPE_BUDGETS, TERRITORY_STYLE, territoryEdgeTriangles, landscapeSurface } from '../visuals/landscape.ts';
 import type { LandscapeTile } from '../visuals/landscape.ts';
-import { settlementVisual } from '../visuals/world-visuals.ts';
+import { settlementVisual, DETAIL_BUDGETS } from '../visuals/world-visuals.ts';
 import * as THREE from 'three';
 import { createLandscapeMeshes } from '../web/landscape-three.ts';
 import { projectWorld } from '../web/live-world.ts';
 import { flatSceneFaces, shapeTriangles, flatPartFaces } from '../web/settlement-parts.ts';
 import { createWorld } from '../core/engine.ts';
+import { createTerritoryMeshes } from '../web/renderer.ts';
+import { createFlatTerritoryLayer } from '../web/flat-renderer.ts';
+import { createSettlementMeshes } from '../web/settlement-three.ts';
 
 const tiles = [
   { q: 0, r: 0, owner: 0, terrain: 'forest', height: .3 },
@@ -139,4 +142,141 @@ await test('larger population roofs leave all seven built families and current d
       }
     }
   }
+});
+
+await test('actual population tiers change residential massing without borrowing the field or workshop footprint', () => {
+  const city = createWorld(1701).cities[0];
+  assert.ok(city);
+  for (const detail of ['far', 'mid', 'close'] as const) {
+    const samples: ReturnType<typeof settlementVisual>[] = [3, 18, 30].map(population => settlementVisual({ ...city, population, buildings: ['farm', 'workshop', 'aqueduct'] }, detail));
+    const heights = samples.map(visual => Math.max(...visual.parts.filter(part => part.id.startsWith('home-')).map(part => part.position[1] + part.scale[1] / 2)));
+    assert.ok(heights[0] !== undefined && heights[1] !== undefined && heights[2] !== undefined);
+    assert.ok(heights[1] > heights[0] + .25);
+    assert.ok(heights[2] > heights[1] + .1);
+    const first = samples[0];
+    assert.ok(first);
+    for (const visual of samples) {
+      assert.ok(visual.houses <= DETAIL_BUDGETS[detail].houses);
+      assert.ok(visual.parts.length <= DETAIL_BUDGETS[detail].parts);
+      assert.deepEqual(visual.parts.filter(part => !part.id.startsWith('home-')), first.parts.filter(part => !part.id.startsWith('home-')));
+      assert.ok(visual.parts.filter(part => part.id.startsWith('home-')).every(part => Math.abs(part.position[0]) + part.scale[0] / 2 < .65));
+    }
+  }
+});
+
+await test('fields and workshop yards reflect installed structures, not active orders or operating permission', () => {
+  const state = createWorld(1701);
+  const city = state.cities[0];
+  assert.ok(city);
+  city.buildings = [];
+  city.construction = { active: { id: 'synthetic-order', ruleVersion: 1, cityId: city.id, buildingId: 'farm', startedRound: 1,
+    paid: { materials: 8, credits: 4 }, workRequired: 4, workDone: 3 }, lastCompleted: null };
+  const before = structuredClone(state);
+  const town = projectWorld(state).cities.find(candidate => candidate.cityId === city.id)?.settlement;
+  assert.ok(town);
+  assert.ok(settlementVisual(town, 'mid').parts.every(part => part.id.startsWith('home-')));
+  assert.deepEqual(state, before);
+  const installed = { ...city, buildings: ['farm', 'workshop'] };
+  const visual = settlementVisual(installed, 'mid');
+  const rows = visual.parts.filter(part => part.id.startsWith('farm-row'));
+  assert.equal(rows.length, 3);
+  assert.equal(new Set(rows.map(part => part.material)).size, 2);
+  assert.ok(rows.every(part => part.scale[0] > .7));
+  assert.ok(visual.parts.some(part => part.id === 'workshop-roof' && part.material === 'metal'));
+  assert.ok(visual.parts.some(part => part.id === 'workshop-chimney'));
+  assert.ok(visual.parts.some(part => part.id === 'workshop-yard'));
+  assert.deepEqual(settlementVisual({ ...installed, buildingOperations: { workshop: { enabled: false, lastResult: null } } }, 'mid').parts, visual.parts);
+});
+
+await test('ownership surfaces cover only exact committed owned hexes and preserve terrain and coast', () => {
+  const source = [...tiles, { q: 2, r: 0, owner: 1, terrain: 'grassland' as const, height: .2 }, { q: 3, r: 0, owner: null, terrain: 'desert' as const, height: .15 }];
+  const before = structuredClone(source);
+  const result = projectLandscape(source, [], 'mid');
+  assert.deepEqual(result.territories.map(tile => [tile.key, tile.owner]), [['0,0', 0], ['1,0', 0], ['2,0', 1]]);
+  assert.ok(result.territories.every(tile => tile.points.length === 6));
+  assert.ok(!result.borders.some(edge => edge.key === '0,0:0' || edge.key === '1,0:3'));
+  assert.ok(result.borders.some(edge => edge.key === '2,0:0'));
+  const unowned = source.map(tile => ({ ...tile, owner: null }));
+  const clear = projectLandscape(unowned, [], 'mid');
+  assert.equal(clear.territories.length, 0);
+  assert.equal(clear.borders.length, 0);
+  assert.deepEqual(clear.parts, result.parts);
+  assert.deepEqual(clear.coast.map(edge => [edge.key, edge.from, edge.to]), result.coast.map(edge => [edge.key, edge.from, edge.to]));
+  assert.deepEqual(unowned.map(landscapeSurface), source.map(landscapeSurface));
+  assert.deepEqual(result, projectLandscape(source.toReversed(), [], 'mid'));
+  assert.deepEqual(source, before);
+  assert.ok(TERRITORY_STYLE.washOpacity > 0 && TERRITORY_STYLE.washOpacity < .3);
+});
+
+class TerritoryElement {
+  tag: string;
+  attributes = new Map<string, string>();
+  children: TerritoryElement[] = [];
+  constructor(tag: string) { this.tag = tag; }
+  setAttribute(name: string, value: string): void { this.attributes.set(name, value); }
+  append(...children: TerritoryElement[]): void { this.children.push(...children); }
+}
+
+await test('SVG and Three territory layers share exact tiles, owners and boundaries without new interaction targets', () => {
+  const world = projectWorld(createWorld(1701));
+  world.tiles = [...tiles, { q: 2, r: 0, owner: 1, terrain: 'grassland', height: .2 }, { q: 3, r: 0, owner: null, terrain: 'forest', height: .3 }];
+  const before = structuredClone(world);
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElementNS: (_namespace: string, tag: string) => new TerritoryElement(tag) } });
+  let flat: TerritoryElement;
+  try { flat = createFlatTerritoryLayer(world) as unknown as TerritoryElement; }
+  finally { if (previous) Object.defineProperty(globalThis, 'document', previous); else Reflect.deleteProperty(globalThis, 'document'); }
+  const layer = createTerritoryMeshes(world);
+  const projected = projectLandscape(world.tiles, [], 'far');
+  assert.equal(flat.attributes.get('pointer-events'), 'none');
+  assert.ok(flat.children.every(element => ['polygon', 'path'].includes(element.tag) && !element.attributes.has('tabindex')));
+  assert.deepEqual(flat.children.filter(element => element.tag === 'polygon').map(element => element.attributes.get('data-territory')), projected.territories.map(tile => tile.key));
+  assert.deepEqual(layer.children.flatMap(child => child.userData['territories'] ?? []).sort(), projected.territories.map(tile => tile.key).sort());
+  assert.deepEqual(layer.children.flatMap(child => child.userData['boundaries'] ?? []).sort(), projected.borders.map(edge => edge.key).sort());
+  for (const child of layer.children) {
+    assert.ok(child instanceof THREE.Mesh);
+    assert.ok(child.material instanceof THREE.MeshBasicMaterial);
+    const owner = world.cities.find(city => city.id === child.userData['owner']);
+    assert.ok(owner);
+    assert.equal(`#${child.material.color.getHexString()}`, owner.color.toLowerCase());
+    assert.equal(child.material.depthWrite, false);
+    const positions = child.geometry.getAttribute('position');
+    assert.ok(positions.count > 0);
+    assert.ok(Array.from(positions.array).every(Number.isFinite));
+    if (child.userData['territories']) assert.equal(child.material.opacity, TERRITORY_STYLE.washOpacity);
+    else assert.equal(positions.count, projected.borders.filter(edge => edge.owner === owner.id).length * 6);
+    child.geometry.dispose();
+    child.material.dispose();
+  }
+  assert.deepEqual(world, before);
+});
+
+await test('boundary ribbons retain canonical elevation and do not add width along an empty edge', () => {
+  const edge = projectLandscape(tiles, [], 'mid').borders[0];
+  assert.ok(edge);
+  const points = territoryEdgeTriangles(edge);
+  assert.equal(points.length, 18);
+  assert.ok(points.filter((_, index) => index % 3 === 1).every(height => height === edge.height));
+  assert.deepEqual(territoryEdgeTriangles({ ...edge, to: edge.from }), []);
+});
+
+await test('shared inhabited parts remain the exact Three instances at every detail tier', () => {
+  const state = createWorld(1701);
+  const city = state.cities[0];
+  assert.ok(city);
+  city.population = 30;
+  city.buildings = ['farm', 'workshop', 'aqueduct'];
+  const world = projectWorld(state);
+  world.cities = world.cities.filter(town => town.cityId === city.id);
+  const appearance = new THREE.MeshBasicMaterial();
+  const meshes = createSettlementMeshes(world, () => appearance);
+  for (const [pixels, detail] of [[18, 'far'], [36, 'mid'], [60, 'close']] as const) {
+    assert.equal(meshes.update(pixels), detail);
+    const instances = meshes.group.children.filter((child): child is THREE.InstancedMesh => child instanceof THREE.InstancedMesh);
+    assert.equal(instances.reduce((sum, mesh) => sum + mesh.count, 0), settlementVisual(city, detail).parts.length);
+    assert.ok(instances.every(mesh => mesh.boundingSphere !== null));
+  }
+  meshes.dispose();
+  assert.equal(meshes.group.children.length, 0);
+  appearance.dispose();
 });

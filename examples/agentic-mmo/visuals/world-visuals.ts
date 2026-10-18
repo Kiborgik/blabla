@@ -32,8 +32,8 @@ export interface SettlementVisual {
 }
 
 const HOME_SITES: ReadonlyArray<readonly [number, number]> = [
-  [-.46, -.36], [.04, -.32], [.49, -.23], [-.45, .2],
-  [.04, .24], [.48, .32], [-.17, .68], [.22, -.73],
+  [-.29, -.42], [.27, -.42], [-.29, .03], [.27, .03],
+  [-.29, .48], [.27, .48], [-.3, -.83], [.28, -.83],
 ];
 const POPULATION_STEPS = [1, 4, 7, 10, 14, 20, 28, 40] as const;
 export type SettlementFacts = Pick<City, 'id' | 'civId' | 'tileId' | 'name' | 'population' | 'wellbeing' | 'damage' | 'buildings' | 'buildingOperations'>;
@@ -53,12 +53,14 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
     parts.push({ id, shape, material, position, scale, rotation });
   };
   const density = populationFootprint(city.population);
+  const tier = city.population >= 28 ? 3 : city.population >= 14 ? 2 : city.population >= 7 ? 1 : 0;
   for (const [index, [siteX, siteZ]] of HOME_SITES.slice(0, houses).entries()) {
     const x = siteX * density;
     const z = siteZ * density;
-    const height = (.29 + (index % 3) * .07) * density;
-    add(`home-${index}-wall`, 'box', 'plaster', [x, height / 2, z], [.4 * density, height, .36 * density]);
-    add(`home-${index}-roof`, 'gable', index === 0 ? 'identity' : 'roof', [x, height + .12, z], [.46 * density, .24, .42 * density], index % 2 ? Math.PI / 2 : 0);
+    const height = .22 + tier * .17 + (index % 2) * .06;
+    const width = .35 + tier * .045;
+    add(`home-${index}-wall`, 'box', 'plaster', [x, height / 2, z], [width, height, .32 + tier * .025]);
+    add(`home-${index}-roof`, 'gable', index % 3 === 0 ? 'identity' : 'roof', [x, height + .12, z], [width + .08, .24, .4 + tier * .025]);
   }
   const buildings = appearances.map(({ icon, label }) => ({ icon, label, value: 1 }));
   parts.push(...allocateBuildingParts(appearances, budget.parts - parts.length - conditionParts.length));
