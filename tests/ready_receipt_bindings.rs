@@ -73,9 +73,10 @@ fn call(probe: &mut ready_receipts::ReadyReceipts, name: &str, args: Value) {
 #[test]
 fn all_finite_fixtures_use_actual_positive_or_zero_effect_refusal_outcomes() {
     let _guard = serial();
+    let campaign = source_cli::Campaign::new();
     for reflection in [false, true] {
         for kind in 0..12 {
-            let mut probe = ready_receipts::ReadyReceipts::new();
+            let mut probe = ready_receipts::ReadyReceipts::with_campaign(campaign.clone());
             call(&mut probe, "ready_receipt_fixture", json!([kind]));
             let before = probe.observe();
             let eligible = matches!(kind, 0 | 7 | 8 | 10 | 11);
