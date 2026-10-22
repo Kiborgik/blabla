@@ -311,6 +311,7 @@ pub(crate) fn claims_pending(
 #[derive(Clone)]
 pub(crate) struct ClaimInput {
     pub goal: String,
+    pub refresh_ready: bool,
     pub status: String,
     pub observation: String,
     pub refs: Vec<String>,
@@ -538,9 +539,15 @@ fn inspect(manifest: &Path, name: &str, request: &Request, json: bool) -> Result
         .and_then(blabla::project::load)
         .map_err(|e| refuse(format!("cannot reload delivery authority: {e:?}"), json))?;
     let task = load(&project, name, json)?;
-    if task.state != "accepted" || !permitted(&project, &task, request.model()) {
+    let refresh_ready = matches!(request, Request::Claim(input) if input.refresh_ready);
+    let state = if refresh_ready { "ready" } else { "accepted" };
+    if task.state != state || !permitted(&project, &task, request.model()) {
         return Err(refuse(
-            "delivery recording requires the ACCEPTED task's currently permitted model",
+            if refresh_ready {
+                "--refresh-ready requires the READY task's same currently permitted accepted model"
+            } else {
+                "delivery recording requires the ACCEPTED task's currently permitted model"
+            },
             json,
         ));
     }
@@ -1092,7 +1099,7 @@ mod tests {
     }
 
     fn claim() -> Request {
-        Request::Claim(ClaimInput { goal: "deliver".into(), status: "partial".into(), observation: "Explicit synthetic observed source outcome".into(), refs: vec![json!({"kind":"artifact","locator":"observation.txt","context":"Synthetic artifact inspected for this fixture"}).to_string()], delivered: Some("Source behavior".into()), remaining: Some("Authorized runtime delivery".into()), owner: Some("release-owner".into()), next: Some("Authorize then observe".into()), blocker: None, unblock_when: None, reason: None, model: "worker".into() })
+        Request::Claim(ClaimInput { goal: "deliver".into(), refresh_ready: false, status: "partial".into(), observation: "Explicit synthetic observed source outcome".into(), refs: vec![json!({"kind":"artifact","locator":"observation.txt","context":"Synthetic artifact inspected for this fixture"}).to_string()], delivered: Some("Source behavior".into()), remaining: Some("Authorized runtime delivery".into()), owner: Some("release-owner".into()), next: Some("Authorize then observe".into()), blocker: None, unblock_when: None, reason: None, model: "worker".into() })
     }
 
     fn review_request(origin: Option<Origin>) -> Request {
@@ -1200,6 +1207,13 @@ mod tests {
         }
         assert_eq!(write(&project, "work", claim(), true), 0);
         handback(&project, "work");
+        if mode == 5 {
+            let Request::Claim(mut input) = claim() else {
+                unreachable!()
+            };
+            input.refresh_ready = true;
+            return (temp, project, "work".into(), Request::Claim(input));
+        }
         prepare(&project, "review", "reviews/review.md", false, Some("work"));
         if mode == 1 || mode == 3 {
             return (temp, project, "review".into(), review_request(None));
@@ -1286,7 +1300,7 @@ mod tests {
 
     #[test]
     fn delivery_checkpoint_noop_records_all_three_explicit_operations() {
-        for mode in 0..4 {
+        for mode in (0..4).chain(std::iter::once(5)) {
             let (_temp, project, name, request) = fixture(mode);
             let mut reached = false;
             let before = task::read(&project.manifest.root, &name).unwrap().unwrap();
@@ -1300,13 +1314,13 @@ mod tests {
             assert_eq!(fingerprint(&before.evidence), fingerprint(&after.evidence));
             assert_eq!(before.scope, after.scope);
             assert_eq!(before.review_of, after.review_of);
-            assert_eq!(after.state, "accepted");
+            assert_eq!(after.state, if mode == 5 { "ready" } else { "accepted" });
         }
     }
 
     #[test]
     fn delivery_checkpoint_preserves_valid_concurrent_note() {
-        race(&[0, 1, 2], |project, name, _| {
+        race(&[0, 1, 2, 5], |project, name, _| {
             assert_eq!(
                 super::super::note(project, name, "New valid concurrent context", true),
                 0
@@ -1316,7 +1330,7 @@ mod tests {
 
     #[test]
     fn delivery_checkpoint_preserves_valid_concurrent_explicit_receipt() {
-        race(&[0, 1, 2], |project, name, request| {
+        race(&[0, 1, 2, 5], |project, name, request| {
             assert_eq!(write(project, name, request.clone(), true), 0);
         });
     }
@@ -1324,7 +1338,7 @@ mod tests {
     #[test]
     fn delivery_checkpoint_rechecks_epoch_state_and_evidence() {
         for field in ["acceptance_epoch", "state", "evidence"] {
-            race(&[0, 1, 2], |project, name, _| {
+            race(&[0, 1, 2, 5], |project, name, _| {
                 rewrite(&project.manifest.root, name, |v| match field {
                     "acceptance_epoch" => v[field] = json!(99),
                     "state" => v[field] = json!("blocked"),
@@ -1337,7 +1351,7 @@ mod tests {
     #[test]
     fn delivery_checkpoint_reloads_revoked_and_valid_changed_model_authority() {
         for replacement in ["other", "worker"] {
-            race(&[0, 1, 2], |project, _, _| {
+            race(&[0, 1, 2, 5], |project, _, _| {
                 let root = &project.manifest.root;
                 let original = std::fs::read_to_string(root.join("process.bla")).unwrap();
                 put(
@@ -1355,7 +1369,7 @@ mod tests {
     #[test]
     fn delivery_checkpoint_reloads_goal_and_system_declarations() {
         for path in ["goals.bla", "system.bla"] {
-            race(&[0, 1, 2], |project, _, _| {
+            race(&[0, 1, 2, 5], |project, _, _| {
                 let root = &project.manifest.root;
                 let original = std::fs::read_to_string(root.join(path)).unwrap();
                 put(
@@ -1372,7 +1386,7 @@ mod tests {
     #[test]
     fn delivery_checkpoint_rechecks_real_source_and_local_observation() {
         for path in ["src/app.rs", "observation.txt"] {
-            race(&[0, 1], |project, _, _| {
+            race(&[0, 1, 5], |project, _, _| {
                 put(&project.manifest.root, path, "Changed input bytes\n")
             });
         }

@@ -2414,14 +2414,20 @@ pub(super) fn ready(project: &Project, name: &str, json: bool) -> i32 {
         Err(skeptic::GOALS_NOT_JUDGED),
     );
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
-    if let Err(next) = task::mark_ready(&mut task, &tree, report.assignment_blockers().len()) {
+    if task::mark_ready(&mut task, &tree, report.assignment_blockers().len()).is_err() {
+        let recovery = handback_recovery(
+            &task,
+            &tree,
+            &report,
+            ready_assignment_clear(project, &task, &tree, &report.assignment_blockers),
+        );
         return emit_error(
             error(
                 "task",
                 format!(
                     "task {name:?} cannot be handed back from {state:?}: {guidance}",
                     state = task.state,
-                    guidance = handback_guidance(&task, next)
+                    guidance = recovery.guidance
                 ),
                 None,
             ),
@@ -2430,6 +2436,103 @@ pub(super) fn ready(project: &Project, name: &str, json: bool) -> i32 {
         );
     }
     store(project, &mut task, json)
+}
+
+#[derive(Serialize)]
+struct HandbackRecovery {
+    action: &'static str,
+    blocker: Option<&'static str>,
+    guidance: String,
+    authority: &'static str,
+}
+
+fn ready_assignment_clear(
+    project: &Project,
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    blockers: &[&str],
+) -> bool {
+    task.state == "ready"
+        && blockers.is_empty()
+        && task::tracked_readiness(task, &project.manifest.root, &project.ignore, tree).supported
+        && task::challenge_current(task, tree)
+}
+
+fn handback_recovery(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    report: &ChallengeReport,
+    clear: bool,
+) -> HandbackRecovery {
+    let name = &task.name;
+    let blocker = report
+        .challenge
+        .as_ref()
+        .filter(|challenge| report.assignment_blockers.contains(&challenge.class.word()));
+    let (action, guidance) = if clear {
+        let (action, next) = if task.state == "accepted" {
+            (
+                "hand-back",
+                format!("hand back now with blabla task ready {name}; "),
+            )
+        } else {
+            (
+                "await-review",
+                "review and result acceptance belong to the orchestrator; ".to_owned(),
+            )
+        };
+        (
+            action,
+            format!(
+                "current assignment evidence and challenge support hand-back; {next}project-wide verification remains the orchestrator's"
+            ),
+        )
+    } else if task.state == "ready" {
+        let inspect = format!(
+            "READY records an earlier hand-back, not current clearance. Inspect blabla task freshness {name}."
+        );
+        match blocker {
+            Some(challenge) => {
+                let (action, route) = match challenge.class {
+                    skeptic::Class::EvidenceSuperseded
+                    | skeptic::Class::ReadinessWithoutEvidence
+                    | skeptic::Class::DeclaredCheckFailed => (
+                        "resume-and-verify",
+                        format!("Resume with blabla task accept {name} --model <id> before recording a new declared-check result."),
+                    ),
+                    skeptic::Class::IntentDispositionMissing
+                    | skeptic::Class::GoalReflectionMissing
+                    | skeptic::Class::GoalDeliveryClaimMissing => (
+                        "inspect-manual-receipts",
+                        "Inspect the stale manual claims before choosing guarded --refresh-ready or ordinary reacceptance; this diagnosis does not establish refresh eligibility.".to_owned(),
+                    ),
+                    skeptic::Class::ReviewTargetStale => (
+                        "inspect-review-target",
+                        format!("If the original successful argv execution and its complete recursive input coverage are unchanged, inspect the guarded alternative blabla task accept {name} --model <id> --reuse-evidence --reason <reason>. Eligibility is checked by that command; reuse never renews manual review claims."),
+                    ),
+                    _ => ("resolve-assignment-blocker", String::new()),
+                };
+                (action, format!("{inspect} {route} {}", challenge.reconcile))
+            }
+            None => (
+                "resume-task",
+                format!(
+                    "{inspect} The recorded challenge no longer supports hand-back. Resume with blabla task accept {name} --model <id>, reconcile the assignment and record current evidence and assessments before challenging again."
+                ),
+            ),
+        }
+    } else {
+        let next = task::handback(task, tree)
+            .err()
+            .unwrap_or("resolve-challenge");
+        (next, handback_guidance(task, next))
+    };
+    HandbackRecovery {
+        action,
+        blocker: blocker.map(|challenge| challenge.class.word()),
+        guidance,
+        authority: "diagnostic-only",
+    }
 }
 
 fn handback_guidance(task: &Task, next: &str) -> String {
@@ -3352,16 +3455,14 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
     let blockers = report.assignment_blockers();
     let mut assignment_clear = None;
     if let Some(task) = selected.as_mut() {
-        if task.state == "ready"
-            && blockers.is_empty()
-            && task::tracked_readiness(task, root, &project.ignore, &tree).supported
-            && task::challenge_current(task, &tree)
-        {
+        if ready_assignment_clear(project, task, &tree, &blockers) {
             assignment_clear = Some(true);
         } else if task.state == "accepted"
             || (task.state == "ready"
                 && task.challenged.is_none()
-                && (task.intent_disposition_required || task.goal_reflection_required))
+                && (task.intent_disposition_required
+                    || task.goal_reflection_required
+                    || !task.delivery_obligations.is_empty()))
         {
             let recorded = task::record_challenge(task, &tree, blockers.len(), now_unix());
             if let Some(identity) = recovery::running() {
@@ -3379,44 +3480,24 @@ pub(super) fn challenge(project: &Project, name: Option<&str>, json: bool) -> i3
             }
             assignment_clear = Some(recorded);
         } else if task.open() {
-            assignment_clear = Some(
-                task.state == "ready"
-                    && blockers.is_empty()
-                    && task::tracked_readiness(
-                        task,
-                        &project.manifest.root,
-                        &project.ignore,
-                        &tree,
-                    )
-                    .supported
-                    && task::challenge_current(task, &tree),
-            );
+            assignment_clear = Some(ready_assignment_clear(project, task, &tree, &blockers));
         }
     }
+    let assignment_recovery = selected
+        .as_ref()
+        .zip(assignment_clear)
+        .map(|(task, clear)| handback_recovery(task, &tree, &report, clear));
     let result = if json {
         let mut view = serde_json::to_value(&report).expect("challenge serializes");
         view["assignment_clear"] = serde_json::json!(assignment_clear);
+        view["assignment_recovery"] = serde_json::json!(assignment_recovery);
         write_json(&view)
     } else {
         let scoped = if let Some(clear) = assignment_clear {
-            let task = selected.as_ref().expect("selected task");
-            let detail = if clear {
-                let next = if task.state == "accepted" {
-                    format!("hand back now with blabla task ready {}; ", task.name)
-                } else {
-                    String::new()
-                };
-                format!(
-                    "current assignment evidence and challenge support hand-back; {next}project-wide verification remains the orchestrator's"
-                )
-            } else {
-                handback_guidance(
-                    task,
-                    task::handback(task, &tree)
-                        .err()
-                        .unwrap_or("resolve-challenge"),
-                )
-            };
+            let detail = &assignment_recovery
+                .as_ref()
+                .expect("selected task recovery")
+                .guidance;
             writeln!(
                 io::stdout().lock(),
                 "\nAssignment check: {} — {detail}",
@@ -3807,11 +3888,14 @@ fn write_task(
                 .join("  ")
         )?;
     }
-    if task.state == "ready" && (task.intent_disposition_required || task.goal_reflection_required)
+    if task.state == "ready"
+        && (task.intent_disposition_required
+            || task.goal_reflection_required
+            || !task.delivery_obligations.is_empty())
     {
         writeln!(
             output,
-            "  Explicit --refresh-ready may renew one manual disposition/reflection with the same still-permitted model when check and recursive targets remain current; then run blabla challenge {}. Changed work requires reacceptance and evidence",
+            "  Explicit --refresh-ready may renew one manual disposition, reflection or delivery claim with the same still-permitted model when check and recursive targets remain current; then run blabla challenge {}. Changed work requires reacceptance and evidence",
             task.name
         )?;
     }
@@ -4206,7 +4290,7 @@ fn render_route(
         )],
         "challenge" => vec![if state == Some("ready") {
             format!(
-                "  READY: hand-back recorded; await orchestrator review; closing task {name} is orchestrator-owned"
+                "  READY: hand-back recorded; blabla challenge {name} checks current clearance and recovery before orchestrator review; closing task {name} is orchestrator-owned"
             )
         } else {
             format!(

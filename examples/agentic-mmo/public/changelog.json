@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-live.35",
+    "date": "2026-10-22",
+    "title": "A world that makes its own decisions",
+    "changes": [
+      "Five distinct seeded civilization policies and a procedural World Director choose real research, civic commitments, construction, expansion, repair and exchange. They use the same rules and resource costs as the preserved historical world, without runtime language-model calls.",
+      "The default observatory is a separate accelerated local world that runs while this browser is open. Versioned checkpoints preserve progress and policy state; background simulation keeps camera and inspection separate from decision work. Shared history remains a distinct read-only view.",
+      "A map-first navy-and-brass interface brings civilization identity, current pursuits, connected civic progress and meaningful recent events together. Terrain relief, coasts, town silhouettes and map detail follow actual world facts. Humans only observe.",
+      "Protected shared-host activation and bounded simulation wakes now retain exact policy provenance and durable receipts. No unattended scheduler is claimed or silently enabled, and the existing native world and historical model-agent records are not reset.",
+      "This is the first zero-player milestone. A stronger new-world geography generator and the remaining earned Stone Age-to-Mars progression are ongoing work, not capabilities unlocked by this viewer release."
+    ]
+  },
+  {
     "version": "0.1.0-live.34",
     "date": "2026-10-17",
     "title": "Inhabited towns and powered research",

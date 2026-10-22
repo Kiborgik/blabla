@@ -39,11 +39,15 @@ export function transformedVertices(part: VisualPart): Point3[] {
   });
 }
 
-export function flatPartFaces(part: VisualPart): Array<{ points: string; shade: number; depth: number }> {
+export function flatMapPoint(x: number, z: number, height = 0): { x: number; z: number } {
+  return { x, z: z * .72 - height * .85 };
+}
+
+export function flatPartFaces(part: VisualPart, groundScale = 1): Array<{ points: string; shade: number; depth: number }> {
   const vertices = transformedVertices(part);
   return partShape(part.shape).faces.flatMap((face, index) => {
     const points = face.flatMap((i) => vertices[i] ? [vertices[i]] : []);
-    const projected = points.map(([x, y, z]) => [x, z - y * .85] as const);
+    const projected = points.map(([x, y, z]) => [x, z * groundScale - y * .85] as const);
     const area = projected.reduce((sum, p, i) => {
       const next = projected[(i + 1) % projected.length];
       return sum + (next ? p[0] * next[1] - next[0] * p[1] : 0);
@@ -51,12 +55,12 @@ export function flatPartFaces(part: VisualPart): Array<{ points: string; shade: 
     if (area <= .000001) return [];
     return [{ points: projected.map(([x, y]) => `${x.toFixed(3)},${y.toFixed(3)}`).join(' '),
       shade: index === 1 ? 0 : index % 2 ? .10 : .22,
-      depth: points.reduce((sum, point) => sum + point[2] * .85 + point[1], 0) / Math.max(1, points.length) }];
+      depth: points.reduce((sum, point) => sum + point[2] * .85 + point[1] * groundScale, 0) / Math.max(1, points.length) }];
   }).toSorted((a, b) => a.depth - b.depth);
 }
 
-export function flatSceneFaces(parts: readonly VisualPart[]): Array<{ part: VisualPart; points: string; shade: number; depth: number }> {
-  return parts.flatMap(part => flatPartFaces(part).map(face => ({ part, ...face }))).toSorted((a, b) => a.depth - b.depth || a.part.id.localeCompare(b.part.id));
+export function flatSceneFaces(parts: readonly VisualPart[], groundScale = 1): Array<{ part: VisualPart; points: string; shade: number; depth: number }> {
+  return parts.flatMap(part => flatPartFaces(part, groundScale).map(face => ({ part, ...face }))).toSorted((a, b) => a.depth - b.depth || a.part.id.localeCompare(b.part.id));
 }
 
 export function shapeTriangles(shape: VisualPart['shape']): number[] {

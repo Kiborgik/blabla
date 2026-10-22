@@ -28,20 +28,21 @@ export function mapLabelVisibility(labels: readonly MapLabel[], selected: string
 export function mapHierarchyAnchors(world: AtlasWorld, selected: string, selectedRoute: string | null, project: (q: number, r: number, height: number) => { x: number; y: number }): HierarchyAnchor[] {
   const civilization = world.cities.find(city => cityKey(city) === selected)?.id;
   const anchors: HierarchyAnchor[] = world.cities.map(city => {
-    const tileId = world.tiles.find(tile => tile.q === city.q && tile.r === city.r)?.id;
+    const tile = world.tiles.find(tile => tile.q === city.q && tile.r === city.r);
+    const tileId = tile?.id;
     return { id: cityKey(city), kind: 'town', label: damageMapLabel(city.capital, city.settlement?.damage ?? 0),
-      ...project(city.q, city.r, .4), selected: cityKey(city) === selected, importance: city.population ?? 0,
+      ...project(city.q, city.r, tile?.height ?? .4), selected: cityKey(city) === selected, importance: city.population ?? 0,
       ...(tileId === undefined ? {} : { tileId }) };
   });
   for (const site of [...world.catchments ?? [], ...world.districts ?? [], ...world.improvements ?? [], ...world.wonders ?? []]) {
     const wonder = 'record' in site;
     const label = 'library' in site ? districtLabel(site) : 'name' in site ? site.name ?? 'Campus' : 'Aqueduct source';
     anchors.push({ id: site.id, kind: wonder ? 'wonder' : 'site', label: `${label}${site.status === 'building' && !('library' in site) ? ' · Building' : ''}${site.cityId === selected && world.acquiredLand?.some(plot => plot.receipt.cityId === selected && plot.receipt.tileId === site.tileId) ? ` · Tile ${site.tileId}` : ''}`,
-      ...project(site.q, site.r, site.height + .4), tileId: site.tileId, related: site.cityId === selected, completed: wonder && site.status === 'built' });
+      ...project(site.q, site.r, site.height), tileId: site.tileId, related: site.cityId === selected, completed: wonder && site.status === 'built' });
   }
-  for (const site of world.pastoralSites ?? []) anchors.push({ id: site.id, kind: 'resource', label: 'Horses', ...project(site.q, site.r, site.height + .4), tileId: site.tileId,
+  for (const site of world.pastoralSites ?? []) anchors.push({ id: site.id, kind: 'resource', label: 'Horses', ...project(site.q, site.r, site.height), tileId: site.tileId,
     revealed: civilization !== undefined && site.revealedTo.includes(civilization) });
-  for (const site of world.deposits ?? []) anchors.push({ id: site.id, kind: 'resource', label: `Iron · ${site.remaining} left`, ...project(site.q, site.r, site.height + .4), tileId: site.tileId,
+  for (const site of world.deposits ?? []) anchors.push({ id: site.id, kind: 'resource', label: `Iron · ${site.remaining} left`, ...project(site.q, site.r, site.height), tileId: site.tileId,
     revealed: civilization !== undefined && site.revealedTo.some(entry => entry.id === civilization) });
   const route = world.routes.find(entry => entry.id === selectedRoute);
   const point = route && routeMapAnchor(route);
@@ -54,7 +55,8 @@ export function mapHierarchyAnchors(world: AtlasWorld, selected: string, selecte
 
 export function mapHierarchyObstacles(container: HTMLElement): ScreenBox[] {
   const origin = container.getBoundingClientRect();
-  return [...container.parentElement?.querySelectorAll('.civilization-panel, .inspection, .world-heading, .chronicle, .map-tools, .layer-controls, .connection-actions') ?? []].flatMap(element => {
+  const shell = container.closest('#app') ?? container.parentElement;
+  return [...shell?.querySelectorAll('.civilization-panel, .inspection, .world-heading, .chronicle, .map-tools, .layer-controls, .connection-actions, .masthead, .footer, .era-pill') ?? []].flatMap(element => {
     const box = element.getBoundingClientRect();
     return box.width && box.height ? [{ left: box.left - origin.left, top: box.top - origin.top, width: box.width, height: box.height }] : [];
   });

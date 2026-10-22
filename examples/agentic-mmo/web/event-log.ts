@@ -58,6 +58,7 @@ function retainedReceipt(event: GameEvent, receipts: readonly RouteResultCue[]):
 
 function routineEvent(event: GameEvent): boolean {
   return event.type === 'settlement-production' || event.type === 'strategy-beat'
+    || event.type === 'hold-position' || event.type === 'calm' || event.type === 'release-applied'
     || event.type.startsWith('clock-')
     || (event.type === 'building-operation' || event.type === 'improvement-operation') && !event.title.endsWith(' blocked');
 }
@@ -65,8 +66,7 @@ function routineEvent(event: GameEvent): boolean {
 export function latestStoryEvent(events: readonly GameEvent[]): GameEvent | undefined {
   const window = events.slice(-96);
   return window.findLast(event => !routineEvent(event))
-    ?? window.findLast(event => event.type === 'settlement-production' || event.type === 'building-operation')
-    ?? window.at(-1);
+    ?? window.findLast(event => event.type === 'settlement-production' || event.type === 'building-operation');
 }
 
 function namedStory(event: GameEvent, options: EventLogOptions): { title: string; category?: string; summary: string } {
@@ -221,7 +221,7 @@ export function renderEventLog(host: HTMLElement, events: readonly GameEvent[], 
   host.replaceChildren();
   const rows = eventLogEntries(events, options);
   if (!rows.length) { host.append(text('li', 'No recorded events in this view.', 'event-log-empty')); return; }
-  const filter: EventLogFilter = { actor: '', family: rows.some(row => !row.routine) ? 'important' : 'routine', page: 0 };
+  const filter: EventLogFilter = { actor: '', family: 'important', page: 0 };
   const controls = text('li', '', 'event-log-controls');
   const list = text('ol', '', 'event-log-page');
   const wrapper = text('li', '', 'event-log-page-wrapper'); wrapper.append(list);
@@ -244,7 +244,7 @@ export function renderEventLog(host: HTMLElement, events: readonly GameEvent[], 
     input.value = value; input.addEventListener('change', () => { choose(input.value); filter.page = 0; render(); }); field.append(input); controls.append(field);
   };
   select('Civilization', [['', 'All civilizations'], ...[...new Set(rows.flatMap(row => row.participants.map(person => person.name)))].toSorted().map(name => [name, name] as [string, string])], value => { filter.actor = value; }, filter.actor);
-  select('Show', [['important', 'Key events'], ['all', 'All records'], ['research', 'Research'], ['building', 'Towns & building'], ['trade', 'Trade'], ['disruption', 'Disasters'], ['routine', 'Routine seasons & calendar']], value => { filter.family = value; }, filter.family);
+  select('Show', [['important', 'Key events'], ['all', 'All records'], ['research', 'Research'], ['building', 'Towns & building'], ['trade', 'Trade'], ['disruption', 'Disasters'], ['routine', 'Routine & system records']], value => { filter.family = value; }, filter.family);
   pager.append(previous, status, next);
   const note = text('li', `${rows.length} selected records from the latest ${Math.min(events.length, 96)} retained events. Filters apply to this captured window.`, 'event-log-window');
   host.append(controls, pager, wrapper, note); render();

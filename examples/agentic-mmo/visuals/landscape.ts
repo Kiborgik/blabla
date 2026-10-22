@@ -1,14 +1,14 @@
-import { populationFootprint } from './world-visuals.ts';
+import { populationFootprint, SETTLEMENT_RENDER_SCALE } from './world-visuals.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
 export interface LandscapeTile { q: number; r: number; owner: number | null; terrain: 'grassland' | 'forest' | 'desert' | 'mountain' | 'tundra'; height: number }
 export interface LandscapeTown { q: number; r: number; population?: number }
-export interface LandscapeEdge { key: string; owner: number | null; from: readonly [number, number]; to: readonly [number, number]; height: number }
+export interface LandscapeEdge { key: string; owner: number | null; from: readonly [number, number]; to: readonly [number, number]; height: number; fromHeight?: number; toHeight?: number }
 export interface LandscapeTerritory { key: string; owner: number; height: number; points: Array<readonly [number, number]> }
 export interface LandscapeProjection { coast: LandscapeEdge[]; borders: LandscapeEdge[]; territories: LandscapeTerritory[]; parts: VisualPart[] }
 export const LANDSCAPE_BUDGETS = { far: 384, mid: 768, close: 1152 } as const;
-export const TERRITORY_STYLE = { washOpacity: .24, borderWidth: .13, borderOpacity: .95 } as const;
-export const LANDSCAPE_COLORS = { grassland: '#94a773', forest: '#7e9863', desert: '#d3b077', mountain: '#9b9b84', tundra: '#b8bcb0', water: '#133f58', shallow: '#387c87', shore: '#c5be8a' } as const;
+export const TERRITORY_STYLE = { washOpacity: .13, borderWidth: .09, borderOpacity: .95 } as const;
+export const LANDSCAPE_COLORS = { grassland: '#86a35c', forest: '#6e8e50', desert: '#cfb47d', mountain: '#929783', tundra: '#b7beb0', water: '#193f50', shallow: '#3e8386', shore: '#d4c393' } as const;
 const NEIGHBORS = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]] as const;
 const key = (tile: { q: number; r: number }): string => `${tile.q},${tile.r}`;
 const order = (a: { q: number; r: number }, b: { q: number; r: number }): number => a.r - b.r || a.q - b.q;
@@ -31,32 +31,84 @@ export function territoryEdgeTriangles(edge: LandscapeEdge): number[] {
   if (!length) return [];
   const ox = -dz / length * TERRITORY_STYLE.borderWidth / 2;
   const oz = dx / length * TERRITORY_STYLE.borderWidth / 2;
-  const a = [edge.from[0] + ox, edge.height, edge.from[1] + oz];
-  const b = [edge.to[0] + ox, edge.height, edge.to[1] + oz];
-  const c = [edge.to[0] - ox, edge.height, edge.to[1] - oz];
-  const d = [edge.from[0] - ox, edge.height, edge.from[1] - oz];
+  const a = [edge.from[0] + ox, edge.fromHeight ?? edge.height, edge.from[1] + oz];
+  const b = [edge.to[0] + ox, edge.toHeight ?? edge.height, edge.to[1] + oz];
+  const c = [edge.to[0] - ox, edge.toHeight ?? edge.height, edge.to[1] - oz];
+  const d = [edge.from[0] - ox, edge.fromHeight ?? edge.height, edge.from[1] - oz];
   return [...a, ...b, ...c, ...a, ...c, ...d];
+}
+
+export type TerrainPoint = readonly [number, number, number];
+export interface TerrainFace { key: string; points: TerrainPoint[]; color: string }
+export interface TerrainSurface { key: string; center: TerrainPoint; rim: TerrainPoint[]; faces: TerrainFace[]; cliffs: TerrainFace[] }
+
+function shadeColor(color: string, amount: number): string {
+  return `#${[1, 3, 5].map(offset => Math.max(0, Math.min(255, Math.round(Number.parseInt(color.slice(offset, offset + 2), 16) * amount))).toString(16).padStart(2, '0')).join('')}`;
+}
+
+export function projectTerrainSurface(tiles: readonly LandscapeTile[]): TerrainSurface[] {
+  const ordered = tiles.toSorted(order);
+  const lookup = new Set(ordered.map(key));
+  const corners = new Map<string, { x: number; z: number; heights: number[] }>();
+  const cornerKey = (x: number, z: number): string => `${Math.round(x * 1e6)},${Math.round(z * 1e6)}`;
+  for (const tile of ordered) {
+    const { x, z } = hexPosition(tile.q, tile.r);
+    for (let index = 0; index < 6; index++) {
+      const angle = Math.PI / 6 + index * Math.PI / 3;
+      const px = x + Math.cos(angle); const pz = z + Math.sin(angle);
+      const id = cornerKey(px, pz);
+      const corner = corners.get(id) ?? { x: px, z: pz, heights: [] };
+      corner.heights.push(tile.height); corners.set(id, corner);
+    }
+  }
+  return ordered.map(tile => {
+    const { x, z } = hexPosition(tile.q, tile.r);
+    const center: TerrainPoint = [x, tile.height, z];
+    const rim: TerrainPoint[] = Array.from({ length: 6 }, (_, index) => {
+      const angle = Math.PI / 6 + index * Math.PI / 3;
+      const corner = corners.get(cornerKey(x + Math.cos(angle), z + Math.sin(angle)));
+      return corner ? [corner.x, corner.heights.reduce((sum, height) => sum + height, 0) / corner.heights.length, corner.z] : center;
+    });
+    const color = landscapeSurface(tile);
+    const faces = rim.map((point, index): TerrainFace => ({ key: `${key(tile)}:face:${index}`, points: [center, point, rim[(index + 1) % 6] ?? point],
+      color: shadeColor(color, 1 + Math.cos(index * Math.PI / 3 + 2.4) * .012 + (noise(tile.q, tile.r, index + 4) - .5) * .008) }));
+    const cliffs = NEIGHBORS.flatMap(([dq, dr], index): TerrainFace[] => {
+      if (lookup.has(`${tile.q + dq},${tile.r + dr}`)) return [];
+      const a = rim[(index + 5) % 6]; const b = rim[index];
+      return a && b ? [{ key: `${key(tile)}:${index}`, points: [a, b, [b[0], 0, b[2]], [a[0], 0, a[2]]],
+        color: shadeColor('#a6a17b', .82 + Math.cos(index * Math.PI / 3 + 2.4) * .13) }] : [];
+    });
+    return { key: key(tile), center, rim, faces, cliffs };
+  });
 }
 
 function terrainParts(tile: LandscapeTile, detail: DetailLevel): VisualPart[] {
   const { x, z } = hexPosition(tile.q, tile.r);
-  const count = tile.terrain === 'forest' ? detail === 'far' ? 2 : detail === 'mid' ? 3 : 5 : tile.terrain === 'mountain' ? detail === 'far' ? 1 : 2 : 0;
-  return Array.from({ length: count }, (_, index) => {
+  const count = tile.terrain === 'forest' ? detail === 'far' ? 3 : detail === 'mid' ? 5 : 7 : tile.terrain === 'mountain' ? detail === 'far' ? 2 : 3 : 0;
+  const parts: VisualPart[] = [];
+  for (let index = 0; index < count; index++) {
     const angle = index * 2.4 + noise(tile.q, tile.r, 0) * 3;
-    const offset = index === 0 ? .1 : .42;
+    const offset = index === 0 ? .08 : .22 + noise(tile.q, tile.r, index + 2) * .4;
     const forest = tile.terrain === 'forest';
-    const height = forest ? .54 + noise(tile.q, tile.r, index) * .3 : .8 + tile.height * 2 + noise(tile.q, tile.r, index) * .25;
-    const width = forest ? .65 + noise(tile.q, tile.r, index + 1) * .18 : index === 0 ? 1.45 : .9;
-    return { id: `${tile.terrain}:${key(tile)}:${index}`, shape: forest ? 'canopy' : 'cone',
-      material: forest ? index % 2 ? 'canopyLight' : 'canopy' : index % 2 ? 'rockLight' : 'rock',
-      position: [x + Math.cos(angle) * offset, tile.height + height / 2, z + Math.sin(angle) * offset],
-      scale: [width, height, width], rotation: noise(tile.q, tile.r, index) * Math.PI };
-  });
+    const desert = tile.terrain === 'desert';
+    const height = forest ? .5 + noise(tile.q, tile.r, index) * .46 : desert ? .08 : .85 + tile.height * 1.7 + noise(tile.q, tile.r, index) * .45;
+    const width = forest ? .48 + noise(tile.q, tile.r, index + 1) * .24 : desert ? 1.1 : index === 0 ? 1.6 : 1.05;
+    const px = x + Math.cos(angle) * offset; const pz = z + Math.sin(angle) * offset;
+    parts.push({ id: `${tile.terrain}:${key(tile)}:${index}`, shape: forest || desert ? 'canopy' : 'cone',
+      material: forest ? index % 3 ? 'canopy' : 'canopyLight' : desert ? 'grain' : index % 2 ? 'rockLight' : 'rock',
+      position: [px, tile.height + height / 2, pz], scale: [width, height, width * (forest ? .9 : .8)], rotation: noise(tile.q, tile.r, index) * Math.PI });
+    if (forest && detail !== 'far') parts.push({ id: `forest:${key(tile)}:trunk:${index}`, shape: 'box', material: 'timber',
+      position: [px, tile.height + .18, pz], scale: [.08, .36, .08], rotation: angle });
+    if (!forest && !desert && index === 0) parts.push({ id: `mountain:${key(tile)}:summit`, shape: 'cone', material: 'neutral',
+      position: [px, tile.height + height * .88, pz], scale: [width * .24, height * .24, width * .8 * .24], rotation: noise(tile.q, tile.r, index) * Math.PI });
+  }
+  return parts;
 }
 
 export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonly LandscapeTown[], detail: DetailLevel): LandscapeProjection {
   const ordered = tiles.toSorted(order);
   const lookup = new Map(ordered.map(tile => [key(tile), tile]));
+  const surfaces = new Map(projectTerrainSurface(ordered).map(tile => [tile.key, tile]));
   const townSites = new Set(towns.map(key));
   const coast: LandscapeEdge[] = [];
   const borders: LandscapeEdge[] = [];
@@ -76,18 +128,20 @@ export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonl
         from: [x + Math.cos(a), z + Math.sin(a)], to: [x + Math.cos(b), z + Math.sin(b)], height: Math.max(tile.height, neighbor?.height ?? 0) + .035 };
       if (!neighbor) coast.push(edge);
       if (tile.owner !== null && neighbor?.owner !== tile.owner) borders.push({ ...edge,
-        from: [x + Math.cos(a) * .98, z + Math.sin(a) * .98], to: [x + Math.cos(b) * .98, z + Math.sin(b) * .98] });
+        from: [x + Math.cos(a) * .98, z + Math.sin(a) * .98], to: [x + Math.cos(b) * .98, z + Math.sin(b) * .98],
+        fromHeight: (surfaces.get(key(tile))?.rim[(index + 5) % 6]?.[1] ?? tile.height) * .98 + tile.height * .02 + .035,
+        toHeight: (surfaces.get(key(tile))?.rim[index]?.[1] ?? tile.height) * .98 + tile.height * .02 + .035 });
     }
   }
   const parts: VisualPart[] = towns.toSorted(order).flatMap((town): VisualPart[] => {
     const tile = lookup.get(key(town));
     if (!tile) return [];
     const { x, z } = hexPosition(town.q, town.r);
-    const radius = populationFootprint(town.population ?? 1);
+    const radius = populationFootprint(town.population ?? 1) * (town.population === undefined ? 1 : SETTLEMENT_RENDER_SCALE);
     return [{ id: `ground:${key(town)}`, shape: 'cylinder', material: 'settled', position: [x, tile.height + .016, z], scale: [radius * 2.3, .025, radius * 1.9], rotation: .15 }];
   }).slice(0, LANDSCAPE_BUDGETS[detail]);
   const groups = ordered.filter(tile => !townSites.has(key(tile))).map(tile => terrainParts(tile, detail));
-  for (let index = 0; index < 5 && parts.length < LANDSCAPE_BUDGETS[detail]; index++) {
+  for (let index = 0; index < 14 && parts.length < LANDSCAPE_BUDGETS[detail]; index++) {
     for (const group of groups) {
       const part = group[index];
       if (part && parts.length < LANDSCAPE_BUDGETS[detail]) parts.push(part);

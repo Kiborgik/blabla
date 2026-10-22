@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { GameEvent } from '../core/types.ts';
 import type { RouteResultCue } from '../visuals/route-cues.ts';
-import { eventLogEntries, latestStoryEvent, renderEventLog } from '../web/event-log.ts';
+import { eventLogEntries, eventLogPage, latestStoryEvent, renderEventLog } from '../web/event-log.ts';
 
 function event(overrides: Partial<GameEvent> = {}): GameEvent {
   return { id: '8:0', round: 4, type: 'earthquake', title: 'Earthquake in Tidehaven', detail: 'city-3', actor: 5, target: 3, tileId: 157,
@@ -132,6 +132,23 @@ void test('map story retains a named decision through routine seasons while paid
   assert.doesNotMatch(row?.summary ?? '', /made supplies/i);
 });
 
+void test('waiting quiet seasons and technical releases stay in history without displacing meaningful events', () => {
+  const discovery = event({ id: '1:0', type: 'research-completed', title: 'Pelagos discovers Writing' });
+  const quiet = [
+    event({ id: '2:0', type: 'hold-position', title: 'Pelagos holds its course', importance: 0 }),
+    event({ id: '3:0', type: 'calm', title: 'A quiet season: Pelagos', importance: 4 }),
+    event({ id: '4:0', type: 'release-applied', title: 'The world gains released capabilities', importance: 5 }),
+  ];
+  const input = [discovery, ...quiet]; const before = structuredClone(input);
+  const rows = eventLogEntries(input, { civilizations });
+  assert.deepEqual(eventLogPage(rows, { actor: '', family: 'important', page: 0 }).rows.map(row => row.id), [discovery.id]);
+  assert.deepEqual(eventLogPage(rows, { actor: '', family: 'all', page: 0 }).rows.map(row => row.id), input.toReversed().map(row => row.id));
+  assert.deepEqual(eventLogPage(rows, { actor: '', family: 'routine', page: 0 }).rows.map(row => row.id), quiet.toReversed().map(row => row.id));
+  assert.equal(latestStoryEvent(input), discovery);
+  assert.equal(latestStoryEvent(quiet), undefined);
+  assert.deepEqual(input, before);
+});
+
 void test('only the exact retained delivery exposes separate sent cargo transport and commerce for both parties', () => {
   const cue: RouteResultCue = { ...receipt(), kind: 'delivery', factSource: 'bound-agreement', exchange: {
     proposer: { civilization: 3, cargo: { energy: 4 }, paidUpkeep: { energy: 1 }, creditedCommerce: { credits: 2 } },
@@ -178,13 +195,32 @@ void test('first glance names the action and keeps raw causes IDs and routine re
     const root = nodes[0]; assert.ok(root);
     const visible = firstGlance(root);
     assert.match(visible, /Pelagos began Fuel management/);
-    assert.match(visible, /Routine seasons & calendar/);
+    assert.match(visible, /Routine & system records/);
     assert.doesNotMatch(visible, /Opaque engine|fuel-management|Event 8:0|Made 7.8/);
     const filter = nodes.find(node => node.tag === 'select' && node.attributes.get('aria-label') === 'Show'); assert.ok(filter); filter.value = 'routine'; filter.listeners.get('change')?.();
     assert.match(root.content(), /Used  2 Energy|Used 2 Energy/);
     assert.match(root.content(), /Made  7.8 Materials|Made 7.8 Materials/);
     assert.ok(nodes.some(node => node.tag === 'summary' && node.textContent === 'Details'));
     assert.ok(nodes.some(node => node.className === 'event-log-page')); 
+  } finally { if (old) Object.defineProperty(globalThis, 'document', old); else Reflect.deleteProperty(globalThis, 'document'); }
+});
+
+void test('a quiet captured window defaults to empty Key events while All records still exposes its original facts', () => {
+  const old = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const nodes: ElementRecord[] = [];
+  const make = (tag: string): ElementRecord => { const node = new ElementRecord(tag); nodes.push(node); return node; };
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: make, createElementNS: (_namespace: string, tag: string) => make(tag) } });
+  try {
+    const host = document.createElement('ol');
+    renderEventLog(host, [event({ type: 'hold-position', title: 'Pelagos holds its course', cause: 'The actor chose to preserve its current position' })], { civilizations });
+    const root = nodes[0]; assert.ok(root);
+    const filter = nodes.find(node => node.tag === 'select' && node.attributes.get('aria-label') === 'Show'); assert.ok(filter);
+    assert.equal(filter.value, 'important');
+    assert.match(firstGlance(root), /No matching events in this captured window/);
+    assert.doesNotMatch(firstGlance(root), /Pelagos holds its course/);
+    filter.value = 'all'; filter.listeners.get('change')?.();
+    assert.match(firstGlance(root), /Pelagos holds its course/);
+    assert.match(root.content(), /The actor chose to preserve its current position/);
   } finally { if (old) Object.defineProperty(globalThis, 'document', old); else Reflect.deleteProperty(globalThis, 'document'); }
 });
 void test('DOM uses safe text native disclosure and semantic icons without history animation', () => {

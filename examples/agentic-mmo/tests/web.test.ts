@@ -89,7 +89,7 @@ await test('release polling reloads only for a valid newer unattempted deploymen
   );
 });
 
-await test('published manifests match the current history entry and distinguish the sample preview', () => {
+await test('published manifests match meaningful current history and sample mode stays explicit', () => {
   const release: unknown = JSON.parse(
     readFileSync(new URL('../public/version.json', import.meta.url), 'utf8'),
   );
@@ -104,9 +104,12 @@ await test('published manifests match the current history entry and distinguish 
     first !== null && typeof first === 'object' && 'version' in first && 'changes' in first,
   );
   assert.equal(first.version, parsed.version);
+  const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /Sample atlas/);
+  assert.match(main, /ILLUSTRATIVE MAP/);
   assert.ok(Array.isArray(first.changes));
   assert.ok(
-    first.changes.some((change: unknown) => typeof change === 'string' && /preview/i.test(change)),
+    first.changes.length > 0 && first.changes.every((change: unknown) => typeof change === 'string' && change.trim().length > 0),
   );
 });
 
@@ -650,9 +653,15 @@ await test('release history keeps six newest-first records per page without muta
 });
 
 await test('narrow Work leaves a selected-town window and culled site geometry is not a phantom control', () => {
-  const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
-  assert.match(css, /inspection\[data-inspection-view='work'\]\s*\{[^}]*calc\(100% - 144px\)/);
-  assert.match(css, /:has\(\.inspection\[data-inspection-view='work'\]\) \.world-heading\s*\{ display: none/);
+  const css = readFileSync(new URL('../web/spectator-hud.css', import.meta.url), 'utf8');
+  const responsive = css.slice(css.indexOf('@media (max-width: 1000px) {'));
+  const work = /#app \.inspection, #app \.inspection\[data-inspection-view='work'\] \{([^}]+)\}/.exec(responsive)?.[1];
+  assert.ok(work);
+  const viewportBound = /max-height: min\((\d+)dvh/.exec(work)?.[1];
+  assert.ok(viewportBound && Number(viewportBound) <= 48);
+  assert.match(work, /bottom: 118px/);
+  assert.match(responsive, /#app \.live-observatory\[data-inspection='true'\] \.chronicle \{ display: none/);
+  assert.match(responsive, /#app \.live-observatory\[data-inspection='true'\] \.world-heading \{ display: block/);
   const flat = readFileSync(new URL('../web/flat-renderer.ts', import.meta.url), 'utf8');
   assert.match(flat, /entry\.element\.setAttribute\('aria-hidden', String\(!mark\)\)/);
 });

@@ -211,7 +211,7 @@ await test('only positive recorded building output earns work motion and payment
   for (const effects of [['Paid 1 materials'], ['Paid 1 materials', 'Produced 0 food'], ['No inputs consumed or outputs produced']]) {
     assert.equal(eventVisual({ ...base, effects })?.cue, 'status');
   }
-  assert.equal(eventVisual({ ...base, title: 'Dawnwell: Kiln blocked', detail: 'hearth/kiln at strategic round 8', effects: ['energy: required 2, opening stock remaining 1; nothing consumed or produced'] })?.label, 'Building needs supplies');
+  assert.equal(eventVisual({ ...base, title: 'Dawnwell: Kiln blocked', detail: 'hearth/kiln at strategic round 8', effects: ['energy: required 2, opening stock remaining 1; nothing consumed or produced'] })?.label, 'Building could not operate');
   const tracker = createEventCueTracker();
   tracker.observe('world', []);
   assert.equal(tracker.observe('world', [base])[0]?.cue, 'work');

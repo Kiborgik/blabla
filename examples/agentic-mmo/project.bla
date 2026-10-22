@@ -64,3 +64,5 @@ draft behavior "contracts/civic-bootstrap.bla"
 draft behavior "contracts/industrial-steam.bla"
 
 draft behavior "contracts/local-power.bla"
+
+draft behavior "contracts/procedural-civilizations.bla"

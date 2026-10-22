@@ -1,6 +1,6 @@
 import { purchasedSiteBlock } from './site-binding.ts';
 import { RESOURCE_IDS, TECHNOLOGIES, WONDERS, WONDER_RULES } from '../content.ts';
-import type { ActionOption, City, ConstructionOrder, GameAction, GameEvent, Resources, WonderConstructionOrder, WonderDefinition, WorldState } from '../types.ts';
+import type { ActionOption, City, ConstructionOrder, GameAction, GameEvent, HexTile, Resources, WonderConstructionOrder, WonderDefinition, WorldState } from '../types.ts';
 import type { CapabilityEligibility } from './capabilities.ts';
 import { districtSiteOccupied } from './districts.ts';
 import { emitEvent } from './events.ts';
@@ -12,9 +12,7 @@ import { civilizationById, transferCost } from './world.ts';
 function quantize(value: number): number { return Math.round(value * 100) / 100; }
 export function isWonderOrder(order: ConstructionOrder): order is WonderConstructionOrder { return 'kind' in order && order.kind === 'wonder'; }
 
-export function wonderSiteBlock(state: WorldState, city: City, definition: WonderDefinition, tileId: number): string | null {
-  const site = state.tiles.find(tile => tile.id === tileId);
-  const center = state.tiles.find(tile => tile.id === city.tileId);
+function resolvedWonderSiteBlock(state: WorldState, city: City, definition: WonderDefinition, tileId: number, site: HexTile | undefined, center: HexTile | undefined): string | null {
   if (!Number.isSafeInteger(tileId) || !site || !center) return 'The exact wonder site is missing';
   if (site.owner !== city.civId) return 'The wonder site must already belong to this civilization';
   const binding = purchasedSiteBlock(state, city, tileId); if (binding) return binding;
@@ -25,8 +23,13 @@ export function wonderSiteBlock(state: WorldState, city: City, definition: Wonde
   return null;
 }
 
+export function wonderSiteBlock(state: WorldState, city: City, definition: WonderDefinition, tileId: number): string | null {
+  return resolvedWonderSiteBlock(state, city, definition, tileId, state.tiles.find(tile => tile.id === tileId), state.tiles.find(tile => tile.id === city.tileId));
+}
+
 export function availableWonderSites(state: WorldState, city: City, definition: WonderDefinition): number[] {
-  return state.tiles.filter(tile => wonderSiteBlock(state, city, definition, tile.id) === null).map(tile => tile.id).toSorted((a, b) => a - b);
+  const center = state.tiles.find(tile => tile.id === city.tileId);
+  return state.tiles.filter(tile => resolvedWonderSiteBlock(state, city, definition, tile.id, tile, center) === null).map(tile => tile.id).toSorted((a, b) => a - b);
 }
 
 export function wonderEligibility(state: WorldState, civId: number, definition: WonderDefinition, cityId: string | null): CapabilityEligibility {

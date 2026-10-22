@@ -375,6 +375,37 @@ Record necessary exceptions with an explicit `policy::development-time-budget` t
 correctness/release reason, accountable owner and next reduction action. Time accounting never waives
 a failing check, independent review, delivery obligation, closure guard or publication permission.
 
+### Recover a READY hand-back
+
+READY is a recorded lifecycle state, not a claim that its evidence is still current.
+Run `blabla challenge NAME` before handing an existing packet to the orchestrator.
+Its assignment summary and JSON `assignment_recovery` share one diagnostic:
+
+- `await-review`: current assignment evidence and challenge support the existing
+  hand-back; project-wide verification remains separate.
+- `resume-and-verify`: check evidence is missing, failed or superseded. Inspect
+  `task freshness`, resume, and record the declared check after the coherent
+  feature or rework batch is ready. Diagnosis itself never runs that check.
+- `inspect-manual-receipts`: inspect stale claims and the existing guarded
+  `--refresh-ready` route; unchanged execution does not confirm a manual claim.
+- `inspect-review-target`: inspect the renewed target and, only if the original
+  execution inputs and recursive coverage remain unchanged, the existing guarded
+  `--reuse-evidence` route. The diagnostic does not establish eligibility.
+- `resume-task`: no assignment blocker was selected, but the old challenge no
+  longer supports the hand-back. Resume and recover through the ordinary workflow.
+- `resolve-assignment-blocker`: follow the selected challenge's reconciliation;
+  owner decisions and findings remain owner responsibilities.
+
+`assignment_recovery` carries `action`, the selected assignment `blocker` (or
+null), `guidance`, and `authority: "diagnostic-only"`. Human challenge output and
+refused `task ready` diagnostics use the same guidance. The projection changes
+neither lifecycle state nor freshness predicates, runs no check, and grants no
+permission to reuse evidence. Existing challenge-recording behavior is unchanged:
+a current READY inspection is read-only, while an explicit challenge can record
+an eligible opted-in manual-receipt continuation. Batch execution and review at
+substantial feature boundaries; adding or editing a test is not itself a reason
+to rerun the suite.
+
 ### Inspect receipt-relative freshness
 
 Use `blabla task freshness NAME` or `blabla task freshness NAME --json` before

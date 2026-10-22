@@ -1,6 +1,6 @@
 # Authoritative hosting seam
 
-This Worker uses the same pure game engine as the local agents. It has no Node filesystem dependency, browser-driven clock, autonomous agent policy or paid model API.
+This Worker uses the same pure game engine as the procedural spectator. It has no Node filesystem dependency, browser-driven shared-world clock or paid model API. Explicitly activated server policies choose ordinary civilization and Director actions; older development-agent history remains unchanged.
 
 `server/worker.ts` exports `createWorker(assetResponder?, { now? })` and a default Worker with `fetch(request, environment)`. The optional asset responder returns a normal `Response` or null for a request. Integration can bundle an embedded asset map and pass its responder here; there is no assumed `ASSETS` binding. API routes take precedence over asset responses.
 
@@ -20,12 +20,25 @@ The public spectator needs no sign-in. Authoritative writes require both a platf
 - `GET /api/observe?seat=0`: engine observation with indexed choices and release/clock metadata
 - `GET /api/history?after=0&limit=50`: bounded chronological transition, frame and public provenance page. Maximum page size200. Follow `nextRevision` only when `hasMore` is true
 - `GET /api/chronicle?after=0&limit=50`: the same bounded chronological transition, events and public provenance page without state snapshots. Its SQL never selects `state_json`. The existing `(world_id,end_revision)` primary-key index supports cursor traversal without an offset or duplicate index. This additive projection leaves full history and receipts intact
+- `GET /api/simulation`: read-only configured/enabled state, policy version, durable actor decision counts and last actual wake
 - `POST /api/init`: `seed`, explicit UTC `clockEpoch`, unique `commandId`; once only
 - `POST /api/action`: `seat`, `expectedRevision`, either `choice` or exact legal `action`, `model`, unique `commandId`
 - `POST /api/tick`: `expectedRevision`, `kind`, `intervalId`, explicit UTC `timestamp`, optional `event`/`target`; event/review decisions require `model`
 - `POST /api/catchup`: `expectedRevision`, explicit UTC `timestamp`, unique `commandId`; optional submitting `model`
 
 All POST bodies are JSON, bounded at64KiB while streaming. Epochs and tick timestamps beyond server time are refused. Revision conflicts and changed idempotency payloads return409. Invalid requests do not create transitions. Public reads never initialize, advance or rewrite the world.
+
+## Procedural lifecycle
+
+The shared world is not activated by deployment, a browser visit or a GET. Existing state, release and history remain intact. An explicitly enrolled operator may use MCP `activate_simulation` or `POST /api/simulation/activate` with `{ expectedRevision, enabled, commandId }` to enable or pause the fixed versioned policies. Activation creates durable policy memory for all five civilizations and the Director without taking a game action. Pausing and resuming retain memory and tactical accounting; neither resets the seed or creates idle allowances.
+
+MCP `run_simulation` or `POST /api/simulation/run` accepts only `{ commandId }`. The trusted host supplies one frozen timestamp. The server realizes at most60 due strategy beats and240 calendar intervals, reports both remaining backlogs, and takes no ordinary decisions while either backlog remains. Once current, it chooses at most one exact legal action per actor for the current ten-second window. Independent engine admission remains authoritative. Sequential older worlds have the same additional durable wake-window bound. Late wakes do not replay missed tactical actions or retroactively apply new choices to earlier production.
+
+Each wake persists exact engine commands, transition frames, individual command receipts, the wake receipt, the current world and all accepted policy memories in one conditional D1 batch. World and policy revisions form the compare-and-swap guard. A definite zero-effect revision conflict is reobserved within a bounded retry loop. A database failure is reconciled through the original wake receipt, never retried with replacement action choices. An uncertain transport response must be retried with the same command ID and caller. Returned `acceptedRevision` remains the original commitment even when the current revision has since advanced.
+
+New decision records use `procedural-policy`, `model: null` and the version, profile, strategic phase, reason, seed and decision counter that selected the action. Economy and calendar mechanics retain `clock-service`. Historical `development-agent` records are not relabeled. Public history validates this metadata and removes the internal operator identity. Policy memory survives Worker restarts in `world_autonomy`; malformed or incompatible versions fail closed rather than silently resetting behavior.
+
+`simulation_status` and `/api/simulation` report configuration and the last completed wake, not scheduler health. This source does not declare a native Worker cron or install a schedule. The supported Sites unattended path is a linked cloud task invoking the authenticated MCP writer; its setup, enrollment, deployment, actual write and readback must be separately authorized and verified. Without that external wake source, an enabled shared world does not run while closed. An explicitly labeled local browser simulation, if displayed by the spectator, is a separate world and does not write to this shared archive.
 
 `server/public-protocol.ts` owns pure shared public world, transition, provenance and page types. Consumers can import its types without loading server runtime. Chronicle and history redact the internal operator id through the same projection. Cache policy remains `no-store`; a viewer may retain its verified snapshot and ETag in memory for explicit conditional polling.
 

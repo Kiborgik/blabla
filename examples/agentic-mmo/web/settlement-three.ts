@@ -3,7 +3,7 @@ import { depositParts } from '../visuals/strategic-resource-visuals.ts';
 import * as THREE from 'three';
 import type { AtlasWorld } from './atlas.ts';
 import { hexPosition } from './atlas.ts';
-import { settlementVisual, VISUAL_PALETTE, visualDetail } from '../visuals/world-visuals.ts';
+import { settlementVisual, SETTLEMENT_RENDER_SCALE, VISUAL_PALETTE, visualDetail } from '../visuals/world-visuals.ts';
 import type { DetailLevel, VisualPart } from '../visuals/world-visuals.ts';
 import { shapeTriangles } from './settlement-parts.ts';
 import { improvementParts } from '../visuals/improvement-visuals.ts';
@@ -66,7 +66,8 @@ export function createSettlementMeshes(world: AtlasWorld, material: (color: stri
     const floor = world.tiles.find(tile => tile.q === city.q && tile.r === city.r)?.height ?? .4;
     return settlementVisual(city.settlement, detail).parts.map(part => ({
       color: part.material === 'identity' ? city.color : VISUAL_PALETTE[part.material],
-      part: { ...part, position: [origin.x + part.position[0], floor + part.position[1], origin.z + part.position[2]] },
+      part: { ...part, position: [origin.x + part.position[0] * SETTLEMENT_RENDER_SCALE, floor + part.position[1] * SETTLEMENT_RENDER_SCALE, origin.z + part.position[2] * SETTLEMENT_RENDER_SCALE],
+        scale: [part.scale[0] * SETTLEMENT_RENDER_SCALE, part.scale[1] * SETTLEMENT_RENDER_SCALE, part.scale[2] * SETTLEMENT_RENDER_SCALE] },
     }));
   }), material);
 }

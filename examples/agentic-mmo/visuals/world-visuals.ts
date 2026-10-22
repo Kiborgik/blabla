@@ -31,6 +31,8 @@ export interface SettlementVisual {
   detail: DetailLevel;
 }
 
+export const SETTLEMENT_RENDER_SCALE = .7;
+
 const HOME_SITES: ReadonlyArray<readonly [number, number]> = [
   [-.29, -.42], [.27, -.42], [-.29, .03], [.27, .03],
   [-.29, .48], [.27, .48], [-.3, -.83], [.28, -.83],
@@ -57,10 +59,11 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
   for (const [index, [siteX, siteZ]] of HOME_SITES.slice(0, houses).entries()) {
     const x = siteX * density;
     const z = siteZ * density;
-    const height = .22 + tier * .17 + (index % 2) * .06;
+    const identity = Math.abs(city.civId) % 3;
+    const height = .22 + tier * .17 + (index % 2) * .06 + (index === 0 ? identity * .035 : 0);
     const width = .35 + tier * .045;
     add(`home-${index}-wall`, 'box', 'plaster', [x, height / 2, z], [width, height, .32 + tier * .025]);
-    add(`home-${index}-roof`, 'gable', index % 3 === 0 ? 'identity' : 'roof', [x, height + .12, z], [width + .08, .24, .4 + tier * .025]);
+    add(`home-${index}-roof`, identity === 2 && tier > 0 ? 'box' : 'gable', index % 3 === 0 ? 'identity' : 'roof', [x, height + .12, z], [width + .08, identity === 2 && tier > 0 ? .1 : .24, .4 + tier * .025], identity === 1 ? Math.PI / 2 : 0);
   }
   const buildings = appearances.map(({ icon, label }) => ({ icon, label, value: 1 }));
   parts.push(...allocateBuildingParts(appearances, budget.parts - parts.length - conditionParts.length));

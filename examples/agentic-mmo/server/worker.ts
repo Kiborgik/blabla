@@ -16,6 +16,9 @@ const stringField = { type: 'string', minLength: 1, maxLength: 200 };
 const planField = { type: 'array', maxItems: TURN_RULES.maximumPlanItems, items: { ...objectSchema, properties: { action: { type: 'object' }, reason: { type: 'string', minLength: 1, maxLength: 280 } }, required: ['action', 'reason'] } };
 const tools = [
   { name: 'whoami', description: 'Return this authenticated caller’s Site-scoped identity for explicit operator enrollment.', inputSchema: { ...objectSchema, properties: {} }, annotations: { readOnlyHint: true } },
+  { name: 'simulation_status', description: 'Read whether this world has explicitly activated procedural policies, their durable decision counts and the last actual wake. Enabled does not establish an installed schedule. This read never advances the world.', inputSchema: { ...objectSchema, properties: {} }, annotations: { readOnlyHint: true } },
+  { name: 'activate_simulation', description: 'Explicitly enable or pause server-owned deterministic civilization and Director policies for this existing world. Preserve its history and release. Requires enrolled operator authority; does not install a schedule or immediately take actions. Stable commandId and exact observed world revision are required.', inputSchema: { ...objectSchema, properties: { expectedRevision: revisionField, enabled: { type: 'boolean' }, commandId: stringField }, required: ['expectedRevision', 'enabled', 'commandId'] } },
+  { name: 'run_simulation', description: 'Wake explicitly activated procedural policies once at server time. The server chooses all exact legal actions; callers supply no actions, targets, models or timestamps. Atomically persist bounded upkeep, at most one decision for each of six actors per current ten-second window, policy memory and exact receipts. No missed tactical allowances accumulate. Inspect simulation.remainingStrategyTicks and simulation.remainingClockTicks; positive backlog means no actor decisions were taken. Retry an uncertain wake only with its original commandId. Requires enrolled operator authority. This tool does not install a scheduler.', inputSchema: { ...objectSchema, properties: { commandId: stringField }, required: ['commandId'] } },
   { name: 'action_receipt', description: 'Read this enrolled caller’s accepted action command ID and its original committed revision without changing the world. not_found means no matching receipt in the reported revision snapshot; it does not diagnose denial or authorize a retry. Preserve the original request and permission boundary.', inputSchema: { ...objectSchema, properties: { commandId: stringField }, required: ['commandId'] }, annotations: { readOnlyHint: true } },
   { name: 'observe_world', description: 'Read the persistent world, action-plan readiness and admission times for one seat. Overdue strategy can make legalActions empty because ordinary admission is blocked; this does not establish structural impossibility. An enrolled caller with an exact supported typed intention may use play_action strategy-action for atomic upkeep and candidate-state validation, or explicit upkeep-only then observe afresh. Empty choices do not authorize invented identifiers. Optional compact-trade-v1 returns every indexed choice. compact-trade-pages-v1 returns 20 complete choices and first-page context; choiceCursor continues that revision and observation time. Stale cursors require a fresh first page. Reads and paging never reserve or execute actions.', inputSchema: { ...objectSchema, properties: { seat: { type: 'integer', minimum: 0, maximum: 5 }, observationFormat: { enum: ['compact-trade-v1', CHOICE_PAGE_FORMAT] }, choiceCursor: { type: 'string', minLength: 1, maxLength: 2048 } } }, annotations: { readOnlyHint: true } },
   { name: 'initialize_world', description: 'Initialize a clearly named new online world once; never replace an existing world.', inputSchema: { ...objectSchema, properties: { seed: { type: 'integer' }, clockEpoch: stringField, commandId: stringField }, required: ['seed', 'clockEpoch', 'commandId'] } },
@@ -53,7 +56,7 @@ function matchesEtag(value: string | null, etag: string): boolean {
 }
 
 function publicProvenance(value: PublicProvenance): PublicProvenance {
-  return { kind: value.kind, model: value.model, seat: value.seat, commandId: value.commandId, recordedAt: value.recordedAt };
+  return { kind: value.kind, model: value.model, seat: value.seat, commandId: value.commandId, recordedAt: value.recordedAt, ...(value.policy ? { policy: { ...value.policy } } : {}) };
 }
 
 function identity(request: Request): string {
@@ -122,10 +125,13 @@ async function observation(store: WorldRepository, timestamp: string, input: Rec
 
 async function callTool(name: string, args: Record<string, unknown>, request: Request, environment: WorkerEnvironment, timestamp: string): Promise<unknown> {
   if (name === 'whoami') return { userId: identity(request), identityScope: 'site', writerEnrolled: (environment.AGENT_WRITER_USER_IDS ?? '').split(',').map((value) => value.trim()).includes(identity(request)) };
+  if (name === 'simulation_status') return repository(environment).simulation();
   if (name === 'observe_world') return observation(repository(environment), timestamp, args, environment.WORLD_ID ?? 'main');
   const actor = authorize(request, environment);
   const store = repository(environment);
   switch (name) {
+    case 'activate_simulation': return store.configureSimulation(args, actor, timestamp);
+    case 'run_simulation': return store.runSimulation(args, actor, timestamp);
     case 'action_receipt': return store.actionReceipt(args, actor);
     case 'initialize_world': return store.initialize(args, actor, timestamp);
     case 'play_action': return store.mutate('action', args, actor, timestamp);
@@ -195,6 +201,7 @@ export function createWorker(assetResponder?: AssetResponder, options: WorkerOpt
                 const value: PublicWorldRead = { ok: true, authoritative: true, ...current };
                 return response(value, 200, { etag: store.worldEtag(current.state.revision) });
               }
+              case '/api/simulation': return response({ ok: true, ...await store.simulation() });
               case '/api/observe': {
                 const formats = url.searchParams.getAll('observationFormat');
                 const input: Record<string, unknown> = { ...Object.fromEntries(url.searchParams), seat: url.searchParams.has('seat') ? Number(url.searchParams.get('seat')) : undefined, observationFormat: formats.length > 1 ? formats : formats[0] };
@@ -222,6 +229,8 @@ export function createWorker(assetResponder?: AssetResponder, options: WorkerOpt
           const input = await payload(request);
           const store = repository(environment);
           switch (url.pathname) {
+            case '/api/simulation/activate': return response(await store.configureSimulation(input, actor, timestamp));
+            case '/api/simulation/run': return response(await store.runSimulation(input, actor, timestamp));
             case '/api/init': return response(await store.initialize(input, actor, timestamp));
             case '/api/action': return response(await store.mutate('action', input, actor, timestamp));
             case '/api/tick': return response(await store.mutate('director-tick', input, actor, timestamp));

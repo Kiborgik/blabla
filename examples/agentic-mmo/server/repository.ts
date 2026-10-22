@@ -6,7 +6,8 @@ import { decisionActionBlock } from '../core/simulation/decisions.ts';
 import { decodeHistorySnapshot, HISTORY_SNAPSHOT_PREFIX } from './snapshot-codec.ts';
 import { HistoryOutputBudget, selectHistoryRows } from './history-budget.ts';
 import { type ActionReceiptRead, readActionReceipt } from './action-receipt.ts';
-import type { PublicChronicleEntry, PublicPage, PublicProvenance, PublicTransition } from './public-protocol.ts';
+import { assertAutonomousState, createAutonomousState, planAutonomousWake, type AutonomousRecord } from './autonomous-runner.ts';
+import { isPublicProvenance, type PublicChronicleEntry, type PublicPage, type PublicProvenance, type PublicTransition } from './public-protocol.ts';
 import { assertWorld, boundedInteger, canonical, isRecord, parseJson, record, RequestFailure, text, utc } from './validation.ts';
 
 export type SqlValue = string | number | null;
@@ -19,13 +20,14 @@ export interface HostedChronicleEntry extends PublicChronicleEntry { provenance:
 export interface HostedEntry extends HostedChronicleEntry { state: WorldState }
 export interface HostedReply { ok: true; revision: number; acceptedRevision: number; duplicate?: boolean; remainingTicks?: number; actionOutcome?: ActionOutcome; operation?: 'strategy-action' | 'strategy-catchup'; strategyTicks?: number; strategyTimestamp?: string; strategyStartRevision?: number; strategyEndRevision?: number }
 export interface HostedWorld { initial: WorldState; state: WorldState }
+export interface SimulationStatus { configured: boolean; enabled: boolean; runtimeRevision: number; policyVersion: string | null; activatedAt: string | null; lastWakeAt: string | null; wakeCount: number; actors: Array<{ seat: number; profileId: string; phase: string; decisions: number }> }
 
 function assertReply(value: unknown): asserts value is HostedReply {
   if (!isRecord(value) || value.ok !== true || typeof value.revision !== 'number' || typeof value.acceptedRevision !== 'number') throw new RequestFailure(503, 'corrupt_receipt');
 }
 
 function assertChronicleEntry(value: unknown): asserts value is HostedChronicleEntry {
-  if (!isRecord(value) || !isRecord(value.transition) || !isRecord(value.provenance) || !Array.isArray(value.events)
+  if (!isRecord(value) || !isRecord(value.transition) || !isPublicProvenance(value.provenance) || !Array.isArray(value.events)
     || value.transition.kind === 'action' && (!isRecord(value.transition.command) || !isGameAction(value.transition.command.action))
     || typeof value.startRevision !== 'number' || !Number.isSafeInteger(value.startRevision) || value.startRevision < 0
     || typeof value.endRevision !== 'number' || !Number.isSafeInteger(value.endRevision) || value.endRevision <= value.startRevision) throw new RequestFailure(503, 'corrupt_history');
@@ -90,6 +92,111 @@ export class WorldRepository {
     assertWorld(state);
     if (row.revision !== state.revision) throw new RequestFailure(503, 'corrupt_world_revision');
     return { initial, state };
+  }
+
+  private async readSimulation(): Promise<{ world: WorldState; runtime: AutonomousRecord | null } | null> {
+    const result = await this.database.prepare('SELECT w.revision AS world_revision, w.initial_json AS initial_json, w.state_json AS world_json, a.revision AS runtime_revision, a.state_json AS runtime_json FROM world_state w LEFT JOIN world_autonomy a ON a.world_id = w.world_id WHERE w.world_id = ?').bind(this.worldId).all();
+    const row = result.results[0];
+    if (row === undefined) return null;
+    if (!isRecord(row) || typeof row.initial_json !== 'string' || typeof row.world_json !== 'string') throw new RequestFailure(503, 'corrupt_world_row');
+    assertWorld(parseJson(row.initial_json));
+    const world = parseJson(row.world_json);
+    assertWorld(world);
+    if (row.world_revision !== world.revision) throw new RequestFailure(503, 'corrupt_world_revision');
+    if (row.runtime_revision === null && row.runtime_json === null) return { world, runtime: null };
+    if (typeof row.runtime_revision !== 'number' || !Number.isSafeInteger(row.runtime_revision) || row.runtime_revision < 1 || typeof row.runtime_json !== 'string') throw new RequestFailure(503, 'corrupt_or_incompatible_simulation');
+    const state = parseJson(row.runtime_json);
+    assertAutonomousState(state, world);
+    return { world, runtime: { revision: row.runtime_revision, state } };
+  }
+
+  async simulation(): Promise<SimulationStatus> {
+    const current = await this.readSimulation();
+    if (!current) throw new RequestFailure(503, 'world_not_initialized');
+    const { runtime } = current;
+    return runtime === null ? { configured: false, enabled: false, runtimeRevision: 0, policyVersion: null, activatedAt: null, lastWakeAt: null, wakeCount: 0, actors: [] }
+      : { configured: true, enabled: runtime.state.enabled, runtimeRevision: runtime.revision, policyVersion: runtime.state.policyVersion, activatedAt: runtime.state.activatedAt, lastWakeAt: runtime.state.lastWakeAt, wakeCount: runtime.state.wakeCount, actors: runtime.state.memories.map(memory => ({ seat: memory.seat, profileId: memory.profileId, phase: memory.phase, decisions: memory.decisionCount })) };
+  }
+
+  async configureSimulation(input: Record<string, unknown>, actorUserId: string, timestamp: string): Promise<HostedReply> {
+    if (Object.keys(input).some(key => !['commandId', 'expectedRevision', 'enabled'].includes(key)) || typeof input.enabled !== 'boolean') throw new RequestFailure(400, 'invalid_simulation_activation');
+    const expectedRevision = boundedInteger(input.expectedRevision, 0, Number.MAX_SAFE_INTEGER, 'revision');
+    const key = `simulation-configure:${text(input.commandId, 'command_id')}`;
+    utc(timestamp);
+    const fingerprint = canonical({ operation: 'simulation-configure', input, actorUserId });
+    const prior = await this.receipt(key, fingerprint);
+    if (prior) return prior;
+    try {
+      const observed = await this.readSimulation();
+      if (!observed) throw new RequestFailure(503, 'world_not_initialized');
+      const { world, runtime: current } = observed;
+      if (world.revision !== expectedRevision) throw new RequestFailure(409, 'stale_revision');
+      if (world.outcome && input.enabled) throw new RequestFailure(409, 'world_finished');
+      const revision = (current?.revision ?? 0) + 1;
+      if (!Number.isSafeInteger(revision)) throw new RequestFailure(503, 'simulation_counter_exhausted');
+      const state = current ? { ...current.state, enabled: input.enabled, lastCommandKey: key } : createAutonomousState(world, timestamp, input.enabled, key);
+      const serialized = JSON.stringify(state);
+      const reply = { ok: true as const, revision: expectedRevision, acceptedRevision: expectedRevision, simulation: { enabled: state.enabled, runtimeRevision: revision, policyVersion: state.policyVersion } };
+      const change = current === null
+        ? this.database.prepare('INSERT INTO world_autonomy (world_id, revision, state_json, updated_at) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_state WHERE world_id = ? AND revision = ?)').bind(this.worldId, revision, serialized, timestamp, this.worldId, expectedRevision)
+        : this.database.prepare('UPDATE world_autonomy SET revision = ?, state_json = ?, updated_at = ? WHERE world_id = ? AND revision = ? AND EXISTS (SELECT 1 FROM world_state WHERE world_id = ? AND revision = ?)').bind(revision, serialized, timestamp, this.worldId, current.revision, this.worldId, expectedRevision);
+      const committed = await this.database.batch([
+        change,
+        this.database.prepare('INSERT INTO world_receipts (world_id, receipt_key, request_json, response_json) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_autonomy WHERE world_id = ? AND revision = ? AND state_json = ?)').bind(this.worldId, key, fingerprint, JSON.stringify(reply), this.worldId, revision, serialized),
+      ]);
+      if (committed[0]?.meta.changes === 1) return reply;
+      throw new RequestFailure(409, 'stale_simulation_revision');
+    } catch (failure) {
+      const retry = await this.receipt(key, fingerprint);
+      if (retry) return retry;
+      throw failure;
+    }
+  }
+
+  async runSimulation(input: Record<string, unknown>, actorUserId: string, timestamp: string): Promise<HostedReply> {
+    if (Object.keys(input).some(key => key !== 'commandId')) throw new RequestFailure(400, 'invalid_simulation_wake');
+    const commandId = text(input.commandId, 'command_id');
+    const key = `simulation-wake:${commandId}`;
+    utc(timestamp);
+    const fingerprint = canonical({ operation: 'simulation-wake', input, actorUserId });
+    const prior = await this.receipt(key, fingerprint);
+    if (prior) return prior;
+    try {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const current = await this.readSimulation();
+        if (!current) throw new RequestFailure(503, 'world_not_initialized');
+        const { world, runtime } = current;
+        if (!runtime) throw new RequestFailure(409, 'simulation_not_active');
+        if (!Number.isSafeInteger(runtime.revision + 1)) throw new RequestFailure(503, 'simulation_counter_exhausted');
+        const wake = planAutonomousWake(world, runtime.state, timestamp, commandId);
+        const expectedRevision = world.revision;
+        const runtimeRevision = runtime.revision + 1;
+        const serialized = JSON.stringify(wake.runtime);
+        const reply = { ok: true as const, revision: wake.state.revision, acceptedRevision: wake.state.revision, simulation: { runtimeRevision, policyVersion: wake.runtime.policyVersion, decisions: wake.decisions, strategyTicks: wake.strategyTicks, clockTicks: wake.clockTicks, remainingStrategyTicks: wake.remainingStrategyTicks, remainingClockTicks: wake.remainingClockTicks, commandIds: wake.steps.filter(step => step.transition.kind === 'action').map(step => step.provenance.commandId), lastWakeAt: timestamp } };
+        const statements: D1Statement[] = [];
+        for (const step of wake.steps) {
+          const startRevision = step.transition.kind === 'action' ? step.transition.command.expectedRevision : 'expectedRevision' in step.transition ? step.transition.expectedRevision : step.transition.command.expectedRevision;
+          statements.push(this.database.prepare('INSERT INTO world_transitions (world_id, start_revision, end_revision, receipt_key, transition_json, provenance_json, state_json, events_json) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_state WHERE world_id = ? AND revision = ?) AND EXISTS (SELECT 1 FROM world_autonomy WHERE world_id = ? AND revision = ?)').bind(this.worldId, startRevision, step.result.state.revision, step.receiptKey, JSON.stringify(step.transition), JSON.stringify({ ...step.provenance, actorUserId }), JSON.stringify(step.result.state), JSON.stringify(step.result.events), this.worldId, expectedRevision, this.worldId, runtime.revision));
+          statements.push(this.database.prepare('INSERT INTO world_receipts (world_id, receipt_key, request_json, response_json) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_transitions WHERE world_id = ? AND receipt_key = ?) AND EXISTS (SELECT 1 FROM world_autonomy WHERE world_id = ? AND revision = ?)').bind(this.worldId, step.receiptKey, canonical({ operation: 'simulation-step', transition: step.transition, policy: step.provenance.policy ?? null, actorUserId }), JSON.stringify({ ok: true, revision: step.result.state.revision, acceptedRevision: step.result.state.revision, ...(step.result.actionOutcome ? { actionOutcome: step.result.actionOutcome } : {}) }), this.worldId, step.receiptKey, this.worldId, runtime.revision));
+        }
+        const last = wake.steps.at(-1);
+        if (last) statements.push(this.database.prepare('UPDATE world_state SET revision = ?, state_json = ?, updated_at = ? WHERE world_id = ? AND revision = ? AND EXISTS (SELECT 1 FROM world_transitions WHERE world_id = ? AND receipt_key = ?) AND EXISTS (SELECT 1 FROM world_autonomy WHERE world_id = ? AND revision = ?)').bind(wake.state.revision, JSON.stringify(wake.state), timestamp, this.worldId, expectedRevision, this.worldId, last.receiptKey, this.worldId, runtime.revision));
+        const runtimeIndex = statements.length;
+        statements.push(last
+          ? this.database.prepare('UPDATE world_autonomy SET revision = ?, state_json = ?, updated_at = ? WHERE world_id = ? AND revision = ? AND EXISTS (SELECT 1 FROM world_state WHERE world_id = ? AND revision = ?) AND EXISTS (SELECT 1 FROM world_transitions WHERE world_id = ? AND receipt_key = ?)').bind(runtimeRevision, serialized, timestamp, this.worldId, runtime.revision, this.worldId, wake.state.revision, this.worldId, last.receiptKey)
+          : this.database.prepare('UPDATE world_autonomy SET revision = ?, state_json = ?, updated_at = ? WHERE world_id = ? AND revision = ? AND EXISTS (SELECT 1 FROM world_state WHERE world_id = ? AND revision = ?)').bind(runtimeRevision, serialized, timestamp, this.worldId, runtime.revision, this.worldId, expectedRevision));
+        statements.push(this.database.prepare('INSERT INTO world_receipts (world_id, receipt_key, request_json, response_json) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM world_autonomy WHERE world_id = ? AND revision = ? AND state_json = ?)').bind(this.worldId, key, fingerprint, JSON.stringify(reply), this.worldId, runtimeRevision, serialized));
+        const committed = await this.database.batch(statements);
+        if (committed[runtimeIndex]?.meta.changes === 1) return reply;
+        const retry = await this.receipt(key, fingerprint);
+        if (retry) return retry;
+      }
+      throw new RequestFailure(409, 'concurrent_retry_limit');
+    } catch (failure) {
+      const retry = await this.receipt(key, fingerprint);
+      if (retry) return retry;
+      throw failure;
+    }
   }
 
   private async receipt(key: string, fingerprint: string): Promise<HostedReply | null> {

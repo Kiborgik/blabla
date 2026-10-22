@@ -251,12 +251,16 @@ await test('SVG and Three territory layers share exact tiles, owners and boundar
   assert.deepEqual(world, before);
 });
 
-await test('boundary ribbons retain canonical elevation and do not add width along an empty edge', () => {
+await test('boundary ribbons retain surface endpoint elevations and do not add width along an empty edge', () => {
   const edge = projectLandscape(tiles, [], 'mid').borders[0];
   assert.ok(edge);
   const points = territoryEdgeTriangles(edge);
   assert.equal(points.length, 18);
-  assert.ok(points.filter((_, index) => index % 3 === 1).every(height => height === edge.height));
+  const from = edge.fromHeight ?? edge.height;
+  const to = edge.toHeight ?? edge.height;
+  assert.deepEqual(points.filter((_, index) => index % 3 === 1), [from, to, to, from, to, from]);
+  const legacy = { key: edge.key, owner: edge.owner, from: edge.from, to: edge.to, height: edge.height };
+  assert.ok(territoryEdgeTriangles(legacy).filter((_, index) => index % 3 === 1).every(height => height === edge.height));
   assert.deepEqual(territoryEdgeTriangles({ ...edge, to: edge.from }), []);
 });
 

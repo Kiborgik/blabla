@@ -1,6 +1,6 @@
 import { purchasedSiteBlock } from './site-binding.ts';
 import { DISTRICT_RULES, IMPROVEMENT_RULES, RESOURCE_IDS } from '../content.ts';
-import type { BuildingDefinition, City, Resource, Resources, WorldState } from '../types.ts';
+import type { BuildingDefinition, City, HexTile, Resource, Resources, WorldState } from '../types.ts';
 import { hexDistance } from './geography.ts';
 import { hasFeatures } from './history.ts';
 
@@ -16,10 +16,8 @@ export function districtCount(city: City): number {
   return Object.keys(city.districtSites ?? {}).length + (city.construction?.active && !('kind' in city.construction.active) && city.construction.active.tileId !== undefined ? 1 : 0);
 }
 
-export function districtSiteBlock(state: WorldState, city: City, building: BuildingDefinition, tileId: number): string | null {
+function resolvedDistrictSiteBlock(state: WorldState, city: City, building: BuildingDefinition, tileId: number, site: HexTile | undefined, center: HexTile | undefined): string | null {
   if (!hasFeatures(state, [DISTRICT_RULES.featureId]) || !building.district) return 'District planning is unavailable';
-  const site = state.tiles.find(tile => tile.id === tileId);
-  const center = state.tiles.find(tile => tile.id === city.tileId);
   if (!Number.isSafeInteger(tileId) || !site || !center) return 'The exact district site is missing';
   if (site.owner !== city.civId) return 'The district site must already belong to this civilization';
   const binding = purchasedSiteBlock(state, city, tileId); if (binding) return binding;
@@ -30,9 +28,14 @@ export function districtSiteBlock(state: WorldState, city: City, building: Build
   return null;
 }
 
+export function districtSiteBlock(state: WorldState, city: City, building: BuildingDefinition, tileId: number): string | null {
+  return resolvedDistrictSiteBlock(state, city, building, tileId, state.tiles.find(tile => tile.id === tileId), state.tiles.find(tile => tile.id === city.tileId));
+}
+
 export function availableDistrictSites(state: WorldState, city: City, building: BuildingDefinition): number[] {
   if (districtCount(city) >= districtCapacity(city)) return [];
-  return state.tiles.filter(tile => districtSiteBlock(state, city, building, tile.id) === null).map(tile => tile.id).toSorted((a, b) => a - b);
+  const center = state.tiles.find(tile => tile.id === city.tileId);
+  return state.tiles.filter(tile => resolvedDistrictSiteBlock(state, city, building, tile.id, tile, center) === null).map(tile => tile.id).toSorted((a, b) => a - b);
 }
 
 export interface DistrictAdjacencyFacts {

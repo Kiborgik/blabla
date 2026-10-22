@@ -13,7 +13,12 @@ void test('connected compact graph retains every node and every multi-parent edg
   const before = structuredClone(nodes);
   const graph = capabilityGraphLayout(nodes);
   assert.equal(graph.nodes.length, catalogue.technologies.length + catalogue.buildings.length + catalogue.improvements.length + catalogue.wonders.length);
-  assert.equal(graph.edges.length, catalogue.edges.length);
+  const displayed = new Set(nodes.map(node => node.id));
+  const expectedEdges = catalogue.edges.filter(edge => displayed.has(edge.from) && displayed.has(edge.to));
+  const edgeKey = (edge: { from: string; to: string }): string => `${edge.from}→${edge.to}`;
+  assert.deepEqual(graph.edges.map(edgeKey).toSorted(), expectedEdges.map(edgeKey).toSorted());
+  assert.ok(nodes.some(node => node.requires.length > 1));
+  for (const node of nodes.filter(node => node.requires.length > 1)) assert.deepEqual(graph.edges.filter(edge => edge.to === node.id).map(edge => edge.from).toSorted(), node.requires.filter(parent => displayed.has(parent)).toSorted());
   assert.equal(new Set(graph.nodes.map(node => `${node.x},${node.y}`)).size, nodes.length);
   assert.ok(graph.nodes.every(node => node.width >= 140 && node.height >= 64));
   assert.deepEqual(nodes, before);

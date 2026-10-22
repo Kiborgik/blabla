@@ -8,6 +8,13 @@
       "when": 1792137711568,
       "tag": "0000_world",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792642018626,
+      "tag": "0001_autonomous_policy",
+      "breakpoints": true
     }
   ]
 }

@@ -114,6 +114,7 @@ export function allocateMapHierarchy(anchors: readonly HierarchyAnchor[], frame:
       caption, fullLabel: item.label, fontSize, symbolSize: item.kind === 'resource' ? 15 : item.selected ? 26 : item.kind === 'town' ? 22 : 20,
       emphasis: item.selected ? 'selected' : item.kind === 'wonder' && item.completed ? 'landmark' : item.kind === 'resource' ? 'subtle' : 'normal' };
     if (!Number.isFinite(item.x) || !Number.isFinite(item.y) || item.x < 0 || item.y < 0 || item.x > frame.width || item.y > frame.height || marks >= budgets.marks) return placement;
+    if (budgets.detail === 'far' && item.kind === 'site' && !item.related && !item.selected) return placement;
     if (item.kind === 'resource' && (!item.revealed || resources.length >= budgets.resources || item.tileId !== undefined && occupiedTiles.has(item.tileId)
       || resources.some(other => Math.hypot(item.x - other.x, item.y - other.y) < budgets.resourceSpacing))) return placement;
     const mark = candidateMarks(item, item.kind === 'resource' ? 20 : 44).find(fits);

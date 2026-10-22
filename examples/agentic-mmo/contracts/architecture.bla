@@ -47,3 +47,20 @@ require "host-reuses-canonical-validation": dependency hostValidation -> validat
 require "live-view-reuses-canonical-validation": dependency liveProjection -> validation
 forbid "evolution-is-independent-of-rendering": dependency evolution -> "three"
 forbid "evolution-is-independent-of-storage": dependency evolution -> "node:fs"
+
+module behaviors "core/behaviors.ts"
+module behaviorProfiles "core/behavior-profiles.ts"
+module autonomousRunner "server/autonomous-runner.ts"
+module localSimulation "web/local-simulation.ts"
+module publicProtocol "server/public-protocol.ts"
+require "weighted-behaviors-use-authoritative-legality": dependency behaviors -> engine
+require "weighted-behaviors-use-authored-profiles": dependency behaviors -> behaviorProfiles
+require "hosted-autonomy-uses-the-shared-controller": dependency autonomousRunner -> behaviors
+require "hosted-autonomy-uses-the-shared-engine": dependency autonomousRunner -> engine
+require "local-observatory-uses-the-shared-controller": dependency localSimulation -> behaviors
+require "local-observatory-uses-the-shared-engine": dependency localSimulation -> engine
+require "public-provenance-validates-controller-evidence": symbol publicProtocol::isPublicProvenance
+forbid "engine-does-not-depend-on-controller-decisions": dependency engine -> behaviors
+forbid "controllers-do-not-import-rendering": dependency behaviors -> "three"
+forbid "controllers-do-not-import-hosted-storage": dependency behaviors -> host
+forbid "local-observatory-does-not-import-hosted-storage": dependency localSimulation -> host

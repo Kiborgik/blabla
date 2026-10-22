@@ -4,7 +4,7 @@ import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.t
 import type { ConstructionOrder, WorldState } from '../core/types.ts';
 import { civicBootstrapJourney } from './fixtures/civic-bootstrap-journey.ts';
 import { secondGovernmentJourney } from './fixtures/second-government-journey.ts';
-import { civicProgressPresentation, createCivicProgress, type CivicProgressInput } from '../web/civic-progress.ts';
+import { civicProgressPresentation, createCivicProgress, civicTreeNodes, type CivicProgressInput } from '../web/civic-progress.ts';
 
 const journey = civicBootstrapJourney();
 const catalogue = capabilityCatalogue();
@@ -197,9 +197,9 @@ await test('the read-only renderer separates Culture, Government and current eff
   assert.match(section.content(), /Culture · Civics/);
   assert.match(section.content(), /Government · Chiefdom/);
   assert.match(section.content(), /Urban planning/);
-  assert.match(section.content(), /Current opening effects/);
+  assert.match(section.content(), /Government effects & construction/);
   assert.match(section.content(), /work recorded/);
-  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civics', 'government']);
+  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civic-tree', 'civics', 'government', 'government-effects']);
   assert.ok(section.all().filter(node => node.tag === 'details').every(node => node.children[0]?.tag === 'summary'));
   assert.equal(section.all().filter(node => ['button', 'input', 'select', 'form'].includes(node.tag)).length, 0);
   assert.ok(section.all().some(node => node.tag === 'svg'));
@@ -366,10 +366,35 @@ await test('second-government comparison and effects stay inside the existing sa
   definition.name = '<button>Switch government</button>';
   const section = render(source);
   assert.ok(section);
-  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civics', 'government']);
+  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civic-tree', 'civics', 'government', 'government-effects']);
   assert.ok(section.all().filter(node => node.tag === 'details').every(node => node.children[0]?.tag === 'summary'));
   assert.match(section.content(), /<button>Switch government<\/button>/);
   assert.match(section.content(), /0 diplomatic · 1 wildcard/);
   assert.match(section.content(), /Current effects still use the active arrangement/);
   assert.equal(section.all().filter(node => ['button', 'input', 'select', 'form'].includes(node.tag)).length, 0);
+});
+
+await test('the civic dependency view derives every node and multi-parent edge from the catalogue', () => {
+  const source = input(journey.selected);
+  const before = structuredClone(source);
+  const nodes = civicTreeNodes(source);
+  assert.equal(nodes.length, source.catalogue.civics.length);
+  assert.equal(nodes.find(node => node.id === 'code-of-laws')?.status, 'developing');
+  assert.equal(nodes.find(node => node.id === 'craftsmanship')?.status, 'unreleased');
+  const workforce = nodes.find(node => node.id === 'state-workforce');
+  assert.deepEqual(workforce?.requires.map(parent => parent.id), ['craftsmanship', 'early-empire']);
+  for (const node of nodes) for (const parent of node.requires) assert.ok(node.level > (nodes.find(candidate => candidate.id === parent.id)?.level ?? -1));
+  assert.deepEqual(source, before);
+});
+
+await test('civic statuses distinguish released choice, unknown record and completed history', () => {
+  assert.equal(civicTreeNodes(input(journey.adopted)).find(node => node.id === 'code-of-laws')?.status, 'available');
+  assert.equal(civicTreeNodes(input(journey.completed)).find(node => node.id === 'code-of-laws')?.status, 'completed');
+  const unknown = input(journey.adopted);
+  delete unknown.projection.governance;
+  assert.equal(civicTreeNodes(unknown).find(node => node.id === 'code-of-laws')?.status, 'unknown');
+  const expanded = input(journey.selected);
+  expanded.catalogue = structuredClone(expanded.catalogue);
+  expanded.catalogue.civics.push({ id: 'future-civic', name: 'Future civic', requires: ['code-of-laws'], requiredFeatures: ['not-released'], cost: 80, capability: 'Future catalogue branch.' });
+  assert.equal(civicTreeNodes(expanded).find(node => node.id === 'future-civic')?.status, 'unreleased');
 });

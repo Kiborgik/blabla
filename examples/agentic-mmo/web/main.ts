@@ -1,3 +1,7 @@
+import { advanceLocalSimulationAsync, disposeLocalSimulationWorker } from './local-simulation-client.ts';
+import { LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, parseLocalSimulation, localSimulationSnapshot, type LocalSimulation } from './local-simulation.ts';
+import './spectator-hud.css';
+import { civilizationSummary, constructionCommitment, spectatorChronicle, renderSpectatorChronicle, renderRecordedPolicyChoice, type SpectatorDestination } from './spectator-hud.ts';
 import { projectTownTerritory } from '../visuals/territory-visuals.ts';
 import { observedPastoralSites } from '../core/simulation/pastoral.ts';
 import { townDevelopmentFacts } from '../visuals/wonder-visuals.ts';
@@ -60,28 +64,28 @@ if (!app) throw new Error('The spectator application mount is missing.');
 
 app.innerHTML = `
   <header class="masthead">
-    <a class="brand" href="#" aria-label="Civitas home"><span class="brand-mark" aria-hidden="true">C</span><span>CIVITAS<small>A WORLD OF ITS OWN</small></span></a>
-    <nav class="top-nav" aria-label="World information"><span class="nav-active">The world</span><button id="events-nav" class="events-nav" data-open-events type="button">Events</button><button class="text-button about-button" type="button">About</button><button id="settings-open" class="text-button" type="button" aria-label="Viewer settings">Settings</button></nav>
-    <div class="mode"><span class="status-dot"></span><span id="connection-label">CONNECTING</span><span class="mode-detail">Humans watch. Agents decide.</span></div>
+    <a class="brand" href="#" aria-label="Civitas home"><span class="brand-mark" aria-hidden="true">C</span><span>CIVITAS</span></a>
+    <nav class="top-nav" aria-label="World information"><span class="nav-active">Observer</span><button id="events-nav" class="events-nav" data-open-events type="button">Events</button><button class="text-button about-button" type="button">About</button><button id="settings-open" class="text-button" type="button" aria-label="Viewer settings">Settings</button></nav>
+    <div class="mode"><span class="status-dot"></span><span id="connection-label">CONNECTING</span><span class="mode-detail">View only</span></div>
   </header>
   <main class="observatory live-observatory">
     <div id="map" class="map"><div id="city-labels" class="city-labels"></div></div>
     <section class="world-heading" aria-label="Current world status"><span id="world-id" class="eyebrow">SHARED WORLD</span><h1 id="world-title">Connecting to the world</h1><p id="world-detail">Looking for the latest committed state.</p></section>
     <div class="era-pill"><span><strong id="era-name">Early settlements</strong><small id="era-detail">A GROWING WORLD</small></span></div>
-    <aside class="civilization-panel panel" aria-label="Civilizations" hidden><div class="panel-heading"><span class="eyebrow">CIVILIZATIONS</span><span class="count">05</span></div><div class="civilization-list"></div><div class="director"><span class="director-icon" aria-hidden="true">D</span><span><strong>World Director</strong><small>The sixth perspective</small></span><span class="director-badge">AI</span></div></aside>
+    <aside class="civilization-panel panel" aria-label="Civilizations" hidden><h2 class="sr-only">Civilizations · Select to inspect</h2><div class="civilization-list"></div></aside>
     <aside class="inspection panel" aria-label="Civilization inspection" hidden></aside>
     <div class="map-tools" role="group" aria-label="Map camera"><button id="zoom-in" type="button" aria-label="Zoom in">+</button><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="reset-camera" type="button" aria-label="Reset camera">Home</button></div>
     <div class="layer-controls" role="group" aria-label="Map layers"><button data-layer="borders" type="button" aria-pressed="${preferences.borders}">Borders</button><button data-layer="routes" type="button" aria-pressed="${preferences.routes}">Routes</button></div>
-    <section class="chronicle panel" aria-label="Latest world event"><div><span id="chronicle-label" class="eyebrow">WORLD CONNECTION</span><strong id="event-title">A shared story is taking shape.</strong><p id="event-detail">This page reads the world. It cannot issue orders.</p><div id="event-deltas" class="story-deltas" tabindex="0" aria-label="Latest event amounts; scroll for all recorded amounts"></div><button id="events-open" class="text-button" data-open-events type="button" hidden>Recent events</button></div></section>
-    <div class="map-hint" id="map-hint">Drag to explore · Use + and − to zoom · Tap a city or route</div>
+    <section class="chronicle panel" aria-label="World chronicle"><div class="chronicle-heading"><span class="eyebrow">WORLD CHRONICLE</span><button id="events-open" class="text-button" data-open-events type="button" hidden>All events ↗</button></div><ol id="major-event-list" aria-label="Latest major events, newest first"></ol><div id="connection-story"><span id="chronicle-label" class="eyebrow">WORLD CONNECTION</span><strong id="event-title">Connecting to the world</strong><p id="event-detail">Waiting for the first recorded changes.</p><div id="event-deltas" class="story-deltas" tabindex="0" aria-label="Latest event amounts; scroll for all recorded amounts"></div></div></section>
+    <div class="map-hint" id="map-hint">Drag to explore · Select a civilization or town</div>
     <div id="connection-actions" class="connection-actions"><button id="sample-open" type="button" hidden>View sample atlas</button><button id="live-open" type="button" hidden>Return to live world</button><span id="render-mode"></span></div>
   </main>
-  <footer class="footer"><span class="footer-status">A shared world. An open future.</span><div class="release-links"><button id="world-info-open" data-open-changelog type="button" aria-haspopup="dialog" aria-controls="history-dialog" aria-label="View changelog for version ${currentRelease.version}">v${currentRelease.version} · Changelog</button><a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">Built with <strong>BlaBla</strong></a></div></footer>
+  <footer class="footer"><span class="footer-status">Observe the world. No player orders.</span><div class="release-links"><button id="world-info-open" data-open-changelog type="button" aria-haspopup="dialog" aria-controls="history-dialog" aria-label="View changelog for version ${currentRelease.version}">v${currentRelease.version} · Changelog</button><a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">Built with <strong>BlaBla</strong></a></div></footer>
   <dialog id="history-dialog" aria-labelledby="history-title"><div class="dialog-top"><span class="eyebrow">VIEWER UPDATES</span><button class="dialog-close" type="button" aria-label="Close update history">×</button></div><h2 id="history-title">Changelog</h2><p class="history-current">Current viewer <strong>v${currentRelease.version}</strong> · Newest first</p><nav class="history-pages" aria-label="Update history pages"><button id="history-newer" type="button">Newer</button><span id="history-range" role="status"></span><button id="history-older" type="button">Older</button></nav><div class="release-history"></div></dialog>
-  <dialog id="about-dialog" aria-labelledby="about-title"><div class="dialog-top"><span class="eyebrow">A WORLD THAT KEEPS GROWING</span><button class="dialog-close" type="button" aria-label="Close world information">×</button></div><h2 id="about-title">The world, without us.</h2><p class="dialog-intro">Five AI civilizations. A sixth AI World Director. Humans watch the story unfold.</p><div class="about-body"><p>Settlements grow through research, construction, production and consenting trade. The applied world release determines which branches are available; inspect the tree for current requirements.</p><h3>Many ways forward</h3><p>The horizon includes scientific, cultural, economic, political and military success. Their systems arrive through future expansions; they are not all available today.</p><p>Fast choices shape slower projects and lasting commitments. The calendar has its own regular rhythm, with deliberate turning points as the world grows.</p><p>Viewer version ${currentRelease.version}. A connected view shows committed server state. It does not claim the agents are acting continuously. Sample mode is clearly labeled and never changes the shared world.</p><p>Development is organized with <a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">BlaBla</a>.</p></div></dialog>
+  <dialog id="about-dialog" aria-labelledby="about-title"><div class="dialog-top"><span class="eyebrow">A WORLD THAT KEEPS GROWING</span><button class="dialog-close" type="button" aria-label="Close world information">×</button></div><h2 id="about-title">The world, without us.</h2><p id="about-source" class="dialog-intro">Five civilizations. An observer-only world.</p><p id="about-world-record" class="history-current"></p><div class="about-body"><p>Settlements grow through research, construction, production and consenting trade. The applied world release determines which branches are available; inspect the tree for current requirements.</p><h3>Many ways forward</h3><p>The horizon includes scientific, cultural, economic, political and military success. Their systems arrive through future expansions; they are not all available today.</p><p>Fast choices shape slower projects and lasting commitments. The calendar has its own regular rhythm, with deliberate turning points as the world grows.</p><p>Viewer version ${currentRelease.version}. A connected view shows committed server state. It does not claim the agents are acting continuously. Sample mode is clearly labeled and never changes the shared world.</p><p>Development is organized with <a href="https://github.com/Kiborgik/blabla" target="_blank" rel="noopener noreferrer">BlaBla</a>.</p></div></dialog>
   <dialog id="events-dialog" aria-labelledby="events-title"><div class="dialog-top"><span class="eyebrow">THE WORLD STORY</span><button class="dialog-close" type="button" aria-label="Close recent events">×</button></div><h2 id="events-title">What changed</h2><p class="dialog-intro">Key events first. Filter by civilization or kind, then open a record for details.</p><button id="events-refresh" type="button" hidden>New events available · Refresh</button><ol id="event-list"></ol></dialog>
   <dialog id="capability-dialog"></dialog>
-  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-top"><span class="eyebrow">YOUR VIEW</span><button class="dialog-close" type="button" aria-label="Close viewer settings">×</button></div><h2 id="settings-title">Viewer settings</h2><p class="dialog-intro">Changes only how you see the world.</p><div class="viewer-options"><label for="viewer-theme">Theme</label><select id="viewer-theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select><p>System follows your device theme.</p><label for="viewer-effects">Effects</label><select id="viewer-effects" aria-describedby="effects-explanation system-motion-note"><option value="calm">Calm</option><option value="rich">Rich</option><option value="cinematic">Cinematic</option></select><p id="effects-explanation"></p><p id="system-motion-note" role="status" hidden>Your device requests reduced motion. Calm is active.</p></div><fieldset class="settings-layers"><legend>Map layers</legend><button data-layer="borders" type="button" aria-pressed="${preferences.borders}">Borders</button><button data-layer="routes" type="button" aria-pressed="${preferences.routes}">Routes</button></fieldset><p class="settings-note">Preferences are kept on this browser when storage is available. No change to agent choices or world speed.</p></dialog>
+  <dialog id="settings-dialog" aria-labelledby="settings-title"><div class="dialog-top"><span class="eyebrow">YOUR VIEW</span><button class="dialog-close" type="button" aria-label="Close viewer settings">×</button></div><h2 id="settings-title">Viewer settings</h2><p class="dialog-intro">Changes only how you see the world.</p><div class="viewer-options"><label for="world-source">World to observe</label><select id="world-source"><option value="local">Local procedural world</option><option value="shared">Shared historical world</option></select><p>Changes the view only. The local world uses built-in rules and accelerated time, not live AI models.</p><p id="local-save-status" role="status"></p><label for="viewer-theme">Theme</label><select id="viewer-theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select><p>System follows your device theme.</p><label for="viewer-effects">Effects</label><select id="viewer-effects" aria-describedby="effects-explanation system-motion-note"><option value="calm">Calm</option><option value="rich">Rich</option><option value="cinematic">Cinematic</option></select><p id="effects-explanation"></p><p id="system-motion-note" role="status" hidden>Your device requests reduced motion. Calm is active.</p></div><fieldset class="settings-layers"><legend>Map layers</legend><button data-layer="borders" type="button" aria-pressed="${preferences.borders}">Borders</button><button data-layer="routes" type="button" aria-pressed="${preferences.routes}">Routes</button></fieldset><p class="settings-note">Preferences are kept on this browser when storage is available. No change to agent choices or world speed.</p></dialog>
   <dialog id="resource-dialog" aria-labelledby="resource-title"><div class="dialog-top"><span class="eyebrow">RESOURCE GUIDE</span><button class="dialog-close" type="button" aria-label="Close resource guide">×</button></div><h2 id="resource-title">Resources</h2><p id="resource-explanation" class="dialog-intro">Select a resource in city details to learn more.</p><p class="resource-reading">The city panel shows the amount stored by the civilization. <strong>Made</strong> is production before food use and other costs. <strong>+</strong> and <strong>−</strong> show recorded gains and losses. <strong>Base / season</strong> is production capacity, not goods already made.</p></dialog>
   <div id="update-notice" class="update-notice panel" hidden><p id="update-status" role="status"></p><button id="update-action" type="button" hidden>Update view</button></div>
 `;
@@ -98,12 +102,20 @@ let selectedRoute: string | null = null;
 let routeListPage = 0;
 let mapFingerprint = '';
 let civilizationFingerprint = '';
+let chronicleFingerprint = '';
 let eventHistoryCaptured = false;
 let eventHistoryRevision = -1;
 let webgl = true;
 let snapshot: LiveSnapshot | null = null;
 let displayed: AtlasWorld = { tiles: [], cities: [], routes: [] };
-let mode: 'loading' | 'live' | 'offline' | 'uninitialized' | 'sample' = 'loading';
+let mode: 'loading' | 'local' | 'live' | 'offline' | 'uninitialized' | 'sample' = 'loading';
+let localSaveMessage = '';
+let localSaveBlocked = false;
+let localSimulation = restoreLocalSimulation();
+let localFrames = 0;
+let localAdvancing = false;
+let localStopped = false;
+let localFailure = '';
 let lastRead = '';
 let observedAt = '';
 const catalogue = capabilityCatalogue();
@@ -195,7 +207,8 @@ function renderInspection(): void {
   const pastoral = snapshot && actual ? observedPastoralSites(snapshot.state, actual.id) : undefined;
   const capabilities = state && actual && observedAt ? projectCapabilities(state, actual.id, preferences.selectedCity, observedAt) : null;
   const territory = state && capabilities ? projectTownTerritory(state, capabilities) : undefined;
-  const fingerprint = JSON.stringify([civ, actual, cities, residentSupport, research, development, pastoral, territory, capabilities?.governance, capabilities?.decisions?.civic, capabilities?.rail, capabilities?.strategic, capabilities?.industrialEvidence, capabilities?.localPower, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
+  const localChoice = mode === 'local' ? localSimulation?.decisions.find(decision => decision.seat === civ.id) : undefined;
+  const fingerprint = JSON.stringify([civ, actual, localChoice, cities, residentSupport, research, development, pastoral, territory, capabilities?.governance, capabilities?.decisions?.civic, capabilities?.rail, capabilities?.strategic, capabilities?.industrialEvidence, capabilities?.localPower, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
   if (fingerprint === inspectionFingerprint) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
   const previousScroll = sameCity && !pendingInspectionWork ? panel.scrollTop : 0;
@@ -220,7 +233,7 @@ function renderInspection(): void {
   inspectionFingerprint = fingerprint;
   inspectedCivilization = civ.id;
   inspectedCity = preferences.selectedCity;
-  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION IN FOCUS</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'live' ? 'COMMITTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${escapeText(civ.symbol)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(cities.find(city => city.id === preferences.selectedCity)?.name ?? civ.character)}</p></div></div><details class="ambition" data-inspection-section="overview"><summary>Civilization aim</summary><p>${escapeText(civ.ambition)}</p></details>${actual ? `<dl class="resources resource-rail" data-inspection-section="overview" aria-label="Civilization stored resources">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="${resourceGuide(resource).label}: ${exactNumber(actual.resources[resource])} stored. Inspect exact value and meaning."><span class="resource-amount">${numberPresentation(actual.resources[resource]).short}</span><span class="resource-name">${resourceGuide(resource).label}</span></button></dt><dd class="sr-only">${exactNumber(actual.resources[resource])} stored</dd></div>`).join('')}</dl><section class="research-detail" data-inspection-section="overview" aria-label="Research progress"></section><button class="capability-open" data-inspection-section="overview" data-open-capabilities type="button" aria-haspopup="dialog">Research &amp; buildings <span>Full tree · Options now</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
+  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'local' ? 'LOCAL' : mode === 'live' ? 'CONNECTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${escapeText(civ.symbol)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(cities.find(city => city.id === preferences.selectedCity)?.name ?? civ.character)}</p></div></div><details class="ambition" data-inspection-section="overview"><summary>Civilization aim</summary><p>${escapeText(civ.ambition)}</p></details>${actual ? `<dl class="resources resource-rail" data-inspection-section="overview" aria-label="Civilization stored resources">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="${resourceGuide(resource).label}: ${exactNumber(actual.resources[resource])} stored. Inspect exact value and meaning."><span class="resource-amount">${numberPresentation(actual.resources[resource]).short}</span><span class="resource-name">${resourceGuide(resource).label}</span></button></dt><dd class="sr-only">${exactNumber(actual.resources[resource])} stored</dd></div>`).join('')}</dl><section class="research-detail" data-inspection-section="overview" aria-label="Research progress"></section><button class="capability-open" data-inspection-section="overview" data-open-capabilities type="button" aria-haspopup="dialog">Technology tree <span>Research &amp; buildings ↗</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
   const capabilityOpener = panel.querySelector('[data-open-capabilities]');
   if (capabilityOpener) panel.insertBefore(capabilityOpener, panel.querySelector('.city-details'));
   const navigation = document.createElement('div'); navigation.className = 'inspection-sections'; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', 'Town inspection sections');
@@ -233,7 +246,12 @@ function renderInspection(): void {
   for (const [name, label] of [['overview', 'Town'], ['work', 'Work'], ['routes', 'Routes']]) {
     if (!name || !label) continue; const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset['inspectionFocus'] = name; button.addEventListener('click', () => { chooseSection(name); panel.scrollTop = 0; }); navigation.append(button);
   }
-  panel.insertBefore(navigation, panel.querySelector('.research-detail') ?? panel.querySelector('.ambition')); 
+  panel.insertBefore(navigation, panel.querySelector('.research-detail') ?? panel.querySelector('.ambition'));
+  const resources = panel.querySelector('.resources');
+  if (resources) panel.insertBefore(resources, panel.querySelector('.city-details'));
+  if (localChoice) {
+    panel.insertBefore(renderRecordedPolicyChoice(localChoice), resources);
+  }
   for (const resource of RESOURCE_IDS) {
     const entry = panel.querySelector<HTMLButtonElement>(`[data-resource="${resource}"]`);
     entry?.prepend(visualIcon(resource));
@@ -246,7 +264,11 @@ function renderInspection(): void {
     researchSection.append(heading);
     if (research.progress) {
       const progress = document.createElement('p');
-      progress.textContent = `${research.progress} · ${research.remaining ?? ''}`;
+      progress.textContent = research.progress;
+      progress.className = 'research-amount';
+      if (technology && actual) {
+        const meter = document.createElement('progress'); meter.className = 'research-meter'; meter.max = technology.cost; meter.value = Math.max(0, actual.researchProgress); meter.setAttribute('aria-label', `${technology.name}: ${research.progress}`); researchSection.append(meter);
+      }
       researchSection.append(progress);
     }
     const details = document.createElement('details');
@@ -261,6 +283,16 @@ function renderInspection(): void {
     }
     researchSection.append(details);
   }
+  const construction = constructionCommitment(cities.find(city => city.id === preferences.selectedCity));
+  if (construction) {
+    const section = document.createElement('section'); section.className = 'construction-detail'; section.dataset['inspectionSection'] = 'overview';
+    section.setAttribute('aria-label', 'Construction progress');
+    const title = document.createElement('strong'); title.textContent = `Building ${construction.name}`;
+    const meter = document.createElement('progress'); meter.className = 'research-meter construction-meter'; meter.max = construction.required; meter.value = construction.done;
+    const amount = document.createElement('p'); amount.className = 'research-amount'; amount.textContent = `${exactNumber(construction.done)} / ${exactNumber(construction.required)} work · Not built yet`;
+    meter.setAttribute('aria-label', `${construction.name}: ${amount.textContent}`);
+    section.append(title, meter, amount); panel.insertBefore(section, capabilityOpener);
+  }
   if (capabilities && state) {
     const city = cities.find(candidate => candidate.id === preferences.selectedCity);
     const civic = createCivicProgress({ catalogue, projection: capabilities, ...(city ? { city } : {}), events: state.events });
@@ -274,7 +306,7 @@ function renderInspection(): void {
     panel.scrollTop = 0;
   }, capabilities?.rail, capabilities?.localPower);
   const overview = settlement?.querySelector<HTMLElement>('.town-overview');
-  if (overview) panel.insertBefore(overview, panel.querySelector('.research-detail'));
+  if (overview) panel.insertBefore(overview, panel.querySelector('.city-details'));
   const aim = panel.querySelector('.ambition'); if (aim) panel.append(aim);
   for (const disclosure of panel.querySelectorAll<HTMLDetailsElement>('[data-town-disclosure]')) {
     disclosure.open = expandedTown.has(disclosure.dataset['townDisclosure']);
@@ -374,6 +406,12 @@ function selectCity(id: string, workId?: string): void {
   savePreferences();
 }
 
+function navigateStory(destination: SpectatorDestination): void {
+  if (destination.kind === 'route') selectRoute(destination.id);
+  else if (destination.kind === 'city') selectCity(destination.id);
+  else selectCivilization(destination.id);
+}
+
 function selectCivilization(id: number): void {
   const city = displayed.cities.find((entry) => entry.id === id && cityKey(entry) === preferences.selectedCity)
     ?? displayed.cities.find((entry) => entry.id === id);
@@ -387,11 +425,14 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
   preferences = { ...preferences, ...resolveCitySelection(world, preferences) };
   const civs = uniqueCivilizations(world);
   element('.civilization-panel').hidden = civs.length === 0;
-  const listFingerprint = JSON.stringify(civs.map(({ id, name, character, color, symbol }) => ({ id, name, character, color, symbol })));
+  const summaries = new Map(civs.map(civ => [civ.id, snapshot && mode !== 'sample' ? civilizationSummary(snapshot.state, civ.id) : 'Sample civilization']));
+  const focusedCiv = document.activeElement instanceof HTMLElement ? document.activeElement.dataset['civ'] : undefined;
+  const listFingerprint = JSON.stringify(civs.map(({ id, name, character, color, symbol }) => ({ id, name, character, color, symbol, summary: summaries.get(id) })));
   if (listFingerprint !== civilizationFingerprint) {
-  element('.civilization-list').innerHTML = civs.map((civ) => `<button class="civilization-row" data-civ="${civ.id}" type="button" style="--civ-color:${escapeText(civ.color)}" aria-pressed="${civ.id === preferences.selected}"><span class="civ-emblem" aria-hidden="true">${escapeText(civ.symbol)}</span><span><strong>${escapeText(civ.name)}</strong><small>${escapeText(civ.character)}</small></span></button>`).join('');
+  element('.civilization-list').innerHTML = civs.map((civ) => `<button class="civilization-row" data-civ="${civ.id}" type="button" style="--civ-color:${escapeText(civ.color)}" aria-pressed="${civ.id === preferences.selected}"><span class="civ-emblem" aria-hidden="true">${escapeText(civ.symbol)}</span><span><strong>${escapeText(civ.name)}</strong><small>${escapeText(summaries.get(civ.id) ?? civ.character)}</small></span></button>`).join('');
   for (const row of document.querySelectorAll<HTMLElement>('[data-civ]')) row.addEventListener('click', () => selectCivilization(Number(row.dataset['civ'])));
   civilizationFingerprint = listFingerprint;
+  if (focusedCiv) document.querySelector<HTMLButtonElement>(`[data-civ="${focusedCiv}"]`)?.focus({ preventScroll: true });
   }
   for (const row of document.querySelectorAll<HTMLElement>('[data-civ]')) row.setAttribute('aria-pressed', String(Number(row.dataset['civ']) === preferences.selected));
   const fingerprint = JSON.stringify(world);
@@ -431,28 +472,42 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
 
 function renderConnection(): void {
   const state = mode === 'sample' ? null : snapshot?.state;
-  const labels = { loading: 'CONNECTING', live: 'CONNECTED WORLD', offline: 'CONNECTION INTERRUPTED', uninitialized: 'WORLD NOT INITIALIZED', sample: 'SAMPLE ATLAS' };
+  const labels = { loading: 'Connecting', local: localStopped ? 'Local simulation stopped' : 'Procedural world', live: 'Shared world', offline: 'Connection lost', uninitialized: 'Waiting for world', sample: 'Sample atlas' };
   element('#connection-label').textContent = labels[mode];
   element('.mode').dataset['connection'] = mode;
-  element('#world-id').textContent = state ? `WORLD SEED ${state.seed} · REVISION ${state.revision}` : mode === 'sample' ? 'ILLUSTRATIVE WORLD · NO LIVE ACTIONS' : 'SHARED WORLD';
+  element('.mode-detail').textContent = mode === 'local' ? 'Built-in policies' : 'View only';
+  if (element('#local-save-status').textContent !== localSaveMessage) element('#local-save-status').textContent = localSaveMessage;
+  element('.footer-status').textContent = mode === 'local' ? `Local simulation · ${localSaveMessage || 'Saved in this browser'}` : 'Shared history · Observer only';
+  element('#about-source').textContent = mode === 'local' ? 'Five civilizations make automatic choices with built-in rules. This world runs in your browser with accelerated time. It is not live AI-model play. It pauses while this tab is hidden.' : mode === 'sample' ? 'An illustrative map, not a running world. No player orders.' : 'This view reads committed shared-world records. It does not claim that AI models are acting continuously. No player orders.';
+  element('#about-world-record').textContent = state ? `Seed ${state.seed} · Round ${state.round} · Revision ${state.revision} · Release ${state.releaseId}${mode === 'local' && localFailure ? ` · Stopped: ${localFailure}` : ''}` : 'No world record loaded.';
+  element('#world-id').textContent = mode === 'sample' ? 'ILLUSTRATIVE MAP' : 'WORLD CALENDAR';
+  element('#world-id').title = state ? `Seed ${state.seed} · Revision ${state.revision}` : '';
   element('#world-title').textContent = state ? formatYear(state.year) : mode === 'sample' ? 'A possible beginning' : mode === 'uninitialized' ? 'Waiting for the first hearths' : mode === 'offline' ? 'The world is out of reach' : 'Connecting to the world';
-  element('#world-detail').textContent = state ? `${mode === 'live' ? 'Live' : 'Last known'} · ${activityLabel(state)}` : mode === 'sample' ? 'Sample geography and decorative routes. This is not the live world.' : mode === 'uninitialized' ? 'The server is ready, but its world has not been started. Checking again automatically.' : mode === 'offline' ? 'No verified world data is available. Reconnecting automatically.' : 'Looking for the latest committed state.';
-  element('#world-detail').title = lastRead ? `Last verified read ${lastRead}` : '';
+  element('#world-detail').textContent = state ? `Round ${state.round} · ${mode === 'local' ? 'Accelerated time' : mode === 'live' ? 'Connected' : 'Last known'}` : mode === 'sample' ? 'Sample geography and decorative routes. This is not the live world.' : mode === 'uninitialized' ? 'The server is ready, but its world has not been started. Checking again automatically.' : mode === 'offline' ? 'No verified world data is available. Reconnecting automatically.' : 'Looking for the latest committed state.';
+  element('#world-detail').title = state ? `${activityLabel(state)}${lastRead ? ` · Last verified read ${lastRead}` : ''}` : '';
   element('#era-name').textContent = state ? capabilityName(Math.max(...state.civilizations.map((civ) => civ.era))) : 'Early settlements';
-  element('#era-detail').textContent = state ? state.releaseId : mode === 'sample' ? 'SAMPLE CAPABILITIES' : 'A GROWING WORLD';
+  element('#era-detail').textContent = state ? 'WORLD PROGRESS' : mode === 'sample' ? 'SAMPLE VIEW' : 'OBSERVER';
+  element('#era-name').title = state ? `Applied release ${state.releaseId}` : '';
   const event = state ? latestStoryEvent(state.events) : undefined;
   const story = event && state ? eventLogEntries([event], { civilizations: state.civilizations, receipts: observedRouteResults })[0] : undefined;
   const receipt = observedRouteResults.find((cue) => cue.eventId === event?.id);
   const routeResult = receipt ? routeResultPresentation(receipt) : null;
   const visual = event ? eventVisual(event) : null;
   element('#chronicle-label').textContent = story ? `${story.category} · ${story.deltas.some(delta => delta.kind === 'production') ? 'Before costs' : `Round ${story.round}`}` : mode === 'sample' ? 'SAMPLE VIEW' : 'WORLD CONNECTION';
-  element('#event-title').textContent = story?.title ?? (mode === 'sample' ? 'A sample, not a simulation.' : 'The story will appear here.');
-  element('#event-detail').textContent = story?.summary ?? (mode === 'sample' ? 'These cities and routes illustrate the atlas. Return to live world to watch committed changes.' : 'This page only reads. Agent actions, discoveries and world events will be shown after they are committed.');
+  element('#event-title').textContent = story?.title ?? (mode === 'sample' ? 'A sample, not a simulation.' : state ? 'No major changes in recent history.' : 'The story will appear here.');
+  element('#event-detail').textContent = story?.summary ?? (mode === 'sample' ? 'These cities and routes illustrate the atlas. Return to live world to watch committed changes.' : state ? 'Research, construction and other major changes appear here. Open Events for routine records.' : 'This page only reads. Agent actions, discoveries and world events will be shown after they are committed.');
   const icon = story?.icon ?? routeResult?.icon ?? visual?.icon;
   if (icon) element('#event-title').prepend(visualIcon(icon));
   renderDeltas(element('#event-deltas'), story?.deltas ?? routeResult?.deltas ?? visual?.deltas ?? []);
   element('#event-detail').hidden = !story?.summary || !!story.deltas.length;
   element('#events-open').hidden = !state?.events.length;
+  const stories = state ? spectatorChronicle(state) : [];
+  const nextChronicle = JSON.stringify(stories);
+  if (nextChronicle !== chronicleFingerprint && !element('#major-event-list').contains(document.activeElement)) {
+    renderSpectatorChronicle(element('#major-event-list'), stories, navigateStory);
+    chronicleFingerprint = nextChronicle;
+  }
+  element('#connection-story').hidden = stories.length > 0;
   element('#sample-open').hidden = snapshot !== null || mode === 'sample' || mode === 'loading';
   element('#live-open').hidden = mode !== 'sample';
   for (const button of document.querySelectorAll<HTMLButtonElement>('.map-tools button, .layer-controls button')) button.disabled = atlas === null;
@@ -475,15 +530,78 @@ function showSample(): void {
 }
 
 function sampleActive(): boolean { return mode === 'sample'; }
+function localActive(): boolean { return mode === 'local'; }
+
+function restoreLocalSimulation(): LocalSimulation | null {
+  let raw: string | null;
+  try { raw = localStorage.getItem(LOCAL_SIMULATION_STORAGE_KEY); }
+  catch { localSaveMessage = 'Not saved · Browser storage is unavailable.'; return createLocalSimulation(); }
+  if (raw === null) { localSaveMessage = 'Not saved yet.'; return createLocalSimulation(); }
+  let saved: LocalSimulation | null = null;
+  try { saved = parseLocalSimulation(JSON.parse(raw) as unknown); } catch { saved = null; }
+  if (saved) { localSaveMessage = 'Saved in this browser.'; return saved; }
+  localSaveBlocked = true;
+  localSaveMessage = 'Saved local world is unavailable. The original save is preserved. Shared history is shown instead.';
+  return null;
+}
+
+function saveLocalSimulation(): void {
+  if (!localSimulation || localSaveBlocked) return;
+  const save = (): void => {
+    if (!localSimulation || localSaveBlocked) return;
+    try {
+      const raw = localStorage.getItem(LOCAL_SIMULATION_STORAGE_KEY);
+      if (raw !== null) {
+        let stored: LocalSimulation | null = null;
+        try { stored = parseLocalSimulation(JSON.parse(raw) as unknown); } catch { stored = null; }
+        if (!stored || stored.seed !== localSimulation.seed) {
+          localSaveBlocked = true; localSaveMessage = 'Not saved · A different or unavailable saved world was preserved.'; return;
+        }
+        if (stored.steps > localSimulation.steps || stored.state.revision > localSimulation.state.revision) {
+          localSimulation = stored; localSaveMessage = 'Saved in this browser · Updated by another tab.'; return;
+        }
+      }
+      localStorage.setItem(LOCAL_SIMULATION_STORAGE_KEY, JSON.stringify(localSimulation));
+      localSaveMessage = 'Saved in this browser.';
+    } catch { localSaveMessage = 'Not saved · Browser storage is unavailable or full.'; }
+  };
+  if (navigator.locks) void navigator.locks.request(LOCAL_SIMULATION_STORAGE_KEY, save).catch(() => { localSaveMessage = 'Not saved · Browser storage is unavailable.'; });
+  else save();
+}
+
+function observeLocalSimulation(): void {
+  if (!localSimulation) return;
+  snapshot = localSimulationSnapshot(localSimulation);
+  observedAt = localSimulation.timestamp;
+  lastRead = '';
+  const world = projectWorld(snapshot.state);
+  const quiet = document.hidden || dialogs.get('events')?.open || capabilityDialog?.open;
+  const cues = eventCues.observe({ identity: snapshot.identity, revision: snapshot.state.revision, mode: quiet ? 'history' : 'live', events: snapshot.state.events, routes: world.routes }, element('#map').clientWidth < 700 ? 1 : 3);
+  if (cues.routeResults.length) observedRouteResults = [...cues.routeResults, ...observedRouteResults].slice(0, 3);
+  renderWorld(world, true);
+  if (!quiet) atlas?.showEvents(cues.events);
+  renderConnection();
+}
+
+function changeWorldSource(source: 'local' | 'shared'): void {
+  if (source === 'local' && !localSimulation) source = 'shared';
+  quietCues(); capabilityTree.close(); setInspectionOpen(false); inspectionCamera.release();
+  atlas?.dispose(); atlas = null; mapFingerprint = ''; inspectionFingerprint = ''; chronicleFingerprint = '';
+  displayed = { tiles: [], cities: [], routes: [] }; snapshot = null; selectedRoute = null; observedRouteResults = [];
+  preferences = { ...preferences, selectedCity: null, zoom: 1, x: 0, z: 0 }; initialOverview = true;
+  const picker = document.querySelector<HTMLSelectElement>('#world-source'); if (picker) picker.value = source;
+  if (source === 'local') { mode = 'local'; observeLocalSimulation(); saveLocalSimulation(); }
+  else { mode = 'loading'; renderConnection(); void readWorld(); }
+}
 
 let reading = false;
 async function readWorld(): Promise<void> {
-  if (reading || sampleActive()) return;
+  if (reading || localActive() || sampleActive()) return;
   reading = true;
   try {
     const response = await fetch('/api/world', { cache: 'no-store', signal: AbortSignal.timeout(8000) });
     const value: unknown = await response.json();
-    if (sampleActive()) return;
+    if (localActive() || sampleActive()) return;
     const read = parseWorldRead(value);
     if (read.kind === 'live' && response.ok && acceptsSnapshot(snapshot, read.snapshot)) {
       const retainCoordinates = snapshot?.identity === read.snapshot.identity && mode !== 'sample';
@@ -499,7 +617,7 @@ async function readWorld(): Promise<void> {
       renderWorld(world, retainCoordinates);
       if (!quiet) atlas?.showEvents(cues.events);
     } else { mode = read.kind === 'uninitialized' ? 'uninitialized' : 'offline'; }
-  } catch { if (!sampleActive()) mode = 'offline'; }
+  } catch { if (!localActive() && !sampleActive()) mode = 'offline'; }
   finally { reading = false; renderConnection(); }
 }
 
@@ -533,11 +651,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('[data-layer]'
   savePreferences();
 });
 element('#sample-open').addEventListener('click', showSample);
-element('#live-open').addEventListener('click', () => {
-  atlas?.dispose(); atlas = null; mapFingerprint = ''; displayed = { tiles: [], cities: [], routes: [] };
-  element('.civilization-panel').hidden = true;
-  mode = 'loading'; renderConnection(); void readWorld();
-});
+element('#live-open').addEventListener('click', () => changeWorldSource('shared'));
 
 const dialogs = new Map<string, HTMLDialogElement>();
 for (const [name, selector] of [['changelog', '#history-dialog'], ['about', '#about-dialog'], ['events', '#events-dialog'], ['settings', '#settings-dialog'], ['resource', '#resource-dialog']]) {
@@ -641,7 +755,7 @@ for (const dialog of dialogs.values()) {
 }
 window.addEventListener('hashchange', syncDialog);
 syncDialog();
-window.addEventListener('pagehide', () => { quietCues(); savePreferences(); });
+window.addEventListener('pagehide', (event) => { quietCues(); savePreferences(); saveLocalSimulation(); if (!event.persisted) disposeLocalSimulationWorker(); });
 window.setInterval(savePreferences, 2000);
 
 function mountDeploymentUpdates(): ReturnType<typeof createViewerUpdates> {
@@ -679,5 +793,24 @@ window.setInterval(() => { void deploymentUpdates.check(); }, 30000);
 window.addEventListener('visibilitychange', () => { if (document.hidden) quietCues(); else { void readWorld(); void deploymentUpdates.check(); } });
 renderConnection();
 if (new URL(window.location.href).searchParams.get('sample') === '1') showSample();
-else void readWorld();
+else changeWorldSource(new URL(window.location.href).searchParams.get('world') === 'shared' ? 'shared' : 'local');
 void deploymentUpdates.check();
+
+element('#world-source').addEventListener('change', (event) => {
+  const source = (event.target as HTMLSelectElement).value;
+  if (source === 'local' || source === 'shared') changeWorldSource(source);
+});
+async function tickLocalObservatory(): Promise<void> {
+  if (mode !== 'local' || document.hidden || localStopped || localAdvancing || !localSimulation) return;
+  localAdvancing = true;
+  const prior = localSimulation;
+  try {
+    const next = await advanceLocalSimulationAsync(prior, 2);
+    if (localSimulation.seed === next.seed && next.steps >= localSimulation.steps && next.state.revision >= localSimulation.state.revision) localSimulation = next;
+    if (mode === 'local' && !document.hidden) observeLocalSimulation();
+    localFrames += 1;
+    if (localFrames % 6 === 0) saveLocalSimulation();
+  } catch (error) { localStopped = true; localFailure = error instanceof Error ? error.message : 'The local step could not be recorded.'; renderConnection(); }
+  finally { localAdvancing = false; }
+}
+window.setInterval(() => { void tickLocalObservatory(); }, 1200);

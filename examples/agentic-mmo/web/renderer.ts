@@ -15,13 +15,13 @@ import { damageMapLabel } from '../visuals/damage-visuals.ts';
 import { cityKey, selectedCity } from './city-selection.ts';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createLandscapeMeshes } from './landscape-three.ts';
-import { projectLandscape, landscapeSurface, LANDSCAPE_COLORS, TERRITORY_STYLE, territoryEdgeTriangles } from '../visuals/landscape.ts';
+import { createLandscapeMeshes, createTerrainMeshes } from './landscape-three.ts';
+import { projectTerrainSurface, projectLandscape, LANDSCAPE_COLORS, TERRITORY_STYLE, territoryEdgeTriangles } from '../visuals/landscape.ts';
 import { hexPosition, routeMapPositions, routeMapAnchor } from './atlas.ts';
-import type { AtlasCue, AtlasTile, AtlasWorld } from './atlas.ts';
+import type { AtlasCue, AtlasWorld } from './atlas.ts';
 import type { ViewerPreferences } from './viewer-state.ts';
 import { resolveAppearance } from './viewer-appearance.ts';
-import { cameraShiftForAnchor } from './inspection-camera.ts';
+import { cameraShiftForAnchor, unobscuredInspectionAnchor } from './inspection-camera.ts';
 import type { CameraView, ScreenPoint } from './inspection-camera.ts';
 import { createSettlementMeshes, createDistrictMeshes, createImprovementMeshes, createDepositMeshes, createWonderMeshes } from './settlement-three.ts';
 import { LUMBER_MARK_PATH, improvementLabel } from '../visuals/improvement-visuals.ts';
@@ -50,8 +50,8 @@ export function routeLineMeshes(route: RouteView, selected: boolean): readonly [
   if (points.length < 2) return null;
   const visual = routeVisual(route);
   const geometry = new LineGeometry().setPositions(points.flatMap(point => [point.x, point.y, point.z]));
-  const backing = new Line2(geometry, new LineMaterial({ color: '#173a3c', linewidth: selected ? 7 : 5, depthTest: false }));
-  const line = new Line2(geometry, new LineMaterial({ color: visual.color, linewidth: selected ? 3 : 2,
+  const backing = new Line2(geometry, new LineMaterial({ color: selected ? '#394538' : '#746b4d', linewidth: selected ? 5 : 3, depthTest: false }));
+  const line = new Line2(geometry, new LineMaterial({ color: selected || visual.status !== 'agreed' ? visual.color : '#c9b17b', linewidth: selected ? 3 : 1.6,
     dashed: visual.dash.length > 0, dashSize: visual.dash[0] ?? 1, gapSize: visual.dash[1] ?? 0, depthTest: false }));
   backing.renderOrder = selected ? 4 : 2;
   line.renderOrder = selected ? 5 : 3;
@@ -63,15 +63,13 @@ export function routeLineMeshes(route: RouteView, selected: boolean): readonly [
 export function createTerritoryMeshes(world: Pick<AtlasWorld, 'tiles' | 'cities'>): THREE.Group {
   const group = new THREE.Group();
   const landscape = projectLandscape(world.tiles, [], 'far');
+  const terrain = new Map(projectTerrainSurface(world.tiles).map(tile => [tile.key, tile]));
   for (const owner of new Map(world.cities.map(city => [city.id, city])).values()) {
     const territories = landscape.territories.filter(tile => tile.owner === owner.id);
     if (!territories.length) continue;
     const wash = new THREE.BufferGeometry();
-    wash.setAttribute('position', new THREE.Float32BufferAttribute(territories.flatMap(tile => tile.points.slice(1, -1).flatMap((point, index) => {
-      const first = tile.points[0];
-      const next = tile.points[index + 2];
-      return first && next ? [first[0], tile.height, first[1], point[0], tile.height, point[1], next[0], tile.height, next[1]] : [];
-    })), 3));
+    wash.setAttribute('position', new THREE.Float32BufferAttribute(territories.flatMap(tile => (terrain.get(tile.key)?.faces ?? []).flatMap(face =>
+      face.points.flatMap(point => [point[0], point[1] + .018, point[2]]))), 3));
     const surface = new THREE.Mesh(wash, new THREE.MeshBasicMaterial({ color: owner.color, transparent: true,
       opacity: TERRITORY_STYLE.washOpacity, depthWrite: false, side: THREE.DoubleSide }));
     surface.userData['territories'] = territories.map(tile => tile.key);
@@ -112,7 +110,7 @@ export function createAtlasRenderer(
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.35;
+  renderer.toneMappingExposure = 1.08;
   renderer.domElement.setAttribute(
     'aria-label',
     `${world.illustrative ? 'Sample' : 'Committed world'} three dimensional atlas. Drag to pan. Pinch or use map buttons to zoom. Select a city to inspect.`,
@@ -133,8 +131,8 @@ export function createAtlasRenderer(
   controls.target.set(preferences.x, 0, preferences.z);
   camera.position.add(new THREE.Vector3(preferences.x, 0, preferences.z));
   controls.update();
-  scene.add(new THREE.HemisphereLight('#fff5d9', '#607875', 2.3));
-  const sun = new THREE.DirectionalLight('#fff0ce', 3.8);
+  scene.add(new THREE.HemisphereLight('#fff5d9', '#607875', 1.7));
+  const sun = new THREE.DirectionalLight('#fff0ce', 2.5);
   sun.position.set(-15, 26, 10);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -154,11 +152,9 @@ export function createAtlasRenderer(
   };
   const sea = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), material(LANDSCAPE_COLORS.water));
   sea.rotation.x = -Math.PI / 2;
-  sea.position.y = -0.23;
+  sea.position.y = -.03;
   sea.receiveShadow = true;
   scene.add(sea);
-  const tileGeometry = new THREE.CylinderGeometry(0.99, 0.99, 1, 6);
-  const coastGeometry = new THREE.CylinderGeometry(1.07, 1.13, 0.13, 6);
   const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
   const roofGeometry = new THREE.ConeGeometry(0.74, 0.5, 4);
   const borders = createTerritoryMeshes(world);
@@ -184,13 +180,18 @@ export function createAtlasRenderer(
     return mesh;
   };
   const landscape = projectLandscape(world.tiles, world.cities, 'far');
-  const coastalTiles = new Set(landscape.coast.map(edge => edge.key.slice(0, edge.key.lastIndexOf(':'))));
-  const addTile = (tile: AtlasTile): void => {
-    const { x, z } = hexPosition(tile.q, tile.r);
-    if (coastalTiles.has(`${tile.q},${tile.r}`)) addMesh(coastGeometry, LANDSCAPE_COLORS.shallow, x, -.12, z);
-    addMesh(tileGeometry, landscapeSurface(tile), x, tile.height / 2, z, [1, tile.height, 1]);
-  };
-  for (const tile of world.tiles) addTile(tile);
+  const shorePositions = landscape.coast.flatMap(edge => {
+    const dx = edge.to[0] - edge.from[0]; const dz = edge.to[1] - edge.from[1];
+    const length = Math.hypot(dx, dz) || 1;
+    const ox = dz / length * .32; const oz = -dx / length * .32;
+    const a = [edge.from[0], .005, edge.from[1]]; const b = [edge.to[0], .005, edge.to[1]];
+    const c = [edge.to[0] + ox, .005, edge.to[1] + oz]; const d = [edge.from[0] + ox, .005, edge.from[1] + oz];
+    return [...a, ...b, ...c, ...a, ...c, ...d];
+  });
+  const shoreGeometry = new THREE.BufferGeometry();
+  shoreGeometry.setAttribute('position', new THREE.Float32BufferAttribute(shorePositions, 3));
+  const shore = new THREE.Mesh(shoreGeometry, new THREE.MeshBasicMaterial({ color: LANDSCAPE_COLORS.shallow, transparent: true, opacity: .8, side: THREE.DoubleSide }));
+  scene.add(shore, createTerrainMeshes(world.tiles));
   borders.visible = preferences.borders;
   scene.add(borders);
   const cityLabels: Array<{ element: HTMLButtonElement; point: THREE.Vector3; id: string }> = [];
@@ -408,7 +409,7 @@ export function createAtlasRenderer(
     selected = id;
     drawAcquired();
     const point = hexPosition(city.q, city.r);
-    ring.position.set(point.x, 0.58, point.z);
+    ring.position.set(point.x, (tileLookup.get(`${city.q},${city.r}`)?.height ?? .4) + .06, point.z);
     for (const label of cityLabels) {
       label.element.classList.toggle('selected', label.id === id);
       label.element.setAttribute('aria-pressed', String(label.id === id));
@@ -531,7 +532,8 @@ export function createAtlasRenderer(
       camera.updateProjectionMatrix(); controls.update(); camera.updateMatrixWorld();
       const width = container.clientWidth; const height = container.clientHeight;
       const window = mapContentWindow(width, height, mapHierarchyObstacles(container));
-      const points = world.tiles.map(tile => { const point = hexPosition(tile.q, tile.r); return new THREE.Vector3(point.x, tile.height, point.z).project(camera); });
+      const overview = width < 600 && world.cities.length ? world.cities.map(city => ({ ...city, height: tileLookup.get(`${city.q},${city.r}`)?.height ?? .4 })) : world.tiles;
+      const points = overview.map(tile => { const point = hexPosition(tile.q, tile.r); return new THREE.Vector3(point.x, tile.height, point.z).project(camera); });
       if (window && points.length) {
         const left = Math.min(...points.map(point => point.x)); const right = Math.max(...points.map(point => point.x));
         const top = Math.max(...points.map(point => point.y)); const bottom = Math.min(...points.map(point => point.y));
@@ -560,9 +562,10 @@ export function createAtlasRenderer(
         return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 };
       };
       const current = screen(city.point);
+      const target = unobscuredInspectionAnchor(current, anchor, { width: container.clientWidth, height: container.clientHeight }, mapHierarchyObstacles(container));
       const unitX = screen(city.point.clone().add(new THREE.Vector3(1, 0, 0)));
       const unitZ = screen(city.point.clone().add(new THREE.Vector3(0, 0, 1)));
-      const shift = cameraShiftForAnchor(current, anchor,
+      const shift = cameraShiftForAnchor(current, target,
         { x: unitX.x - current.x, y: unitX.y - current.y },
         { x: unitZ.x - current.x, y: unitZ.y - current.y });
       const translation = new THREE.Vector3(shift.x, 0, shift.z);

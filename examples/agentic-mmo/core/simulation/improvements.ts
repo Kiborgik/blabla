@@ -24,9 +24,7 @@ export function orderedImprovements(city: City): CityImprovement[] {
   return Object.values(city.improvements ?? {}).toSorted((left, right) => left.tileId - right.tileId);
 }
 
-export function improvementSiteBlock(state: WorldState, city: City, definition: ImprovementDefinition, tileId: number, installed = false): string | null {
-  const site = state.tiles.find(tile => tile.id === tileId);
-  const center = state.tiles.find(tile => tile.id === city.tileId);
+function resolvedImprovementSiteBlock(state: WorldState, city: City, definition: ImprovementDefinition, tileId: number, site: HexTile | undefined, center: HexTile | undefined, installed = false): string | null {
   if (!Number.isSafeInteger(tileId) || !site || !center) return 'The exact improvement site is missing';
   if (site.owner !== city.civId) return 'The improvement site must already belong to this civilization';
   const binding = purchasedSiteBlock(state, city, tileId); if (binding) return binding;
@@ -39,8 +37,13 @@ export function improvementSiteBlock(state: WorldState, city: City, definition: 
   return null;
 }
 
+export function improvementSiteBlock(state: WorldState, city: City, definition: ImprovementDefinition, tileId: number, installed = false): string | null {
+  return resolvedImprovementSiteBlock(state, city, definition, tileId, state.tiles.find(tile => tile.id === tileId), state.tiles.find(tile => tile.id === city.tileId), installed);
+}
+
 export function availableImprovementSites(state: WorldState, city: City, definition: ImprovementDefinition): number[] {
-  return state.tiles.filter(tile => improvementSiteBlock(state, city, definition, tile.id) === null).map(tile => tile.id).toSorted((a, b) => a - b);
+  const center = state.tiles.find(tile => tile.id === city.tileId);
+  return state.tiles.filter(tile => resolvedImprovementSiteBlock(state, city, definition, tile.id, tile, center) === null).map(tile => tile.id).toSorted((a, b) => a - b);
 }
 
 export function executeImprovementAction(state: WorldState, seat: number, action: Extract<GameAction, { type: 'improve' | 'set-improvement-operation' }>, events: GameEvent[]): void {

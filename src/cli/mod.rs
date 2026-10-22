@@ -307,6 +307,11 @@ enum TaskAction {
     Delivery {
         name: String,
         goal: String,
+        #[arg(
+            long,
+            help = "Explicitly refresh this manual claim on a READY task with current evidence and review targets; does not rerun or reuse execution"
+        )]
+        refresh_ready: bool,
         #[arg(long)]
         status: String,
         #[arg(long)]
@@ -1351,6 +1356,7 @@ fn execute(cli: Cli) -> i32 {
                     TaskAction::Delivery {
                         name,
                         goal,
+                        refresh_ready,
                         status,
                         observation,
                         observation_ref,
@@ -1367,6 +1373,7 @@ fn execute(cli: Cli) -> i32 {
                         &name,
                         task::delivery::Request::Claim(task::delivery::ClaimInput {
                             goal,
+                            refresh_ready,
                             status,
                             observation,
                             refs: observation_ref,

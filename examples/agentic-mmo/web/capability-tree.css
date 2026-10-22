@@ -186,3 +186,17 @@ dialog.capability-sheet {
   .capability-toolbar .capability-options > .capability-note { font-size: 10px; }
   .capability-sheet-top { padding-block: 10px; }
 }
+
+dialog.capability-sheet { border-radius: 3px; border: 1px solid #a88e60; }
+.capability-sheet-top { border-bottom-color: #a88e60; }
+.capability-sheet h2 { letter-spacing: .2px; }
+.capability-viewport { border-radius: 2px; background-image: radial-gradient(color-mix(in srgb, var(--gold) 14%, transparent) 1px, transparent 1px); background-size: 18px 18px; }
+.capability-graph .capability-node { border-radius: 2px; box-shadow: 0 2px 5px #08132118; }
+.capability-graph .capability-node[data-kind='technology'] { border-top: 2px solid #76a9c6; }
+.capability-graph .capability-node[data-kind='building'] { border-top: 2px solid #c3a16b; }
+.capability-graph .capability-node[data-kind='wonder'] { border-top: 2px solid #d8bd74; }
+.capability-graph .capability-node[data-status='planned'] { border-style: dashed; }
+.capability-node-state { font-size: 12px; }
+.capability-connections { stroke: var(--gold); opacity: .75; }
+.capability-selected-detail, .capability-sheet button, .capability-sheet select { border-radius: 2px; }
+.capability-graph-hint { font-size: 12px; }

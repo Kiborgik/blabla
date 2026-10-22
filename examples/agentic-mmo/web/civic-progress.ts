@@ -119,6 +119,36 @@ export function civicProgressPresentation(input: CivicProgressInput) {
   };
 }
 
+export interface CivicTreeNode {
+  id: string;
+  name: string;
+  level: number;
+  requires: Array<{ id: string; name: string }>;
+  status: 'completed' | 'developing' | 'available' | 'locked' | 'unreleased' | 'unknown';
+  cost: number;
+  explanation: string;
+}
+
+export function civicTreeNodes(input: CivicProgressInput): CivicTreeNode[] {
+  const definitions = input.catalogue.civics;
+  const civic = input.projection.governance?.civics;
+  const available = input.projection.decisions?.civic?.availableIds ?? [];
+  const depth = (id: string, visited = new Set<string>()): number => {
+    if (visited.has(id)) return 0;
+    const definition = definitions.find(candidate => candidate.id === id);
+    const parents = definition?.requires.filter(parent => definitions.some(candidate => candidate.id === parent)) ?? [];
+    return parents.length ? 1 + Math.max(...parents.map(parent => depth(parent, new Set([...visited, id])))) : 0;
+  };
+  return definitions.map((definition): CivicTreeNode => ({
+    id: definition.id, name: definition.name, level: depth(definition.id),
+    requires: definition.requires.map(id => ({ id, name: definitions.find(parent => parent.id === id)?.name ?? id })),
+    status: !definition.requiredFeatures.every(feature => input.projection.unlockedFeatures.includes(feature)) ? 'unreleased'
+      : !civic ? 'unknown' : civic.completedCivicIds.includes(definition.id) ? 'completed'
+        : civic.active?.civicId === definition.id ? 'developing' : available.includes(definition.id) ? 'available' : 'locked',
+    cost: definition.cost, explanation: definition.capability,
+  })).toSorted((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+}
+
 function text<K extends keyof HTMLElementTagNameMap>(tag: K, value: string, className = ''): HTMLElementTagNameMap[K] {
   const element = document.createElement(tag);
   element.textContent = value;
@@ -143,7 +173,27 @@ export function createCivicProgress(input: CivicProgressInput): HTMLElement | nu
   const heading = text('h4', 'Culture · Civics');
   heading.prepend(visualIcon('culture'));
   section.append(heading, text('strong', view.heading, 'civic-current'));
-  if (view.progress) section.append(text('p', view.progress, 'civic-amount'));
+  if (view.progress) {
+    const active = input.projection.governance?.civics?.active;
+    if (active) {
+      const meter = text('progress', '', 'civic-meter'); meter.max = active.requiredCulture; meter.value = Math.max(0, active.progress); meter.setAttribute('aria-label', `${view.heading}: ${view.progress}`); section.append(meter);
+    }
+    section.append(text('p', view.progress, 'civic-amount'));
+  }
+  const tree = disclosure('civic-tree', 'Civic tree · Explore progress');
+  tree.className = 'town-receipt civic-record civic-tree';
+  tree.append(text('p', 'Each civic needs all of its earlier civics. Agents choose what to develop; this view cannot give orders.', 'civic-note'));
+  const nodes = text('ol', '', 'civic-tree-nodes');
+  const statuses = { completed: 'Completed', developing: 'Developing', available: 'Available', locked: 'Locked', unreleased: 'Not released', unknown: 'Record unavailable' };
+  for (const node of civicTreeNodes(input)) {
+    const row = text('li', '', 'civic-tree-node'); row.dataset['civicId'] = node.id; row.dataset['status'] = node.status;
+    row.setAttribute('style', `--civic-depth:${Math.min(node.level, 3)}`);
+    const heading = text('div', '', 'civic-node-heading');
+    heading.append(text('strong', node.name), text('span', statuses[node.status], 'civic-node-status'));
+    row.append(heading, text('p', node.requires.length ? `Requires → ${node.requires.map(parent => parent.name).join(' + ')}` : 'Starting civic', 'civic-node-parents'), text('p', `${exactNumber(node.cost)} Culture`, 'civic-node-cost'), text('p', node.explanation, 'civic-note'));
+    nodes.append(row);
+  }
+  tree.append(nodes); section.append(tree);
   const civic = disclosure('civics', 'Civic progress & record');
   civic.append(text('p', view.explanation));
   for (const choice of view.choices) civic.append(text('p', `Available civic · ${choice}`));
@@ -162,13 +212,15 @@ export function createCivicProgress(input: CivicProgressInput): HTMLElement | nu
   for (const target of view.government.targets) government.append(text('p', target));
   government.append(text('p', view.government.choiceExplanation, 'civic-note'));
   for (const event of view.government.events) government.append(text('p', `Recorded event · ${event}`, 'civic-note'));
-  section.append(government, text('h4', 'Current opening effects'));
-  for (const effect of view.effects) section.append(text('p', effect, 'civic-effect'));
-  if (view.capitalApplicability) section.append(text('p', view.capitalApplicability, 'civic-note'));
-  if (!view.effects.length) section.append(text('p', view.emptyEffects, 'civic-note'));
-  section.append(text('p', view.outputFactor, 'civic-note'));
-  if (view.constructionCapacity) section.append(text('p', view.constructionCapacity, 'civic-amount'));
-  if (view.constructionRecord) section.append(text('p', view.constructionRecord, 'civic-note'));
-  section.append(text('p', view.effectExplanation, 'civic-note'));
+  section.append(government);
+  const effects = disclosure('government-effects', 'Government effects & construction');
+  for (const effect of view.effects) effects.append(text('p', effect, 'civic-effect'));
+  if (view.capitalApplicability) effects.append(text('p', view.capitalApplicability, 'civic-note'));
+  if (!view.effects.length) effects.append(text('p', view.emptyEffects, 'civic-note'));
+  effects.append(text('p', view.outputFactor, 'civic-note'));
+  if (view.constructionCapacity) effects.append(text('p', view.constructionCapacity, 'civic-amount'));
+  if (view.constructionRecord) effects.append(text('p', view.constructionRecord, 'civic-note'));
+  effects.append(text('p', view.effectExplanation, 'civic-note'));
+  section.append(effects);
   return section;
 }
