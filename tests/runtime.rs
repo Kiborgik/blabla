@@ -313,13 +313,49 @@ fn rejects_wrong_observation_types_through_the_session_boundary() {
 fn bounds_read_and_blocking_write_deadlines() {
     let mut read_session = AppSession::spawn(&AppConfig {
         startup: Duration::from_millis(100),
-        ..python_config(&fixture(), "timeout_read", Duration::from_millis(100))
+        ..python_config(&fixture(), "timeout_read", Duration::from_millis(25))
     })
     .unwrap();
     let read_start = Instant::now();
     let read_error = read_session.reset().unwrap_err();
     assert_eq!(read_error.code, "APP_TIMEOUT");
     assert!(read_start.elapsed() < Duration::from_secs(1));
+    let read_json = serde_json::to_value(&read_error).unwrap();
+    let read_witness = &read_json["exchange_witness"];
+    assert_eq!(read_witness["operation"], "reset");
+    assert_eq!(read_witness["allowance"], "startup");
+    assert_eq!(read_witness["budget_ms"], 100);
+    assert_eq!(read_witness["phase"], "wait_response");
+    assert_eq!(read_witness["writer_produced"], "flushed");
+    assert_eq!(read_witness["writer_completion_received"], true);
+    assert_eq!(read_witness["reader_produced"]["status"], "available");
+    assert!(read_witness["reader_produced"]["last_event"].is_null());
+    assert!(read_witness["reader_received_ordinal"].is_null());
+    assert!(read_witness["reader_correlated_ordinal"].is_null());
+    assert_eq!(read_witness["child_status"]["status"], "running");
+    assert_eq!(read_witness["remaining_ms"], 0);
+    assert!(read_witness["elapsed_ms"].as_u64().unwrap() >= 100);
+    let request_id = read_witness["request_id"].as_str().unwrap();
+    assert_eq!(request_id.len(), 32);
+    assert!(request_id.bytes().all(|b| b.is_ascii_hexdigit()));
+    let request_bytes = serde_json::to_vec(&json!({"id": request_id, "op": "reset"}))
+        .unwrap()
+        .len()
+        + 1;
+    assert_eq!(read_witness["request_bytes"], request_bytes);
+    let total_ms = read_witness["elapsed_ms"].as_u64().unwrap();
+    assert!(read_witness["phase_elapsed_ms"].as_u64().unwrap() <= total_ms);
+    let produced_ms = read_witness["writer_completed_at_session_ms"]
+        .as_u64()
+        .unwrap();
+    let received_ms = read_witness["writer_received_at_session_ms"]
+        .as_u64()
+        .unwrap();
+    let captured_ms = read_witness["captured_at_session_ms"].as_u64().unwrap();
+    assert!(produced_ms <= received_ms && received_ms <= captured_ms);
+    let child_pid = read_witness["child_pid"].as_i64().unwrap();
+    assert!(child_pid > 0);
+    assert_process_stopped(child_pid);
 
     let mut write_session = AppSession::spawn(&python_config(
         &fixture(),
@@ -328,11 +364,12 @@ fn bounds_read_and_blocking_write_deadlines() {
     ))
     .unwrap();
     write_session.reset().unwrap();
-    let payload = json!("x".repeat(8 * 1024 * 1024));
+    let secret = "EXCHANGE_ARGUMENT_SECRET_MARKER";
+    let payload = json!(format!("{secret}{}", "x".repeat(8 * 1024 * 1024)));
     let write_start = Instant::now();
     let write_error = write_session
         .call(&Call {
-            action: "large".into(),
+            action: "EXCHANGE_ACTION_SECRET_MARKER".into(),
             args: vec![payload],
         })
         .unwrap_err();
@@ -343,6 +380,32 @@ fn bounds_read_and_blocking_write_deadlines() {
         write_error.message
     );
     assert!(write_start.elapsed() < Duration::from_millis(1500));
+    let encoded = serde_json::to_string(&write_error).unwrap();
+    assert!(!encoded.contains(secret));
+    assert!(!encoded.contains("EXCHANGE_ACTION_SECRET_MARKER"));
+    assert!(encoded.len() < 2048);
+    let write_json: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    let write_witness = &write_json["exchange_witness"];
+    assert_eq!(write_witness["operation"], "call");
+    assert_eq!(write_witness["allowance"], "response");
+    assert_eq!(write_witness["budget_ms"], 500);
+    assert_eq!(write_witness["phase"], "wait_write");
+    assert!(matches!(
+        write_witness["writer_produced"].as_str(),
+        Some("queued" | "writing")
+    ));
+    assert_eq!(write_witness["writer_completion_received"], false);
+    assert!(write_witness["request_bytes"].as_u64().unwrap() > 8 * 1024 * 1024);
+    assert_eq!(write_witness["reader_produced"]["last_event"]["ordinal"], 1);
+    assert_eq!(
+        write_witness["reader_produced"]["last_event"]["kind"],
+        "line"
+    );
+    assert!(write_witness["reader_received_ordinal"].is_null());
+    assert!(write_witness["reader_correlated_ordinal"].is_null());
+    assert_eq!(write_witness["child_status"]["status"], "running");
+    assert_eq!(write_witness["remaining_ms"], 0);
+    assert_process_stopped(write_witness["child_pid"].as_i64().unwrap());
 }
 
 #[test]
@@ -366,6 +429,29 @@ fn drop_and_protocol_errors_release_the_isolated_directory() {
         .unwrap_err();
     assert_eq!(error.code, "APP_TIMEOUT");
     assert!(!directory.exists());
+    let before_drop = serde_json::to_value(&error).unwrap();
+    drop(session);
+    assert_eq!(serde_json::to_value(&error).unwrap(), before_drop);
+    assert_eq!(
+        before_drop["exchange_witness"]["child_status"]["status"],
+        "running"
+    );
+    assert!(!directory.exists());
+}
+
+#[test]
+fn adapter_json_cannot_supply_trusted_exchange_witness() {
+    let mut session = AppSession::spawn(&python_config(
+        &fixture(),
+        "spoof_witness",
+        Duration::from_secs(1),
+    ))
+    .unwrap();
+    let error = session.reset().unwrap_err();
+    assert_eq!(error.code, "APP_PROTOCOL");
+    let value = serde_json::to_value(error).unwrap();
+    assert!(value.get("exchange_witness").is_none());
+    assert!(!value.to_string().contains("ADAPTER_SPOOF_SECRET_MARKER"));
 }
 
 #[test]

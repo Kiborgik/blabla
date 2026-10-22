@@ -1,5 +1,5 @@
 use blabla::application::AppConfig;
-use blabla::diagnostic::{Diagnostic, Location};
+use blabla::diagnostic::{Diagnostic, ExchangeWitness, Location};
 use blabla::project::status::CompletionView;
 use blabla::report::{
     DEFAULT_CASES, DEFAULT_STEPS, DEFAULT_TIMEOUT_MS, Failure, MAX_SHRINK_ATTEMPTS, RunOptions,
@@ -785,6 +785,8 @@ struct ErrorReport {
     diagnostic: Option<Diagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     evidence: Option<Box<Failure>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exchange_witness: Option<Box<ExchangeWitness>>,
 }
 
 fn positive_count(value: &str) -> Result<usize, String> {
@@ -830,6 +832,28 @@ fn emit_error(error: ErrorReport, json: bool, exit: i32) -> i32 {
                     diagnostic.message
                 )?;
             }
+            if let Some(witness) = &error.exchange_witness {
+                writeln!(
+                    output,
+                    "exchange: request_id={} op={:?} pid={:?} bytes={} allowance={:?} budget_ms={} phase={:?} elapsed_ms={} phase_elapsed_ms={} remaining_ms={} child_before_cleanup={:?}; transport: writer={:?} completion_received={} reader={:?} received_ordinal={:?} correlated_ordinal={:?}",
+                    witness.request_id,
+                    witness.operation,
+                    witness.child_pid,
+                    witness.request_bytes,
+                    witness.allowance,
+                    witness.budget_ms,
+                    witness.phase,
+                    witness.elapsed_ms,
+                    witness.phase_elapsed_ms,
+                    witness.remaining_ms,
+                    witness.child_status,
+                    witness.writer_produced,
+                    witness.writer_completion_received,
+                    witness.reader_produced,
+                    witness.reader_received_ordinal,
+                    witness.reader_correlated_ordinal,
+                )?;
+            }
             if error.completion.is_some() {
                 writeln!(
                     output,
@@ -852,6 +876,7 @@ fn error(category: &'static str, message: impl Into<String>, seed: Option<u64>) 
         completion: None,
         diagnostic: None,
         evidence: None,
+        exchange_witness: None,
     }
 }
 
@@ -876,6 +901,7 @@ fn verify_error(failure: VerifyError, seed: u64) -> (ErrorReport, i32) {
                 Some(seed),
             );
             report.code = Some(failure.code);
+            report.exchange_witness = failure.exchange_witness;
             (report, 3)
         }
         VerifyError::Unstable { message, failure } => {

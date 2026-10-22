@@ -1,10 +1,13 @@
 pub mod command;
+mod exchange_witness;
 pub mod primitives;
 pub(crate) mod process_tree;
 pub(crate) mod strict_json;
 
 use crate::application::{AppConfig, Application};
-use crate::diagnostic::AppError;
+use crate::diagnostic::{
+    AppError, ExchangeAllowance, ExchangeOperation, ReaderEventKind, ReaderProgress,
+};
 use crate::ir::{Field, MAX_INT, Type};
 use crate::report::Call;
 use serde_json::{Map, Value, json};
@@ -16,6 +19,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
+use exchange_witness::{Exchange, ReaderRecorder, Slot, WriterMetadata};
 use process_tree::ProcessTree;
 
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(8);
@@ -26,6 +30,7 @@ const CLEANUP_LIMIT: Duration = Duration::from_millis(250);
 struct WriteJob {
     bytes: Vec<u8>,
     completion: SyncSender<Result<(), String>>,
+    witness: Arc<Slot<WriterMetadata>>,
 }
 
 enum ResponseEvent {
@@ -36,10 +41,47 @@ enum ResponseEvent {
     Io(String),
 }
 
+struct ResponseFrame {
+    ordinal: Option<u64>,
+    event: ResponseEvent,
+}
+
+struct ResponseSender {
+    channel: SyncSender<ResponseFrame>,
+    witness: Arc<ReaderRecorder>,
+    ordinal: Option<u64>,
+    session_started: Instant,
+}
+
+impl ResponseSender {
+    fn send(
+        &mut self,
+        event: ResponseEvent,
+        bytes: usize,
+    ) -> Result<(), mpsc::SendError<ResponseFrame>> {
+        self.ordinal = self.ordinal.and_then(|ordinal| ordinal.checked_add(1));
+        let kind = match &event {
+            ResponseEvent::Line(_) => ReaderEventKind::Line,
+            ResponseEvent::Eof => ReaderEventKind::Eof,
+            ResponseEvent::Unterminated => ReaderEventKind::Unterminated,
+            ResponseEvent::TooLong => ReaderEventKind::TooLong,
+            ResponseEvent::Io(_) => ReaderEventKind::Io,
+        };
+        self.witness
+            .produced(self.ordinal, kind, bytes, self.session_started);
+        self.channel.send(ResponseFrame {
+            ordinal: self.ordinal,
+            event,
+        })
+    }
+}
+
 pub struct AppSession {
     child: Option<Child>,
     writer: Option<Sender<WriteJob>>,
-    responses: Receiver<ResponseEvent>,
+    responses: Receiver<ResponseFrame>,
+    reader_witness: Arc<ReaderRecorder>,
+    session_started: Instant,
     writer_thread: Option<JoinHandle<()>>,
     reader_thread: Option<JoinHandle<()>>,
     process_tree: Option<ProcessTree>,
@@ -77,6 +119,7 @@ impl AppSession {
     }
 
     fn spawn_in(config: &AppConfig, temp_dir: Arc<TempDir>) -> Result<Self, AppError> {
+        let session_started = Instant::now();
         let mut command = Command::new(&config.executable);
         command
             .args(&config.args)
@@ -111,9 +154,18 @@ impl AppSession {
         };
         let (writer, write_jobs) = mpsc::channel();
         let (response_sender, responses) = mpsc::sync_channel(1);
+        let reader_witness = Arc::new(ReaderRecorder::new(ReaderProgress::Available {
+            last_event: None,
+        }));
+        let response_sender = ResponseSender {
+            channel: response_sender,
+            witness: Arc::clone(&reader_witness),
+            ordinal: Some(0),
+            session_started,
+        };
         let writer_thread = match thread::Builder::new()
             .name("blabla-app-writer".into())
-            .spawn(move || write_requests(stdin, write_jobs))
+            .spawn(move || write_requests(stdin, write_jobs, session_started))
         {
             Ok(handle) => handle,
             Err(error) => {
@@ -153,6 +205,8 @@ impl AppSession {
             child: Some(child),
             writer: Some(writer),
             responses,
+            reader_witness,
+            session_started,
             writer_thread: Some(writer_thread),
             reader_thread: Some(reader_thread),
             process_tree: Some(process_tree),
@@ -166,24 +220,32 @@ impl AppSession {
         })
     }
 
-    fn exchange(&mut self, request: Value) -> Result<Value, AppError> {
-        let result = self.exchange_open(request);
+    fn exchange(
+        &mut self,
+        operation: ExchangeOperation,
+        request: Value,
+    ) -> Result<Value, AppError> {
+        let result = self.exchange_open(operation, request);
         if result.is_err() {
             self.shutdown();
         }
         result
     }
 
-    fn exchange_open(&mut self, mut request: Value) -> Result<Value, AppError> {
+    fn exchange_open(
+        &mut self,
+        operation: ExchangeOperation,
+        mut request: Value,
+    ) -> Result<Value, AppError> {
         if self.closed {
             return Err(AppError::new("APP_IO", "application session is closed"));
         }
-        let deadline = Instant::now()
-            + if self.booted {
-                self.timeout
-            } else {
-                self.startup
-            };
+        let started = Instant::now();
+        let (allowance, budget) = if self.booted {
+            (ExchangeAllowance::Response, self.timeout)
+        } else {
+            (ExchangeAllowance::Startup, self.startup)
+        };
         let request_id = request_id()?;
         request
             .as_object_mut()
@@ -196,15 +258,46 @@ impl AppSession {
             )
         })?;
         bytes.push(b'\n');
+        let mut exchange = Exchange::new(
+            request_id,
+            operation,
+            bytes.len(),
+            self.child.as_ref().map(Child::id),
+            allowance,
+            budget,
+            started,
+            self.session_started,
+        );
+        let result = self.exchange_pending(bytes, &mut exchange);
+        result.map_err(|mut error| {
+            if error.code == "APP_TIMEOUT" {
+                error.exchange_witness = Some(Box::new(
+                    exchange.snapshot(&self.reader_witness, self.child.as_mut()),
+                ));
+            }
+            error
+        })
+    }
+
+    fn exchange_pending(
+        &mut self,
+        bytes: Vec<u8>,
+        exchange: &mut Exchange,
+    ) -> Result<Value, AppError> {
+        let deadline = exchange.deadline;
         let (completion, written) = mpsc::sync_channel(1);
         self.writer
             .as_ref()
             .ok_or_else(|| AppError::new("APP_IO", "application input is closed"))?
-            .send(WriteJob { bytes, completion })
+            .send(WriteJob {
+                bytes,
+                completion,
+                witness: Arc::clone(&exchange.writer),
+            })
             .map_err(|_| AppError::new("APP_IO", "application input is closed"))?;
 
         match written.recv_timeout(remaining(deadline)?) {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => exchange.received_write(),
             Ok(Err(message)) => return Err(AppError::new("APP_IO", message)),
             Err(RecvTimeoutError::Timeout) => {
                 return Err(AppError::new(
@@ -220,8 +313,8 @@ impl AppSession {
             }
         }
 
-        let event = match self.responses.recv_timeout(remaining(deadline)?) {
-            Ok(event) => event,
+        let frame = match self.responses.recv_timeout(remaining(deadline)?) {
+            Ok(frame) => frame,
             Err(RecvTimeoutError::Timeout) => {
                 return Err(AppError::new(
                     "APP_TIMEOUT",
@@ -235,7 +328,8 @@ impl AppSession {
                 ));
             }
         };
-        let line = match event {
+        exchange.received_response(frame.ordinal);
+        let line = match frame.event {
             ResponseEvent::Line(line) => line,
             ResponseEvent::Eof => return Err(self.eof_error(deadline)),
             ResponseEvent::Unterminated => {
@@ -260,7 +354,9 @@ impl AppSession {
                     format!("application emitted malformed JSON: {error}"),
                 )
             })?;
-        unwrap_response(response.0, &request_id)
+        let result = unwrap_response(response.0, &exchange.request_id)?;
+        exchange.correlated_response();
+        Ok(result)
     }
 
     fn eof_error(&mut self, exchange_deadline: Instant) -> AppError {
@@ -295,8 +391,14 @@ impl AppSession {
         }
     }
 
-    fn acknowledgement(&mut self, request: Value) -> Result<(), AppError> {
-        let result = self.exchange(request).and_then(validate_acknowledgement);
+    fn acknowledgement(
+        &mut self,
+        operation: ExchangeOperation,
+        request: Value,
+    ) -> Result<(), AppError> {
+        let result = self
+            .exchange(operation, request)
+            .and_then(validate_acknowledgement);
         if result.is_err() {
             self.shutdown();
         }
@@ -373,7 +475,7 @@ impl AppSession {
 
             if !saw_eof {
                 let wait = remaining(deadline)?.min(Duration::from_millis(5));
-                match self.responses.recv_timeout(wait) {
+                match self.responses.recv_timeout(wait).map(|frame| frame.event) {
                     Ok(ResponseEvent::Line(_)) => {
                         return Err(AppError::new(
                             "APP_PROTOCOL",
@@ -484,7 +586,7 @@ impl AppSession {
                 tree.reap_descendants();
             }
             while let Ok(event) = self.responses.try_recv() {
-                if !matches!(event, ResponseEvent::Eof) {
+                if !matches!(event.event, ResponseEvent::Eof) {
                     return Err(AppError::new(
                         "APP_PROTOCOL",
                         "unexpected protocol output during trusted termination",
@@ -519,7 +621,7 @@ impl AppSession {
         join_finished(&mut self.writer_thread);
         join_finished(&mut self.reader_thread);
         while let Ok(event) = self.responses.try_recv() {
-            if !matches!(event, ResponseEvent::Eof) {
+            if !matches!(event.event, ResponseEvent::Eof) {
                 return Err(AppError::new(
                     "APP_PROTOCOL",
                     "unexpected trailing protocol output during trusted termination",
@@ -615,7 +717,7 @@ impl Application for AppSession {
             }
             *self = Self::spawn(&config)?;
         }
-        self.acknowledgement(json!({"op": "reset"}))?;
+        self.acknowledgement(ExchangeOperation::Reset, json!({"op": "reset"}))?;
         self.initialized = true;
         Ok(())
     }
@@ -627,15 +729,18 @@ impl Application for AppSession {
                 "restart must use the trusted lifecycle operation",
             ));
         }
-        self.acknowledgement(json!({
-            "op": "call",
-            "name": call.action,
-            "args": call.args,
-        }))
+        self.acknowledgement(
+            ExchangeOperation::Call,
+            json!({
+                "op": "call",
+                "name": call.action,
+                "args": call.args,
+            }),
+        )
     }
 
     fn observe(&mut self, schema: &[Field]) -> Result<Value, AppError> {
-        let response = self.exchange(json!({"op": "observe"}))?;
+        let response = self.exchange(ExchangeOperation::Observe, json!({"op": "observe"}))?;
         let result = project_observation(&response, schema);
         if result.is_err() {
             self.shutdown();
@@ -860,13 +965,15 @@ fn remaining(deadline: Instant) -> Result<Duration, AppError> {
         .ok_or_else(|| AppError::new("APP_TIMEOUT", "application exchange deadline elapsed"))
 }
 
-fn write_requests(mut stdin: ChildStdin, jobs: Receiver<WriteJob>) {
+fn write_requests(mut stdin: ChildStdin, jobs: Receiver<WriteJob>, session_started: Instant) {
     for job in jobs {
+        job.witness.writing();
         let result = stdin
             .write_all(&job.bytes)
             .and_then(|()| stdin.flush())
             .map_err(|error| format!("could not write application request: {error}"));
         let failed = result.is_err();
+        job.witness.completed(!failed, session_started);
         let _ = job.completion.send(result);
         if failed {
             break;
@@ -874,16 +981,17 @@ fn write_requests(mut stdin: ChildStdin, jobs: Receiver<WriteJob>) {
     }
 }
 
-fn read_responses(stdout: ChildStdout, responses: SyncSender<ResponseEvent>) {
+fn read_responses(stdout: ChildStdout, mut responses: ResponseSender) {
     let mut reader = BufReader::new(stdout);
     let mut line = Vec::new();
     loop {
         let available = match reader.fill_buf() {
             Ok(available) => available,
             Err(error) => {
-                let _ = responses.send(ResponseEvent::Io(format!(
-                    "could not read application response: {error}"
-                )));
+                let _ = responses.send(
+                    ResponseEvent::Io(format!("could not read application response: {error}")),
+                    line.len(),
+                );
                 return;
             }
         };
@@ -893,18 +1001,19 @@ fn read_responses(stdout: ChildStdout, responses: SyncSender<ResponseEvent>) {
             } else {
                 ResponseEvent::Unterminated
             };
-            let _ = responses.send(event);
+            let _ = responses.send(event, line.len());
             return;
         }
         if let Some(newline) = available.iter().position(|byte| *byte == b'\n') {
             if line.len() + newline > RESPONSE_LINE_LIMIT {
-                let _ = responses.send(ResponseEvent::TooLong);
+                let _ = responses.send(ResponseEvent::TooLong, line.len() + newline + 1);
                 return;
             }
             line.extend_from_slice(&available[..newline]);
             reader.consume(newline + 1);
+            let bytes = line.len() + 1;
             if responses
-                .send(ResponseEvent::Line(std::mem::take(&mut line)))
+                .send(ResponseEvent::Line(std::mem::take(&mut line)), bytes)
                 .is_err()
             {
                 return;
@@ -912,7 +1021,7 @@ fn read_responses(stdout: ChildStdout, responses: SyncSender<ResponseEvent>) {
         } else {
             let available_len = available.len();
             if line.len() + available_len > RESPONSE_LINE_LIMIT {
-                let _ = responses.send(ResponseEvent::TooLong);
+                let _ = responses.send(ResponseEvent::TooLong, line.len() + available_len);
                 return;
             }
             line.extend_from_slice(available);
