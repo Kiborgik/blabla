@@ -22,6 +22,7 @@ function world(): WorldState {
       const result = applyRelease(baseline, { expectedRevision: baseline.revision, expectedFromReleaseId: baseline.releaseId, targetReleaseId: release.id, timestamp: epoch });
       assert.equal(result.ok, true, result.error);
       baseline = result.state;
+      if (release.id === 'settlement-living-partnerships-1') break;
     }
     assert.ok(baseline.unlockedFeatures.includes('historical-pressures'));
   }

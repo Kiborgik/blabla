@@ -15,6 +15,7 @@ import {
   DIRECTOR_SEAT,
   GAME_VERSION,
   SCHEMA_VERSION,
+  type GameAction,
   type ActionOption,
   type Command,
   type GameEvent,
@@ -154,8 +155,8 @@ export function createWorld(seed: number, clockEpoch?: string): WorldState {
   return state;
 }
 
-export function legalActions(state: WorldState, seat: number, timestamp?: string): ActionOption[] {
-  return availableActions(state, seat, timestamp);
+export function legalActions(state: WorldState, seat: number, timestamp?: string, selectedEvent?: Extract<GameAction, { type: 'event' }>): ActionOption[] {
+  return availableActions(state, seat, timestamp, 'full', selectedEvent);
 }
 
 export function observe(state: WorldState, seat: number, timestamp?: string, tradePresentation: TradePresentation = 'full'): Observation {
@@ -206,6 +207,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
         state.round < offer.expiresRound &&
         (director || offer.proposer === seat || offer.recipient === seat),
     ),
+    ...(hasFeatures(state, ['consented-relief']) ? { relief: state.relief } : {}),
     ...(hasFeatures(state, ['public-projects']) ? { publicProjects: (state.publicProjects ?? []).filter((project) => director || project.proposer === seat || project.recipient === seat) } : {}),
     recentEvents: state.events.slice(-12),
     legalActions: availableActions(state, seat, timestamp, tradePresentation),
@@ -255,7 +257,7 @@ export function applyCommand(state: WorldState, command: Command): TransitionRes
     denied, 'blocked');
   const decisionBlock = decisionActionBlock(state, command.seat, command.action);
   if (decisionBlock) return refuseAction(state, command, command.action.type === 'wait' ? 'required_decisions' : 'active_commitment', decisionBlock, 'blocked');
-  const available = legalActions(state, command.seat, command.timestamp);
+  const available = legalActions(state, command.seat, command.timestamp, command.action.type === 'event' ? command.action : undefined);
   if (!available.some((choice) => sameAction(choice.action, command.action))) {
     return refuseAction(state, command, 'illegal_action', 'Action is not legal in the current released world');
   }

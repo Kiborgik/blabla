@@ -1,3 +1,4 @@
+import { resolveReliefCharters } from './relief-charters.ts';
 import { resolveSpaceflight } from './spaceflight.ts';
 import { recordLocalPower } from './local-power.ts';
 import { recordIndustrialFoundry } from './industrial-evidence.ts';
@@ -206,6 +207,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   }
   resolveTrade(state, events);
   resolvePublicProjects(state, events);
+  resolveReliefCharters(state, events);
   for (const civilization of state.civilizations) resolveResearch(state, civilization.id, researchBudgets.get(civilization.id) ?? 0, events);
   for (const civilization of state.civilizations) resolveCivics(state, civilization.id, civicBudgets.get(civilization.id) ?? 0, events);
   resolveConstruction(state, openingWork, events);

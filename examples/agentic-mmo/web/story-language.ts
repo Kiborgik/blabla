@@ -128,6 +128,24 @@ function regionalStory(state: StoryNames, event: GameEvent, fallback: EventLogEn
 
 export function storyLanguage(state: StoryNames, event: GameEvent, fallback: EventLogEntry): StoryLanguage {
   const actor = civilization(state, event.actor); const target = civilization(state, event.target);
+  const relief = event.reliefResult;
+  if (relief?.eventId === event.id && event.type === `relief-${relief.outcome}` && event.detail === relief.charter.id) {
+    const donor = civilization(state, relief.charter.terms.donorId); const recipient = civilization(state, relief.charter.terms.recipientId);
+    const labels = { delivered: 'Food relief delivered', declined: 'Food relief declined', withdrawn: 'Food relief withdrawn', expired: 'Relief offer expired', failed: 'Food relief could not proceed' };
+    const cause = relief.outcome === 'delivered' ? 'Both partners had consented; the donor funded the complete agreed transfer.'
+      : relief.outcome === 'declined' ? `${civilization(state, relief.actor)} declined the offer.`
+        : relief.outcome === 'withdrawn' ? `${civilization(state, relief.actor)} withdrew from the charter.`
+          : relief.outcome === 'expired' ? 'The consent window ended without agreement.' : boundedRecord(state, relief.reason);
+    return { title: `${donor} → ${recipient} · ${labels[relief.outcome]}`, cause,
+      consequence: relief.outcome === 'delivered' ? `${exactNumber(relief.deliveredFood)} Food moved from ${donor}’s civilization reserves to ${recipient}’s; ${exactNumber(relief.paid.energy)} Energy consumed.`
+        : 'No aid was delivered. This charter charged no supplies or penalty.' };
+  }
+  if (event.type === 'relief-proposed') return { title: `${actor} offered Food relief to ${target}`, cause: 'The recipient needed Food when this offer was made.', consequence: 'Recipient consent was still required. No aid was delivered or paid for by this offer.' };
+  if (event.type === 'relief-accepted') {
+    const due = event.effects.flatMap(effect => /^Full transfer is due round (\d+); no payment occurred at acceptance$/.exec(effect)?.[1] ?? [])[0];
+    return { title: `${actor} accepted Food relief from ${target}`, cause: 'Both partners agreed to the exact offered amount.',
+      consequence: `${due ? `The transfer was scheduled for round ${due}. ` : ''}No aid was delivered or paid for by this acceptance.` };
+  }
   const result = recordedPublicProjectResult(event);
   if (result) {
     const labels = { completed: 'Joint repair completed', failed: 'Joint repair failed', 'no-work-needed': 'No repair needed', declined: 'Repair declined', cancelled: 'Repair cancelled', expired: 'Repair offer expired' };

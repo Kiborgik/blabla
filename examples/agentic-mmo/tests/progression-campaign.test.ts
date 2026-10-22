@@ -196,10 +196,10 @@ function summary(state: WorldState): object {
   };
 }
 
-void test('earned generated seed1701 campaign reaches supplied inhabited Mars through paid autonomous choices', { timeout: 600_000 }, context => {
-  const localTemplate = createLocalSimulation();
-  const initial = createGeneratedWorld(1701, epoch);
-  assert.deepEqual(initial, localTemplate.state, 'The measured campaign is the actual new default local observatory');
+void test('historical living-partnerships seed1701 campaign reaches supplied inhabited Mars through paid autonomous choices', { timeout: 600_000 }, context => {
+  const localTemplate = createLocalSimulation(1701, 'settlement-living-partnerships-1');
+  const initial = createGeneratedWorld(1701, epoch, 'settlement-living-partnerships-1');
+  assert.deepEqual(initial, localTemplate.state, 'The historical campaign retains its explicit published Living partnerships genesis');
   assert.equal(initial.origin?.kind, 'generated'); assert.equal(initial.origin?.seed, 1701);
   assert.ok(initial.civilizations.every(actor => actor.technologies.length === 0 && actor.marsPopulation === 0));
   assert.ok(initial.cities.every(city => city.buildings.length === 0));

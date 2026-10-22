@@ -25,7 +25,7 @@ function eventDelta(before: LocalSimulation, after: LocalSimulation): GameEvent[
 
 await test('natural nondefault seed 73 uses actual autonomous windows, conserved releases and exact restart continuation', { timeout: 330_000 }, () => {
   mkdirSync(scratch, { recursive: true });
-  let run = createLocalSimulation(73);
+  let run = createLocalSimulation(73, 'settlement-living-partnerships-1');
   assert.ok(run.state.unlockedFeatures.includes('partnership-stewardship'));
   const deadline = Date.now() + 300_000;
   const counts: Record<string, number> = {};

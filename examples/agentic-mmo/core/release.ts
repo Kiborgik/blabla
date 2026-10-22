@@ -49,10 +49,18 @@ const interplanetaryRelease: CompatibleReleaseDefinition = {
   compatibleFrom: [previousRelease.id],
   featureIds: [...previousRelease.featureIds, 'planetary-networks', 'interplanetary-logistics', 'earned-history'],
 };
-export const RELEASES: readonly CompatibleReleaseDefinition[] = [...historicalReleases, interplanetaryRelease, {
+const partnershipRelease: CompatibleReleaseDefinition = {
   id: 'settlement-living-partnerships-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
   compatibleFrom: [interplanetaryRelease.id],
   featureIds: [...interplanetaryRelease.featureIds, 'partnership-stewardship', 'historical-pressures'],
+};
+const reliefRelease: CompatibleReleaseDefinition = {
+  id: 'settlement-relief-charters-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  compatibleFrom: [partnershipRelease.id], featureIds: [...partnershipRelease.featureIds, 'consented-relief'],
+};
+export const RELEASES: readonly CompatibleReleaseDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, {
+  id: 'settlement-regional-targets-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  compatibleFrom: [reliefRelease.id], featureIds: [...reliefRelease.featureIds, 'procedural-regional-targets'],
 }];
 
 function currentRelease(): CompatibleReleaseDefinition {

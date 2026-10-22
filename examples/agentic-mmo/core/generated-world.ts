@@ -10,7 +10,7 @@ import { createStrategicDeposits, createCoalDeposits } from './simulation/metals
 import { createPastoralSites } from './simulation/pastoral.ts';
 import { createLandTransportPlanner } from './simulation/transport.ts';
 
-export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' = 'settlement-living-partnerships-1'): WorldState {
+export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' = 'settlement-living-partnerships-1'): WorldState {
   if (parseUtcTimestamp(clockEpoch) === null) throw new RangeError('Generated worlds require an explicit UTC clock epoch');
   const geography = generateGeography(seed);
   let state = createWorld(seed, clockEpoch);
@@ -24,7 +24,7 @@ export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialRel
   state.height = geography.height;
   state.tiles = geography.tiles;
   state.rng = geography.rng;
-  state.origin = { kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed: state.seed, clockEpoch, ...(initialReleaseId === 'settlement-living-partnerships-1' ? { initialReleaseId } : {}) };
+  state.origin = { kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed: state.seed, clockEpoch, ...(initialReleaseId !== 'settlement-interplanetary-1' ? { initialReleaseId } : {}) };
   for (const city of state.cities) {
     const tileId = geography.capitalTileIds[city.civId];
     const center = tileId === undefined ? undefined : state.tiles[tileId];

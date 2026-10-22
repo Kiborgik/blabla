@@ -30,6 +30,7 @@ const GROUPS: ReadonlyArray<{ prefix: string; category: string; family: string; 
   { prefix: 'industrial-accident', category: 'Industrial accident', family: 'disruption', icon: 'damage' },
   { prefix: 'internal-migration', category: 'Internal migration', family: 'population', icon: 'population' },
   { prefix: 'trade', category: 'Trade result', family: 'trade', icon: 'cargo' },
+  { prefix: 'relief', category: 'Food relief', family: 'relief', icon: 'food' },
   { prefix: 'public-project', category: 'Shared project', family: 'partnership', icon: 'influence' },
   { prefix: 'building', category: 'Building result', family: 'building', icon: 'infrastructure' },
   { prefix: 'improvement', category: 'Worked land', family: 'building', icon: 'materials' },

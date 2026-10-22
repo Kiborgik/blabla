@@ -1,3 +1,6 @@
+import { isReliefAction } from './relief-validation.ts';
+import { reliefActionFailure } from './simulation/relief-charters.ts';
+import { isHistoricalEventSelection } from './historical-selection-validation.ts';
 import { spaceflightActionBlock } from './simulation/spaceflight.ts';
 import { railEdgeId, railTownBlock, railSiteBlock } from './simulation/rail.ts';
 import { governmentActionBlock } from './simulation/government.ts';
@@ -67,6 +70,10 @@ function integer(value: unknown, maximum = Number.MAX_SAFE_INTEGER): value is nu
 export function isGameAction(value: unknown): value is GameAction {
   if (!record(value)) return false;
   switch (value.type) {
+    case 'propose-relief':
+    case 'respond-relief':
+    case 'withdraw-relief':
+      return isReliefAction(value);
     case 'adopt-government':
       return fields(value, ['type', 'governmentId', 'assignments']) && text(value.governmentId, 128) && Array.isArray(value.assignments) && value.assignments.length <= 16 && Array.from(value.assignments).every(assignment => record(assignment) && fields(assignment, ['slotType', 'slotIndex', 'policyId']) && POLICY_SLOT_TYPES.some(slot => slot === assignment.slotType) && integer(assignment.slotIndex, 15) && text(assignment.policyId, 128));
     case 'choose-civic':
@@ -116,7 +123,7 @@ export function isGameAction(value: unknown): value is GameAction {
     case 'repair':
       return fields(value, ['type', 'routeId']) && text(value.routeId, 128);
     case 'event':
-      return fields(value, ['type', 'event', 'target']) && integer(value.target, CIV_COUNT - 1) && DIRECTOR_EVENTS.some((event) => event.id === value.event);
+      return (fields(value, ['type', 'event', 'target']) || fields(value, ['type', 'event', 'target', 'regional']) && isHistoricalEventSelection(value.regional) && value.regional.local.kind === value.event) && integer(value.target, CIV_COUNT - 1) && DIRECTOR_EVENTS.some((event) => event.id === value.event);
     case 'expedition':
       return fields(value, ['type', 'cityId', 'mission']) && text(value.cityId, 128) && ['settle', 'resupply'].includes(String(value.mission));
     case 'wait':
@@ -189,6 +196,19 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
   if (specialized && (action.type === 'focus' || action.type === 'build') && !cities.some((city) => city.id === action.cityId))
     return invalidated('This release requires an explicit existing owned city target; review and choose the exact city');
   switch (action.type) {
+    case 'propose-relief':
+    case 'respond-relief':
+    case 'withdraw-relief': {
+      if (action.type === 'propose-relief') {
+        const route = state.routes.find(candidate => candidate.id === action.routeId);
+        return !route || !route.agreement?.enabled || !cities.some(city => city.id === action.sourceCityId)
+          || !state.cities.some(city => city.id === action.recipientCityId && city.civId !== seat)
+          ? invalidated('The exact consented relief corridor or named endpoints are no longer available') : null;
+      }
+      const charter = state.relief?.active.find(candidate => candidate.id === action.charterId);
+      return !charter || (action.type === 'respond-relief' ? charter.terms.recipientId !== seat || charter.status !== 'proposed' : charter.terms.donorId !== seat && charter.terms.recipientId !== seat)
+        ? invalidated('The exact relief charter is resolved or no longer open to this actor') : null;
+    }
     case 'adopt-government':
       return null;
     case 'choose-civic':
@@ -337,6 +357,7 @@ function unavailableReason(state: WorldState, seat: number, action: GameAction):
   if (action.type === 'settle-coast') { const block = coastalSourceBlock(state, seat, action.sourceCityId); if (block) return block; }
   const decisionBlock = decisionActionBlock(state, seat, action);
   if (decisionBlock) return decisionBlock;
+  if (action.type === 'propose-relief' || action.type === 'respond-relief' || action.type === 'withdraw-relief') return reliefActionFailure(state, seat, action) ?? 'Review the exact relief commitment and admission';
   if (action.type === 'propose-public-project' || action.type === 'respond-public-project' || action.type === 'cancel-public-project') return publicProjectActionFailure(state, seat, action) ?? 'Review the current charter and admission';
   const civilization = state.civilizations.find((candidate) => candidate.id === seat);
   const requiredFeatures = [...ACTION_FEATURES[action.type]];
@@ -403,7 +424,7 @@ export function observeActionPlan(state: WorldState, seat: number, plan: ActionP
   else {
     const admission = admissionError(state, seat, timestamp);
     if (admission) Object.assign(next, blocked(admission));
-    else if (!availableActions(state, seat, timestamp).some((option) => sameAction(option.action, next.action)))
+    else if (!availableActions(state, seat, timestamp, 'full', next.action.type === 'event' ? next.action : undefined).some((option) => sameAction(option.action, next.action)))
       Object.assign(next, blocked(unavailableReason(state, seat, next.action)));
     else Object.assign(next, { status: 'ready', result: `Legal at revision ${state.revision}; review and explicitly submit this action to execute it` });
   }

@@ -8,7 +8,9 @@ import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:partnerships-v1';
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:living-world-v1';
+export const PARTNERSHIPS_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:partnerships-v1';
+export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-regional-targets-1';
 export const PRIOR_GENERATED_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v2';
 export const PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v1';
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
@@ -33,7 +35,7 @@ export interface PreviousLocalSimulation extends Omit<LocalSimulation, 'version'
   readonly memories: ReadonlyArray<LegacyBehaviorMemory | null>;
 }
 
-export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' = 'settlement-living-partnerships-1'): LocalSimulation {
+export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' = ACTIVE_LOCAL_RELEASE_ID): LocalSimulation {
   const state = createGeneratedWorld(seed, EPOCH, initialReleaseId);
   return { version: 2, source: 'local-procedural', policyVersion: BEHAVIOR_POLICY_VERSION, seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
 }
@@ -64,6 +66,10 @@ function parseRun(value: unknown, previous: boolean): LocalSimulation | Previous
 }
 
 export function parseLocalSimulation(value: unknown): LocalSimulation | null { return parseRun(value, false) as LocalSimulation | null; }
+export function parseActiveLocalSimulation(value: unknown): LocalSimulation | null {
+  const run = parseLocalSimulation(value);
+  return run?.state.releaseId === ACTIVE_LOCAL_RELEASE_ID && run.state.origin?.initialReleaseId === ACTIVE_LOCAL_RELEASE_ID ? run : null;
+}
 export function parsePreviousLocalSimulation(value: unknown): PreviousLocalSimulation | null { return parseRun(value, true) as PreviousLocalSimulation | null; }
 
 export function advanceLocalSimulation(run: LocalSimulation, steps = 1): LocalSimulation {

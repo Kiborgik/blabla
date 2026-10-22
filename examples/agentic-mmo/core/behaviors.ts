@@ -1,4 +1,5 @@
 import { BEHAVIOR_POLICY_VERSION, LEGACY_BEHAVIOR_POLICY_VERSION, BEHAVIOR_PROFILES, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
+import { deriveReliefPlan, reliefPriority, reliefProtects, reliefReason, reliefWeight, type ReliefPlan } from './behavior-relief.ts';
 import { deriveDiplomacyPlan, diplomacyPriority, diplomacyProtects, diplomacyReason, diplomacyWeight, type DiplomacyPlan } from './behavior-diplomacy.ts';
 import { deriveProgressionPlan, progressionOperationalPriority, progressionTransportPriority, progressionWeight, type ProgressionPlan } from './behavior-progression.ts';
 import { BUILDINGS, CIVICS, ECONOMY_RULES, FOCUS_IDS, GOVERNMENTS, IMPROVEMENTS, POLICIES, RESOURCE_IDS, TECHNOLOGIES, TRADE_RECIPES, WONDERS } from './content.ts';
@@ -131,6 +132,7 @@ interface Situation {
   phase: BehaviorPhase;
   progression: ProgressionPlan;
   diplomacy: DiplomacyPlan | null;
+  relief: ReliefPlan | null;
 }
 
 function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
@@ -153,7 +155,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null };
+  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null };
 }
 
 function selectPhase(context: Situation, options: readonly ActionOption[]): BehaviorPhase {
@@ -343,6 +345,7 @@ function actionWeight(option: ActionOption, context: Situation): number {
       const route = state.routes.find(candidate => candidate.id === project?.routeId);
       return action.accept === ((route?.damage ?? 0) > 0) ? 12 : 0;
     }
+    case 'propose-relief': case 'respond-relief': case 'withdraw-relief': return 0;
     case 'cancel-public-project': case 'trade': case 'event': return 0;
     case 'federate': return 10 * profile.priorities.trade;
     case 'expedition': return context.foodRisk ? 0 : 10 * profile.priorities.research;
@@ -387,6 +390,7 @@ function laneOf(action: GameAction, lanes: Map<string, Set<string>>): string | n
 
 function urgent(candidate: Candidate, context: Situation): boolean {
   const action = candidate.option.action;
+  if (context.relief && reliefPriority(candidate.option, context.relief) > 0) return true;
   if (context.diplomacy && diplomacyPriority(candidate.option, context.diplomacy) > 0) return true;
   if (!context.foodRisk && (progressionOperationalPriority(candidate.option, context.progression) || progressionTransportPriority(candidate.option, context.state, context.progression))) return true;
   if (context.foodRisk) {
@@ -403,7 +407,8 @@ function stableKey(action: GameAction): string {
   return JSON.stringify(Object.fromEntries(Object.entries(action).sort(([left], [right]) => left.localeCompare(right))));
 }
 
-function weightedChoice(candidates: Candidate[], seed: number): Candidate {
+function weightedChoice(candidates: Candidate[], seed: number, director = false): Candidate {
+  const lotteryKey = (action: GameAction): string => stableKey(director && action.type === 'event' ? { type: 'event', event: action.event, target: action.target } : action);
   let cursor = seed;
   const pick = <T>(items: readonly T[], weight: (item: T) => number): T => {
     const step = randomStep(cursor); cursor = step.seed;
@@ -419,7 +424,7 @@ function weightedChoice(candidates: Candidate[], seed: number): Candidate {
   const average = (items: Candidate[]): number => items.reduce((sum, item) => sum + item.weight, 0) / items.length;
   const category = pick(bucket(candidates, candidate => candidate.category), average);
   const variant = pick(bucket(category, candidate => candidate.variant), average);
-  return pick(variant.toSorted((left, right) => stableKey(left.option.action).localeCompare(stableKey(right.option.action))), candidate => candidate.weight);
+  return pick(variant.toSorted((left, right) => lotteryKey(left.option.action).localeCompare(lotteryKey(right.option.action))), candidate => candidate.weight);
 }
 
 function committedDecision(state: WorldState, memory: BehaviorMemory, candidate: Candidate, phase: BehaviorPhase, reason: string, profile?: BehaviorProfile, isUrgent = false): BehaviorDecision {
@@ -460,21 +465,35 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
     const base = progressionWeight(option, actionWeight(option, context), state, actor, profile, context.progression);
     const replacing = action.type === 'stop-trade' && context.progression.replaceableRoutes.has(action.routeId)
       && !state.publicProjects?.some(project => project.routeId === action.routeId && project.status === 'committed');
-    const weight = context.diplomacy && !replacing ? diplomacyWeight(option, base, context.diplomacy) : base;
+    const diplomatic = context.diplomacy && !replacing ? diplomacyWeight(option, base, context.diplomacy) : base;
+    const weight = context.relief ? reliefWeight(option, diplomatic, context.relief) : diplomatic;
     return { option, weight, ...classify(option.action), lane: laneOf(option.action, lanes) };
   });
-  const required = candidates.filter(candidate => candidate.lane !== null && (!context.diplomacy || !diplomacyProtects(candidate.option, context.diplomacy)));
+  const required = candidates.filter(candidate => candidate.lane !== null && (!context.diplomacy || !diplomacyProtects(candidate.option, context.diplomacy)) && (!context.relief || !reliefProtects(candidate.option, context.relief)));
   let emergencies = candidates.filter(candidate => candidate.weight > 0 && urgent(candidate, context));
-  if (context.diplomacy && !context.severeFoodRisk) {
+  if (context.relief) {
+    const priorityOf = (candidate: Candidate): number => Math.max(reliefPriority(candidate.option, context.relief!), context.diplomacy ? diplomacyPriority(candidate.option, context.diplomacy) : 0);
+    const priority = Math.max(0, ...emergencies.map(priorityOf));
+    if (priority > 0 && (!context.severeFoodRisk || emergencies.some(candidate => reliefPriority(candidate.option, context.relief!) >= 4))) emergencies = emergencies.filter(candidate => priorityOf(candidate) === priority);
+  } else if (context.diplomacy && !context.severeFoodRisk) {
     const priority = Math.max(0, ...emergencies.map(candidate => diplomacyPriority(candidate.option, context.diplomacy!)));
     if (priority > 0) emergencies = emergencies.filter(candidate => diplomacyPriority(candidate.option, context.diplomacy!) === priority);
   }
   let pool: Candidate[];
   let reason: string;
   let isUrgent = false;
+  let reliefCompetition = false;
   if (emergencies.length && (memory.urgentStreak < 2 || required.length === 0)) {
     pool = emergencies; isUrgent = true;
     reason = context.foodRisk ? 'Food is low; protect the towns before expanding.' : 'Repair serious damage to restore town production and exchanges.';
+    if (context.relief && pool.every(candidate => candidate.option.action.type === 'propose-relief')) {
+      const keys = [...new Set(required.map(candidate => candidate.lane as string))].sort();
+      const next = keys.find(key => memory.lastRequiredLane === null || key > memory.lastRequiredLane) ?? keys[0];
+      const alternatives = required.length ? required.filter(candidate => candidate.lane === next).map(candidate => ({ ...candidate, weight: Math.max(0.1, candidate.weight) }))
+        : candidates.filter(candidate => candidate.weight > 0 && candidate.option.action.type !== 'propose-relief');
+      pool = [...pool, ...alternatives]; reliefCompetition = true;
+      reason = 'Balance nearby Food relief against the next useful commitment using current supplies and soft priorities.';
+    }
   } else if (required.length) {
     const keys = [...new Set(required.map(candidate => candidate.lane as string))].sort();
     const next = keys.find(key => memory.lastRequiredLane === null || key > memory.lastRequiredLane) ?? keys[0];
@@ -486,9 +505,14 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   }
   if (!pool.length) return noDecision(memory, 'No useful legal action is available; existing commitments remain unchanged.');
   const choice = weightedChoice(pool, behaviorSeed(`${BEHAVIOR_POLICY_VERSION}:${state.seed}:${seat}:${memory.decisionCount}`));
+  if (reliefCompetition) {
+    isUrgent = choice.option.action.type === 'propose-relief';
+    if (choice.lane) reason = `Start the next required ${choice.lane.startsWith('construction:') ? 'town construction' : choice.lane} commitment.`;
+  }
   if (isUrgent && !context.foodRisk && progressionOperationalPriority(choice.option, context.progression)) reason = 'Budget local residents and opening supplies for useful production and learning.';
   else if (isUrgent && !context.foodRisk && progressionTransportPriority(choice.option, state, context.progression)) reason = 'Seek fresh consent for a funded steam exchange whose paid rails improve delivery cadence.';
   if (context.diplomacy && !(choice.option.action.type === 'stop-trade' && context.progression.replaceableRoutes.has(choice.option.action.routeId))) reason = diplomacyReason(choice.option, context.diplomacy) ?? reason;
+  if (context.relief) reason = reliefReason(choice.option, context.relief) ?? reason;
   return committedDecision(state, memory, choice, context.phase, reason, profile, isUrgent);
 }
 
@@ -512,8 +536,8 @@ export function chooseDirectorBehavior(state: WorldState, previous?: BehaviorMem
     }
     return { option, weight, ...classify(action), lane: null };
   });
-  const choice = weightedChoice(candidates, behaviorSeed(`${BEHAVIOR_POLICY_VERSION}:${state.seed}:${DIRECTOR_SEAT}:${memory.decisionCount}`));
+  const choice = weightedChoice(candidates, behaviorSeed(`${BEHAVIOR_POLICY_VERSION}:${state.seed}:${DIRECTOR_SEAT}:${memory.decisionCount}`), true);
   const action = choice.option.action;
-  const cause = action.type === 'event' && hasFeatures(state, ['historical-pressures']) && isHistoricalEventId(action.event) ? historicalEventQuote(state, action.event, action.target)?.cause : undefined;
+  const cause = action.type === 'event' && hasFeatures(state, ['historical-pressures']) && isHistoricalEventId(action.event) ? historicalEventQuote(state, action.event, action.target, action.regional)?.cause : undefined;
   return committedDecision(state, memory, choice, 'director', cause ?? (action.type === 'wait' ? 'Let existing events and civilization decisions unfold.' : 'A seeded world event uses only released effects and an admitted target.'));
 }

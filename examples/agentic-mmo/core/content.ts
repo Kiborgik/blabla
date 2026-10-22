@@ -1,3 +1,4 @@
+export { RELIEF_RULES } from './relief-content.ts';
 import { CIV_COUNT } from './types.ts';
 import type {
   CivicDefinition, GovernmentDefinition, PolicyDefinition, BuildingCapability, BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
@@ -85,7 +86,9 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'consented-relief', name: 'Consented food relief', description: 'A civilization may promise contextual surplus Food over an existing exact consenting corridor. Explicit acceptance precedes one conserved, fully funded due transfer; withdrawal and shortage do not invent cargo or betrayal.' },
   { id: 'partnership-stewardship', name: 'Partnership stewardship', description: 'Civilizations weigh supplied exchanges, expiring consent and promised repair contributions against their current needs. This additive controller rule leaves older release policies unchanged.' },
+  { id: 'procedural-regional-targets', name: 'Local historical variety', description: 'Deterministic qualifying local event targets are quoted explicitly and retained with immediate factual consequences.' },
   { id: 'historical-pressures', name: 'Regional pressures and opportunities', description: 'Actual cultivated land, forests, coast, delivered trade, operated industry and displaced residents qualify local consequential historical events.' },
   { id: 'earned-history', name: 'Earned historical transitions', description: 'Retain actual milestone proof and explicitly advance a new ruleset calendar once per earned cause.' },
   { id: 'powered-science', name: 'Powered scientific laboratories', description: 'Sanitation and Chemistry lead to paid era-three local Campus laboratories using same-town Power, Credits and residents for productive Science.' },
@@ -148,6 +151,7 @@ export const FEATURES: FeatureDefinition[] = [
 ];
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  'propose-relief': ['consented-relief'], 'respond-relief': ['consented-relief'], 'withdraw-relief': ['consented-relief'],
   'build-rail': ['industrial-steam', 'recurring-decisions', 'owned-territory'],
   'choose-civic': ['civic-bootstrap'],
   'adopt-government': ['civic-bootstrap'],

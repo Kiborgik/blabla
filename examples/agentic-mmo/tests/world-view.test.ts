@@ -95,7 +95,7 @@ void test('actual local identities survive policy and revision changes but disti
 
 void test('the browser startup, source switch and deployment adapter actually use the qualified session', () => {
   const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /observeWorldIdentity\(next, mode === 'prior' \? 'prior' : mode === 'previous' \? 'previous' : 'local'\)/);
+  assert.match(main, /observeWorldIdentity\(next, mode === 'partnerships' \? 'partnerships' : mode === 'prior' \? 'prior' : mode === 'previous' \? 'previous' : 'local'\)/);
   assert.match(main, /observeWorldIdentity\(read\.snapshot, 'shared'\)/);
   assert.match(main, /preferences: \(\) => worldView\.capture/);
   assert.match(main, /localSimulation !== previous\) observeLocalSimulation\(\)/);
@@ -115,7 +115,7 @@ void test('choosing a real source replaces stale sample and source URL hints wit
 function storageFixture(initial: Record<string, string> = {}, overrides: Partial<LocalWorldStoragePorts> = {}) {
   const values = new Map(Object.entries(initial)); const writes: Array<{ key: string; value: string }> = []; const reads: string[] = []; const locks: string[] = [];
   const ports: LocalWorldStoragePorts = { read: key => { reads.push(key); return values.get(key) ?? null; }, write: (key, value) => { writes.push({ key, value }); values.set(key, value); },
-    withLock: async (key, operation) => { locks.push(key); return operation(); }, ...overrides };
+    withLock: async (key, operation) => { locks.push(key); return operation(); }, entropy: () => 1701, ...overrides };
   return { adapter: createLocalWorldStorage(ports), values, writes, reads, locks, ports };
 }
 
@@ -125,9 +125,8 @@ void test('new checkpoints never migrate or rewrite the exact previous local sav
   const original = ` \n${JSON.stringify(previous)}\n`;
   const f = storageFixture({ [PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY]: original });
   const old = f.adapter.previous(); assert.ok(old.run); assert.match(old.message, /Read-only/);
-  const current = f.adapter.restore(); assert.ok(current.run); assert.equal(current.run.version, 2);
+  const current = await f.adapter.restore(); assert.ok(current.run); assert.equal(current.run.version, 2);
   assert.notEqual(localSimulationSnapshot(current.run).identity, localSimulationSnapshot(old.run).identity);
-  await f.adapter.save(() => current.run);
   assert.equal(f.values.get(PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY), original);
   assert.equal(f.writes.length, 1); assert.equal(f.writes[0]?.key, LOCAL_SIMULATION_STORAGE_KEY);
   assert.deepEqual(f.locks, [LOCAL_SIMULATION_STORAGE_KEY]);
@@ -136,7 +135,7 @@ void test('new checkpoints never migrate or rewrite the exact previous local sav
 void test('missing Locks permits this-tab observation but performs no shared checkpoint write or unsafe fallback', async () => {
   const run = createLocalSimulation(); let reads = 0; let writes = 0;
   const adapter = createLocalWorldStorage({ read: () => { reads += 1; return JSON.stringify(run); }, write: () => { writes += 1; } });
-  const restored = adapter.restore(); assert.ok(restored.run); assert.equal(restored.ephemeral, true); assert.match(restored.message, /without saving/);
+  const restored = await adapter.restore(); assert.ok(restored.run); assert.equal(restored.ephemeral, true); assert.match(restored.message, /without saving/);
   const saved = await adapter.save(() => restored.run); assert.equal(saved.ephemeral, true); assert.equal(reads, 1); assert.equal(writes, 0);
   assert.deepEqual(saved.run, restored.run);
 });
@@ -144,7 +143,7 @@ void test('missing Locks permits this-tab observation but performs no shared che
 void test('unavailable storage creates an explicitly ephemeral world without attempting a checkpoint write', async () => {
   let writes = 0;
   const f = storageFixture({}, { read: () => { throw new Error('unavailable'); }, write: () => { writes += 1; } });
-  const restored = f.adapter.restore(); assert.ok(restored.run); assert.equal(restored.ephemeral, true); assert.match(restored.message, /This tab only · Not saved/);
+  const restored = await f.adapter.restore(); assert.ok(restored.run); assert.equal(restored.ephemeral, true); assert.match(restored.message, /This tab only · Not saved/);
   await f.adapter.save(() => restored.run); assert.equal(writes, 0); assert.equal(f.locks.length, 0);
   assert.match(f.adapter.previous().message, /cannot be read/);
 });
@@ -152,7 +151,7 @@ void test('unavailable storage creates an explicitly ephemeral world without att
 void test('corrupt current and previous saves remain unavailable and are never silently reset', async () => {
   const currentRaw = '{broken'; const oldRaw = '{"version":99}';
   const f = storageFixture({ [LOCAL_SIMULATION_STORAGE_KEY]: currentRaw, [PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY]: oldRaw });
-  const restored = f.adapter.restore(); assert.equal(restored.run, null); assert.equal(restored.blocked, true); assert.match(restored.message, /preserved/);
+  const restored = await f.adapter.restore(); assert.equal(restored.run, null); assert.equal(restored.blocked, true); assert.match(restored.message, /preserved/);
   assert.equal(f.adapter.previous().run, null); assert.match(f.adapter.previous().message, /preserved/);
   await f.adapter.save(() => createLocalSimulation()); assert.equal(f.writes.length, 0); assert.equal(f.locks.length, 0);
   assert.equal(f.values.get(LOCAL_SIMULATION_STORAGE_KEY), currentRaw); assert.equal(f.values.get(PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY), oldRaw);
@@ -162,7 +161,7 @@ void test('write quota and lock refusal leave the same in-memory world usable an
   for (const failure of ['write', 'lock']) {
     let attempted = 0;
     const f = storageFixture({}, failure === 'write' ? { write: () => { attempted += 1; throw new Error('quota'); } } : { withLock: async () => { attempted += 1; throw new Error('lock refused'); } });
-    const restored = f.adapter.restore(); assert.ok(restored.run);
+    const restored = await f.adapter.restore(); assert.ok(restored.run);
     const failed = await f.adapter.save(() => restored.run); assert.equal(failed.run, restored.run); assert.equal(failed.ephemeral, true); assert.match(failed.message, /Not saved/);
     const again = await f.adapter.save(() => restored.run); assert.equal(again.run, restored.run); assert.equal(attempted, 1); assert.equal(f.values.has(LOCAL_SIMULATION_STORAGE_KEY), false);
   }
@@ -170,18 +169,18 @@ void test('write quota and lock refusal leave the same in-memory world usable an
 
 void test('a save reads the latest in-memory checkpoint only after acquiring the lock and cannot rewind a newer durable checkpoint', async () => {
   const original = createLocalSimulation(); const newer = advanceLocalSimulation(original, 1); let current = original; const pendingLock: { grant?: () => void } = {};
-  const f = storageFixture({}, { withLock: (_key, operation) => new Promise<LocalCheckpointResult>(resolve => { pendingLock.grant = () => resolve(operation()); }) });
-  f.adapter.restore(); const pending = f.adapter.save(() => current); current = newer; assert.ok(pendingLock.grant); pendingLock.grant();
+  const f = storageFixture({ [LOCAL_SIMULATION_STORAGE_KEY]: JSON.stringify(original) }, { withLock: (_key, operation) => new Promise<LocalCheckpointResult>(resolve => { pendingLock.grant = () => resolve(operation()); }) });
+  await f.adapter.restore(); const pending = f.adapter.save(() => current); current = newer; assert.ok(pendingLock.grant); pendingLock.grant();
   const saved = await pending; assert.equal(saved.run, newer); assert.equal(JSON.parse(f.values.get(LOCAL_SIMULATION_STORAGE_KEY)!).steps, newer.steps);
-  const behind = storageFixture({ [LOCAL_SIMULATION_STORAGE_KEY]: JSON.stringify(newer) }); behind.adapter.restore();
+  const behind = storageFixture({ [LOCAL_SIMULATION_STORAGE_KEY]: JSON.stringify(newer) }); await behind.adapter.restore();
   const retained = await behind.adapter.save(() => original);
   assert.deepEqual(retained.run, newer); assert.equal(behind.writes.length, 0); assert.match(retained.message, /Updated by another tab/);
 });
 
 void test('a different or corrupt checkpoint arriving before a save is preserved instead of overwritten', async () => {
   for (const other of [JSON.stringify(createLocalSimulation(1702)), '{not-readable']) {
-    const f = storageFixture(); const restored = f.adapter.restore(); assert.ok(restored.run);
-    f.values.set(LOCAL_SIMULATION_STORAGE_KEY, other);
+    const f = storageFixture(); const restored = await f.adapter.restore(); assert.ok(restored.run);
+    f.writes.length = 0; f.values.set(LOCAL_SIMULATION_STORAGE_KEY, other);
     const saved = await f.adapter.save(() => restored.run);
     assert.equal(saved.run, restored.run); assert.equal(saved.blocked, true); assert.equal(saved.ephemeral, true);
     assert.match(saved.message, /preserved/); assert.equal(f.writes.length, 0); assert.equal(f.values.get(LOCAL_SIMULATION_STORAGE_KEY), other);

@@ -1,3 +1,4 @@
+import { isHistoricalEventSelection } from '../core/historical-selection-validation.ts';
 import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
 import { type ActionOutcome, type Command, type DirectorTickCommand, type GameAction, type HistoryAdvanceCommand, type ReleaseApplyCommand, type TransitionResult, type WorldState } from '../core/types.ts';
 import { isGameAction, validateAttachedPlan } from '../core/planning.ts';
@@ -276,12 +277,13 @@ export class WorldRepository {
           model = text(input.model, 'model');
           seat = boundedInteger(input.seat, 0, 5, 'seat');
           if (!actionState.independentTurns && seat !== actionState.phase) throw new RequestFailure(409, 'wrong_active_seat');
-          const options = legalActions(actionState, seat);
+          const selector = intent?.kind === 'action' ? intent.action : input.action;
+          const options = legalActions(actionState, seat, undefined, isGameAction(selector) && selector.type === 'event' ? selector : undefined);
           let action: GameAction | undefined;
           if (input.choice !== undefined && input.action !== undefined) throw new RequestFailure(400, 'one_action_selector_required');
           if (input.choice !== undefined) action = options[boundedInteger(input.choice, 0, options.length - 1, 'choice')]?.action;
           else {
-            const exact = intent?.kind === 'action' ? intent.action : input.action;
+            const exact = selector;
             action = options.find((option) => canonical(option.action) === canonical(exact))?.action;
             if (!action && isGameAction(exact) && decisionActionBlock(actionState, seat, exact)) action = exact;
           }
@@ -323,7 +325,8 @@ export class WorldRepository {
             const event = input.event ?? 'calm';
             if (!isDirectorEvent(event)) throw new RequestFailure(400, 'invalid_event');
             const target = boundedInteger(input.target ?? 0, 0, 4, 'target');
-            const command: DirectorTickCommand = { expectedRevision, kind, intervalId: text(input.intervalId, 'interval_id'), timestamp: at, event, target };
+            if (Object.hasOwn(input, 'regional') && !isHistoricalEventSelection(input.regional)) throw new RequestFailure(400, 'invalid_regional_selection');
+            const command: DirectorTickCommand = { ...(isHistoricalEventSelection(input.regional) ? { regional: structuredClone(input.regional) } : {}), expectedRevision, kind, intervalId: text(input.intervalId, 'interval_id'), timestamp: at, event, target };
             transition = { kind: 'director-tick', command };
             result = applyDirectorTick(current.state, command);
           }

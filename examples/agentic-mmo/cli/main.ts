@@ -33,7 +33,7 @@ export function main(argv = process.argv.slice(2)): void {
     const options = flags(argv.slice(1));
     const allowed: Record<string, string[]> = {
       init: ['--seed', '--clock-epoch', '--state'], observe: ['--seat', '--at', '--state', '--observation-format'], action: ['--seat', '--revision', '--choice', '--action', '--plan', '--at', '--model', '--id', '--state'], replay: ['--out', '--state'],
-      tick: ['--revision', '--kind', '--interval', '--at', '--event', '--target', '--model', '--state'],
+      tick: ['--revision', '--kind', '--interval', '--at', '--event', '--target', '--regional', '--model', '--state'],
       catchup: ['--revision', '--at', '--id', '--model', '--state'],
       'strategy-catchup': ['--revision', '--at', '--id', '--model', '--state'],
       'history-advance': ['--revision', '--cause-kind', '--cause-id', '--reason', '--years', '--at', '--id', '--model', '--state'],
@@ -79,6 +79,10 @@ export function main(argv = process.argv.slice(2)): void {
         request.intervalId = options.get('--interval');
         request.event = options.get('--event') ?? 'calm';
         request.target = numberOption(options, '--target') ?? 0;
+        const regional = options.get('--regional');
+        if (regional !== undefined) {
+          try { request.regional = JSON.parse(regional); } catch { throw new ProtocolError('--regional must be valid JSON'); }
+        }
       }
     }
     if (operation === 'history-advance' || operation === 'release-apply') {

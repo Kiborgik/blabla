@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-live.40",
+    "date": "2026-10-22",
+    "title": "Relief, local consequences and a new living world",
+    "changes": [
+      "Civilizations can offer one-way Food relief over an existing consenting corridor, accept or withdraw exact terms, and pay a conserved later transfer from real supplies. Promises are not stocks and shortages cause no invented penalty.",
+      "Regional events choose a seeded eligible town and exact local attachment, retain that selection through commands and replay, and record immediate costs and before/after consequences without silently choosing another target.",
+      "The latest Living world gets one new locked, persisted genesis and seed. Living partnerships, previous generated worlds and the first local world remain untouched, separately selectable read-only histories.",
+      "This is a new local-observatory release, not an upgrade of old saves or activation of the shared hosted world. Broader campaigns, platform behavior and visual delivery remain separately evidenced."
+    ]
+  },
+  {
     "version": "0.1.0-live.39",
     "date": "2026-10-22",
     "title": "A more readable working landscape",

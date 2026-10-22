@@ -1,3 +1,4 @@
+import { createReliefState } from './relief-charters.ts';
 import { initializeSpaceflight } from './spaceflight.ts';
 import { POWERED_SCIENCE_RULES, SECOND_GOVERNMENT_RULES, LOCAL_POWER_RULES, INDUSTRIAL_RULES, CIVIC_RULES, TERRITORY_RULES } from '../content.ts';
 import { expandMapExtent, mapExpansionBlock } from './map-expansion.ts';
@@ -206,6 +207,7 @@ export function applyRelease(state: WorldState, command: ReleaseApplyCommand): T
   if (target.featureIds.includes('bounded-plans') && !source.featureIds.includes('bounded-plans'))
     next.actionPlans = Array.from({ length: DIRECTOR_SEAT + 1 }, () => null);
   if (target.featureIds.includes('public-projects') && !source.featureIds.includes('public-projects')) next.publicProjects = [];
+  if (target.featureIds.includes('consented-relief') && !source.featureIds.includes('consented-relief')) next.relief = createReliefState(next);
   const added = target.featureIds.filter((feature) => !source.featureIds.includes(feature));
   emitEvent(next, events, {
     type: 'release-applied',

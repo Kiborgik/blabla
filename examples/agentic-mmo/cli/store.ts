@@ -1,3 +1,4 @@
+import { isHistoricalEventSelection } from '../core/historical-selection-validation.ts';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -453,7 +454,7 @@ export class GameStore {
       if (expectedRevision > campaign.state.revision || (expectedRevision !== campaign.state.revision && !canRebase))
         return refuse(`stale revision: expected ${campaign.state.revision}`);
       if (!campaign.state.independentTurns && seat !== campaign.state.phase) return refuse(`active seat is ${campaign.state.phase}`);
-      const options = legalActions(campaign.state, seat);
+      const options = legalActions(campaign.state, seat, undefined, isGameAction(input.action) && input.action.type === 'event' ? input.action : undefined);
       let action: GameAction | undefined;
       if (input.choice !== undefined && input.action !== undefined)
         return refuse('provide either choice or action, not both');
@@ -540,6 +541,7 @@ export class GameStore {
       const intervalId = input.intervalId;
       const event = input.event;
       const target = input.target;
+      if (Object.hasOwn(input, 'regional') && (operation !== 'director-tick' || !isHistoricalEventSelection(input.regional))) return refuse('invalid regional selection');
       if (
         operation === 'director-tick' &&
         ((kind !== 'event' && kind !== 'review' && kind !== 'clock') ||
@@ -565,7 +567,7 @@ export class GameStore {
         operation,
       };
       if (operation === 'director-tick')
-        Object.assign(request, { kind, intervalId, event, target });
+        Object.assign(request, { kind, intervalId, event, target, ...(isHistoricalEventSelection(input.regional) ? { regional: structuredClone(input.regional) } : {}) });
       const prior = campaign.provenance.find(
         (entry) => entry.operation === operation && entry.commandId === commandId,
       ) ?? campaign.noOpReceipts?.find((entry) => entry.operation === operation && entry.commandId === commandId);
@@ -601,6 +603,7 @@ export class GameStore {
         )
           return refuse('invalid Director tick fields');
         const command: DirectorTickCommand = {
+          ...(isHistoricalEventSelection(input.regional) ? { regional: structuredClone(input.regional) } : {}),
           expectedRevision: revision,
           kind,
           intervalId,

@@ -1,3 +1,5 @@
+import { executeReliefAction } from './relief-charters.ts';
+import type { HistoricalEventSelection } from '../historical-selection.ts';
 import { launchMarsMission } from './spaceflight.ts';
 import { executeRailAction } from './rail.ts';
 import { adoptGovernment } from './government.ts';
@@ -18,7 +20,7 @@ import { executeTradeAction } from './trade.ts';
 import { applyEffects, directorEffects } from './effects.ts';
 import { emitEvent } from './events.ts';
 import { citiesOf, civilizationById, clamp, transferCost } from './world.ts';
-import { applyHistoricalEvent, historicalEventQuote, isHistoricalEventId } from './historical-events.ts';
+import { applyHistoricalEventWithReceipt, historicalEventQuote, isHistoricalEventId } from './historical-events.ts';
 
 export function applyDirectorEvent(
   state: WorldState,
@@ -26,17 +28,20 @@ export function applyDirectorEvent(
   target: number,
   events: GameEvent[],
   cause?: string,
+  selection?: HistoricalEventSelection,
 ): void {
   const definition = DIRECTOR_EVENTS.find((event) => event.id === eventId);
   if (!definition) throw new RangeError(`Unknown Director event ${eventId}`);
   const civilization = civilizationById(state, target);
   const regional = isHistoricalEventId(eventId);
-  const quote = regional ? historicalEventQuote(state, eventId, target) : null;
+  const quote = regional ? historicalEventQuote(state, eventId, target, selection) : null;
   if (regional && !quote) throw new RangeError('The regional event no longer has its required local conditions');
-  const effects = quote ? applyHistoricalEvent(state, quote) : applyEffects(state, target, directorEffects(state, definition));
+  const outcome = quote ? applyHistoricalEventWithReceipt(state, quote, `${state.revision}:${events.length}`) : { effects: applyEffects(state, target, directorEffects(state, definition)), receipt: undefined };
+  const effects = outcome.effects;
   state.directorCooldown = hasFeatures(state, ['historical-pressures']) ? Math.max(state.directorCooldown, definition.cooldown) : definition.cooldown;
   emitEvent(state, events, {
     type: definition.id,
+    ...(outcome.receipt ? { regionalEvent: outcome.receipt } : {}),
     title: `${definition.name}: ${civilization.name}`,
     detail: `${definition.description} ${definition.consequence}`,
     actor: DIRECTOR_SEAT,
@@ -54,8 +59,12 @@ export function executeAction(
   action: GameAction,
   events: GameEvent[],
 ): void {
+  if (action.type === 'propose-relief' || action.type === 'respond-relief' || action.type === 'withdraw-relief') {
+    executeReliefAction(state, seat, action, events);
+    return;
+  }
   if (action.type === 'event') {
-    applyDirectorEvent(state, action.event, action.target, events);
+    applyDirectorEvent(state, action.event, action.target, events, undefined, action.regional);
     return;
   }
   if (action.type === 'wait') {

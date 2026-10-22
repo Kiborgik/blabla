@@ -61,3 +61,15 @@ await test('procedural provenance stays distinct while historical agent and cloc
   assert.equal(isPublicProvenance({ ...procedural, policy: { ...procedural.policy, decision: 0 } }), false);
   assert.equal(isPublicProvenance({ ...procedural, kind: 'development-agent' }), false);
 });
+
+await test('Worker refuses historical generated releases without changing their read-only checkpoint bytes', () => {
+  for (const release of ['settlement-interplanetary-1', 'settlement-living-partnerships-1', 'settlement-relief-charters-1'] as const) {
+    const historical = createLocalSimulation(1701, release);
+    const before = JSON.stringify(historical);
+    assert.deepEqual(parseLocalSimulation(JSON.parse(before)), historical);
+    const response = processLocalSimulationRequest({ id: 19, run: historical, steps: 1 });
+    assert.equal(response.ok, false);
+    if (!response.ok) assert.match(response.error, /incompatible|read-only/);
+    assert.equal(JSON.stringify(historical), before);
+  }
+});

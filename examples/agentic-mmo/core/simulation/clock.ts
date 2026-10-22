@@ -1,3 +1,4 @@
+import { isHistoricalEventSelection } from '../historical-selection-validation.ts';
 import { DIRECTOR_CLOCK_RULES, DIRECTOR_EVENTS } from '../content.ts';
 import {
   DIRECTOR_SEAT,
@@ -39,6 +40,8 @@ export function applyDirectorTick(
       'Director tick has an invalid kind, interval, revision or terminal state',
     );
   }
+  if (Object.hasOwn(command, 'regional') && (command.kind === 'clock' || !isHistoricalEventSelection(command.regional) || command.regional.local.kind !== command.event || !hasFeatures(state, ['procedural-regional-targets'])))
+    return rejected(state, 'Director regional selection is invalid for this event and release');
   const timestamp = parseUtcTimestamp(command.timestamp);
   if (timestamp === null)
     return rejected(state, 'Director tick requires a valid explicit UTC timestamp');
@@ -68,7 +71,7 @@ export function applyDirectorTick(
     ) {
       return rejected(state, 'Director event is unavailable or targets no civilization');
     }
-    if (isHistoricalEventId(event.id) && !historicalEventQuote(state, event.id, command.target))
+    if (isHistoricalEventId(event.id) && !historicalEventQuote(state, event.id, command.target, command.regional))
       return rejected(state, 'Regional event requires current local conditions and a completed Director cooldown');
   }
   const next = structuredClone(state);
@@ -112,6 +115,7 @@ export function applyDirectorTick(
       command.target,
       events,
       `The World Director ${command.kind} interval ${command.intervalId} was submitted at ${command.timestamp}`,
+      command.regional,
     );
     next.year +=
       command.kind === 'event'

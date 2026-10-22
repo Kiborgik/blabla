@@ -1,3 +1,6 @@
+import { availableReliefActions } from './relief-charters.ts';
+import { selectHistoricalEventTarget } from '../historical-selection.ts';
+import { isHistoricalEventSelection } from '../historical-selection-validation.ts';
 import { availableSpaceMissions } from './spaceflight.ts';
 import { availableRailActions } from './rail.ts';
 import { availableGovernmentActions } from './government.ts';
@@ -52,6 +55,7 @@ export function availableActions(
   seat: number,
   timestamp?: string,
   tradePresentation: TradePresentation = 'full',
+  selectedEvent?: Extract<GameAction, { type: 'event' }>,
 ): ActionOption[] {
   if (!canAct(state, seat, timestamp)) return [];
   const choices: ActionOption[] = [];
@@ -68,10 +72,13 @@ export function availableActions(
       if (event.minEra > era || !hasFeatures(state, event.requiredFeatures)) continue;
       for (const target of state.civilizations) {
         const regional = isHistoricalEventId(event.id);
-        const quote = regional ? historicalEventQuote(state, event.id, target.id) : null;
+        const selection = regional && hasFeatures(state, ['procedural-regional-targets'])
+          ? selectedEvent?.event === event.id && selectedEvent.target === target.id ? selectedEvent.regional : selectHistoricalEventTarget(state, event.id, target.id) ?? undefined
+          : undefined;
+        const quote = regional ? historicalEventQuote(state, event.id, target.id, selection) : null;
         if (regional && !quote) continue;
         choices.push({
-          action: { type: 'event', event: event.id, target: target.id },
+          action: { type: 'event', event: event.id, target: target.id, ...(selection ? { regional: structuredClone(selection) } : {}) },
           label: `${event.name}: ${target.name}`,
           reason: `${quote?.cause ?? event.description} ${event.consequence}`,
         });
@@ -227,7 +234,7 @@ export function availableActions(
   }
   choices.push(...availableRailActions(state, seat));
   choices.push(...availableCoastalActions(state, seat));
-  choices.push(...availableTradeActions(state, seat, tradePresentation), ...availablePublicProjectActions(state, seat));
+  choices.push(...availableTradeActions(state, seat, tradePresentation), ...availablePublicProjectActions(state, seat), ...availableReliefActions(state, seat));
   if (actionFeatureAvailable(state, 'repair-city') && canAfford(civilization.resources, ECONOMY_RULES.repair.cost)) {
     for (const city of cities.filter((candidate) => candidate.damage > 0)) {
       choices.push({
@@ -256,6 +263,12 @@ export function availableActions(
     }
   }
   return choices;
+}
+
+function exactFields(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (typeof left !== 'object' || left === null || typeof right !== 'object' || right === null) return false;
+  return Object.keys(left).length === Object.keys(right).length && Object.entries(left).every(([key, value]) => Object.hasOwn(right, key) && exactFields(value, Reflect.get(right, key)));
 }
 
 export function sameAction(left: GameAction, right: unknown): boolean {
@@ -313,6 +326,12 @@ export function sameAction(left: GameAction, right: unknown): boolean {
         left.offerId === right.offerId &&
         left.accept === right.accept
       );
+    case 'propose-relief':
+      return 'routeId' in right && 'sourceCityId' in right && 'recipientCityId' in right && left.routeId === right.routeId && left.sourceCityId === right.sourceCityId && left.recipientCityId === right.recipientCityId;
+    case 'respond-relief':
+      return 'charterId' in right && 'accept' in right && left.charterId === right.charterId && left.accept === right.accept;
+    case 'withdraw-relief':
+      return 'charterId' in right && left.charterId === right.charterId;
     case 'propose-public-project':
       return 'routeId' in right && 'recipeId' in right && left.routeId === right.routeId && left.recipeId === right.recipeId;
     case 'respond-public-project':
@@ -332,7 +351,8 @@ export function sameAction(left: GameAction, right: unknown): boolean {
         'event' in right &&
         'target' in right &&
         left.event === right.event &&
-        left.target === right.target
+        left.target === right.target &&
+        (left.regional === undefined ? !('regional' in right) : 'regional' in right && isHistoricalEventSelection(right.regional) && exactFields(left.regional, right.regional))
       );
     case 'expedition':
       return 'cityId' in right && 'mission' in right && left.cityId === right.cityId && left.mission === right.mission;

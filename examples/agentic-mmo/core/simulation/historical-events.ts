@@ -1,24 +1,17 @@
-import { BUILDINGS, RESOURCE_IDS } from '../content.ts';
 import { HISTORICAL_DIRECTOR_EVENTS, HISTORICAL_EVENT_RULES, type HistoricalEventId } from '../historical-event-content.ts';
-import type { City, EffectDefinition, Resources, Route, WorldState } from '../types.ts';
-import { isCoastalSite } from './coastal.ts';
+import type { City, EffectDefinition, Resources, WorldState } from '../types.ts';
 import { applyEffects } from './effects.ts';
-import { hexDistance } from './geography.ts';
 import { cityGrowthFacts } from './growth.ts';
 import { hasFeatures } from './history.ts';
-import { canAfford, clamp } from './world.ts';
+import { clamp } from './world.ts';
+import { historicalEventCandidates, historicalEventInstanceId, type HistoricalEventFact, type HistoricalEventLocalTarget, type HistoricalEventReceipt, type HistoricalEventSelection } from '../historical-selection.ts';
+import { isHistoricalEventSelection } from '../historical-selection-validation.ts';
+export type { HistoricalEventFact } from '../historical-selection.ts';
 
 type LocalEffect = Extract<EffectDefinition, { kind: 'resource' | 'city' }>;
 
-export interface HistoricalEventFact {
-  scope: 'civilization' | 'city' | 'route';
-  id: number | string;
-  field: string;
-  before: number | boolean;
-  after: number | boolean;
-}
-
 export interface HistoricalEventQuote {
+  selection?: HistoricalEventSelection;
   eventId: HistoricalEventId;
   target: number;
   revision: number;
@@ -40,22 +33,6 @@ export function isHistoricalEventId(id: string): id is HistoricalEventId {
   return HISTORICAL_DIRECTOR_EVENTS.some(event => event.id === id);
 }
 
-function orderedTowns(state: WorldState, target: number): City[] {
-  return state.cities.filter(city => city.civId === target && city.population > 0 && state.tiles.some(tile => tile.id === city.tileId && tile.owner === target && tile.terrain !== 'ocean' && tile.terrain !== 'mountain'))
-    .toSorted((left, right) => left.tileId - right.tileId || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
-}
-
-function workingEndpointRoutes(state: WorldState, city: City): Route[] {
-  return state.routes.filter(route => {
-    const agreement = route.agreement;
-    if (!route.active || !agreement?.enabled || agreement.closedRound !== null || agreement.blockedReason !== null || route.damage >= agreement.terms.damageDisableAt) return false;
-    const from = state.cities.find(candidate => candidate.id === route.from);
-    const to = state.cities.find(candidate => candidate.id === route.to);
-    return !!from && !!to && from.civId === route.owner && to.civId === route.partner && from.population > 0 && to.population > 0
-      && ((route.from === city.id && route.owner === city.civId) || (route.to === city.id && route.partner === city.civId));
-  }).toSorted((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
-}
-
 function effectFacts(state: WorldState, target: number, city: City, effects: LocalEffect[]): HistoricalEventFact[] {
   const civilization = state.civilizations.find(candidate => candidate.id === target);
   if (!civilization) throw new RangeError('Historical event requires an existing civilization');
@@ -71,94 +48,44 @@ function effectFacts(state: WorldState, target: number, city: City, effects: Loc
   });
 }
 
-export function historicalEventQuote(state: WorldState, eventId: string, target: number): HistoricalEventQuote | null {
-  if (!isHistoricalEventId(eventId) || state.outcome || state.directorCooldown > 0) return null;
+function localEventQuote(state: WorldState, eventId: HistoricalEventId, target: number, local: HistoricalEventLocalTarget, selection?: HistoricalEventSelection): HistoricalEventQuote | null {
   const definition = HISTORICAL_DIRECTOR_EVENTS.find(event => event.id === eventId);
-  const civilization = state.civilizations.find(candidate => candidate.id === target);
-  if (!definition || !civilization || civilization.era < definition.minEra || !hasFeatures(state, definition.requiredFeatures)) return null;
-  const cities = orderedTowns(state, target);
-  let city: City | undefined;
-  let destination: City | undefined;
-  let route: Route | undefined;
-  let buildingId: string | undefined;
+  const city = state.cities.find(candidate => candidate.id === local.cityId);
+  if (!definition || !city) return null;
+  const destination = local.kind === 'internal-migration' ? state.cities.find(candidate => candidate.id === local.destinationCityId) : undefined;
+  const route = (local.kind === 'trade-fair' || local.kind === 'coastal-storm') && local.route ? state.routes.find(candidate => candidate.id === local.route?.routeId) : undefined;
+  const buildingId = local.kind === 'industrial-accident' ? local.buildingId : undefined;
   let cause = '';
   let paid: Partial<Resources> = {};
   const effects = definition.effects.filter((effect): effect is LocalEffect => effect.kind === 'resource' || effect.kind === 'city').map(effect => ({ ...effect }));
   const destinationEffects: LocalEffect[] = [];
-  switch (eventId) {
+  switch (local.kind) {
     case 'cultivated-harvest': {
       paid = { ...HISTORICAL_EVENT_RULES.harvestCost };
-      if (!canAfford(civilization.resources, paid)) return null;
-      city = cities.find(candidate => candidate.damage < 100 && candidate.buildings.includes('farm') && state.tiles.some(tile => tile.id === candidate.tileId && tile.terrain === 'grassland'));
-      if (!city) return null;
       cause = `${city.name} (${city.id}) has completed Terraced fields (farm) on owned grassland tile ${city.tileId}; three Materials fund the extra cultivated harvest`;
       break;
     }
     case 'forest-fire': {
-      let forestTileId: number | undefined;
-      city = cities.find(candidate => {
-        if (candidate.damage >= 100) return false;
-        const site = state.tiles.find(tile => tile.id === candidate.tileId);
-        const forest = site && state.tiles.filter(tile => tile.terrain === 'forest' && hexDistance(site, tile) === 1).toSorted((left, right) => left.id - right.id)[0];
-        if (!forest) return false;
-        forestTileId = forest.id;
-        return true;
-      });
-      if (!city || forestTileId === undefined) return null;
-      cause = `${city.name} (${city.id}), inhabited by ${city.population} residents, adjoins forest tile ${forestTileId}; the fire's repairable damage is confined to this town`;
+      cause = `${city.name} (${city.id}), inhabited by ${city.population} residents, adjoins forest tile ${local.forestTileId}; the fire's repairable damage is confined to this town`;
       break;
     }
     case 'coastal-storm': {
-      city = cities.find(candidate => candidate.damage < 100 && isCoastalSite(state, candidate.tileId));
-      if (!city) return null;
-      route = workingEndpointRoutes(state, city)[0];
       cause = `${city.name} (${city.id}) stands on ocean-adjacent tile ${city.tileId}; the storm strikes this town${route ? ` and its exact active endpoint route ${route.id}` : ', with no active endpoint route affected'}`;
       break;
     }
     case 'trade-fair': {
+      if (!route?.agreement) return null;
       paid = { ...HISTORICAL_EVENT_RULES.fairCost };
-      if (!canAfford(civilization.resources, paid)) return null;
-      city = cities.find(candidate => {
-        if (candidate.damage >= 100) return false;
-        route = workingEndpointRoutes(state, candidate).find(item => {
-          const agreement = item.agreement;
-          return !!agreement && item.volume > 0 && agreement.deliveryCount > 0 && agreement.lastDeliveryRound !== null
-            && agreement.lastDeliveryRound <= state.round && state.round - agreement.lastDeliveryRound <= agreement.terms.cadenceRounds;
-        });
-        return route !== undefined;
-      });
-      if (!city || !route?.agreement) return null;
       cause = `${city.name} (${city.id}) hosts a fair on working route ${route.id}, which actually delivered ${route.volume} cargo in round ${route.agreement.lastDeliveryRound}; four Food and two Materials fund the gathering, not another shipment`;
       break;
     }
     case 'industrial-accident': {
-      city = cities.find(candidate => {
-        if (candidate.damage >= 100) return false;
-        buildingId = [...HISTORICAL_EVENT_RULES.industries].toSorted().find(id => {
-          const building = BUILDINGS.find(item => item.id === id);
-          const operation = candidate.buildingOperations?.[id];
-          const result = operation?.lastResult;
-          return !!building && candidate.buildings.includes(id) && hasFeatures(state, building.requiredFeatures) && operation?.enabled === true
-            && result?.status === 'operated' && result.round === state.round
-            && (RESOURCE_IDS.some(resource => (result.produced[resource] ?? 0) > 0) || (result.localPower?.generated ?? 0) > 0);
-        });
-        return buildingId !== undefined;
-      });
-      if (!city || !buildingId) return null;
       cause = `${city.name} (${city.id}) has an enabled ${buildingId} with actual operated output in current round ${state.round}; the accident damages only this operating town`;
       break;
     }
     case 'internal-migration': {
+      if (!destination) return null;
       paid = { ...HISTORICAL_EVENT_RULES.migrationCost };
-      if (!canAfford(civilization.resources, paid)) return null;
-      city = cities.find(candidate => {
-        if (candidate.population < HISTORICAL_EVENT_RULES.migrants + 1 || (candidate.damage < HISTORICAL_EVENT_RULES.migrationSourceDamage && candidate.wellbeing > HISTORICAL_EVENT_RULES.migrationSourceWellbeing)) return false;
-        destination = cities.find(other => other.id !== candidate.id && other.housing !== undefined
-          && other.damage <= HISTORICAL_EVENT_RULES.migrationDestinationDamage && other.wellbeing >= HISTORICAL_EVENT_RULES.migrationDestinationWellbeing
-          && cityGrowthFacts(state, other).capacity - other.population >= HISTORICAL_EVENT_RULES.migrants);
-        return destination !== undefined;
-      });
-      if (!city || !destination) return null;
       effects.push({ kind: 'city', field: 'population', amount: -HISTORICAL_EVENT_RULES.migrants });
       destinationEffects.push({ kind: 'city', field: 'population', amount: HISTORICAL_EVENT_RULES.migrants });
       const capacity = cityGrowthFacts(state, destination).capacity;
@@ -169,6 +96,7 @@ export function historicalEventQuote(state: WorldState, eventId: string, target:
   const facts = effectFacts(state, target, city, effects);
   if (destination) facts.push(...effectFacts(state, target, destination, destinationEffects));
   const quote: HistoricalEventQuote = {
+    ...(selection ? { selection: structuredClone(selection) } : {}),
     eventId, target, revision: state.revision, round: state.round, cityId: city.id, tileId: city.tileId,
     ...(route ? { routeId: route.id } : {}), ...(destination ? { destinationCityId: destination.id } : {}), ...(buildingId ? { buildingId } : {}),
     cause, effects, destinationEffects, paid, facts,
@@ -183,8 +111,34 @@ export function historicalEventQuote(state: WorldState, eventId: string, target:
   return quote;
 }
 
+export function historicalEventQuote(state: WorldState, eventId: string, target: number, selection?: HistoricalEventSelection): HistoricalEventQuote | null {
+  if (!isHistoricalEventId(eventId)) return null;
+  const candidates = historicalEventCandidates(state, eventId, target);
+  if (!hasFeatures(state, ['procedural-regional-targets'])) {
+    const local = candidates[0]?.locals[0];
+    return selection === undefined && local ? localEventQuote(state, eventId, target, local) : null;
+  }
+  if (!isHistoricalEventSelection(selection)) return null;
+  const count = state.eventCounts[eventId] ?? 0;
+  if (!Number.isSafeInteger(count) || count < 0 || count >= Number.MAX_SAFE_INTEGER || !Number.isSafeInteger(state.seed) || state.seed < 0 || state.seed > 0xffffffff
+    || selection.occurrence !== count + 1 || selection.instanceId !== historicalEventInstanceId(state.seed, eventId, target, selection.occurrence)) return null;
+  const local = candidates.find(city => city.cityId === selection.local.cityId && city.tileId === selection.local.tileId)?.locals.find(candidate => sameLocal(candidate, selection.local));
+  return local ? localEventQuote(state, eventId, target, local, selection) : null;
+}
+
+function sameLocal(left: HistoricalEventLocalTarget, right: HistoricalEventLocalTarget): boolean {
+  if (left.kind !== right.kind || left.cityId !== right.cityId || left.tileId !== right.tileId) return false;
+  if (left.kind === 'forest-fire' && right.kind === 'forest-fire') return left.forestTileId === right.forestTileId;
+  if (left.kind === 'industrial-accident' && right.kind === 'industrial-accident') return left.buildingId === right.buildingId;
+  if (left.kind === 'internal-migration' && right.kind === 'internal-migration') return left.destinationCityId === right.destinationCityId && left.destinationTileId === right.destinationTileId;
+  if ((left.kind === 'trade-fair' || left.kind === 'coastal-storm') && (right.kind === 'trade-fair' || right.kind === 'coastal-storm')) {
+    return left.route === null || right.route === null ? left.route === right.route : left.route.routeId === right.route.routeId && left.route.agreementOfferId === right.route.agreementOfferId && left.route.fromCityId === right.route.fromCityId && left.route.toCityId === right.route.toCityId;
+  }
+  return true;
+}
+
 export function applyHistoricalEvent(state: WorldState, quote: HistoricalEventQuote): string[] {
-  const current = historicalEventQuote(state, quote.eventId, quote.target);
+  const current = historicalEventQuote(state, quote.eventId, quote.target, quote.selection);
   if (!current || JSON.stringify(current) !== JSON.stringify(quote)) throw new RangeError('Historical event quote is stale, edited or no longer eligible');
   const route = quote.routeDamage ? state.routes.find(candidate => candidate.id === quote.routeId) : undefined;
   if (quote.routeDamage && !route) throw new RangeError('Historical event quote route is missing');
@@ -199,8 +153,48 @@ export function applyHistoricalEvent(state: WorldState, quote: HistoricalEventQu
   return changes;
 }
 
+function observedFact(state: WorldState, fact: HistoricalEventFact): number | boolean {
+  if (fact.scope === 'route' && fact.field === 'damageDisableAt') {
+    const threshold = state.routes.find(route => route.id === fact.id)?.agreement?.terms.damageDisableAt;
+    if (threshold === undefined) throw new RangeError('Historical event route threshold is missing');
+    return threshold;
+  }
+  const object = fact.scope === 'civilization' ? state.civilizations.find(civilization => civilization.id === fact.id)?.resources
+    : fact.scope === 'city' ? state.cities.find(city => city.id === fact.id) : state.routes.find(route => route.id === fact.id);
+  if (!object) throw new RangeError('Historical event fact object is missing');
+  const value: unknown = Reflect.get(object, fact.field);
+  if (typeof value !== 'number' && typeof value !== 'boolean') throw new RangeError('Historical event fact field is missing');
+  return value;
+}
+
+export function applyHistoricalEventWithReceipt(state: WorldState, quote: HistoricalEventQuote, eventId: string): { effects: string[]; receipt?: HistoricalEventReceipt } {
+  if (!quote.selection) return { effects: applyHistoricalEvent(state, quote) };
+  if (!/^(0|[1-9]\d*):(0|[1-9]\d*)$/.test(eventId) || !eventId.split(':').every(part => Number.isSafeInteger(Number(part))) || Number(eventId.split(':')[0]) !== state.revision) throw new RangeError('Historical event receipt requires its exact event ID');
+  const facts = quote.facts.map(fact => ({ ...fact, before: observedFact(state, fact) }));
+  if (quote.routeDamage && quote.routeId && !facts.some(fact => fact.scope === 'route' && fact.id === quote.routeId && fact.field === 'active')) {
+    const active: HistoricalEventFact = { scope: 'route', id: quote.routeId, field: 'active', before: quote.routeDamage.activeBefore, after: quote.routeDamage.activeAfter };
+    active.before = observedFact(state, active);
+    facts.push(active);
+  }
+  if (quote.routeDamage && quote.routeId) {
+    const threshold: HistoricalEventFact = { scope: 'route', id: quote.routeId, field: 'damageDisableAt', before: 0, after: 0 };
+    threshold.before = observedFact(state, threshold);
+    facts.push(threshold);
+  }
+  const effects = applyHistoricalEvent(state, quote);
+  for (const fact of facts) fact.after = observedFact(state, fact);
+  const selection = structuredClone(quote.selection);
+  return { effects, receipt: {
+    ruleVersion: 1, instanceId: selection.instanceId, occurrence: selection.occurrence, selection,
+    eventKind: quote.eventId, civId: quote.target, eventId, revision: quote.revision, round: quote.round,
+    paid: { ...quote.paid }, facts,
+  } };
+}
+
 export function historicalEventWeight(state: WorldState, eventId: string, target: number): number {
-  const quote = historicalEventQuote(state, eventId, target);
+  if (!isHistoricalEventId(eventId)) return 0;
+  const local = historicalEventCandidates(state, eventId, target)[0]?.locals[0];
+  const quote = local ? localEventQuote(state, eventId, target, local) : null;
   if (!quote) return 0;
   const city = state.cities.find(candidate => candidate.id === quote.cityId);
   const civilization = state.civilizations.find(candidate => candidate.id === target);

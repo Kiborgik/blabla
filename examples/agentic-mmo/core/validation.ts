@@ -1,3 +1,6 @@
+import { isReliefState, validReliefEvent } from './relief-validation.ts';
+import { isHistoricalEventReceipt } from './historical-selection-validation.ts';
+import { historicalEventInstanceId } from './historical-selection.ts';
 import { generatedHistoryRecords, spaceflightRecords, validMarsEvent } from './spaceflight-validation.ts';
 import {
   BUILDINGS,
@@ -1558,7 +1561,8 @@ function territoryRecords(present: boolean, value: unknown, cities: City[], tile
 
 export function isGameEvent(value: unknown): value is GameEvent {
   return (
-    record(value) && validMarsEvent(value) &&
+    record(value) && validMarsEvent(value) && validReliefEvent(value) &&
+    (!Object.hasOwn(value, 'regionalEvent') || isHistoricalEventReceipt(value.regionalEvent) && value.regionalEvent.eventId === value.id && value.regionalEvent.round === value.round && value.regionalEvent.eventKind === value.type && value.actor === DIRECTOR_SEAT && value.target === value.regionalEvent.civId && value.tileId === value.regionalEvent.selection.local.tileId) &&
     ['id', 'type', 'title', 'cause'].every((field) => text(value[field])) &&
     typeof value.detail === 'string' &&
     integer(value.round) &&
@@ -1703,6 +1707,12 @@ export function isWorldState(
     !unique(value.events.map((item) => item.id))
   )
     return false;
+  for (const event of value.events) {
+    const receipt = event.regionalEvent;
+    if (!receipt) continue;
+    const count = value.eventCounts[receipt.eventKind];
+    if (!value.unlockedFeatures.includes('procedural-regional-targets') || receipt.revision > value.revision || receipt.round > value.round || typeof count !== 'number' || receipt.occurrence > count || receipt.instanceId !== historicalEventInstanceId(value.seed, receipt.eventKind, receipt.civId, receipt.occurrence)) return false;
+  }
   const width = value.width;
   const height = value.height;
   const tiles = value.tiles;
@@ -1756,6 +1766,9 @@ export function isWorldState(
     (value.outcome !== null && value.outcome.round > round)
   )
     return false;
+  const reliefEnabled = features.includes('consented-relief');
+  if (reliefEnabled !== Object.hasOwn(value, 'relief') || (reliefEnabled && !isReliefState(value.relief, value as unknown as WorldState))
+    || (!reliefEnabled && value.events.some(event => Object.hasOwn(event, 'reliefResult') || event.type.startsWith('relief-')))) return false;
   if (!spaceflightRecords(value as unknown as WorldState) || !generatedHistoryRecords(value as unknown as WorldState)) return false;
   return industrialRecords({ seed: value.seed, tiles, cities, civilizations: value.civilizations, events: value.events, routes: value.routes, unlockedFeatures: features, revision: value.revision, round, calendarMilestones: value.calendarMilestones, coalDeposits: value.coalDeposits, railEdges: value.railEdges, industrialEvidence: value.industrialEvidence, strategicDeposits: value.strategicDeposits, pastoralSites: value.pastoralSites, tradeOffers: Array.isArray(value.tradeOffers) && value.tradeOffers.every(tradeOffer) ? value.tradeOffers : [], presentFields: Object.keys(value) });
 }

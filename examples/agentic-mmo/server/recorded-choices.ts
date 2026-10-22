@@ -1,3 +1,4 @@
+import { isHistoricalEventSelection } from '../core/historical-selection-validation.ts';
 import { isActionPlanItems, isGameAction } from '../core/planning.ts';
 import { sameAction } from '../core/simulation/choices.ts';
 import { parseUtcTimestamp } from '../core/simulation/clock.ts';
@@ -10,7 +11,7 @@ import { boundedInteger, canonical, isRecord, parseJson, RequestFailure } from '
 
 export const RECORDED_CHOICE_LIMITS = { rows: 200, rowBytes: 512 * 1024, pageBytes: 1024 * 1024, snapshotBytes: 8 * 1024 * 1024 } as const;
 const encoder = new TextEncoder();
-const eventFields = new Set<string>(['id', 'round', 'type', 'title', 'detail', 'actor', 'target', 'tileId', 'cause', 'effects', 'importance', 'publicProjectResult', 'coastalFounding', 'strategicExtraction', 'strategicShipment', 'wonderCompletion', 'wonderLoss', 'researchBoost', 'populationGrowth', 'territoryAcquisition', 'railCompletion', 'industrialFoundry', 'steamDelivery', 'localPower', 'marsDeparture', 'marsArrival', 'marsUpkeep', 'marsHabitat']);
+const eventFields = new Set<string>(['id', 'round', 'type', 'title', 'detail', 'actor', 'target', 'tileId', 'cause', 'effects', 'importance', 'publicProjectResult', 'coastalFounding', 'strategicExtraction', 'strategicShipment', 'wonderCompletion', 'wonderLoss', 'researchBoost', 'populationGrowth', 'territoryAcquisition', 'railCompletion', 'industrialFoundry', 'steamDelivery', 'localPower', 'marsDeparture', 'marsArrival', 'marsUpkeep', 'marsHabitat', 'reliefResult', 'regionalEvent']);
 
 function corrupt(): never { throw new RequestFailure(503, 'corrupt_history'); }
 function integer(value: unknown, minimum = 0): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum; }
@@ -56,6 +57,29 @@ function strictEvents(value: unknown, start?: number, end?: number): GameEvent[]
   return result;
 }
 
+function regionalReceiptLink(selection: unknown, family: unknown, civilization: unknown, revision: number, events: GameEvent[]): void {
+  const receipts = events.flatMap(event => event.regionalEvent ? [event.regionalEvent] : []);
+  if (selection === undefined) {
+    if (receipts.length !== 0) return corrupt();
+    return;
+  }
+  const receipt = receipts[0];
+  if (!isHistoricalEventSelection(selection) || receipts.length !== 1 || !receipt || receipt.eventKind !== family
+    || receipt.civId !== civilization || receipt.revision !== revision || canonical(receipt.selection) !== canonical(selection)) return corrupt();
+}
+
+function reliefReceiptLink(kind: string, action: GameAction | undefined, seat: unknown, events: GameEvent[]): void {
+  const receipts = events.flatMap(event => event.reliefResult ? [event.reliefResult] : []);
+  if (new Set(receipts.map(result => result.charter.id)).size !== receipts.length) return corrupt();
+  for (const result of receipts) {
+    if (result.outcome === 'declined' || result.outcome === 'withdrawn') {
+      if (kind !== 'action' || result.actor !== seat || !action || !('charterId' in action) || action.charterId !== result.charter.id
+        || (result.outcome === 'declined' ? action.type !== 'respond-relief' || action.accept : action.type !== 'withdraw-relief')) return corrupt();
+    } else if (kind !== 'strategy-catchup') return corrupt();
+  }
+  if (kind === 'action' && receipts.length > 1) return corrupt();
+}
+
 function projectEntry(value: unknown): RecordedChronicleEntry {
   if (!isRecord(value) || !integer(value.start_revision) || !integer(value.end_revision, value.start_revision + 1)
     || typeof value.transition_json !== 'string' || typeof value.provenance_json !== 'string' || typeof value.events_json !== 'string') return corrupt();
@@ -72,6 +96,8 @@ function projectEntry(value: unknown): RecordedChronicleEntry {
   const kind = transition.kind;
   if (kind === 'clock-catchup' || kind === 'strategy-catchup') {
     if (!keys(transition, ['kind', 'expectedRevision', 'timestamp']) || transition.expectedRevision !== value.start_revision || !timestamp(transition.timestamp)) return corrupt();
+    regionalReceiptLink(undefined, undefined, undefined, value.end_revision, events);
+    reliefReceiptLink(kind, undefined, undefined, events);
     return { ...base, kind, action: null };
   }
   if (!keys(transition, ['kind', 'command']) || !isRecord(transition.command) || transition.command.expectedRevision !== value.start_revision) return corrupt();
@@ -85,19 +111,25 @@ function projectEntry(value: unknown): RecordedChronicleEntry {
     const plan = isActionPlanItems(command.plan) ? command.plan : [];
     const head = plan[0];
     if (head && !sameAction(head.action, command.action)) return corrupt();
+    const action = command.action;
+    regionalReceiptLink(action.type === 'event' ? action.regional : undefined, action.type === 'event' ? action.event : undefined, action.type === 'event' ? action.target : undefined, value.end_revision, events);
+    reliefReceiptLink(kind, action, command.seat, events);
     const recordedReason = provenance.kind === 'procedural-policy' ? provenance.policy?.reason ?? null : head?.reason ?? null;
     return { ...base, kind, action: structuredClone(command.action), recordedReason };
   }
   if (!timestamp(command.timestamp)) return corrupt();
   if (kind === 'director-tick') {
-    if (!keys(command, ['expectedRevision', 'kind', 'intervalId', 'timestamp', 'event', 'target']) || !scalarEnum(command.kind, ['clock', 'event', 'review'])
+    if (!keys(command, ['expectedRevision', 'kind', 'intervalId', 'timestamp', 'event', 'target', 'regional'], ['expectedRevision', 'kind', 'intervalId', 'timestamp', 'event', 'target']) || Object.hasOwn(command, 'regional') && (!isHistoricalEventSelection(command.regional) || command.regional.local.kind !== command.event || command.kind === 'clock') || !scalarEnum(command.kind, ['clock', 'event', 'review'])
       || !nonblank(command.intervalId, 200) || !isDirectorEvent(command.event) || !integer(command.target) || command.target > 4) return corrupt();
+    regionalReceiptLink(command.regional, command.event, command.target, value.end_revision, events);
   } else if (kind === 'release-apply') {
     if (!keys(command, ['expectedRevision', 'expectedFromReleaseId', 'targetReleaseId', 'timestamp']) || !nonblank(command.expectedFromReleaseId, 200) || !nonblank(command.targetReleaseId, 200)) return corrupt();
   } else if (kind === 'history-advance') {
     if (!keys(command, ['expectedRevision', 'cause', 'reason', 'deltaYears', 'timestamp']) || !isRecord(command.cause) || !keys(command.cause, ['kind', 'id'])
       || !scalarEnum(command.cause.kind, ['feature', 'event']) || !nonblank(command.cause.id, 128) || !nonblank(command.reason, 1000) || !integer(command.deltaYears)) return corrupt();
   } else return corrupt();
+  if (kind !== 'director-tick') regionalReceiptLink(undefined, undefined, undefined, value.end_revision, events);
+  reliefReceiptLink(kind, undefined, undefined, events);
   return { ...base, kind, action: null };
 }
 
