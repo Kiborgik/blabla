@@ -1,7 +1,7 @@
 import { BUILDINGS, CIVICS, GOVERNMENTS, IMPROVEMENTS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
 import type { City, GameAction, GameEvent, WorldState } from '../core/types.ts';
 import type { CapabilityProjection } from '../core/capabilities.ts';
-import { eventLogEntries, type EventLogEntry } from './event-log.ts';
+import { eventLogEntries, recordedPublicProjectResult, type EventLogEntry } from './event-log.ts';
 import { exactNumber } from './number-format.ts';
 import { visualIcon } from './world-cues.ts';
 
@@ -15,29 +15,59 @@ export interface SpectatorStory {
   destination: SpectatorDestination | null;
 }
 
-export function spectatorEventDestination(state: Pick<WorldState, 'cities' | 'routes' | 'civilizations'>, event: GameEvent): SpectatorDestination | null {
-  const routeId = event.publicProjectResult?.routeId ?? event.strategicShipment?.routeId ?? (event.steamDelivery?.eventId === event.id ? event.steamDelivery.routeId : undefined)
-    ?? (event.type.startsWith('trade-') ? event.detail : undefined);
-  const route = state.routes.find(candidate => candidate.id === routeId);
+type StoryWorld = Pick<WorldState, 'cities' | 'routes' | 'civilizations'> & Partial<Pick<WorldState, 'publicProjects' | 'events'>>;
+
+export function spectatorEventDestination(state: StoryWorld, event: GameEvent): SpectatorDestination | null {
+  const partnership = event.type.startsWith('public-project-');
+  const trade = event.type.startsWith('trade-') && event.type !== 'trade-fair';
+  const participantsMatch = (candidate: { proposer: number; recipient: number }): boolean => (event.actor === candidate.proposer && event.target === candidate.recipient) || (event.actor === candidate.recipient && event.target === candidate.proposer);
+  const project = partnership ? state.publicProjects?.find(candidate => candidate.id === event.detail && participantsMatch(candidate)) : undefined;
+  const directResult = recordedPublicProjectResult(event);
+  const result = directResult ?? (partnership ? state.events?.map(recordedPublicProjectResult).findLast(candidate => candidate?.projectId === event.detail && participantsMatch(candidate)) : null);
+  const binding = directResult ?? project ?? result;
+  const routeId = partnership ? binding?.routeId : event.strategicShipment?.routeId ?? (event.steamDelivery?.eventId === event.id ? event.steamDelivery.routeId : undefined)
+    ?? (trade ? event.detail : undefined);
+  const route = state.routes.find(candidate => candidate.id === routeId && (!partnership || binding
+    && candidate.agreement?.offerId === binding.agreementOfferId
+    && ((candidate.owner === binding.proposer && candidate.partner === binding.recipient) || (candidate.owner === binding.recipient && candidate.partner === binding.proposer))));
   if (route) {
     const from = state.cities.find(city => city.id === route.from);
     const to = state.cities.find(city => city.id === route.to);
     return { kind: 'route', id: route.id, label: from && to ? `${from.name} ↔ ${to.name}` : 'Trade route' };
   }
-  const cityId = [event.populationGrowth, event.wonderCompletion, event.wonderLoss, event.railCompletion, event.territoryAcquisition, event.localPower, event.industrialFoundry]
-    .find(receipt => receipt?.eventId === event.id)?.cityId;
-  const city = state.cities.find(candidate => cityId ? candidate.id === cityId : event.tileId !== null && candidate.tileId === event.tileId);
-  if (city) return { kind: 'city', id: city.id, label: city.name };
+  if (!partnership && !trade) {
+    const cityId = [event.populationGrowth, event.wonderCompletion, event.wonderLoss, event.railCompletion, event.territoryAcquisition, event.localPower, event.industrialFoundry]
+      .find(receipt => receipt?.eventId === event.id)?.cityId;
+    const city = state.cities.find(candidate => cityId ? candidate.id === cityId : event.tileId !== null && candidate.tileId === event.tileId);
+    if (city) return { kind: 'city', id: city.id, label: city.name };
+  }
   const civilization = state.civilizations.find(candidate => candidate.id === (event.target ?? event.actor));
   return civilization ? { kind: 'civilization', id: civilization.id, label: civilization.name } : null;
 }
 
-export function spectatorChronicle(state: Pick<WorldState, 'events' | 'cities' | 'routes' | 'civilizations'>): SpectatorStory[] {
-  const entries = eventLogEntries(state.events, { civilizations: state.civilizations });
-  return entries.filter(entry => !entry.routine).slice(0, 3).flatMap(entry => {
+export function spectatorChronicle(state: StoryWorld & Pick<WorldState, 'events'>): SpectatorStory[] {
+  const candidates = eventLogEntries(state.events, { civilizations: state.civilizations }).filter(entry => !entry.routine).flatMap(entry => {
     const source = state.events.findLast(event => event.id === entry.id);
-    return source ? [{ event: entry, destination: spectatorEventDestination(state, source) }] : [];
+    return source ? [{ event: entry, source, destination: spectatorEventDestination(state, source) }] : [];
   });
+  const chosen = new Set<number>();
+  const families = new Set<string>();
+  const participants = new Set<number>();
+  while (chosen.size < Math.min(3, candidates.length)) {
+    let best = -1; let score = -1;
+    for (const [index, candidate] of candidates.entries()) {
+      if (chosen.has(index)) continue;
+      const novelty = (families.has(candidate.event.family) ? 0 : 2)
+        + Number([candidate.source.actor, candidate.source.target].some(id => id !== null && !participants.has(id)));
+      if (best < 0 || chosen.size > 0 && novelty > score) { best = index; score = novelty; }
+      if (chosen.size === 0) break;
+    }
+    const candidate = candidates[best];
+    if (!candidate) break;
+    chosen.add(best); families.add(candidate.event.family);
+    for (const id of [candidate.source.actor, candidate.source.target]) if (id !== null) participants.add(id);
+  }
+  return candidates.filter((_candidate, index) => chosen.has(index)).map(({ event, destination }) => ({ event, destination }));
 }
 
 export function civilizationSummary(state: Pick<WorldState, 'cities'>, id: number): string {
@@ -54,6 +84,74 @@ export function constructionCommitment(city: Pick<City, 'construction'> | undefi
       : order.kind === 'wonder' ? WONDERS.find(item => item.id === order.wonderId)?.name ?? 'Recorded wonder'
         : 'Railway';
   return { name, done: order.workDone, required: order.workRequired };
+}
+
+export interface DevelopingTown {
+  cityId: string;
+  orderId: string;
+  civilizationId: number;
+  town: string;
+  civilization: string;
+  name: string;
+  done: number;
+  required: number;
+  amount: string;
+  status: string;
+}
+
+export function developingTowns(state: Pick<WorldState, 'cities' | 'civilizations' | 'outcome'>, options: { archived?: boolean } = {}): DevelopingTown[] {
+  return state.cities.flatMap(city => {
+    const order = city.construction?.active;
+    const commitment = constructionCommitment(city);
+    if (!order || order.cityId !== city.id || !commitment) return [];
+    return [{ cityId: city.id, orderId: order.id, civilizationId: city.civId, town: city.name,
+      civilization: state.civilizations.find(civ => civ.id === city.civId)?.name ?? `Civilization ${city.civId}`,
+      ...commitment, amount: `${exactNumber(commitment.done)} / ${exactNumber(commitment.required)} work`,
+      status: options.archived || state.outcome ? 'Recorded unfinished work' : 'Under construction · not built yet' }];
+  });
+}
+
+export function renderDevelopingTowns(host: HTMLElement, towns: readonly DevelopingTown[], selectCity: (cityId: string) => void, sourceIdentity = ''): void {
+  const sameSource = host.dataset['sourceIdentity'] === sourceIdentity;
+  const active = sameSource && document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement : null;
+  const focused = active?.dataset['constructionIdentity'];
+  const pagerFocus = active?.dataset['townPage'];
+  const pages = Math.max(1, Math.ceil(towns.length / 4));
+  const retainedPage = sameSource ? Number(host.dataset['townPage'] ?? 0) : 0;
+  const focusedIndex = towns.findIndex(town => JSON.stringify([town.cityId, town.orderId]) === focused);
+  const requestedPage = focusedIndex >= 0 ? Math.floor(focusedIndex / 4) : retainedPage;
+  const page = Math.min(pages - 1, Math.max(0, Number.isFinite(requestedPage) ? Math.floor(requestedPage) : 0));
+  host.dataset['sourceIdentity'] = sourceIdentity; host.dataset['townPage'] = String(page);
+  host.setAttribute('aria-label', 'Developing towns');
+  host.replaceChildren();
+  for (const town of towns.slice(page * 4, page * 4 + 4)) {
+    const item = document.createElement('li');
+    const row = document.createElement('button'); row.type = 'button'; row.className = 'developing-town';
+    row.dataset['cityId'] = town.cityId; row.dataset['orderId'] = town.orderId;
+    row.dataset['constructionIdentity'] = JSON.stringify([town.cityId, town.orderId]);
+    row.setAttribute('aria-label', `${town.town}, ${town.civilization}. ${town.name}: ${town.amount}. ${town.status}. Inspect town`);
+    row.addEventListener('click', () => selectCity(town.cityId));
+    const name = document.createElement('strong'); name.textContent = `${town.town} · ${town.civilization}`;
+    const work = document.createElement('span'); work.textContent = `${town.name} · ${town.amount}`;
+    const status = document.createElement('small'); status.textContent = town.status;
+    row.append(visualIcon('materials'), name, work, status); item.append(row); host.append(item);
+    if (focused === row.dataset['constructionIdentity']) row.focus({ preventScroll: true });
+  }
+  if (towns.length > 4) {
+    const pager = document.createElement('li'); pager.className = 'developing-town-pager';
+    const status = document.createElement('span'); status.className = 'developing-town-page-status'; status.setAttribute('role', 'status');
+    status.textContent = `${page * 4 + 1}–${Math.min((page + 1) * 4, towns.length)} of ${towns.length} developing towns`;
+    const control = (direction: 'previous' | 'next', label: string, nextPage: number): HTMLButtonElement => {
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset['townPage'] = direction;
+      button.disabled = nextPage < 0 || nextPage >= pages;
+      button.addEventListener('click', () => { host.dataset['townPage'] = String(nextPage); renderDevelopingTowns(host, towns, selectCity, sourceIdentity); });
+      return button;
+    };
+    const previous = control('previous', 'Previous towns', page - 1); const next = control('next', 'Next towns', page + 1);
+    pager.append(previous, status, next); host.append(pager);
+    if (pagerFocus === 'previous') (previous.disabled ? next : previous).focus({ preventScroll: true });
+    if (pagerFocus === 'next') (next.disabled ? previous : next).focus({ preventScroll: true });
+  }
 }
 
 export interface OngoingCommitment {
@@ -132,18 +230,20 @@ export function renderRecordedPolicyChoice(choice: { action: GameAction; reason:
   return record;
 }
 
-export function renderSpectatorChronicle(host: HTMLElement, stories: readonly SpectatorStory[], navigate: (destination: SpectatorDestination) => void): void {
-  const focused = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement.dataset['storyId'] : undefined;
+export function renderSpectatorChronicle(host: HTMLElement, stories: readonly SpectatorStory[], navigate: (destination: SpectatorDestination) => void, sourceIdentity = ''): void {
+  const focused = host.dataset['sourceIdentity'] === sourceIdentity && document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement.dataset['storyId'] : undefined;
+  host.dataset['sourceIdentity'] = sourceIdentity;
   host.replaceChildren();
   for (const { event, destination } of stories) {
     const item = document.createElement('li');
     const row = document.createElement(destination ? 'button' : 'div');
     row.className = 'chronicle-story';
     row.dataset['storyId'] = event.id;
+    const consequence = event.summary || event.effects.slice(0, 2).join(' ');
     if (row instanceof HTMLButtonElement && destination) {
       row.type = 'button';
       row.addEventListener('click', () => navigate(destination));
-      row.setAttribute('aria-label', `${event.title}. Round ${event.round}. ${destination.kind === 'civilization' ? 'Inspect civilization' : 'Show on map'}: ${destination.label}`);
+      row.setAttribute('aria-label', `${event.title}. Round ${event.round}.${event.cause ? ` Why: ${event.cause}.` : ''}${consequence ? ` Result: ${consequence}.` : ''} ${destination.kind === 'civilization' ? 'Inspect civilization' : 'Show on map'}: ${destination.label}`);
     }
     const marker = document.createElement('span'); marker.className = 'chronicle-marker'; marker.append(visualIcon(event.icon));
     const body = document.createElement('span'); body.className = 'chronicle-story-body';
@@ -152,7 +252,10 @@ export function renderSpectatorChronicle(host: HTMLElement, stories: readonly Sp
     const location = document.createElement('span'); location.className = 'chronicle-location';
     location.textContent = destination ? `${destination.kind === 'civilization' ? 'View civilization' : 'On the map'} · ${destination.label}` : 'World event';
     if (destination) location.append(visualIcon('inspect'));
-    body.append(meta, title, location); row.append(marker, body); item.append(row); host.append(item);
+    body.append(meta, title);
+    if (event.cause) { const cause = document.createElement('span'); cause.className = 'chronicle-cause'; cause.textContent = `Why: ${event.cause}`; body.append(cause); }
+    if (consequence) { const result = document.createElement('span'); result.className = 'chronicle-result'; result.textContent = `Result: ${consequence}`; body.append(result); }
+    body.append(location); row.append(marker, body); item.append(row); host.append(item);
     if (focused === event.id) row.focus({ preventScroll: true });
   }
 }

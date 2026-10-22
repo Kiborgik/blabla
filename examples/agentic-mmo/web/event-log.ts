@@ -1,6 +1,6 @@
 import { exactNumber } from './number-format.ts';
 import { extractionFacts } from '../visuals/strategic-resource-visuals.ts';
-import type { GameEvent, Resources } from '../core/types.ts';
+import type { GameEvent, PublicProjectResult, Resources } from '../core/types.ts';
 import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
 import { eventVisual, type VisualDelta } from '../visuals/event-visuals.ts';
 import type { VisualIcon } from '../visuals/visual-language.ts';
@@ -23,8 +23,14 @@ export interface EventLogEntry {
 const GROUPS: ReadonlyArray<{ prefix: string; category: string; family: string; icon: VisualIcon }> = [
   { prefix: 'wonder', category: 'World wonder', family: 'building', icon: 'discovery' },
   { prefix: 'research', category: 'Research', family: 'research', icon: 'science' },
+  { prefix: 'cultivated-harvest', category: 'Extra harvest', family: 'production', icon: 'food' },
+  { prefix: 'forest-fire', category: 'Forest fire', family: 'disruption', icon: 'damage' },
+  { prefix: 'coastal-storm', category: 'Coastal storm', family: 'disruption', icon: 'damage' },
+  { prefix: 'trade-fair', category: 'Trade fair', family: 'culture', icon: 'culture' },
+  { prefix: 'industrial-accident', category: 'Industrial accident', family: 'disruption', icon: 'damage' },
+  { prefix: 'internal-migration', category: 'Internal migration', family: 'population', icon: 'population' },
   { prefix: 'trade', category: 'Trade result', family: 'trade', icon: 'cargo' },
-  { prefix: 'public-project', category: 'Shared project', family: 'trade', icon: 'influence' },
+  { prefix: 'public-project', category: 'Shared project', family: 'partnership', icon: 'influence' },
   { prefix: 'building', category: 'Building result', family: 'building', icon: 'infrastructure' },
   { prefix: 'improvement', category: 'Worked land', family: 'building', icon: 'materials' },
   { prefix: 'construction', category: 'Construction', family: 'building', icon: 'infrastructure' },
@@ -70,10 +76,36 @@ export function latestStoryEvent(events: readonly GameEvent[]): GameEvent | unde
     ?? window.findLast(event => event.type === 'settlement-production' || event.type === 'building-operation');
 }
 
+export function recordedPublicProjectResult(event: GameEvent): PublicProjectResult | null {
+  const result = event.publicProjectResult;
+  return result && event.type === `public-project-${result.outcome}` && event.detail === result.projectId ? result : null;
+}
+
+function publicProjectStory(event: GameEvent, options: EventLogOptions): { title: string; category: string; summary: string } | null {
+  const result = recordedPublicProjectResult(event);
+  if (!result) return null;
+  const proposer = participant(result.proposer, options).name;
+  const recipient = participant(result.recipient, options).name;
+  const labels: Record<PublicProjectResult['outcome'], string> = {
+    completed: 'Joint repair completed', declined: 'Repair declined', cancelled: 'Repair cancelled',
+    expired: 'Repair offer expired', failed: 'Joint repair failed', 'no-work-needed': 'No repair needed',
+  };
+  const damage = result.damageBefore === null || result.damageAfter === null ? 'Recorded route damage unavailable.'
+    : `Recorded damage ${exactNumber(result.damageBefore)} → ${exactNumber(result.damageAfter)}.`;
+  return { title: `${proposer} + ${recipient}: ${labels[result.outcome].toLowerCase()}`, category: labels[result.outcome],
+    summary: `${damage} ${proposer} paid ${amounts(result.proposerPaid)}; ${recipient} paid ${amounts(result.recipientPaid)}. No shipment created.` };
+}
+
 function namedStory(event: GameEvent, options: EventLogOptions): { title: string; category?: string; summary: string } {
   const actor = participant(event.actor, options).name;
   const target = participant(event.target, options).name;
   const technology = TECHNOLOGIES.find(candidate => candidate.id === event.detail);
+  const project = publicProjectStory(event, options);
+  if (project) return project;
+  if (['cultivated-harvest', 'forest-fire', 'coastal-storm', 'trade-fair', 'industrial-accident', 'internal-migration'].includes(event.type)) {
+    const label = GROUPS.find(group => group.prefix === event.type)?.category ?? event.type;
+    return { title: `${label} · ${target}`, category: label, summary: event.effects.slice(0, 6).join(' · ') };
+  }
   if (event.populationGrowth?.eventId === event.id) { const growth = event.populationGrowth; return { title: event.title, category: 'Population grew', summary: `${growth.populationBefore} → ${growth.populationAfter} residents. Paid ${exactNumber(growth.foodPaid)} Food. Housing capacity then ${growth.capacity}.` }; }
   if (event.wonderCompletion?.eventId === event.id) return { title: `${actor} completed ${WONDERS.find(wonder => wonder.id === event.wonderCompletion?.wonderId)?.name ?? 'a world wonder'}`, category: 'World wonder completed', summary: `Tile ${event.wonderCompletion.tileId}. Research boosts are available for an explicit choice; production comes in later seasons.` };
   if (event.wonderLoss?.eventId === event.id) return { title: `${actor} ended its ${WONDERS.find(wonder => wonder.id === event.wonderLoss?.wonderId)?.name ?? 'wonder'} attempt`, category: 'Contest ended', summary: `Another town completed the wonder. Refund received: ${amounts(event.wonderLoss.refund)}. No landmark installed at tile ${event.wonderLoss.tileId}.` };
@@ -95,9 +127,15 @@ function namedStory(event: GameEvent, options: EventLogOptions): { title: string
     const building = BUILDINGS.find(candidate => candidate.id === id);
     if (building && id && event.title.endsWith(` ${id}`)) return { title: event.title.slice(0, -id.length) + building.name, category: 'Work choice', summary: 'This changes future seasons; it does not record new output.' };
   }
+  if (event.type === 'public-project-proposed') return { title: `${actor} proposed a joint repair with ${target}`, category: 'Repair offer', summary: 'Partner agreement was still needed. No stock paid, damage repaired or cargo delivered.' };
+  if (event.type === 'public-project-committed') return { title: `${actor} agreed to a joint repair with ${target}`, category: 'Repair agreed', summary: 'Both partners agreed. No stock paid yet; route damage and cargo were unchanged.' };
+  if (event.type === 'trade-blocked') return { title: event.title, category: 'Shipment blocked', summary: 'No cargo delivered. No partial cargo payment, transport upkeep or commerce income changed.' };
   if (event.type === 'trade-proposed' && event.target !== null) return { title: `${actor} offered trade to ${target}`, category: 'Offer', summary: 'Partner agreement was still needed. No cargo was delivered by this offer.' };
-  if (event.type === 'trade-accepted' && event.target !== null) return { title: `${actor} agreed to trade with ${target}`, category: 'Agreement', summary: 'The agreement began. A delivery is recorded separately.' };
-  if (event.type === 'trade-delivered' && event.target !== null && event.target !== event.actor) return { title: `${actor} and ${target} exchanged cargo`, category: 'Delivered', summary: 'A completed exchange. Cargo and costs are separate.' };
+  if (event.type === 'trade-accepted' && event.target !== null) return { title: `${actor} agreed to trade with ${target}`, category: 'Agreement', summary: 'The agreement began. No cargo was delivered by this acceptance.' };
+  if (event.type === 'trade-delivered') {
+    const cargo = event.effects.find(effect => /^(\d+(?:\.\d+)?(?:e[+-]?\d+)?) cargo exchanged atomically$/.test(effect));
+    return { title: event.target !== null && event.target !== event.actor ? `${actor} and ${target} exchanged cargo` : event.title, category: 'Delivered', summary: `${cargo ? `${cargo}.` : 'A completed exchange was recorded.'} Cargo and costs are separate.` };
+  }
   if (event.type === 'trade-stopped' && event.target !== null) return { title: `${actor} stopped trade with ${target}`, category: 'Stopped', summary: 'Future shipments stopped. Earlier deliveries remain recorded.' };
   if (event.type === 'settlement-production') return { title: `${actor} made supplies`, category: 'Season result', summary: 'Gross output before household upkeep and growth costs.' };
   return { title: event.title, summary: '' };
@@ -134,7 +172,9 @@ export function eventLogEntries(events: readonly GameEvent[], options: EventLogO
         if (row && (cargo.iron ?? 0) > 0) row.cargo = [row.cargo === 'None' ? '' : row.cargo, `${cargo.iron} Iron`].filter(Boolean).join(', ');
       }
     }
-    const deltas = (receipt?.deltas ?? visual?.deltas ?? []).map(delta => ({ ...delta, subject: delta.subject?.startsWith('Route route-') ? 'Trade route' : delta.subject }));
+    const projectResult = recordedPublicProjectResult(event);
+    const projectDeltas: VisualDelta[] | null = projectResult ? projectResult.damageBefore === null || projectResult.damageAfter === null ? [] : [{ icon: 'damage', label: 'Damage', value: projectResult.damageAfter - projectResult.damageBefore, kind: 'delta', tone: projectResult.damageAfter < projectResult.damageBefore ? 'positive' : projectResult.damageAfter > projectResult.damageBefore ? 'negative' : 'neutral', qualifier: 'points changed in this recorded result', subject: null }] : null;
+    const deltas = (projectDeltas ?? receipt?.deltas ?? visual?.deltas ?? []).map(delta => ({ ...delta, subject: delta.subject?.startsWith('Route route-') ? 'Trade route' : delta.subject }));
     if (event.strategicExtraction?.status === 'extracted') deltas.push({ icon: 'materials', label: 'Iron', value: event.strategicExtraction.quantity, kind: 'production', tone: 'positive', qualifier: 'finite extraction', subject: `Tile ${event.strategicExtraction.tileId}` });
     const extraction = event.strategicExtraction ? extractionFacts(event.strategicExtraction) : [];
     const shipment = event.strategicShipment;
@@ -152,8 +192,8 @@ export function eventLogEntries(events: readonly GameEvent[], options: EventLogO
       id: event.id, round: event.round, title: story.title, category: story.category ?? group?.category ?? 'World record', family: group?.family ?? 'world',
       icon: receipt?.icon ?? visual?.icon ?? group?.icon ?? 'discovery',
       participants: [participant(event.actor, options), ...(event.target !== null && event.target !== event.actor ? [participant(event.target, options)] : [])],
-      cause: event.cause, detail: event.detail, effects: [...event.effects], deltas: structuredClone(deltas), qualifiers,
-      receiptDetails: [...(receipt?.details ?? []), ...extraction],
+      cause: projectResult?.reason ?? event.cause, detail: event.detail, effects: [...event.effects], deltas: structuredClone(deltas), qualifiers,
+      receiptDetails: [...(projectResult ? [story.summary, projectResult.reason] : receipt?.details ?? []), ...extraction],
       summary: [story.summary, ...transfers, ...extraction.slice(0, 2)].filter(Boolean).join(' '), routine: routineEvent(event),
       exchanges,
     };
@@ -245,7 +285,7 @@ export function renderEventLog(host: HTMLElement, events: readonly GameEvent[], 
     input.value = value; input.addEventListener('change', () => { choose(input.value); filter.page = 0; render(); }); field.append(input); controls.append(field);
   };
   select('Civilization', [['', 'All civilizations'], ...[...new Set(rows.flatMap(row => row.participants.map(person => person.name)))].toSorted().map(name => [name, name] as [string, string])], value => { filter.actor = value; }, filter.actor);
-  select('Show', [['important', 'Key events'], ['all', 'All records'], ['research', 'Research'], ['building', 'Towns & building'], ['trade', 'Trade'], ['disruption', 'Disasters'], ['routine', 'Routine & system records']], value => { filter.family = value; }, filter.family);
+  select('Show', [['important', 'Key events'], ['all', 'All records'], ['research', 'Research'], ['building', 'Towns & building'], ['trade', 'Trade'], ['partnership', 'Shared projects'], ['culture', 'Culture'], ['population', 'People'], ['disruption', 'Disasters'], ['routine', 'Routine & system records']], value => { filter.family = value; }, filter.family);
   pager.append(previous, status, next);
   const note = text('li', `${rows.length} selected records from the latest ${Math.min(events.length, 96)} retained events. Filters apply to this captured window.`, 'event-log-window');
   host.append(controls, pager, wrapper, note); render();

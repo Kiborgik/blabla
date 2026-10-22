@@ -4,6 +4,7 @@ import type {
   EraDefinition, FeatureDefinition, Focus, GameAction, HistoricalMilestone, Resource,
   Resources, StrategicResource, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe, ImprovementDefinition, WonderDefinition,
 } from './types.ts';
+import { HISTORICAL_DIRECTOR_EVENTS } from './historical-event-content.ts';
 
 export const SPACEFLIGHT_RULES = {
   ruleVersion: 1, featureId: 'interplanetary-logistics', minimumSourcePopulation: 3, settlers: 3, flightRounds: 4,
@@ -84,6 +85,8 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'partnership-stewardship', name: 'Partnership stewardship', description: 'Civilizations weigh supplied exchanges, expiring consent and promised repair contributions against their current needs. This additive controller rule leaves older release policies unchanged.' },
+  { id: 'historical-pressures', name: 'Regional pressures and opportunities', description: 'Actual cultivated land, forests, coast, delivered trade, operated industry and displaced residents qualify local consequential historical events.' },
   { id: 'earned-history', name: 'Earned historical transitions', description: 'Retain actual milestone proof and explicitly advance a new ruleset calendar once per earned cause.' },
   { id: 'powered-science', name: 'Powered scientific laboratories', description: 'Sanitation and Chemistry lead to paid era-three local Campus laboratories using same-town Power, Credits and residents for productive Science.' },
   { id: 'local-power', name: 'Local Coal power supplies productive Factories', description: 'Opening Coal and residents generate expiring same-town Power for atomically staffed Factories. Emissions are receipt-only; industrial-project work remains planned.' },
@@ -261,6 +264,7 @@ export const DIRECTOR_EVENTS: DirectorEventDefinition[] = [
   { id: 'crypto-boom', name: 'A speculative fever', requiredFeatures: ['director-events', 'speculative-markets'], minEra: 4, description: 'A digital-asset mania draws wealth and attention.', consequence: 'New liquidity comes with political discontent and diverted investment.', effects: [{ kind: 'resource', resource: 'credits', amount: 28 }, { kind: 'resource', resource: 'materials', amount: -5 }, { kind: 'civilization', field: 'legitimacy', amount: -8 }], cooldown: 3 },
   { id: 'ufo-contact', name: 'Visitors in the sky', requiredFeatures: ['director-events', 'anomalous-contact'], minEra: 0, description: 'An unexplained encounter challenges what people believe.', consequence: 'A scientific opportunity arrives alongside cultural fascination and disagreement.', effects: [{ kind: 'resource', resource: 'science', amount: 24 }, { kind: 'resource', resource: 'culture', amount: 8 }, { kind: 'civilization', field: 'legitimacy', amount: -6 }], cooldown: 4 },
   { id: 'calm', name: 'A quiet season', requiredFeatures: ['director-events'], minEra: 0, description: 'The world gives civilizations room to act.', consequence: 'Existing projects and pressures unfold without a new shock.', effects: [], cooldown: 0 },
+  ...HISTORICAL_DIRECTOR_EVENTS,
 ];
 
 const initialEra = ERAS[0];

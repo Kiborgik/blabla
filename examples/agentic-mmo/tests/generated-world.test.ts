@@ -42,7 +42,7 @@ for (const seed of seeds) void test(`seed ${seed}: fresh current-rules foundatio
   assert.equal(state.year, ECONOMY_RULES.initialYear);
   assert.equal(state.clockEpoch, EPOCH);
   assert.equal(state.clockTicks, 0);
-  assert.deepEqual(state.origin, { kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed, clockEpoch: EPOCH });
+  assert.deepEqual(state.origin, { kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed, clockEpoch: EPOCH, initialReleaseId: 'settlement-living-partnerships-1' });
   assert.deepEqual(state.independentTurns, before.independentTurns);
   assert.deepEqual(state.civilizations, before.civilizations);
   assert.equal(state.cities.length, CIV_COUNT);

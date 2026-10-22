@@ -1,3 +1,4 @@
+import { BUILDINGS, TECHNOLOGIES } from '../core/content.ts';
 import { buildingIdentity } from './building-visuals.ts';
 import type { GameEvent } from '../core/types.ts';
 import { METRIC_LABELS } from './visual-language.ts';
@@ -28,6 +29,12 @@ export interface VisualEvent {
 }
 
 const EVENT_MARKS: Record<string, Pick<VisualEvent, 'label' | 'cue' | 'icon'>> = {
+  'cultivated-harvest': { label: 'Extra harvest', cue: 'production', icon: 'food' },
+  'forest-fire': { label: 'Forest fire', cue: 'warning', icon: 'damage' },
+  'coastal-storm': { label: 'Coastal storm', cue: 'warning', icon: 'damage' },
+  'trade-fair': { label: 'Trade fair', cue: 'status', icon: 'culture' },
+  'industrial-accident': { label: 'Industrial accident', cue: 'warning', icon: 'damage' },
+  'internal-migration': { label: 'Residents moved', cue: 'status', icon: 'population' },
   drought: { label: 'Dry season', cue: 'dry-wind', icon: 'drought' },
   'building-completed': { label: 'New building', cue: 'construction', icon: 'infrastructure' },
   'settlement-founded': { label: 'New settlement', cue: 'construction', icon: 'infrastructure' },
@@ -39,7 +46,7 @@ const EVENT_MARKS: Record<string, Pick<VisualEvent, 'label' | 'cue' | 'icon'>> =
   earthquake: { label: 'Earthquake', cue: 'warning', icon: 'damage' },
   'resource-boom': { label: 'New supplies', cue: 'discovery', icon: 'materials' },
   'trade-delivered': { label: 'Cargo delivered', cue: 'delivery', icon: 'cargo' },
-  'trade-blocked': { label: 'Trade stopped', cue: 'warning', icon: 'cargo' },
+  'trade-blocked': { label: 'Shipment blocked', cue: 'warning', icon: 'cargo' },
 };
 
 function isVisualMetric(value: string): value is VisualMetric {
@@ -91,6 +98,25 @@ function effectDelta(effect: string): VisualDelta | null {
   return cargo ? delta('cargo', Number(cargo[1]), 'total') : null;
 }
 
+function committedContentLabel(event: GameEvent): string | null {
+  const compact = (value: string, limit: number): string => value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
+  if (event.type === 'research-completed') {
+    const ids = event.effects.flatMap(effect => /^Technology ([a-z0-9-]+) unlocked$/.exec(effect)?.[1] ?? []);
+    const technology = ids.length === 1 ? TECHNOLOGIES.find(candidate => candidate.id === ids[0])
+      : ids.length === 0 ? TECHNOLOGIES.find(candidate => event.title.endsWith(` discovers ${candidate.name}`)) : undefined;
+    if (technology) {
+      const suffix = ` discovers ${technology.name}`;
+      const civilization = event.title.endsWith(suffix) ? event.title.slice(0, -suffix.length) : '';
+      return `${civilization ? `${compact(civilization, 24)} · ` : ''}${compact(technology.name, 32)} discovered`;
+    }
+  }
+  if (event.type === 'building-completed') {
+    const building = BUILDINGS.find(candidate => event.title.endsWith(` builds ${candidate.name}`));
+    if (building) return `${compact(event.title.slice(0, -` builds ${building.name}`.length), 24)} · ${compact(building.name, 36)} built`;
+  }
+  return null;
+}
+
 export function eventVisual(event: GameEvent): VisualEvent | null {
   const deltas = event.effects.flatMap((effect) => { const parsed = effectDelta(effect); return parsed ? [parsed] : []; });
   const made = deltas.some((entry) => entry.kind === 'production' && entry.value > 0);
@@ -102,10 +128,12 @@ export function eventVisual(event: GameEvent): VisualEvent | null {
     mark = { label, icon, cue: made ? 'work' : 'status' };
   }
   if (!mark) return null;
+  const committedLabel = committedContentLabel(event);
+  if (committedLabel) mark = { ...mark, label: committedLabel.length > 72 ? `${committedLabel.slice(0, 71)}…` : committedLabel };
   if (event.type === 'settlement-production' && !made) mark = { ...mark, cue: 'status' };
   return {
     ...mark, eventId: event.id, tileId: event.tileId, actor: event.actor, target: event.target,
-    detail: event.detail, importance: event.importance, durationMs: mark.cue === 'dry-wind' ? 3200 : 2600,
+    detail: committedLabel ? `${event.title}. ${event.detail}` : event.detail, importance: event.importance, durationMs: mark.cue === 'dry-wind' ? 3200 : 2600,
     deltas: deltas.slice(0, 4),
   };
 }

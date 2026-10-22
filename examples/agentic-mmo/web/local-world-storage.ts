@@ -1,4 +1,4 @@
-import { LOCAL_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, parsePreviousLocalSimulation, type LocalSimulation, type PreviousLocalSimulation } from './local-simulation.ts';
+import { LOCAL_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, parsePreviousLocalSimulation, type LocalSimulation, type PreviousLocalSimulation } from './local-simulation.ts';
 
 export interface LocalCheckpointResult {
   run: LocalSimulation | null;
@@ -43,6 +43,14 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
       if (raw === null) return { run: null, message: 'No previous local world is saved in this browser.' };
       const run = decode(raw, parsePreviousLocalSimulation);
       return { run, message: run ? `Previous local world · Read-only at round ${run.state.round}. Its original save is unchanged.` : 'The previous local world could not be read. Its original save is preserved.' };
+    },
+    priorGenerated(): { run: LocalSimulation | null; message: string } {
+      let raw: string | null;
+      try { raw = ports.read(PRIOR_GENERATED_SIMULATION_STORAGE_KEY); }
+      catch { return { run: null, message: 'The previous generated world cannot be read because browser storage is unavailable.' }; }
+      if (raw === null) return { run: null, message: 'No previous generated world is saved in this browser.' };
+      const run = decode(raw, parseLocalSimulation);
+      return { run, message: run ? `Previous generated world · Read-only at round ${run.state.round}. Its original save and rules are unchanged.` : 'The previous generated world could not be read. Its original save is preserved.' };
     },
     async save(current: () => LocalSimulation | null): Promise<LocalCheckpointResult> {
       if (ephemeral || blocked || !ports.withLock || !current()) return result(current());

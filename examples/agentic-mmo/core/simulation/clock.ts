@@ -11,6 +11,7 @@ import { commitEvents, emitEvent } from './events.ts';
 import { hasFeatures, resolveHistory } from './history.ts';
 import { parseUtcTimestamp } from './time.ts';
 import { strategyTimingError } from './turns.ts';
+import { historicalEventQuote, isHistoricalEventId } from './historical-events.ts';
 
 export { parseUtcTimestamp } from './time.ts';
 
@@ -67,6 +68,8 @@ export function applyDirectorTick(
     ) {
       return rejected(state, 'Director event is unavailable or targets no civilization');
     }
+    if (isHistoricalEventId(event.id) && !historicalEventQuote(state, event.id, command.target))
+      return rejected(state, 'Regional event requires current local conditions and a completed Director cooldown');
   }
   const next = structuredClone(state);
   const events: GameEvent[] = [];

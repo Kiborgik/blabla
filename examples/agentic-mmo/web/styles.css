@@ -1480,3 +1480,15 @@ dialog h2 {
 .local-power-record > summary { min-height: 44px; padding-block: 10px; box-sizing: border-box; cursor: pointer; overflow-wrap: anywhere; }
 .local-power-operation { margin: 8px 0; padding-block: 6px; border-top: 1px solid var(--border); }
 .local-power-inspection summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.faction-crest { display: block; width: 1.5em; height: 1.5em; }
+.chronicle-cause, .chronicle-result { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
+#app .chronicle-cause { color: #bcc7cc; -webkit-line-clamp: 1; }
+#app .chronicle-result { color: var(--hud-ink, #f3e8cd); margin-top: 3px; -webkit-line-clamp: 2; }
+.developing-towns { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 9px; }
+.developing-towns > summary { cursor: pointer; font-size: 12px; }
+.developing-town { display: flex; flex-direction: column; align-items: flex-start; width: 100%; gap: 3px; margin-top: 6px; padding: 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; text-align: left; }
+.developing-town-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; }
+.developing-town-pager button { color: var(--ink); background: var(--surface); border: 1px solid var(--border); padding: 6px 8px; border-radius: 5px; }
+.developing-town-page-status { font-size: 11px; }
+@media (max-width: 760px) { .chronicle-cause, .chronicle-result { font-size: 10px; } }

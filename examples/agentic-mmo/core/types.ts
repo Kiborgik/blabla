@@ -8,7 +8,7 @@ export const DIRECTOR_SEAT = 5;
 
 export type Resource = 'food' | 'materials' | 'energy' | 'credits' | 'science' | 'culture';
 export type Resources = Record<Resource, number>;
-export interface GeneratedWorldOrigin { kind: 'generated'; generatorVersion: 'coherent-geography-v1'; seed: number; clockEpoch: string }
+export interface GeneratedWorldOrigin { kind: 'generated'; generatorVersion: 'coherent-geography-v1'; seed: number; clockEpoch: string; initialReleaseId?: 'settlement-living-partnerships-1' }
 export type MarsMissionKind = 'settle' | 'resupply';
 export interface MarsMissionQuote { ruleVersion: 1; civId: number; mission: MarsMissionKind; sourceCityId: string; departureRound: number; arrivalRound: number; settlers: number; launchCost: Partial<Resources>; cargo: Partial<Resources>; totalCost: Partial<Resources>; sourcePopulationBefore: number; sourcePopulationAfter: number }
 export interface MarsMission extends MarsMissionQuote { id: string; eventId: string; paid: Partial<Resources> }
@@ -30,7 +30,7 @@ export interface StrategicShipmentResult { ruleVersion: 1; routeId: string; offe
 export type Focus = 'growth' | 'industry' | 'research' | 'culture' | 'diplomacy';
 export type Terrain = 'ocean' | 'grassland' | 'forest' | 'desert' | 'mountain' | 'tundra';
 export type EraId = 'settlement' | 'states' | 'connected' | 'industrial' | 'planetary' | 'interplanetary';
-export type EventKind = 'drought' | 'earthquake' | 'resource-boom' | 'crypto-boom' | 'ufo-contact' | 'calm';
+export type EventKind = 'drought' | 'earthquake' | 'resource-boom' | 'crypto-boom' | 'ufo-contact' | 'calm' | 'cultivated-harvest' | 'forest-fire' | 'coastal-storm' | 'trade-fair' | 'industrial-accident' | 'internal-migration';
 export type VictoryKind = 'mars' | 'federation' | 'cultural' | 'economic' | 'military';
 
 export interface TileAcquisitionQuote { ruleVersion: 1; cityId: string; civId: number; cityTileId: number; tileId: number; pathTileIds: number[]; distance: number; priorCivilizationPurchases: number; paid: { credits: number } }

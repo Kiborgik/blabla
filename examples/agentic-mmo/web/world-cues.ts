@@ -58,7 +58,7 @@ export function createCueStream(): { observe: (observation: RouteCueObservation,
     const batch = projectRouteCues(cursor, observation, 3);
     cursor = batch.cursor;
     if (observation.mode === 'history' || (previous?.identity === observation.identity && observation.revision <= previous.revision)) return { events: [], routeResults: [] };
-    const events = ordinary.observe(observation.identity, observation.events.filter((event) => !event.type.startsWith('trade-')));
+    const events = ordinary.observe(observation.identity, observation.events.filter((event) => (!event.type.startsWith('trade-') || event.type === 'trade-fair')));
     if (observation.mode !== 'live' || previous?.resumeBaseline) return { events: [], routeResults: [] };
     const order = new Map(observation.events.map((event, index) => [event.id, { importance: event.importance, index }]));
     const limit = Number.isFinite(slots) ? Math.min(3, Math.max(0, Math.floor(slots))) : 0;

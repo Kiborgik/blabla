@@ -44,10 +44,15 @@ const historicalReleases: readonly CompatibleReleaseDefinition[] = [
 ];
 const previousRelease = historicalReleases.at(-1);
 if (!previousRelease) throw new Error('Historical releases must precede interplanetary logistics');
-export const RELEASES: readonly CompatibleReleaseDefinition[] = [...historicalReleases, {
+const interplanetaryRelease: CompatibleReleaseDefinition = {
   id: 'settlement-interplanetary-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
   compatibleFrom: [previousRelease.id],
   featureIds: [...previousRelease.featureIds, 'planetary-networks', 'interplanetary-logistics', 'earned-history'],
+};
+export const RELEASES: readonly CompatibleReleaseDefinition[] = [...historicalReleases, interplanetaryRelease, {
+  id: 'settlement-living-partnerships-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  compatibleFrom: [interplanetaryRelease.id],
+  featureIds: [...interplanetaryRelease.featureIds, 'partnership-stewardship', 'historical-pressures'],
 }];
 
 function currentRelease(): CompatibleReleaseDefinition {

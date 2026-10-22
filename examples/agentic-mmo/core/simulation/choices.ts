@@ -31,6 +31,7 @@ import { buildingEligibility, improvementEligibility, researchEligibility } from
 import { selectedMountainCatchment } from './water.ts';
 import { decisionActionBlock } from './decisions.ts';
 import { requiredConstructionWork } from './construction.ts';
+import { historicalEventQuote, isHistoricalEventId } from './historical-events.ts';
 
 export function actionFeatureAvailable(state: WorldState, action: GameAction['type']): boolean {
   return hasFeatures(state, ACTION_FEATURES[action]);
@@ -66,10 +67,13 @@ export function availableActions(
     for (const event of DIRECTOR_EVENTS) {
       if (event.minEra > era || !hasFeatures(state, event.requiredFeatures)) continue;
       for (const target of state.civilizations) {
+        const regional = isHistoricalEventId(event.id);
+        const quote = regional ? historicalEventQuote(state, event.id, target.id) : null;
+        if (regional && !quote) continue;
         choices.push({
           action: { type: 'event', event: event.id, target: target.id },
           label: `${event.name}: ${target.name}`,
-          reason: `${event.description} ${event.consequence}`,
+          reason: `${quote?.cause ?? event.description} ${event.consequence}`,
         });
       }
     }

@@ -61,7 +61,7 @@ await test('paid rail endpoints can share an earned wonder hex without replacing
 
 await test('generated default and frozen prior local checkpoint have separate identities and storage without migration', () => {
   let state = createWorld(1701, epoch);
-  for (const release of RELEASES.slice(1, -1)) { const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch }); assert.ok(result.ok, result.error); state = result.state; }
+  for (const release of RELEASES.slice(1, RELEASES.findIndex(candidate => candidate.id === 'settlement-interplanetary-1'))) { const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch }); assert.ok(result.ok, result.error); state = result.state; }
   const previous = { version: 1, source: 'local-procedural', policyVersion: 'weighted-civilizations-v1', seed: 1701, timestamp: epoch, steps: 0, state, memories: Array(6).fill(null), decisions: [] };
   const bytes = JSON.stringify(previous);
   const parsed = parsePreviousLocalSimulation(JSON.parse(bytes)); assert.ok(parsed);

@@ -8,7 +8,8 @@ import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v2';
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:partnerships-v1';
+export const PRIOR_GENERATED_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v2';
 export const PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v1';
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
 const EPOCH = '2000-01-01T00:00:00.000Z';
@@ -32,8 +33,8 @@ export interface PreviousLocalSimulation extends Omit<LocalSimulation, 'version'
   readonly memories: ReadonlyArray<LegacyBehaviorMemory | null>;
 }
 
-export function createLocalSimulation(seed = 1701): LocalSimulation {
-  const state = createGeneratedWorld(seed, EPOCH);
+export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' = 'settlement-living-partnerships-1'): LocalSimulation {
+  const state = createGeneratedWorld(seed, EPOCH, initialReleaseId);
   return { version: 2, source: 'local-procedural', policyVersion: BEHAVIOR_POLICY_VERSION, seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
 }
 
@@ -103,5 +104,6 @@ export function advanceLocalSimulation(run: LocalSimulation, steps = 1): LocalSi
 }
 
 export function localSimulationSnapshot(run: LocalSimulation | PreviousLocalSimulation): LiveSnapshot {
-  return { identity: `local:${run.state.origin?.generatorVersion ?? 'legacy-foundation-v1'}:${run.seed}:${run.state.clockEpoch}`, state: run.state };
+  const genesis = run.state.origin?.initialReleaseId;
+  return { identity: `local:${run.state.origin?.generatorVersion ?? 'legacy-foundation-v1'}:${run.seed}:${run.state.clockEpoch}${genesis ? `:${genesis}` : ''}`, state: run.state };
 }

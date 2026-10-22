@@ -118,7 +118,13 @@ export function spaceflightRecords(world: WorldState): boolean {
 }
 
 export function generatedHistoryRecords(world: WorldState): boolean {
-  if (world.origin !== undefined) { const origin: unknown = world.origin; if (!record(origin) || !keys(origin, ['kind', 'generatorVersion', 'seed', 'clockEpoch']) || origin.kind !== 'generated' || origin.generatorVersion !== 'coherent-geography-v1' || origin.seed !== world.seed || origin.clockEpoch !== world.clockEpoch) return false; }
+  if (world.origin !== undefined) {
+    const origin: unknown = world.origin;
+    if (!record(origin) || !keys(origin, ['kind', 'generatorVersion', 'seed', 'clockEpoch', ...(Object.hasOwn(origin, 'initialReleaseId') ? ['initialReleaseId'] : [])])
+      || origin.kind !== 'generated' || origin.generatorVersion !== 'coherent-geography-v1' || origin.seed !== world.seed || origin.clockEpoch !== world.clockEpoch
+      || Object.hasOwn(origin, 'initialReleaseId') && (origin.initialReleaseId !== 'settlement-living-partnerships-1'
+        || !world.unlockedFeatures.includes('partnership-stewardship') || !world.unlockedFeatures.includes('historical-pressures'))) return false;
+  }
   if (!world.unlockedFeatures.includes('earned-history')) return !Object.hasOwn(world, 'milestoneProofs');
   const proofs: unknown = world.milestoneProofs;
   if (!record(proofs) || Object.keys(proofs).length > HISTORICAL_MILESTONES.length) return false;

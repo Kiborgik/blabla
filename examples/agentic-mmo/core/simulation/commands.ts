@@ -18,6 +18,7 @@ import { executeTradeAction } from './trade.ts';
 import { applyEffects, directorEffects } from './effects.ts';
 import { emitEvent } from './events.ts';
 import { citiesOf, civilizationById, clamp, transferCost } from './world.ts';
+import { applyHistoricalEvent, historicalEventQuote, isHistoricalEventId } from './historical-events.ts';
 
 export function applyDirectorEvent(
   state: WorldState,
@@ -29,16 +30,19 @@ export function applyDirectorEvent(
   const definition = DIRECTOR_EVENTS.find((event) => event.id === eventId);
   if (!definition) throw new RangeError(`Unknown Director event ${eventId}`);
   const civilization = civilizationById(state, target);
-  const effects = applyEffects(state, target, directorEffects(state, definition));
-  state.directorCooldown = definition.cooldown;
+  const regional = isHistoricalEventId(eventId);
+  const quote = regional ? historicalEventQuote(state, eventId, target) : null;
+  if (regional && !quote) throw new RangeError('The regional event no longer has its required local conditions');
+  const effects = quote ? applyHistoricalEvent(state, quote) : applyEffects(state, target, directorEffects(state, definition));
+  state.directorCooldown = hasFeatures(state, ['historical-pressures']) ? Math.max(state.directorCooldown, definition.cooldown) : definition.cooldown;
   emitEvent(state, events, {
     type: definition.id,
     title: `${definition.name}: ${civilization.name}`,
     detail: `${definition.description} ${definition.consequence}`,
     actor: DIRECTOR_SEAT,
     target,
-    tileId: citiesOf(state, target)[0]?.tileId ?? null,
-    cause: cause ?? 'The World Director selected a released event for this civilization',
+    tileId: quote ? state.cities.find(city => city.id === quote.cityId)?.tileId ?? null : citiesOf(state, target)[0]?.tileId ?? null,
+    cause: quote ? `${cause ? `${cause}; ` : ''}${quote.cause}` : cause ?? 'The World Director selected a released event for this civilization',
     effects: effects.length ? effects : ['No new shock; existing projects and pressures continue'],
     importance: 4,
   });
