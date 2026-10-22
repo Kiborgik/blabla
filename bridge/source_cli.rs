@@ -171,21 +171,51 @@ impl RequestDiagnostics {
 
 type Inventory = BTreeMap<PathBuf, Option<Vec<u8>>>;
 
+struct VerifiedImage {
+    inputs: Inventory,
+    executable: PathBuf,
+    identity: ArtifactIdentity,
+    environment: BTreeMap<std::ffi::OsString, std::ffi::OsString>,
+    quarantine: RefCell<Option<ImageIntegrityFailure>>,
+    _owner: TempDir,
+}
+
 enum Transport {
-    Cargo {
-        inputs: Option<Inventory>,
-    },
-    Artifact {
-        inputs: Inventory,
-        executable: PathBuf,
-        identity: ArtifactIdentity,
-        environment: BTreeMap<std::ffi::OsString, std::ffi::OsString>,
-        _owner: TempDir,
-    },
+    Cargo { inputs: Option<Inventory> },
+    Artifact(Rc<VerifiedImage>),
+}
+
+struct ImageSource {
+    source: PathBuf,
+    image: RefCell<Option<Rc<VerifiedImage>>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ImageScope(Rc<ImageSource>);
+
+impl ImageScope {
+    pub(crate) fn new() -> Self {
+        Self::from_source(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+    }
+
+    pub(crate) fn from_source(source: PathBuf) -> Self {
+        Self(Rc::new(ImageSource {
+            source,
+            image: RefCell::new(None),
+        }))
+    }
+
+    pub(crate) fn campaign(&self) -> Campaign {
+        Campaign(Rc::new(Source {
+            scope: self.clone(),
+            transport: RefCell::new(None),
+            failure: RefCell::new(None),
+        }))
+    }
 }
 
 struct Source {
-    source: PathBuf,
+    scope: ImageScope,
     transport: RefCell<Option<Transport>>,
     failure: RefCell<Option<String>>,
 }
@@ -195,15 +225,11 @@ pub(crate) struct Campaign(Rc<Source>);
 
 impl Campaign {
     pub(crate) fn new() -> Self {
-        Self::from_source(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+        ImageScope::new().campaign()
     }
 
     pub(crate) fn from_source(source: PathBuf) -> Self {
-        Self(Rc::new(Source {
-            source,
-            transport: RefCell::new(None),
-            failure: RefCell::new(None),
-        }))
+        ImageScope::from_source(source).campaign()
     }
 
     #[track_caller]
@@ -560,40 +586,71 @@ pub(crate) struct ArtifactIdentity {
     digest: [u8; 32],
 }
 
-pub(crate) fn artifact_identity(
+#[derive(Clone)]
+struct ImageIntegrityFailure(String);
+
+enum ArtifactCheckError {
+    Deadline,
+    Integrity(ImageIntegrityFailure),
+}
+
+impl ArtifactCheckError {
+    fn message(self) -> String {
+        match self {
+            Self::Deadline => "source CLI exceeded request deadline".into(),
+            Self::Integrity(failure) => failure.0,
+        }
+    }
+}
+
+impl From<std::io::Error> for ArtifactCheckError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Integrity(ImageIntegrityFailure(error.to_string()))
+    }
+}
+
+fn artifact_time(deadline: Instant) -> Result<(), ArtifactCheckError> {
+    check_time(deadline).map_err(|_| ArtifactCheckError::Deadline)
+}
+
+fn read_artifact_identity(
     path: &Path,
     deadline: Instant,
-) -> Result<ArtifactIdentity, String> {
-    check_time(deadline)?;
-    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
-    let before = file.metadata().map_err(|e| e.to_string())?;
-    let modified = before.modified().map_err(|e| e.to_string())?;
+) -> Result<ArtifactIdentity, ArtifactCheckError> {
+    artifact_time(deadline)?;
+    let mut file = fs::File::open(path)?;
+    let before = file.metadata()?;
+    let modified = before.modified()?;
     let mut hasher = Sha256::new();
     let mut buffer = [0; 64 * 1024];
     let mut length = 0;
     loop {
-        check_time(deadline)?;
-        let count = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        artifact_time(deadline)?;
+        let count = file.read(&mut buffer)?;
         if count == 0 {
             break;
         }
         length += count as u64;
         if length > before.len() {
-            return Err("Cargo artifact changed during identity read".into());
+            return Err(ArtifactCheckError::Integrity(ImageIntegrityFailure(
+                "Cargo artifact changed during identity read".into(),
+            )));
         }
         hasher.update(&buffer[..count]);
     }
-    let after = file.metadata().map_err(|e| e.to_string())?;
-    let selected = fs::metadata(path).map_err(|e| e.to_string())?;
+    let after = file.metadata()?;
+    let selected = fs::metadata(path)?;
     if length != before.len()
         || after.len() != length
         || selected.len() != length
-        || after.modified().map_err(|e| e.to_string())? != modified
-        || selected.modified().map_err(|e| e.to_string())? != modified
+        || after.modified()? != modified
+        || selected.modified()? != modified
     {
-        return Err("Cargo artifact changed during identity read".into());
+        return Err(ArtifactCheckError::Integrity(ImageIntegrityFailure(
+            "Cargo artifact changed during identity read".into(),
+        )));
     }
-    check_time(deadline)?;
+    artifact_time(deadline)?;
     Ok(ArtifactIdentity {
         length,
         modified,
@@ -601,15 +658,50 @@ pub(crate) fn artifact_identity(
     })
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn artifact_identity(
+    path: &Path,
+    deadline: Instant,
+) -> Result<ArtifactIdentity, String> {
+    read_artifact_identity(path, deadline).map_err(ArtifactCheckError::message)
+}
+
+fn verify_artifact_identity(
+    path: &Path,
+    expected: &ArtifactIdentity,
+    deadline: Instant,
+) -> Result<(), ArtifactCheckError> {
+    if &read_artifact_identity(path, deadline)? != expected {
+        return Err(ArtifactCheckError::Integrity(ImageIntegrityFailure(
+            "source Cargo artifact changed during verification".into(),
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn verify_artifact(
     path: &Path,
     expected: &ArtifactIdentity,
     deadline: Instant,
 ) -> Result<(), String> {
-    if &artifact_identity(path, deadline)? != expected {
-        return Err("source Cargo artifact changed during verification".into());
+    verify_artifact_identity(path, expected, deadline).map_err(ArtifactCheckError::message)
+}
+
+impl VerifiedImage {
+    fn verify(&self, deadline: Instant) -> Result<(), String> {
+        if let Some(failure) = self.quarantine.borrow().as_ref() {
+            return Err(failure.0.clone());
+        }
+        match verify_artifact_identity(&self.executable, &self.identity, deadline) {
+            Ok(()) => Ok(()),
+            Err(ArtifactCheckError::Integrity(failure)) => {
+                *self.quarantine.borrow_mut() = Some(failure.clone());
+                Err(failure.0)
+            }
+            Err(error) => Err(error.message()),
+        }
     }
-    Ok(())
 }
 
 pub(crate) fn owned_artifact(
@@ -689,7 +781,7 @@ impl Request {
     #[allow(dead_code)]
     pub(crate) fn artifact_path(&self) -> Option<PathBuf> {
         match self.campaign.0.transport.borrow().as_ref() {
-            Some(Transport::Artifact { executable, .. }) => Some(executable.clone()),
+            Some(Transport::Artifact(image)) => Some(image.executable.clone()),
             _ => None,
         }
     }
@@ -738,9 +830,12 @@ impl Request {
 
     fn acquire(&self) -> Result<Transport, String> {
         check_time(self.deadline)?;
+        if let Some(image) = self.campaign.0.scope.0.image.borrow().as_ref() {
+            return Ok(Transport::Artifact(image.clone()));
+        }
         let environment = std::env::vars_os().collect();
         let inputs = match self.observe("initial inventory", || {
-            inventory(&self.campaign.0.source, self.deadline)
+            inventory(&self.campaign.0.scope.0.source, self.deadline)
         }) {
             Ok(inputs) => inputs,
             Err(_) => {
@@ -748,8 +843,8 @@ impl Request {
                 return Ok(Transport::Cargo { inputs: None });
             }
         };
-        if !configuration_allows_reuse(&self.campaign.0.source)
-            || !closed_inputs(&inputs, &self.campaign.0.source)
+        if !configuration_allows_reuse(&self.campaign.0.scope.0.source)
+            || !closed_inputs(&inputs, &self.campaign.0.scope.0.source)
         {
             return Ok(Transport::Cargo {
                 inputs: Some(inputs),
@@ -765,14 +860,14 @@ impl Request {
                 "--message-format=json",
                 "--manifest-path",
             ])
-            .arg(self.campaign.0.source.join("Cargo.toml"))
-            .current_dir(&self.campaign.0.source);
+            .arg(self.campaign.0.scope.0.source.join("Cargo.toml"))
+            .current_dir(&self.campaign.0.scope.0.source);
         let output = self.during("first Cargo provenance build", || {
             self.process("first-provenance-process", &mut build)
         })?;
-        let executable = successful_artifact(&output, &self.campaign.0.source)?;
+        let executable = successful_artifact(&output, &self.campaign.0.scope.0.source)?;
         if self.observe("post-build inventory", || {
-            inventory(&self.campaign.0.source, self.deadline)
+            inventory(&self.campaign.0.scope.0.source, self.deadline)
         })? != inputs
         {
             return Err("source CLI inputs changed during Cargo build".into());
@@ -792,25 +887,28 @@ impl Request {
         let verified = self.during("second Cargo provenance build", || {
             self.process("second-provenance-process", &mut build)
         })?;
-        if successful_artifact(&verified, &self.campaign.0.source)?.as_ref() != Some(&original) {
+        if successful_artifact(&verified, &self.campaign.0.scope.0.source)?.as_ref()
+            != Some(&original)
+        {
             return Err("source Cargo artifact changed during verification".into());
         }
         self.during("reverified artifact SHA-256", || {
             verify_artifact(&original, &identity, self.deadline)
         })?;
         if self.observe("post-acquisition inventory", || {
-            inventory(&self.campaign.0.source, self.deadline)
+            inventory(&self.campaign.0.scope.0.source, self.deadline)
         })? != inputs
         {
             return Err("source CLI inputs changed during artifact acquisition".into());
         }
-        Ok(Transport::Artifact {
+        Ok(Transport::Artifact(Rc::new(VerifiedImage {
             inputs,
             executable,
             identity,
             environment,
+            quarantine: RefCell::new(None),
             _owner: owner,
-        })
+        })))
     }
 
     fn retain_failure<T>(&self, result: Result<T, String>) -> Result<T, String> {
@@ -832,26 +930,22 @@ impl Request {
         self.retain_failure((|| {
             let transport = self.campaign.0.transport.borrow();
             let inputs = match transport.as_ref() {
-                Some(Transport::Artifact {
-                    inputs,
-                    environment,
-                    ..
-                }) => {
-                    if !configuration_allows_reuse(&self.campaign.0.source)
-                        || *environment != std::env::vars_os().collect()
+                Some(Transport::Artifact(image)) => {
+                    if !configuration_allows_reuse(&self.campaign.0.scope.0.source)
+                        || image.environment != std::env::vars_os().collect()
                     {
                         return Err(
                             "source CLI build environment or configuration changed during campaign"
                                 .into(),
                         );
                     }
-                    Some(inputs)
+                    Some(&image.inputs)
                 }
                 Some(Transport::Cargo { inputs }) => inputs.as_ref(),
                 None => None,
             };
             if let Some(inputs) = inputs
-                && &inventory(&self.campaign.0.source, self.deadline)? != inputs
+                && &inventory(&self.campaign.0.scope.0.source, self.deadline)? != inputs
             {
                 return Err("source CLI inputs changed during request".into());
             }
@@ -862,13 +956,8 @@ impl Request {
     fn check_artifact(&self) -> Result<(), String> {
         check_time(self.deadline)?;
         self.retain_failure((|| {
-            if let Some(Transport::Artifact {
-                executable,
-                identity,
-                ..
-            }) = self.campaign.0.transport.borrow().as_ref()
-            {
-                verify_artifact(executable, identity, self.deadline)?;
+            if let Some(Transport::Artifact(image)) = self.campaign.0.transport.borrow().as_ref() {
+                image.verify(self.deadline)?;
             }
             check_time(self.deadline)
         })())
@@ -918,19 +1007,28 @@ impl Request {
         self.verified.set(true);
         self.during("before CLI invocation", || self.check_inputs())?;
         let transport = self.campaign.0.transport.borrow();
+        if let Some(Transport::Artifact(image)) = transport.as_ref() {
+            self.campaign
+                .0
+                .scope
+                .0
+                .image
+                .borrow_mut()
+                .get_or_insert_with(|| image.clone());
+        }
         let mut child = match transport.as_ref().unwrap() {
             Transport::Cargo { .. } => {
                 let mut child = Command::new("cargo");
                 child
                     .args(["run", "--locked", "--quiet", "--manifest-path"])
-                    .arg(self.campaign.0.source.join("Cargo.toml"))
+                    .arg(self.campaign.0.scope.0.source.join("Cargo.toml"))
                     .args(["--bin", "blabla", "--"]);
                 child
             }
-            Transport::Artifact { executable, .. } => Command::new(executable),
+            Transport::Artifact(image) => Command::new(&image.executable),
         };
         child
-            .current_dir(&self.campaign.0.source)
+            .current_dir(&self.campaign.0.scope.0.source)
             .arg("--project")
             .arg(root);
         if json {

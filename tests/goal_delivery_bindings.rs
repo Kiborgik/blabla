@@ -36,6 +36,7 @@ fn serial() -> std::sync::MutexGuard<'static, ()> {
 #[test]
 fn qualified_positive_and_refused_operations_preserve_actual_records() {
     let _guard = serial();
+    let scope = source_cli::ImageScope::new();
     for (kind, action, args, eligibility, positive) in [
         (0, "accept_delivery_assignment", json!([]), "accept", true),
         (2, "accept_delivery_assignment", json!([]), "accept", false),
@@ -112,7 +113,7 @@ fn qualified_positive_and_refused_operations_preserve_actual_records() {
             false,
         ),
     ] {
-        let mut probe = goal_delivery::GoalDelivery::new();
+        let mut probe = goal_delivery::GoalDelivery::with_campaign(scope.campaign());
         call(&mut probe, "delivery_fixture", json!([kind]));
         let before = probe.observe();
         assert_eq!(

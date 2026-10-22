@@ -73,10 +73,10 @@ fn call(probe: &mut ready_receipts::ReadyReceipts, name: &str, args: Value) {
 #[test]
 fn all_finite_fixtures_use_actual_positive_or_zero_effect_refusal_outcomes() {
     let _guard = serial();
-    let campaign = source_cli::Campaign::new();
+    let scope = source_cli::ImageScope::new();
     for reflection in [false, true] {
         for kind in 0..12 {
-            let mut probe = ready_receipts::ReadyReceipts::with_campaign(campaign.clone());
+            let mut probe = ready_receipts::ReadyReceipts::with_campaign(scope.campaign());
             call(&mut probe, "ready_receipt_fixture", json!([kind]));
             let before = probe.observe();
             let eligible = matches!(kind, 0 | 7 | 8 | 10 | 11);
@@ -141,8 +141,9 @@ fn all_finite_fixtures_use_actual_positive_or_zero_effect_refusal_outcomes() {
 #[test]
 fn both_claim_kinds_remember_observed_but_unclaimed_identities() {
     let _guard = serial();
+    let scope = source_cli::ImageScope::new();
     for action in ["refresh_ready_disposition", "refresh_ready_reflection"] {
-        let mut probe = ready_receipts::ReadyReceipts::new();
+        let mut probe = ready_receipts::ReadyReceipts::with_campaign(scope.campaign());
         call(&mut probe, "ready_receipt_fixture", json!([7]));
         call(&mut probe, action, json!([]));
         let observed = probe.observe();
@@ -209,11 +210,12 @@ fn lazy_initialization_and_reset_do_not_invent_a_task_or_a_decision() {
 #[test]
 fn hostile_kinds_are_bounded_and_malformed_arguments_do_not_become_refusals() {
     let _guard = serial();
+    let scope = source_cli::ImageScope::new();
     for kind in [i64::MIN, i64::MAX] {
-        let mut probe = ready_receipts::ReadyReceipts::new();
+        let mut probe = ready_receipts::ReadyReceipts::with_campaign(scope.campaign());
         call(&mut probe, "ready_receipt_fixture", json!([kind]));
         let before = probe.observe();
-        let mut normalized = ready_receipts::ReadyReceipts::new();
+        let mut normalized = ready_receipts::ReadyReceipts::with_campaign(scope.campaign());
         call(
             &mut normalized,
             "ready_receipt_fixture",

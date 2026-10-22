@@ -813,3 +813,359 @@ fn diagnostic_stalled_sink_child() {
     await_diagnostic_delivery();
     assert_eq!(source_cli::diagnostic_publication().writers_started, 1);
 }
+
+fn scoped_source() -> tempfile::TempDir {
+    let source = locked_source();
+    std::fs::write(source.path().join("src/help.md"), "original").unwrap();
+    std::fs::write(
+        source.path().join("src/main.rs"),
+        r#"use std::sync::atomic::{AtomicUsize, Ordering};
+static MEMORY: AtomicUsize = AtomicUsize::new(0);
+fn main() {
+    let args: Vec<_> = std::env::args().collect();
+    if args.iter().any(|arg| arg == "refuse") { std::process::exit(2); }
+    let root = std::path::Path::new(&args[2]);
+    let count = root.join("count");
+    let writes = std::fs::read_to_string(&count).unwrap_or_default().parse::<usize>().unwrap_or(0) + 1;
+    std::fs::write(count, writes.to_string()).unwrap();
+    println!("{{\"writes\":{},\"memory\":{},\"embedded\":{:?}}}", writes, MEMORY.fetch_add(1, Ordering::Relaxed), include_str!("help.md"));
+}
+"#,
+    )
+    .unwrap();
+    source
+}
+
+fn scope_request(campaign: &source_cli::Campaign) -> source_cli::Request {
+    campaign.request(Instant::now() + blabla::runtime::MAX_TIMEOUT)
+}
+
+fn scope_write(request: &source_cli::Request, root: &Path, writes: usize) -> std::path::PathBuf {
+    let (exit, value) = request.invoke(root, &[], true).unwrap();
+    assert_eq!(exit, 0);
+    assert_eq!(
+        value,
+        json!({"writes": writes, "memory": 0, "embedded": "original"})
+    );
+    request.finish().unwrap();
+    request.artifact_path().unwrap()
+}
+
+#[test]
+fn image_scope_is_lazy_and_shares_only_the_image_across_roots_and_processes() {
+    let source = scoped_source();
+    let scope = source_cli::ImageScope::from_source(source.path().to_owned());
+    let first = scope.campaign();
+    let second = scope.campaign();
+    let a = tempfile::TempDir::new().unwrap();
+    let b = tempfile::TempDir::new().unwrap();
+    let unused = scope_request(&first);
+    unused.finish().unwrap();
+    assert!(unused.artifact_path().is_none());
+    assert!(!a.path().join("count").exists());
+    drop(unused);
+
+    let image = scope_write(&scope_request(&first), a.path(), 1);
+    assert_eq!(scope_write(&scope_request(&second), b.path(), 1), image);
+    assert_eq!(scope_write(&scope_request(&second), a.path(), 2), image);
+    let refusal = scope_request(&first);
+    assert_eq!(refusal.invoke(a.path(), &["refuse"], false).unwrap().0, 2);
+    refusal.finish().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(a.path().join("count")).unwrap(),
+        "2"
+    );
+    drop(refusal);
+
+    let independent = source_cli::ImageScope::from_source(source.path().to_owned());
+    let other = independent.campaign();
+    let other_image = scope_write(&scope_request(&other), a.path(), 3);
+    assert_ne!(image, other_image);
+    drop(independent);
+    assert!(other_image.exists());
+    drop(other);
+    assert!(!other_image.exists());
+
+    let last = scope_request(&second);
+    assert_eq!(scope_write(&last, b.path(), 2), image);
+    drop(scope);
+    drop(first);
+    drop(second);
+    assert!(image.exists());
+    last.finish().unwrap();
+    drop(last);
+    assert!(!image.exists());
+}
+
+#[test]
+fn image_scope_source_and_configuration_drift_are_sticky_only_for_the_observer() {
+    let source = scoped_source();
+    let scope = source_cli::ImageScope::from_source(source.path().to_owned());
+    let root = tempfile::TempDir::new().unwrap();
+    let unaffected = scope.campaign();
+    let image = scope_write(&scope_request(&unaffected), root.path(), 1);
+    let mut writes = 1;
+    for configuration in [false, true] {
+        let observer = scope.campaign();
+        let request = scope_request(&observer);
+        writes += 1;
+        assert_eq!(scope_write(&request, root.path(), writes), image);
+        let path = source.path().join(if configuration {
+            ".cargo/config.toml"
+        } else {
+            "src/help.md"
+        });
+        if configuration {
+            std::fs::create_dir(source.path().join(".cargo")).unwrap();
+        }
+        std::fs::write(
+            &path,
+            if configuration {
+                "[env]\nSCOPE_DRIFT='changed'\n"
+            } else {
+                "changed"
+            },
+        )
+        .unwrap();
+        let failure = request.finish().unwrap_err();
+        assert!(failure.contains("changed"), "{failure}");
+        assert!(request.invoke(root.path(), &[], true).is_err());
+        assert!(
+            scope_request(&scope.campaign())
+                .invoke(root.path(), &[], true)
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("count")).unwrap(),
+            writes.to_string()
+        );
+        if configuration {
+            std::fs::remove_dir_all(source.path().join(".cargo")).unwrap();
+        } else {
+            std::fs::write(&path, "original").unwrap();
+        }
+        assert!(
+            scope_request(&observer.clone())
+                .invoke(root.path(), &[], true)
+                .is_err()
+        );
+        writes += 1;
+        assert_eq!(
+            scope_write(&scope_request(&unaffected), root.path(), writes),
+            image
+        );
+        writes += 1;
+        assert_eq!(
+            scope_write(&scope_request(&scope.campaign()), root.path(), writes),
+            image
+        );
+    }
+}
+
+#[test]
+fn image_scope_integrity_quarantine_survives_restoration_for_existing_and_new_borrowers() {
+    for damage in ["same-stamp tamper", "missing", "unreadable"] {
+        let source = scoped_source();
+        let scope = source_cli::ImageScope::from_source(source.path().to_owned());
+        let root = tempfile::TempDir::new().unwrap();
+        let first = scope.campaign();
+        let existing = scope.campaign();
+        let detecting = scope_request(&first);
+        let image = scope_write(&detecting, root.path(), 1);
+        let already_verified = scope_request(&existing);
+        assert_eq!(scope_write(&already_verified, root.path(), 2), image);
+        let bytes = std::fs::read(&image).unwrap();
+        let metadata = std::fs::metadata(&image).unwrap();
+        let modified = metadata.modified().unwrap();
+        if damage != "same-stamp tamper" {
+            std::fs::remove_file(&image).unwrap();
+            if damage == "unreadable" {
+                std::fs::create_dir(&image).unwrap();
+            }
+        } else {
+            let mut changed = bytes.clone();
+            changed[0] ^= 1;
+            std::fs::write(&image, changed).unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&image)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(modified))
+                .unwrap();
+        }
+        assert!(detecting.finish().is_err(), "{damage}");
+        if damage == "unreadable" {
+            std::fs::remove_dir(&image).unwrap();
+        }
+        std::fs::write(&image, bytes).unwrap();
+        std::fs::set_permissions(&image, metadata.permissions()).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&image)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert!(already_verified.finish().is_err());
+        for borrower in [first.clone(), existing.clone(), scope.campaign()] {
+            let request = scope_request(&borrower);
+            assert!(request.invoke(root.path(), &[], true).is_err());
+            assert_eq!(
+                std::fs::read_to_string(root.path().join("count")).unwrap(),
+                "2"
+            );
+        }
+    }
+}
+
+#[test]
+fn image_scope_expired_borrower_does_not_quarantine_a_verified_image() {
+    let source = scoped_source();
+    let scope = source_cli::ImageScope::from_source(source.path().to_owned());
+    let root = tempfile::TempDir::new().unwrap();
+    let expired = scope.campaign();
+    let before = expired.request(Instant::now());
+    assert!(
+        before
+            .invoke(root.path(), &[], true)
+            .unwrap_err()
+            .contains("deadline")
+    );
+    assert!(before.artifact_path().is_none());
+    assert!(!root.path().join("count").exists());
+    let healthy = scope.campaign();
+    let image = scope_write(&scope_request(&healthy), root.path(), 1);
+    let request = expired.request(Instant::now());
+    assert!(
+        request
+            .invoke(root.path(), &[], true)
+            .unwrap_err()
+            .contains("deadline")
+    );
+    assert!(request.finish().unwrap_err().contains("deadline"));
+    assert_eq!(
+        scope_write(&scope_request(&scope.campaign()), root.path(), 2),
+        image
+    );
+    assert_eq!(scope_write(&scope_request(&healthy), root.path(), 3), image);
+}
+
+#[test]
+fn image_scope_cargo_fallback_remains_local_and_does_not_prevent_later_acquisition() {
+    let source = scoped_source();
+    std::fs::create_dir(source.path().join(".cargo")).unwrap();
+    std::fs::write(
+        source.path().join(".cargo/config.toml"),
+        "[env]\nSCOPE_FALLBACK='configured'\n",
+    )
+    .unwrap();
+    let scope = source_cli::ImageScope::from_source(source.path().to_owned());
+    let fallback = scope.campaign();
+    let root = tempfile::TempDir::new().unwrap();
+    let request = scope_request(&fallback);
+    assert_eq!(
+        request.invoke(root.path(), &[], true).unwrap().1["writes"],
+        1
+    );
+    assert!(request.artifact_path().is_none());
+    request.finish().unwrap();
+    std::fs::remove_dir_all(source.path().join(".cargo")).unwrap();
+    assert!(request.finish().unwrap_err().contains("inputs changed"));
+    let image = scope_write(&scope_request(&scope.campaign()), root.path(), 2);
+    assert!(
+        scope_request(&fallback)
+            .invoke(root.path(), &[], true)
+            .is_err()
+    );
+    assert_eq!(
+        scope_write(&scope_request(&scope.campaign()), root.path(), 3),
+        image
+    );
+}
+
+#[test]
+fn image_scope_failed_acquisition_is_not_a_shared_failure_or_a_new_baseline() {
+    let source = scoped_source();
+    let main = source.path().join("src/main.rs");
+    let original = std::fs::read(&main).unwrap();
+    std::fs::write(
+        &main,
+        "compile_error!(\"deliberate acquisition failure\"); fn main() {}\n",
+    )
+    .unwrap();
+    let scope = source_cli::ImageScope::from_source(source.path().to_owned());
+    let failed = scope.campaign();
+    let root = tempfile::TempDir::new().unwrap();
+    let request = scope_request(&failed);
+    assert!(
+        request
+            .invoke(root.path(), &[], true)
+            .unwrap_err()
+            .contains("build failed")
+    );
+    assert!(request.artifact_path().is_none());
+    assert!(!root.path().join("count").exists());
+    std::fs::write(&main, original).unwrap();
+    scope_write(&scope_request(&scope.campaign()), root.path(), 1);
+    assert!(
+        scope_request(&failed)
+            .invoke(root.path(), &[], true)
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("count")).unwrap(),
+        "1"
+    );
+}
+
+#[test]
+fn image_scope_borrowers_do_not_follow_replacement_of_the_original_cargo_output() {
+    let source = scoped_source();
+    let scope = source_cli::ImageScope::from_source(source.path().to_owned());
+    let root = tempfile::TempDir::new().unwrap();
+    let first = scope.campaign();
+    let image = scope_write(&scope_request(&first), root.path(), 1);
+    let output = command::run(
+        Command::new("cargo")
+            .args([
+                "build",
+                "--locked",
+                "--bin",
+                "blabla",
+                "--message-format=json",
+                "--manifest-path",
+            ])
+            .arg(source.path().join("Cargo.toml"))
+            .current_dir(source.path()),
+        Instant::now() + blabla::runtime::MAX_TIMEOUT,
+        2 * 1024 * 1024,
+    )
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let original = source_cli::select_artifact(&output.stdout, source.path())
+        .unwrap()
+        .unwrap();
+    assert_ne!(image, original);
+    let bytes = std::fs::read(&original).unwrap();
+    let metadata = std::fs::metadata(&original).unwrap();
+    std::fs::write(&original, "replacement, not the verified executable").unwrap();
+    let second = scope.campaign();
+    let request = scope_request(&second);
+    let result = request.invoke(root.path(), &[], true);
+    let finished = request.finish();
+    std::fs::write(&original, &bytes).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&original)
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(metadata.modified().unwrap()))
+        .unwrap();
+    assert_eq!(result.unwrap().1["writes"], 2);
+    finished.unwrap();
+    assert_eq!(request.artifact_path(), Some(image.clone()));
+    assert_eq!(std::fs::read(&image).unwrap(), bytes);
+    assert_eq!(scope_write(&scope_request(&first), root.path(), 3), image);
+}
