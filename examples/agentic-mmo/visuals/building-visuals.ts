@@ -28,7 +28,8 @@ const APPEARANCES: Record<string, { icon: VisualIcon; label: string; corePartIds
     icon: 'infrastructure', label: 'Launch complex', corePartIds: ['launchpad-gantry', 'launchpad-apron', 'launchpad-service-arm'], parts: (detail) => [
       part('launchpad-apron', 'cylinder', 'stone', [-.94, .075, .87], [1.05, .15, 1.05]),
       part('launchpad-gantry', 'box', 'metal', [-1.22, .79, .54], [.15, 1.58, .2]),
-      ...(detail === 'far' ? [] : [part('launchpad-service-arm', 'box', 'metal', [-.99, 1.48, .54], [.59, .12, .18]), part('launchpad-pad', 'cylinder', 'water', [-.9, .16, .94], [.58, .025, .58]), part('launchpad-gantry-foot', 'box', 'stone', [-1.22, .16, .54], [.33, .2, .33])]),
+      part('launchpad-service-arm', 'box', 'metal', [-.99, 1.48, .54], [.59, .12, .18]),
+      ...(detail === 'far' ? [] : [part('launchpad-pad', 'cylinder', 'water', [-.9, .16, .94], [.58, .025, .58]), part('launchpad-gantry-foot', 'box', 'stone', [-1.22, .16, .54], [.33, .2, .33])]),
       ...(detail === 'close' ? [part('launchpad-service-tank', 'cylinder', 'plaster', [-1.34, .37, 1.23], [.24, .58, .24]), part('launchpad-gantry-crossbar', 'box', 'grain', [-1.22, .85, .66], [.16, .09, .03])] : []),
     ],
   },
@@ -81,8 +82,11 @@ const APPEARANCES: Record<string, { icon: VisualIcon; label: string; corePartIds
   },
   academy: {
     icon: 'academy', label: 'House of learning', corePartIds: ['academy-roof'], parts: (detail) => [
-      part('academy-roof', 'gable', 'plaster', [-.86, .55, 1.3], [.86, .3, .55]),
-      ...(detail === 'far' ? [] : [part('academy-wall', 'box', 'stone', [-.86, .2, 1.3], [.74, .4, .46]), part('academy-door', 'box', 'timber', [-.86, .16, 1.54], [.18, .32, .03])]),
+      part('academy-roof', 'gable', 'plaster', [-.86, .65, 1.3], [.96, .3, .65]),
+      part('academy-wall', 'box', 'stone', [-.86, .25, 1.25], [.74, .5, .46]),
+      part('academy-portico-left', 'box', 'plaster', [-1.17, .26, 1.58], [.1, .52, .1]),
+      part('academy-portico-right', 'box', 'plaster', [-.55, .26, 1.58], [.1, .52, .1]),
+      ...(detail === 'far' ? [] : [part('academy-door', 'box', 'timber', [-.86, .16, 1.54], [.18, .32, .03])]),
       ...(detail === 'close' ? [part('academy-tablet-left', 'box', 'grain', [-1.03, .47, 1.55], [.16, .17, .03]), part('academy-tablet-right', 'box', 'grain', [-.85, .47, 1.55], [.16, .17, .03])] : []),
     ],
   },
@@ -97,6 +101,8 @@ const APPEARANCES: Record<string, { icon: VisualIcon; label: string; corePartIds
     icon: 'boat-yard', label: 'Boat yard', corePartIds: ['boat-yard-slipway', 'boat-yard-roof'], parts: (detail) => [
       part('boat-yard-slipway', 'box', 'timber', [1.22, .08, -.32], [.62, .16, .76]),
       part('boat-yard-roof', 'gable', 'plaster', [1.22, .46, -.47], [.68, .28, .4]),
+      part('boat-yard-davit', 'box', 'timber', [1.48, .51, -.02], [.08, .88, .09]),
+      part('boat-yard-davit-arm', 'box', 'timber', [1.26, .94, -.02], [.52, .07, .09]),
       ...(detail === 'far' ? [] : [part('boat-yard-post-left', 'box', 'timber', [.99, .22, -.47], [.07, .44, .07]), part('boat-yard-post-right', 'box', 'timber', [1.45, .22, -.47], [.07, .44, .07])]),
       ...(detail === 'close' ? [part('boat-yard-rail-left', 'box', 'grain', [1.02, .18, -.08], [.06, .04, .42]), part('boat-yard-rail-right', 'box', 'grain', [1.42, .18, -.08], [.06, .04, .42])] : []),
     ],
@@ -152,4 +158,21 @@ export function installedBuildingBadges(ids: readonly string[]): Array<{ icon: V
     icon: building.id === 'coal-plant' ? 'energy' as const : building.production.science ? 'science' as const : building.production.culture ? 'culture' as const : building.production.credits ? 'credits' as const : 'infrastructure' as const,
     label: building.name, value: 1,
   }))];
+}
+
+export interface BuildingSite { x: number; z: number; width: number; depth: number; height: number }
+
+export function placeBuildingParts(parts: readonly VisualPart[], reference: readonly VisualPart[], site: BuildingSite): VisualPart[] {
+  if (!reference.length) return [];
+  const bounds = (axis: 0 | 2): [number, number] => [
+    Math.min(...reference.map(part => part.position[axis] - (part.scale[axis] * Math.abs(Math.cos(part.rotation)) + part.scale[axis === 0 ? 2 : 0] * Math.abs(Math.sin(part.rotation))) / 2)),
+    Math.max(...reference.map(part => part.position[axis] + (part.scale[axis] * Math.abs(Math.cos(part.rotation)) + part.scale[axis === 0 ? 2 : 0] * Math.abs(Math.sin(part.rotation))) / 2)),
+  ];
+  const [left, right] = bounds(0);
+  const [back, front] = bounds(2);
+  const horizontal = Math.min(site.width / Math.max(.01, right - left), site.depth / Math.max(.01, front - back));
+  return parts.map(part => ({ ...part,
+    position: [site.x + (part.position[0] - (left + right) / 2) * horizontal, part.position[1] * site.height, site.z + (part.position[2] - (back + front) / 2) * horizontal],
+    scale: [part.scale[0] * horizontal, part.scale[1] * site.height, part.scale[2] * horizontal],
+  }));
 }

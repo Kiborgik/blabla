@@ -147,19 +147,20 @@ await test('every displayed metric uses an original semantic icon path and a wor
   }
 });
 
-await test('irrigation and kiln reuse original solids and remain within every active detail budget', () => {
+await test('recipe inventories stay complete while each selected irrigation or kiln remains recognizable', () => {
   for (const detail of ['far', 'mid', 'close'] as const) {
     const all = settlementVisual({ ...city, population: 100, buildings: ['farm', 'workshop', 'irrigation', 'kiln'] }, detail);
-    assert.deepEqual(all.buildings.map((entry) => entry.icon), ['farm', 'workshop', 'irrigation', 'kiln']);
-    assert.ok(all.parts.some((entry) => entry.id === 'irrigation-cistern'));
-    assert.ok(all.parts.some((entry) => entry.id === 'irrigation-basin'));
-    assert.ok(all.parts.some((entry) => entry.id === 'kiln-body' && entry.shape === 'cylinder'));
-    assert.ok(all.parts.some((entry) => entry.id === 'kiln-opening'));
+    assert.deepEqual(all.buildings.map(entry => entry.icon), ['farm', 'workshop', 'irrigation', 'kiln']);
     assert.ok(all.parts.length <= DETAIL_BUDGETS[detail].parts);
-    assert.equal(new Set(all.parts.map((entry) => entry.id)).size, all.parts.length);
-    assert.ok(all.parts.every((entry) => [...entry.position, ...entry.scale, entry.rotation].every(Number.isFinite)));
-    if (detail === 'close') assert.ok(all.parts.some((entry) => entry.id === 'irrigation-gate'));
-    if (detail === 'far') assert.ok(!all.parts.some((entry) => entry.id === 'kiln-flue'));
+    for (const id of ['irrigation', 'kiln']) {
+      const selected = settlementVisual({ ...city, buildings: [id] }, detail);
+      assert.deepEqual(selected.landmarks, [id]);
+      assert.ok(selected.parts.some(entry => entry.id === `${id}-${id === 'kiln' ? 'body' : 'cistern'}`));
+      assert.ok(selected.parts.some(entry => entry.id === `${id}-${id === 'kiln' ? 'opening' : 'basin'}`));
+      assert.ok(selected.parts.length <= DETAIL_BUDGETS[detail].parts);
+      assert.equal(new Set(selected.parts.map(entry => entry.id)).size, selected.parts.length);
+      assert.ok(selected.parts.every(entry => [...entry.position, ...entry.scale, entry.rotation].every(Number.isFinite)));
+    }
   }
 });
 
@@ -282,28 +283,29 @@ await test('repair cues use the clamped damage change and exact paid inputs with
 
 const BUILT_FAMILIES = ['farm', 'workshop', 'irrigation', 'kiln', 'academy', 'monument', 'fuel-yard'];
 
-await test('every built family and current damage survive core-first allocation at all detail budgets', () => {
+await test('every installed fact and current damage survive selective compact landmark allocation', () => {
   const source = { ...city, population: 10000, damage: 35, buildings: [...BUILT_FAMILIES] };
   const before = structuredClone(source);
   for (const detail of ['far', 'mid', 'close'] as const) {
-    const appearances = buildingAppearances(source.buildings, detail);
     const visual = settlementVisual(source, detail);
+    const appearances = buildingAppearances(visual.landmarks, detail);
     assert.deepEqual(visual.buildings.map((entry) => entry.icon), BUILT_FAMILIES);
-    assert.equal(visual.parts.length, DETAIL_BUDGETS[detail].parts);
-    assert.equal(visual.houses, DETAIL_BUDGETS[detail].houses);
+    assert.ok(visual.parts.length <= DETAIL_BUDGETS[detail].parts);
+    assert.ok(visual.houses >= 1 && visual.houses <= DETAIL_BUDGETS[detail].houses);
+    assert.equal(visual.landmarks.length + visual.summarizedBuildings.length, BUILT_FAMILIES.length);
     assert.equal(visual.population, source.population);
     assert.equal(visual.conditions.find((entry) => entry.icon === 'damage')?.value, 35);
     for (const appearance of appearances) {
       for (const id of appearance.corePartIds) assert.ok(visual.parts.some((entry) => entry.id === id), `${detail}: ${id}`);
     }
-    assert.deepEqual(visual.parts.filter((entry) => entry.id.startsWith('damage-')), damageParts(35));
+    assert.deepEqual(visual.parts.filter(entry => entry.id.startsWith('damage-')).map(entry => entry.id), damageParts(35).map(entry => entry.id));
     assert.equal(new Set(visual.parts.map((entry) => entry.id)).size, visual.parts.length);
     for (const part of visual.parts) {
       assert.ok([...part.position, ...part.scale, part.rotation].every(Number.isFinite));
       const c = Math.abs(Math.cos(part.rotation));
       const s = Math.abs(Math.sin(part.rotation));
-      assert.ok(Math.abs(part.position[0]) + (part.scale[0] * c + part.scale[2] * s) / 2 <= 1.65);
-      assert.ok(Math.abs(part.position[2]) + (part.scale[2] * c + part.scale[0] * s) / 2 <= 1.65);
+      assert.ok(Math.abs(part.position[0]) + (part.scale[0] * c + part.scale[2] * s) / 2 <= .96);
+      assert.ok(Math.abs(part.position[2]) + (part.scale[2] * c + part.scale[0] * s) / 2 <= .96);
     }
   }
   assert.deepEqual(source, before);
@@ -320,7 +322,7 @@ await test('all building subsets have stable identity and geometry independent o
       assert.deepEqual(reversed, expected);
       assert.deepEqual(duplicated, expected);
       assert.ok(expected.parts.length <= DETAIL_BUDGETS[detail].parts);
-      for (const appearance of buildingAppearances(buildings, detail)) {
+      for (const appearance of buildingAppearances(expected.landmarks, detail)) {
         assert.ok(appearance.corePartIds.every((id) => expected.parts.some((entry) => entry.id === id)));
       }
     }

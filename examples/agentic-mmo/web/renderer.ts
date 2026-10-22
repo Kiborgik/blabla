@@ -1,3 +1,4 @@
+import { civilizationIdentity } from '../visuals/visual-language.ts';
 import { selectedAcquiredLand } from '../visuals/territory-visuals.ts';
 import { allocateMapHierarchy, mapContentWindow } from '../visuals/map-hierarchy.ts';
 import { MAP_ZOOM } from './viewer-state.ts';
@@ -254,7 +255,15 @@ export function createAtlasRenderer(
     element.style.setProperty('--civ-color', city.color);
     const title = document.createElement('strong');
     title.textContent = city.capital;
-    const badge = document.createElement('span'); badge.className = 'map-town-badge'; badge.setAttribute('aria-hidden', 'true'); badge.textContent = city.name.slice(0, 1);
+    const badge = document.createElement('span'); badge.className = 'map-town-badge'; badge.setAttribute('aria-hidden', 'true');
+    const identity = civilizationIdentity(city.id);
+    const crest = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    crest.setAttribute('viewBox', '0 0 24 24'); crest.setAttribute('width', '16'); crest.setAttribute('height', '16');
+    crest.style.width = '66%'; crest.style.height = '66%'; crest.dataset['crest'] = identity.crest;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', identity.path); path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.8'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+    crest.append(path); badge.append(crest);
     title.className = 'map-caption';
     element.append(badge, title);
     element.setAttribute('aria-label', `Inspect ${city.name}, ${damageMapLabel(city.capital, city.settlement?.damage ?? 0)}`);
@@ -444,8 +453,8 @@ export function createAtlasRenderer(
     const left = new THREE.Vector3(-1, 0, 0).project(camera);
     const right = new THREE.Vector3(1, 0, 0).project(camera);
     const tilePixels = Math.hypot((right.x - left.x) * container.clientWidth / 2, (right.y - left.y) * container.clientHeight / 2);
-    const detail = settlements.update(tilePixels);
-    landscapeMeshes.update(tilePixels);
+    settlements.update(tilePixels);
+    const detail = landscapeMeshes.update(tilePixels);
     districtMeshes.update(tilePixels);
     improvementMeshes.update(tilePixels);
     depositMeshes.update(tilePixels);

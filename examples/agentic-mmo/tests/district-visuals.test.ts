@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createWorld } from '../core/engine.ts';
 import { projectWorld } from '../web/live-world.ts';
-import { districtCaptionPlacement, districtParts, districtLabel, DISTRICT_PART_BUDGETS } from '../visuals/district-visuals.ts';
+import { districtCaptionPlacement, districtParts, districtLabel, districtLandmarks, DISTRICT_PART_BUDGETS } from '../visuals/district-visuals.ts';
 import type { DistrictView } from '../visuals/district-visuals.ts';
 import { createDistrictMeshes } from '../web/settlement-three.ts';
 import { createLandscapeMeshes } from '../web/landscape-three.ts';
@@ -110,7 +110,7 @@ await test('shared district geometry batches at its exact site and clears only c
   assert.ok(district);
   const material = new THREE.MeshBasicMaterial();
   const layer = createDistrictMeshes(world, () => material);
-  assert.equal(layer.update(60), 'close');
+  assert.equal(layer.update(110), 'close');
   const meshes = layer.group.children.filter(child => child instanceof THREE.InstancedMesh);
   assert.equal(meshes.reduce((sum, mesh) => sum + mesh.count, 0), districtParts(district, 'close').length);
   assert.ok(meshes.every(mesh => mesh.boundingSphere !== null));
@@ -143,7 +143,7 @@ await test('worked-site captions use the narrow gap between a header and town wi
   assert.equal(placed.y, 145);
 });
 
-await test('late industrial and scientific attachments remain recognizable at their actual district under every budget', () => {
+await test('late industrial and scientific landmarks summarize exact installed attachments at their actual district', () => {
   const { state, city } = fixture();
   city.buildings = ['campus', 'library', 'university', 'observatory', 'research-lab', 'industrial-zone', 'guild-workshop', 'foundry', 'coal-plant', 'factory'];
   city.districtSites = { campus: 39, 'industrial-zone': 56 };
@@ -162,8 +162,13 @@ await test('late industrial and scientific attachments remain recognizable at th
       assert.ok(parts.every(part => [...part.position, ...part.scale, part.rotation].every(Number.isFinite)));
       assert.deepEqual(districtParts({ ...districtView, attachments: districtView.attachments?.toReversed() ?? [] }, detail), parts);
     }
-    for (const id of ['coal-plant-stack', 'factory-roof', 'guild-roof', 'foundry-cap']) assert.ok(districtParts(industrial, detail).some(part => part.id.endsWith(`:${id}`)), `${detail}: ${id}`);
-    for (const id of ['research-lab-block', 'library-roof', 'university-roof', 'observatory-crown']) assert.ok(districtParts(campus, detail).some(part => part.id.endsWith(`:${id}`)), `${detail}: ${id}`);
+    for (const id of ['coal-plant-stack', 'factory-roof']) assert.ok(districtParts(industrial, detail).some(part => part.id.endsWith(`:${id}`)), `${detail}: ${id}`);
+    assert.ok(districtParts(campus, detail).some(part => part.id.endsWith(':observatory-crown')));
+    const represented = districtLandmarks(campus, detail);
+    assert.equal(represented.length, detail === 'far' ? 1 : detail === 'mid' ? 2 : 4);
+    for (const [building, part] of [['research-lab', 'research-lab-block'], ['library', 'library-roof'], ['university', 'university-roof']] as const) {
+      assert.equal(districtParts(campus, detail).some(entry => entry.id.endsWith(`:${part}`)), represented.includes(building));
+    }
   }
 });
 

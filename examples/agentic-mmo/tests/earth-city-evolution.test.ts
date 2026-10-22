@@ -27,8 +27,8 @@ await test('towns in one global era keep materially different locally earned for
   assert.equal(new Set(visuals.map(value => JSON.stringify(value.parts))).size, 4);
   assert.ok(visuals[0]?.parts.some(part => part.id === 'home-hearth' && part.material === 'stone'));
   assert.ok(visuals[0]?.parts.some(part => part.id === 'home-0-roof' && part.shape === 'cone'));
-  assert.ok(visuals[1]?.parts.some(part => part.id === 'home-0-wall' && part.material === 'stone'));
-  assert.ok(visuals[2]?.parts.some(part => part.id === 'home-0-roof' && part.shape === 'box'));
+  assert.ok(visuals[1]?.parts.some(part => part.id === 'home-0-wall' && part.material === 'plaster'));
+  assert.ok(visuals[2]?.parts.some(part => part.id === 'home-0-roof' && part.material === 'identity'));
   assert.ok(visuals[3]?.parts.some(part => part.id === 'launchpad-gantry'));
   assert.ok(visuals.every(value => !value.parts.some(part => /rocket|plume/.test(part.id))));
   assert.deepEqual(state, before);
@@ -98,7 +98,7 @@ await test('only fresh enabled productive operation earns town smoke; paused, sh
   assert.equal(currentBuildingOperation({ ...active, round: Number.NaN }, 'kiln'), null);
 });
 
-await test('all installed standalone assets and exact counts survive finite full-building budgets', () => {
+await test('representative standalone landmarks and complete exact inventory survive finite full-building budgets', () => {
   const buildings = BUILDINGS.map(building => building.id);
   const input = { ...city, population: 10000, damage: 35, buildings };
   const before = structuredClone(input);
@@ -109,8 +109,10 @@ await test('all installed standalone assets and exact counts survive finite full
     assert.equal(visual.population, input.population);
     assert.equal(visual.buildings.length, BUILDINGS.length);
     assert.ok(visual.buildings.every(entry => entry.value === 1));
-    for (const id of ['launchpad-gantry', 'granary-silo', 'aqueduct-channel', 'farm-soil']) assert.ok(visual.parts.some(part => part.id === id), `${detail}: ${id}`);
-    if (detail !== 'far') assert.ok(visual.parts.some(part => part.id === 'launchpad-service-arm'));
+    assert.equal(visual.landmarks.length, detail === 'far' ? 1 : detail === 'mid' ? 2 : 3);
+    assert.equal(visual.summarizedBuildings.length + visual.landmarks.length, BUILDINGS.length);
+    assert.ok(visual.parts.some(part => part.id === 'launchpad-gantry'));
+    assert.ok(visual.parts.some(part => part.id === 'launchpad-service-arm'));
     assert.ok(!visual.parts.some(part => /^(factory|coal-plant|research-lab|campus|foundry|observatory)-/.test(part.id)));
     assert.equal(new Set(visual.parts.map(part => part.id)).size, visual.parts.length);
     assert.ok(visual.parts.every(part => [...part.position, ...part.scale, part.rotation].every(Number.isFinite)));
@@ -130,7 +132,7 @@ await test('flat faces and actual WebGL instance matrices consume the identical 
   const meshes = createSettlementMeshes(world, () => material);
   const origin = hexPosition(town.q, town.r);
   const floor = world.tiles.find(tile => tile.q === town.q && tile.r === town.r)?.height ?? .4;
-  for (const [pixels, detail] of [[18, 'far'], [35, 'mid'], [60, 'close']] as const) {
+  for (const [pixels, detail] of [[24, 'far'], [60, 'mid'], [110, 'close']] as const) {
     meshes.update(pixels);
     const parts = settlementVisual(town.settlement!, detail).parts;
     const faces = flatSceneFaces(parts);

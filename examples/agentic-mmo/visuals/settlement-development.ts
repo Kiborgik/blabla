@@ -1,6 +1,7 @@
 import { BUILDINGS } from '../core/content.ts';
 import type { BuildingOperationResult, City, Resources } from '../core/types.ts';
-import { buildingAppearance } from './building-visuals.ts';
+import { buildingAppearance, buildingAppearances } from './building-visuals.ts';
+import type { BuildingAppearance } from './building-visuals.ts';
 import type { SettlementFacts, VisualPart } from './world-visuals.ts';
 import type { DetailLevel } from './visual-language.ts';
 
@@ -31,6 +32,21 @@ export function settlementDevelopment(city: Pick<SettlementFacts, 'buildings'>):
   const civic = CIVIC.filter(id => built.has(id));
   if (civic.length) return { stage: 'civic', label: 'Civic town', evidence: civic };
   return { stage: 'primitive', label: 'Hearth settlement', evidence: [] };
+}
+
+export function settlementLandmarks(city: SettlementFacts, detail: DetailLevel, reservedConstruction = false): BuildingAppearance[] {
+  const preferred = [
+    ['academy', 'aqueduct', 'monument', 'granary'],
+    ['farm', 'water-mill', 'irrigation', 'granary'],
+    ['workshop', 'kiln', 'fuel-yard', 'aqueduct'],
+    ['boat-yard', 'water-mill', 'granary', 'irrigation'],
+    ['academy', 'monument', 'aqueduct', 'kiln'],
+  ][((city.civId % 5) + 5) % 5] ?? [];
+  const priority = ['launchpad', ...preferred, 'boat-yard', 'academy', 'workshop', 'kiln', 'water-mill', 'aqueduct', 'granary', 'farm', 'irrigation', 'monument', 'fuel-yard'];
+  const count = detail === 'far' ? 1 : detail === 'mid' ? 2 : 3;
+  return buildingAppearances(city.buildings, detail)
+    .toSorted((left, right) => priority.indexOf(left.id) - priority.indexOf(right.id))
+    .slice(0, Math.max(1, count - Number(reservedConstruction)));
 }
 
 export function currentBuildingOperation(context: OperationContext, buildingId: string): BuildingOperationResult | null {

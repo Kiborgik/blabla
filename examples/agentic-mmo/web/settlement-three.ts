@@ -3,13 +3,13 @@ import { depositParts } from '../visuals/strategic-resource-visuals.ts';
 import * as THREE from 'three';
 import type { AtlasWorld } from './atlas.ts';
 import { hexPosition } from './atlas.ts';
-import { settlementVisual, SETTLEMENT_RENDER_SCALE, VISUAL_PALETTE, visualDetail } from '../visuals/world-visuals.ts';
+import { settlementVisual, SETTLEMENT_RENDER_SCALE, VISUAL_PALETTE, visualDetail, settlementDetail } from '../visuals/world-visuals.ts';
 import type { DetailLevel, VisualPart } from '../visuals/world-visuals.ts';
 import { shapeTriangles } from './settlement-parts.ts';
 import { improvementParts } from '../visuals/improvement-visuals.ts';
 import { districtParts } from '../visuals/district-visuals.ts';
 
-export function createPartMeshes(project: (detail: DetailLevel) => Array<{ part: VisualPart; color: string }>, material: (color: string) => THREE.Material): {
+export function createPartMeshes(project: (detail: DetailLevel) => Array<{ part: VisualPart; color: string }>, material: (color: string) => THREE.Material, resolveDetail: typeof visualDetail = visualDetail): {
   group: THREE.Group; update: (tilePixels: number) => DetailLevel; dispose: () => void;
 } {
   const group = new THREE.Group();
@@ -22,7 +22,7 @@ export function createPartMeshes(project: (detail: DetailLevel) => Array<{ part:
   return {
     group,
     update: (tilePixels) => {
-      const next = visualDetail(tilePixels, detail);
+      const next = resolveDetail(tilePixels, detail);
       if (next === detail) return next;
       detail = next;
       clear();
@@ -69,7 +69,7 @@ export function createSettlementMeshes(world: AtlasWorld, material: (color: stri
       part: { ...part, position: [origin.x + part.position[0] * SETTLEMENT_RENDER_SCALE, floor + part.position[1] * SETTLEMENT_RENDER_SCALE, origin.z + part.position[2] * SETTLEMENT_RENDER_SCALE],
         scale: [part.scale[0] * SETTLEMENT_RENDER_SCALE, part.scale[1] * SETTLEMENT_RENDER_SCALE, part.scale[2] * SETTLEMENT_RENDER_SCALE] },
     }));
-  }), material);
+  }), material, settlementDetail);
 }
 
 export function createDistrictMeshes(world: AtlasWorld, material: (color: string) => THREE.Material): ReturnType<typeof createPartMeshes> {
@@ -79,7 +79,7 @@ export function createDistrictMeshes(world: AtlasWorld, material: (color: string
       color: part.material === 'identity' ? district.color : VISUAL_PALETTE[part.material],
       part: { ...part, position: [origin.x + part.position[0], district.height + part.position[1], origin.z + part.position[2]] },
     }));
-  }), material);
+  }), material, settlementDetail);
 }
 
 export function createImprovementMeshes(world: AtlasWorld, material: (color: string) => THREE.Material): ReturnType<typeof createPartMeshes> {

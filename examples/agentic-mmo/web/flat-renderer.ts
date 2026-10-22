@@ -17,7 +17,8 @@ import type { AtlasRenderer } from './renderer.ts';
 import type { ViewerPreferences } from './viewer-state.ts';
 import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor, unobscuredInspectionAnchor } from './inspection-camera.ts';
-import { settlementVisual, SETTLEMENT_RENDER_SCALE, VISUAL_PALETTE, visualDetail } from '../visuals/world-visuals.ts';
+import { settlementVisual, SETTLEMENT_RENDER_SCALE, VISUAL_PALETTE, visualDetail, settlementDetail } from '../visuals/world-visuals.ts';
+import { civilizationIdentity } from '../visuals/visual-language.ts';
 import type { DetailLevel } from '../visuals/world-visuals.ts';
 import { flatMapPoint, flatSceneFaces } from './settlement-parts.ts';
 import { createWorldCues } from './world-cues.ts';
@@ -109,7 +110,8 @@ export function createFlatAtlasRenderer(
   const districtNodes: Array<{ element: SVGGElement; parts: SVGGElement; hit: SVGCircleElement; label: SVGTextElement; leader: SVGLineElement; mark: SVGGElement; markLeader: SVGLineElement; index: number; placed: boolean }> = [];
   const settlements: Array<{ element: SVGGElement; index: number }> = [];
   let detail: DetailLevel | undefined;
-  const cityNodes: Array<{ id: string; element: SVGGElement; hit: SVGCircleElement; ring: SVGCircleElement; marker: SVGTextElement; label: SVGTextElement; banner: SVGRectElement; leader: SVGLineElement }> = [];
+  let townDetail: DetailLevel | undefined;
+  const cityNodes: Array<{ id: string; element: SVGGElement; hit: SVGCircleElement; ring: SVGCircleElement; marker: SVGPathElement; label: SVGTextElement; banner: SVGRectElement; leader: SVGLineElement }> = [];
   const initialCity = selectedCity(world, preferences);
   let selected = initialCity ? cityKey(initialCity) : '';
   let zoom = preferences.zoom;
@@ -220,8 +222,8 @@ export function createFlatAtlasRenderer(
     settlementShapes.append(settlement);
     const leader = node('line', { stroke: city.color, 'stroke-width': '1', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
     group.append(leader, hit, ring);
-    const marker = node('text', { 'text-anchor': 'middle', y: '0.24', fill: '#fff5d8', 'font-size': '0.7', 'font-family': 'Arial, sans-serif' });
-    marker.textContent = city.name.slice(0, 1);
+    const identity = civilizationIdentity(city.id);
+    const marker = node('path', { d: identity.path, fill: 'none', stroke: '#fff5d8', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', 'data-crest': identity.crest });
     group.append(marker);
     const label = node('text', { 'text-anchor': 'middle', y: '1.45', fill: '#fff5d8', 'font-size': '0.55', 'font-family': 'Arial, sans-serif', stroke: '#173a3c', 'stroke-width': '0.11', 'paint-order': 'stroke' });
     label.textContent = damageMapLabel(city.capital, city.settlement?.damage ?? 0);
@@ -249,22 +251,27 @@ export function createFlatAtlasRenderer(
     svg.setAttribute('viewBox', `${x - halfHeight * aspect} ${z * .72 - halfHeight} ${halfHeight * aspect * 2} ${halfHeight * 2}`);
     const pixelsPerUnit = container.clientHeight / (halfHeight * 2);
     const nextDetail = visualDetail(pixelsPerUnit * 2, detail);
-    if (nextDetail !== detail) {
+    const nextTownDetail = settlementDetail(pixelsPerUnit * 2, townDetail);
+    if (nextDetail !== detail || nextTownDetail !== townDetail) {
       detail = nextDetail;
+      townDetail = nextTownDetail;
+      svg.dataset['townDetail'] = townDetail;
       svg.dataset['detail'] = detail;
       paintParts(terrain, projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? []), ...(world.improvements ?? []), ...(world.wonders ?? [])], detail).parts, VISUAL_PALETTE.stone);
       for (const entry of depositNodes) { const deposit = world.deposits?.[entry.index]; if (deposit) paintParts(entry.parts, depositParts(deposit, detail), VISUAL_PALETTE.metal); }
       for (const entry of districtNodes) {
         const district = sites[entry.index];
-        if (district) paintParts(entry.parts, district.parts(detail), district.color);
+        if (district) paintParts(entry.parts, district.parts(district.kind === 'district' ? townDetail : detail), district.color);
       }
       for (const entry of settlements) {
         const city = world.cities[entry.index];
         if (!city?.settlement) continue;
-        const visual = settlementVisual(city.settlement, detail);
+        const visual = settlementVisual(city.settlement, townDetail);
         entry.element.replaceChildren();
         entry.element.dataset['houses'] = String(visual.houses);
         entry.element.dataset['buildings'] = city.settlement.buildings.join(' ');
+        entry.element.dataset['landmarks'] = visual.landmarks.join(' ');
+        entry.element.dataset['summarizedBuildings'] = String(visual.summarizedBuildings.length);
         paintParts(entry.element, visual.parts, city.color);
       }
     }
@@ -293,8 +300,8 @@ export function createFlatAtlasRenderer(
       city.ring.setAttribute('r', String(placement.symbolSize / 2 / pixelsPerUnit));
       city.ring.setAttribute('cx', String(dx)); city.ring.setAttribute('cy', String(dy));
       city.ring.setAttribute('stroke-width', String(2 / pixelsPerUnit));
-      city.marker.setAttribute('font-size', String(12 / pixelsPerUnit));
-      city.marker.setAttribute('x', String(dx)); city.marker.setAttribute('y', String(dy + 4 / pixelsPerUnit));
+      const crestSize = placement.symbolSize * .66 / pixelsPerUnit;
+      city.marker.setAttribute('transform', `translate(${dx - crestSize / 2} ${dy - crestSize / 2}) scale(${crestSize / 24})`);
       city.leader.setAttribute('x2', String(dx)); city.leader.setAttribute('y2', String(dy));
       city.label.style.visibility = placement.label ? 'visible' : 'hidden';
       city.banner.style.visibility = placement.label ? 'visible' : 'hidden';

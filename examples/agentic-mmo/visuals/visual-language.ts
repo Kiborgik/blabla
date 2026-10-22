@@ -55,3 +55,19 @@ export function visualDetail(tileDiameterPixels: number, previous?: DetailLevel)
   if (previous === 'mid' && size >= 22 && size < 52) return 'mid';
   return size < 24 ? 'far' : size < 48 ? 'mid' : 'close';
 }
+
+export const CIVILIZATION_IDENTITIES = [
+  { name: 'Aster', crest: 'Star', path: 'M12 2L14.5 8.5L21 12L14.5 14.5L12 22L9.5 14.5L3 12L9.5 8.5Z', wall: 'plaster', roof: 'identity', roofShape: 'gable', roofHeight: .24, rotation: 0 },
+  { name: 'Verdant', crest: 'Leaf', path: 'M20 3C9 2 3 7 4 14C5 21 13 23 18 16C21 12 20 7 20 3ZM5 20L16 8M10 15L9 10M10 15L16 15', wall: 'timber', roof: 'canopy', roofShape: 'gable', roofHeight: .3, rotation: Math.PI / 2 },
+  { name: 'Ember', crest: 'Flame', path: 'M12 2C13 8 20 10 20 16C20 24 4 24 4 16C4 12 7 9 9 7C8 12 11 13 12 2ZM12 13C10 17 9 17 10 20C12 23 16 20 14 17Z', wall: 'stone', roof: 'roof', roofShape: 'gable', roofHeight: .32, rotation: 0 },
+  { name: 'Pelagos', crest: 'Wave', path: 'M2 10C7 2 17 3 18 10C18 14 12 15 11 11C15 12 15 8 12 8C8 8 7 15 2 16M2 20C6 17 8 23 12 20C16 17 18 23 22 20', wall: 'plaster', roof: 'identity', roofShape: 'box', roofHeight: .09, rotation: 0 },
+  { name: 'Vesper', crest: 'Crescent', path: 'M18 3A10 10 0 1 0 21 17A9 9 0 0 1 18 3ZM19 5V9M17 7H21', wall: 'rockLight', roof: 'identity', roofShape: 'cone', roofHeight: .33, rotation: 0 },
+] as const;
+
+export function civilizationIdentity(civId: number): typeof CIVILIZATION_IDENTITIES[number] {
+  return CIVILIZATION_IDENTITIES[((Math.trunc(civId) % CIVILIZATION_IDENTITIES.length) + CIVILIZATION_IDENTITIES.length) % CIVILIZATION_IDENTITIES.length] ?? CIVILIZATION_IDENTITIES[0];
+}
+
+export function settlementDetail(tileDiameterPixels: number, previous?: DetailLevel): DetailLevel {
+  return visualDetail(tileDiameterPixels * .62, previous);
+}
