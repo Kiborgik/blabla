@@ -5,6 +5,13 @@ import type {
   Resources, StrategicResource, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe, ImprovementDefinition, WonderDefinition,
 } from './types.ts';
 
+export const SPACEFLIGHT_RULES = {
+  ruleVersion: 1, featureId: 'interplanetary-logistics', minimumSourcePopulation: 3, settlers: 3, flightRounds: 4,
+  settle: { launchCost: { materials: 36, energy: 24, credits: 60 }, cargo: { food: 18, materials: 48, energy: 40 } },
+  resupply: { launchCost: { materials: 18, energy: 16, credits: 36 }, cargo: { food: 24, materials: 24, energy: 40 } },
+  habitat: { workPerBeat: 25, requiredWork: 100, costPerBeat: { materials: 10, energy: 4 } },
+  shortage: { populationLossEvery: 2, populationLoss: 1 },
+} as const;
 export const CIVIC_RULES = { ruleVersion: 1, featureId: 'civic-bootstrap', governmentCredits: 10, reslotCredits: 8, commitmentBeats: 4, transitionBeats: 2, transitionOutput: 0.75 } as const;
 export const POWERED_SCIENCE_RULES = { ruleVersion: 1, featureId: 'powered-science' } as const;
 export const SECOND_GOVERNMENT_RULES = { ruleVersion: 1, featureId: 'second-government' } as const;
@@ -41,7 +48,7 @@ export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, pe
 
 export const LOCAL_POWER_RULES = { ruleVersion: 1, featureId: 'local-power' } as const;
 
-export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { 'research-lab': 18, 'coal-plant': 18, factory: 18, observatory: 14, foundry: 14, 'theater-square': 10, 'printing-house': 14, 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { 'research-lab': 18, 'coal-plant': 18, launchpad: 24, factory: 18, observatory: 14, foundry: 14, 'theater-square': 10, 'printing-house': 14, 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
 
 export const LOCAL_GROWTH_RULES = { ruleVersion: 1, featureId: 'local-growth', legacyBaseCapacity: 20, foundedBaseCapacity: 8, baseFoodCost: 6, populationPerFoodCost: 4, researchMultiplier: 3 } as const;
 
@@ -77,6 +84,7 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'earned-history', name: 'Earned historical transitions', description: 'Retain actual milestone proof and explicitly advance a new ruleset calendar once per earned cause.' },
   { id: 'powered-science', name: 'Powered scientific laboratories', description: 'Sanitation and Chemistry lead to paid era-three local Campus laboratories using same-town Power, Credits and residents for productive Science.' },
   { id: 'local-power', name: 'Local Coal power supplies productive Factories', description: 'Opening Coal and residents generate expiring same-town Power for atomically staffed Factories. Emissions are receipt-only; industrial-project work remains planned.' },
   { id: 'industrial-steam', name: 'Finite Coal powers useful rail exchanges', description: 'Connected productive research reveals finite hill Coal, funds exact owned rail edges and enables newly consented fuel-paid steam delivery.' },
@@ -191,8 +199,8 @@ export const TECHNOLOGIES: TechnologyDefinition[] = [
   { id: 'fuel-management', name: 'Fuel management', requiredFeatures: ['statecraft', 'settlement-crafts'], era: 1, cost: 28, requires: ['civic-institutions', 'kiln-firing'], capability: 'Fuel yards use materials to supply energy for production, trade and repairs.' },
   { id: 'navigation', name: 'Navigation', requiredFeatures: ['navigation'], era: 2, cost: 42, requires: ['civic-institutions'], capability: 'A completed coastal Boat yard can send existing residents to a new shore beyond the ordinary frontier.' },
   { id: 'industrialization', name: 'Industrialization', requiredFeatures: ['industrialization', 'industrial-steam'], era: 3, cost: 220, requires: ['apprenticeship', 'metal-casting', 'scientific-method'], capability: 'Reveal finite hill Coal for staffed Mines and connect Shipbuilding to Steam power. Coal power plants and Factories additionally require the local Power release, era 3 and a completed Industrial zone.' },
-  { id: 'computing', name: 'Planetary computing', requiredFeatures: ['planetary-networks'], era: 4, cost: 100, requires: ['industrialization'], capability: 'Information networks connect markets and political projects across the planet.' },
-  { id: 'spaceflight', name: 'Interplanetary logistics', requiredFeatures: ['interplanetary-logistics'], era: 5, cost: 144, requires: ['computing'], capability: 'Launch infrastructure and life-support supply make off-world settlements possible.' },
+  { id: 'computing', name: 'Planetary computing', requiredFeatures: ['planetary-networks'], era: 4, cost: 600, requires: ['industrialization', 'chemistry'], capability: 'Information networks connect markets and political projects across the planet.' },
+  { id: 'spaceflight', name: 'Interplanetary logistics', requiredFeatures: ['interplanetary-logistics'], era: 5, cost: 900, requires: ['computing'], capability: 'Launch infrastructure and life-support supply make off-world settlements possible.' },
 ];
 
 const ERA_PRESENTATION: Array<Pick<EraDefinition, 'id' | 'name' | 'year' | 'technology'>> = [
@@ -201,7 +209,7 @@ const ERA_PRESENTATION: Array<Pick<EraDefinition, 'id' | 'name' | 'year' | 'tech
   { id: 'connected', name: 'A Connected World', year: -500, technology: 'navigation' },
   { id: 'industrial', name: 'The Industrial Age', year: 1750, technology: 'industrialization' },
   { id: 'planetary', name: 'The Planetary Age', year: 2000, technology: 'computing' },
-  { id: 'interplanetary', name: 'Beyond Earth', year: 2150, technology: 'spaceflight' },
+  { id: 'interplanetary', name: 'Spacefaring preparation', year: 2150, technology: 'spaceflight' },
 ];
 
 export const ERAS: EraDefinition[] = ERA_PRESENTATION.map(era => {
@@ -243,7 +251,7 @@ export const BUILDINGS: BuildingDefinition[] = [
   { id: 'academy', name: 'House of learning', requiredFeatures: ['statecraft', 'building-operations'], minEra: 1, cost: { materials: 16, credits: 10 }, requires: ['civic-institutions'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }], operatingInputs: { culture: 2, credits: 1 }, production: { science: 3 }, description: 'Use culture and credits each economy beat to support learning. Operation can be paused.' },
   { id: 'monument', name: 'Civic gathering place', requiredFeatures: ['statecraft'], minEra: 1, cost: { materials: 12, credits: 8 }, requires: ['civic-institutions'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }, { kind: 'civilization', field: 'legitimacy', amount: 4 }], production: { culture: 4 }, description: 'A public place makes collective identity and political commitments visible.' },
   { id: 'fuel-yard', name: 'Fuel yard', requiredFeatures: ['statecraft', 'settlement-crafts', 'building-operations'], minEra: 1, cost: { materials: 14, credits: 8 }, requires: ['fuel-management'], effects: [], operatingInputs: { materials: 2 }, production: { energy: 3 }, description: 'Use materials each economy beat to supply energy. Operation can be paused.' },
-  { id: 'launchpad', name: 'Orbital gateway', requiredFeatures: ['interplanetary-logistics'], minEra: 5, cost: { materials: 40, energy: 24, credits: 30 }, requires: ['spaceflight'], effects: [{ kind: 'city', field: 'infrastructure', amount: 2 }], production: {}, description: 'Launch infrastructure connects Earth’s industry to an off-world supply line.' },
+  { id: 'launchpad', name: 'Launch complex', requiredFeatures: ['interplanetary-logistics', 'local-power', 'building-operations', 'resident-capacity'], minEra: 5, cost: { materials: 72, energy: 36, credits: 72 }, requires: ['spaceflight'], localPowerInput: 2, effects: [{ kind: 'city', field: 'infrastructure', amount: 2 }], production: {}, description: 'Launch infrastructure connects Earth’s industry to an off-world supply line.' },
 ];
 
 export const DIRECTOR_EVENTS: DirectorEventDefinition[] = [

@@ -59,6 +59,7 @@ function retainedReceipt(event: GameEvent, receipts: readonly RouteResultCue[]):
 function routineEvent(event: GameEvent): boolean {
   return event.type === 'settlement-production' || event.type === 'strategy-beat'
     || event.type === 'hold-position' || event.type === 'calm' || event.type === 'release-applied'
+    || event.type === 'building-operation-changed' || event.type === 'improvement-operation-changed'
     || event.type.startsWith('clock-')
     || (event.type === 'building-operation' || event.type === 'improvement-operation') && !event.title.endsWith(' blocked');
 }

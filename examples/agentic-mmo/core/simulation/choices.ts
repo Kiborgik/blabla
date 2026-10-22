@@ -1,3 +1,4 @@
+import { availableSpaceMissions } from './spaceflight.ts';
 import { availableRailActions } from './rail.ts';
 import { availableGovernmentActions } from './government.ts';
 import { availableCivicActions } from './civics.ts';
@@ -106,6 +107,9 @@ export function availableActions(
         });
       }
     }
+  }
+  if (actionFeatureAvailable(state, 'expedition')) {
+    for (const quote of availableSpaceMissions(state, seat)) choices.push({ action: { type: 'expedition', cityId: quote.sourceCityId, mission: quote.mission }, label: quote.mission === 'settle' ? 'Launch a paid Mars settlement mission' : 'Send paid Mars supplies and replacement settlers', reason: `Depart from ${quote.sourceCityId}; arrive in round ${quote.arrivalRound}; transfer ${quote.settlers} existing residents and paid cargo` });
   }
   if (actionFeatureAvailable(state, 'research')) {
     for (const technology of TECHNOLOGIES) {
@@ -327,6 +331,7 @@ export function sameAction(left: GameAction, right: unknown): boolean {
         left.target === right.target
       );
     case 'expedition':
+      return 'cityId' in right && 'mission' in right && left.cityId === right.cityId && left.mission === right.mission;
     case 'wait':
       return true;
     default:

@@ -1,3 +1,4 @@
+import { resolveSpaceflight } from './spaceflight.ts';
 import { recordLocalPower } from './local-power.ts';
 import { recordIndustrialFoundry } from './industrial-evidence.ts';
 import { governmentModifiers, resolveGovernmentTransitions } from './government.ts';
@@ -209,4 +210,5 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   for (const civilization of state.civilizations) resolveCivics(state, civilization.id, civicBudgets.get(civilization.id) ?? 0, events);
   resolveConstruction(state, openingWork, events);
   resolveGovernmentTransitions(state, events);
+  resolveSpaceflight(state, events);
 }

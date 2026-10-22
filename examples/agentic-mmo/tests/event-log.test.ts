@@ -149,6 +149,18 @@ void test('waiting quiet seasons and technical releases stay in history without 
   assert.deepEqual(input, before);
 });
 
+void test('routine operation choices stay in All records without hiding shortages arrivals or meaningful production', () => {
+  const changes = ['building-operation-changed', 'improvement-operation-changed'].flatMap((type, index) => ['pauses', 'resumes'].map((verb, side) => event({ id: `choice-${index}-${side}`, type, title: `Tidehaven ${verb} kiln`, detail: 'city-3/kiln' })));
+  const major = [event({ id: 'shortage', type: 'supply-shortage' }), event({ id: 'blocked', type: 'building-operation', title: 'Tidehaven: Kiln blocked' }), event({ id: 'site-blocked', type: 'improvement-operation', title: 'Tidehaven: Farm blocked' }), event({ id: 'arrival', type: 'mars-arrived' }), event({ id: 'habitat', type: 'mars-habitat-work' })];
+  const input = [...major, ...changes]; const before = structuredClone(input); const rows = eventLogEntries(input, { civilizations });
+  assert.deepEqual(eventLogPage(rows, { actor: '', family: 'important', page: 0 }).rows.map(row => row.id), major.toReversed().map(row => row.id));
+  assert.deepEqual(eventLogPage(rows, { actor: '', family: 'routine', page: 0 }).rows.map(row => row.id), changes.toReversed().map(row => row.id));
+  const all = [0, 1].flatMap(page => eventLogPage(rows, { actor: '', family: 'all', page }).rows);
+  assert.deepEqual(all.map(row => row.id), input.toReversed().map(row => row.id));
+  assert.equal(latestStoryEvent(input), major.at(-1)); assert.equal(latestStoryEvent(changes), undefined);
+  assert.deepEqual(input, before);
+});
+
 void test('only the exact retained delivery exposes separate sent cargo transport and commerce for both parties', () => {
   const cue: RouteResultCue = { ...receipt(), kind: 'delivery', factSource: 'bound-agreement', exchange: {
     proposer: { civilization: 3, cargo: { energy: 4 }, paidUpkeep: { energy: 1 }, creditedCommerce: { credits: 2 } },
@@ -201,7 +213,7 @@ void test('first glance names the action and keeps raw causes IDs and routine re
     assert.match(root.content(), /Used  2 Energy|Used 2 Energy/);
     assert.match(root.content(), /Made  7.8 Materials|Made 7.8 Materials/);
     assert.ok(nodes.some(node => node.tag === 'summary' && node.textContent === 'Details'));
-    assert.ok(nodes.some(node => node.className === 'event-log-page')); 
+    assert.ok(nodes.some(node => node.className === 'event-log-page'));
   } finally { if (old) Object.defineProperty(globalThis, 'document', old); else Reflect.deleteProperty(globalThis, 'document'); }
 });
 

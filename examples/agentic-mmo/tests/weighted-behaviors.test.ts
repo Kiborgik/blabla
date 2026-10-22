@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BEHAVIOR_PROFILES, civilizationBehaviorProfile } from '../core/behavior-profiles.ts';
-import { BEHAVIOR_POLICY_VERSION, chooseCivilizationBehavior, chooseDirectorBehavior, createBehaviorMemory, isBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
+import { BEHAVIOR_POLICY_VERSION, chooseCivilizationBehavior, chooseDirectorBehavior, createBehaviorMemory, isBehaviorMemory, isLegacyBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
 import { BUILDINGS, CIVICS, TECHNOLOGIES, TURN_RULES } from '../core/content.ts';
 import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { RELEASES } from '../core/release.ts';
@@ -20,7 +20,7 @@ function releasedWorld(seed = 41): WorldState {
     assert.ok(applied.ok, `${release.id}: ${applied.error}`);
     state = applied.state;
   }
-  assert.equal(state.releaseId, 'settlement-powered-science-1');
+  assert.equal(state.releaseId, RELEASES.at(-1)?.id);
   assert.ok(isWorldState(state));
   return state;
 }
@@ -87,12 +87,29 @@ void test('persisted memory rejects wrong versions, profiles, unsafe counters an
   const state = releasedWorld();
   const memory = createBehaviorMemory(state, 0);
   for (const corruption of [
-    { version: 2 }, { policyVersion: 'made-up-model' }, { profileId: 'pelagos-traders' },
+    { version: 3 }, { policyVersion: 'made-up-model' }, { profileId: 'pelagos-traders' },
     { seat: -1 }, { decisionCount: NaN }, { decisionCount: Number.MAX_SAFE_INTEGER + 1 },
     { seed: -1 }, { phase: 'unrestricted' }, { focusLocks: [{ cityId: 'city-0', focus: 'war', untilRound: 2 }] },
   ]) assert.equal(isBehaviorMemory({ ...memory, ...corruption }), false, JSON.stringify(corruption));
   assert.throws(() => chooseCivilizationBehavior(state, 1, memory, epoch), RangeError);
   assert.throws(() => chooseCivilizationBehavior(releasedWorld(42), 0, memory, epoch), RangeError);
+});
+
+void test('legacy v1 memory remains readable but cannot activate or silently reset a v2 controller', () => {
+  const state = releasedWorld();
+  const memory = createBehaviorMemory(state, 0);
+  const legacy = { ...memory, version: 1, policyVersion: 'weighted-civilizations-v1', decisionCount: 37, lastRequiredLane: 'research' };
+  const before = structuredClone(legacy);
+  freeze(legacy);
+  assert.equal(memory.version, 2);
+  assert.equal(BEHAVIOR_POLICY_VERSION, 'weighted-civilizations-v2');
+  assert.ok(isLegacyBehaviorMemory(legacy));
+  assert.equal(isBehaviorMemory(legacy), false);
+  assert.equal(isLegacyBehaviorMemory(memory), false);
+  assert.throws(() => chooseCivilizationBehavior(state, 0, legacy as unknown as BehaviorMemory, epoch), RangeError);
+  assert.deepEqual(legacy, before);
+  for (const patch of [{ decisionCount: -1 }, { urgentStreak: 3 }, { profileId: 'new-profile' }, { policyVersion: BEHAVIOR_POLICY_VERSION }, { phase: 'future-phase' }, { focusLocks: [{ cityId: 'city-0', focus: 'future-focus', untilRound: 2 }] }])
+    assert.equal(isLegacyBehaviorMemory({ ...legacy, ...patch }), false);
 });
 
 void test('synthetic required-lane scenario covers research, civics and every exact owned town fairly', () => {

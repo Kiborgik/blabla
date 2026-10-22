@@ -3,11 +3,25 @@ import { test } from 'node:test';
 import { createViewerUpdates, preferencesAfterUpdate, updateHistoryState } from '../web/viewer-updates.ts';
 import type { ViewerUpdatePorts, UpdateNotice } from '../web/viewer-updates.ts';
 import { DEFAULT_PREFERENCES } from '../web/viewer-state.ts';
+import { createWorldViewSession, saveWorldView } from '../web/world-view.ts';
 import { UPDATE_COOLDOWN_MS, UPDATE_RETRY_PARAM } from '../web/deployment-update.ts';
 
 const old = { schemaVersion: 1 as const, version: 'local-old', buildId: 'local-old', publishedAt: '2026-10-16T12:00:00Z' };
 const next = { ...old, version: 'local-new', buildId: 'local-new', publishedAt: '2026-10-16T14:00:00Z' };
 const prefs = { ...DEFAULT_PREFERENCES, selectedCity: 'frontier-town', theme: 'dark' as const, effects: 'calm' as const, x: 7, zoom: 1.7 };
+
+void test('an actual automatic deployment restores qualified archive selection through history even when preference storage fails', async () => {
+  const identity = { source: 'shared' as const, identity: 'native-archive-origin', body: 'earth' };
+  const qualified = saveWorldView(prefs, identity, prefs);
+  const f = fixture({ preferences: () => qualified, savePreferences: () => { throw new Error('unavailable'); } });
+  await createViewerUpdates(f.ports).check();
+  assert.equal(f.navigations.length, 1);
+  const loaded = preferencesAfterUpdate(next.buildId, null, f.history());
+  assert.deepEqual(loaded, qualified); assert.equal(loaded.worldSource, 'shared');
+  const view = createWorldViewSession().observe(loaded, identity);
+  assert.equal(view.restored, true); assert.equal(view.preferences.x, 7); assert.equal(view.preferences.selectedCity, 'frontier-town');
+  assert.doesNotMatch(f.navigations[0]?.href ?? '', /native-archive-origin|frontier-town/);
+});
 function fixture(overrides: Partial<ViewerUpdatePorts> = {}) {
   let time = Date.parse('2026-10-16T15:00:00Z'); let href = 'https://viewer.example/?other=keep#events';
   let attempt: string | null = null; let history: unknown = { unrelated: { scroll: 19 }, route: ['keep'] };

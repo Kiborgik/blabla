@@ -71,7 +71,7 @@ export function resolveHistory(state: WorldState, events: GameEvent[]): void {
     for (const civilization of state.civilizations)
       civilization.era = Math.max(civilization.era, milestone.era);
     state.calendarMilestones.push(milestone.id);
-    emitEvent(state, events, {
+    const event = emitEvent(state, events, {
       type: 'history-milestone',
       title: milestone.name,
       detail: milestone.explanation,
@@ -85,5 +85,16 @@ export function resolveHistory(state: WorldState, events: GameEvent[]): void {
       ],
       importance: 5,
     });
+    if (hasFeatures(state, ['earned-history'])) {
+      state.milestoneProofs ??= {};
+      state.milestoneProofs[milestone.id] = { ruleVersion: 1, milestoneId: milestone.id, round: state.round, revision: state.revision, eventId: event.id, year: state.year, targetYear: milestone.year, era: milestone.era };
+    }
   }
+}
+
+export function nextEarnedHistoryAdvance(state: WorldState, timestamp: string): import('../types.ts').HistoryAdvanceCommand | null {
+  if (state.outcome || !hasFeatures(state, ['earned-history'])) return null;
+  const proof = Object.values(state.milestoneProofs ?? {}).filter(proof => !state.historyAdvances?.[`milestone:${proof.milestoneId}`] && state.calendarMilestones.includes(proof.milestoneId)).toSorted((left, right) => right.targetYear - left.targetYear || (left.milestoneId < right.milestoneId ? -1 : left.milestoneId > right.milestoneId ? 1 : 0))[0];
+  if (!proof) return null;
+  return { expectedRevision: state.revision, cause: { kind: 'milestone', id: proof.milestoneId }, reason: `Actual earned ${proof.milestoneId} advances the calendar to its authored historical threshold`, deltaYears: Math.max(0, proof.targetYear - state.year), timestamp };
 }

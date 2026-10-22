@@ -4,7 +4,7 @@ import type { CompatibleReleaseDefinition } from './types.ts';
 const settlementFeatures = ['settlement-turns', 'settlement-production', 'settlement-research', 'director-events'];
 const civicFeatures = [...settlementFeatures, 'history-advancement', 'release-evolution', 'trade-routes', 'independent-actions', 'bounded-plans', 'building-operations', 'settlement-crafts', 'settlement-expansion', 'conserved-founding', 'terrain-production', 'city-specialization', 'city-repair', 'disaster-recovery', 'statecraft'];
 const charterFeatures = [...civicFeatures, 'public-projects'];
-export const RELEASES: readonly CompatibleReleaseDefinition[] = [
+const historicalReleases: readonly CompatibleReleaseDefinition[] = [
   { id: 'settlement-foundations-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: [], featureIds: settlementFeatures },
   { id: 'settlement-foundations-2', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-foundations-1'], featureIds: [...settlementFeatures, 'history-advancement', 'release-evolution'] },
   { id: 'settlement-trade-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-foundations-2'], featureIds: [...settlementFeatures, 'history-advancement', 'release-evolution', 'trade-routes'] },
@@ -42,6 +42,14 @@ export const RELEASES: readonly CompatibleReleaseDefinition[] = [
   { id: 'settlement-second-government-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-local-power-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints', 'land-transport', 'operating-resource-exchange', 'recurring-decisions', 'resident-capacity', 'navigation', 'coastal-founding', 'productive-research', 'district-planning', 'writing', 'worked-land', 'mining', 'finite-metals', 'learning-commerce', 'manufacturing', 'unique-wonders', 'local-growth', 'water-land', 'forest-production', 'world-expansion', 'owned-territory', 'culture-production', 'foundry-production', 'observatory-learning', 'civic-bootstrap', 'industrial-steam', 'industrialization', 'local-power', 'second-government'] },
   { id: 'settlement-powered-science-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION, compatibleFrom: ['settlement-second-government-1'], featureIds: [...charterFeatures, 'exact-trade-endpoints', 'land-transport', 'operating-resource-exchange', 'recurring-decisions', 'resident-capacity', 'navigation', 'coastal-founding', 'productive-research', 'district-planning', 'writing', 'worked-land', 'mining', 'finite-metals', 'learning-commerce', 'manufacturing', 'unique-wonders', 'local-growth', 'water-land', 'forest-production', 'world-expansion', 'owned-territory', 'culture-production', 'foundry-production', 'observatory-learning', 'civic-bootstrap', 'industrial-steam', 'industrialization', 'local-power', 'second-government', 'powered-science'] },
 ];
+const previousRelease = historicalReleases.at(-1);
+if (!previousRelease) throw new Error('Historical releases must precede interplanetary logistics');
+export const RELEASES: readonly CompatibleReleaseDefinition[] = [...historicalReleases, {
+  id: 'settlement-interplanetary-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  compatibleFrom: [previousRelease.id],
+  featureIds: [...previousRelease.featureIds, 'planetary-networks', 'interplanetary-logistics', 'earned-history'],
+}];
+
 function currentRelease(): CompatibleReleaseDefinition {
   const release = RELEASES.find((candidate) => candidate.id === 'settlement-foundations-1');
   if (!release) throw new Error('The current release must be registered');

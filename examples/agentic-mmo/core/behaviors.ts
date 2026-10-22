@@ -1,4 +1,5 @@
-import { BEHAVIOR_POLICY_VERSION, BEHAVIOR_PROFILES, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
+import { BEHAVIOR_POLICY_VERSION, LEGACY_BEHAVIOR_POLICY_VERSION, BEHAVIOR_PROFILES, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
+import { deriveProgressionPlan, progressionOperationalPriority, progressionTransportPriority, progressionWeight, type ProgressionPlan } from './behavior-progression.ts';
 import { BUILDINGS, CIVICS, ECONOMY_RULES, FOCUS_IDS, GOVERNMENTS, IMPROVEMENTS, POLICIES, RESOURCE_IDS, TECHNOLOGIES, TRADE_RECIPES, WONDERS } from './content.ts';
 import { legalActions } from './engine.ts';
 import { decisionObligations } from './simulation/decisions.ts';
@@ -14,7 +15,7 @@ export { BEHAVIOR_POLICY_VERSION };
 export type { BehaviorPhase, BehaviorProfile };
 
 export interface BehaviorMemory {
-  version: 1;
+  version: 2;
   policyVersion: typeof BEHAVIOR_POLICY_VERSION;
   seed: number;
   seat: number;
@@ -29,6 +30,22 @@ export interface BehaviorMemory {
   focusLocks: Array<{ cityId: string; focus: Focus; untilRound: number }>;
 }
 
+export interface LegacyBehaviorMemory {
+  readonly version: 1;
+  readonly policyVersion: typeof LEGACY_BEHAVIOR_POLICY_VERSION;
+  readonly seed: number;
+  readonly seat: number;
+  readonly profileId: string;
+  readonly decisionCount: number;
+  readonly phase: 'survival' | 'recovery' | 'development' | 'expansion' | 'trade' | 'consolidation' | 'director';
+  readonly phaseSinceRound: number;
+  readonly lastDecisionRound: number;
+  readonly lastRequiredLane: string | null;
+  readonly lastActionKey: string | null;
+  readonly urgentStreak: number;
+  readonly focusLocks: ReadonlyArray<Readonly<{ cityId: string; focus: 'growth' | 'industry' | 'research' | 'culture' | 'diplomacy'; untilRound: number }>>;
+}
+
 export interface BehaviorDecision {
   action: GameAction | null;
   memory: BehaviorMemory;
@@ -38,17 +55,20 @@ export interface BehaviorDecision {
 export type CivilizationBehaviorMemory = BehaviorMemory;
 export type CivilizationBehaviorDecision = BehaviorDecision;
 
-const phases: readonly BehaviorPhase[] = ['survival', 'recovery', 'development', 'expansion', 'trade', 'consolidation', 'director'];
+const legacyProfileIds = ['aster-scholars', 'verdant-stewards', 'ember-builders', 'pelagos-traders', 'vesper-custodians'] as const;
+const legacyFocusIds: readonly string[] = ['growth', 'industry', 'research', 'culture', 'diplomacy'];
+const legacyPhases = ['survival', 'recovery', 'development', 'expansion', 'trade', 'consolidation', 'director'] as const;
+const phases: readonly BehaviorPhase[] = legacyPhases;
 const integer = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const shortString = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 256;
 
-export function isBehaviorMemory(value: unknown): value is BehaviorMemory {
-  if (!record(value) || value.version !== 1 || value.policyVersion !== BEHAVIOR_POLICY_VERSION
+function validMemoryFields(value: unknown, legacy = false): boolean {
+  if (!record(value)
     || !integer(value.seed) || value.seed > 0xffffffff || !integer(value.seat) || value.seat > DIRECTOR_SEAT
-    || value.profileId !== (value.seat === DIRECTOR_SEAT ? 'world-director' : BEHAVIOR_PROFILES[value.seat]?.id)
+    || value.profileId !== (value.seat === DIRECTOR_SEAT ? 'world-director' : legacy ? legacyProfileIds[value.seat] : BEHAVIOR_PROFILES[value.seat]?.id)
     || !integer(value.decisionCount) || !integer(value.phaseSinceRound) || !integer(value.lastDecisionRound)
-    || value.phaseSinceRound > value.lastDecisionRound || !phases.includes(value.phase as BehaviorPhase)
+    || value.phaseSinceRound > value.lastDecisionRound || !(legacy ? legacyPhases : phases).includes(value.phase as BehaviorPhase)
     || (value.seat === DIRECTOR_SEAT) !== (value.phase === 'director')
     || !(value.lastRequiredLane === null || shortString(value.lastRequiredLane))
     || !(value.lastActionKey === null || typeof value.lastActionKey === 'string' && value.lastActionKey.length <= 2048)
@@ -56,10 +76,18 @@ export function isBehaviorMemory(value: unknown): value is BehaviorMemory {
     return false;
   const ids = new Set<string>();
   return value.focusLocks.every(lock => {
-    if (!record(lock) || !shortString(lock.cityId) || !FOCUS_IDS.includes(lock.focus as Focus) || !integer(lock.untilRound) || ids.has(lock.cityId)) return false;
+    if (!record(lock) || !shortString(lock.cityId) || !(legacy ? legacyFocusIds : FOCUS_IDS).includes(lock.focus as Focus) || !integer(lock.untilRound) || ids.has(lock.cityId)) return false;
     ids.add(lock.cityId);
     return true;
   });
+}
+
+export function isBehaviorMemory(value: unknown): value is BehaviorMemory {
+  return record(value) && value.version === 2 && value.policyVersion === BEHAVIOR_POLICY_VERSION && validMemoryFields(value);
+}
+
+export function isLegacyBehaviorMemory(value: unknown): value is LegacyBehaviorMemory {
+  return record(value) && value.version === 1 && value.policyVersion === LEGACY_BEHAVIOR_POLICY_VERSION && validMemoryFields(value, true);
 }
 
 export const isCivilizationBehaviorMemory = isBehaviorMemory;
@@ -68,7 +96,7 @@ export function createBehaviorMemory(state: WorldState, seat: number): BehaviorM
   if (!Number.isInteger(seat) || seat < 0 || seat > DIRECTOR_SEAT || (seat !== DIRECTOR_SEAT && !state.civilizations.some(actor => actor.id === seat)))
     throw new RangeError('Behavior memory requires an existing civilization or the Director');
   return {
-    version: 1, policyVersion: BEHAVIOR_POLICY_VERSION, seed: state.seed, seat,
+    version: 2, policyVersion: BEHAVIOR_POLICY_VERSION, seed: state.seed, seat,
     profileId: seat === DIRECTOR_SEAT ? 'world-director' : civilizationBehaviorProfile(state.seed, seat).id,
     decisionCount: 0, phase: seat === DIRECTOR_SEAT ? 'director' : 'development',
     phaseSinceRound: state.round, lastDecisionRound: state.round, lastRequiredLane: null,
@@ -99,9 +127,10 @@ interface Situation {
   maxDamage: number;
   weights: Resources;
   phase: BehaviorPhase;
+  progression: ProgressionPlan;
 }
 
-function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory): Situation {
+function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
   const cities = state.cities.filter(city => city.civId === actor.id);
   const upkeep = cities.reduce((sum, city) => sum + city.population * ECONOMY_RULES.populationFoodUpkeep, 0);
   const maxDamage = cities.reduce((maximum, city) => Math.max(maximum, city.damage), 0);
@@ -121,7 +150,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase };
+  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, progression: deriveProgressionPlan(state, actor, profile, options) };
 }
 
 function selectPhase(context: Situation, options: readonly ActionOption[]): BehaviorPhase {
@@ -130,7 +159,7 @@ function selectPhase(context: Situation, options: readonly ActionOption[]): Beha
   if (maxDamage >= 25 || memory.phase === 'recovery' && maxDamage >= 10) return 'recovery';
   const scores: Partial<Record<BehaviorPhase, number>> = {
     development: options.some(option => ['research', 'build', 'choose-civic', 'improve', 'build-wonder', 'build-rail'].includes(option.action.type)) ? 10 : 2,
-    expansion: options.some(option => ['settle', 'settle-coast'].includes(option.action.type)) && context.cities.length < profile.settlementGoal && actor.resources.food > upkeep * 4 + 10 ? 8 * profile.priorities.expansion : 0,
+    expansion: options.some(option => ['settle', 'settle-coast'].includes(option.action.type)) && (context.cities.length < profile.settlementGoal || context.progression.coastalNeeded) && actor.resources.food > upkeep * 4 + 10 ? 8 * profile.priorities.expansion : 0,
     trade: options.some(option => ['propose-trade', 'respond-trade'].includes(option.action.type)) ? 7 * profile.priorities.trade : 0,
     consolidation: 3,
   };
@@ -173,7 +202,7 @@ function constructionWeight(action: GameAction, context: Situation): number {
   if (action.type === 'improve') {
     const definition = IMPROVEMENTS.find(candidate => candidate.id === action.improvementId);
     if (!definition) return 0;
-    const deposit = state.strategicDeposits?.deposits[String(action.tileId)] ?? state.coalDeposits?.deposits[String(action.tileId)];
+    const deposit = context.progression.deposits.get(action.tileId);
     return (4 + outputValue(definition.production, context) + (deposit && deposit.remaining > 0 ? 4 : 0)) * profile.priorities.construction;
   }
   if (action.type === 'build-wonder') {
@@ -245,7 +274,8 @@ function actionWeight(option: ActionOption, context: Situation): number {
       return (route?.damage ?? 0) * profile.priorities.recovery * 0.5;
     }
     case 'settle': case 'settle-coast': {
-      if (context.foodRisk || cities.length >= profile.settlementGoal || actor.resources.food < context.upkeep * 3 + ECONOMY_RULES.settle.cost.food
+      const coastalGoal = context.progression.coastalNeeded && (action.type === 'settle-coast' || context.progression.coastalCities.size === 0 && context.progression.coastalSites.has(action.tileId));
+      if (context.foodRisk || cities.length >= profile.settlementGoal + (coastalGoal ? 2 : 0) || actor.resources.food < context.upkeep * 3 + ECONOMY_RULES.settle.cost.food
         || actor.resources.materials < ECONOMY_RULES.settle.cost.materials + 8 || actor.resources.credits < ECONOMY_RULES.settle.cost.credits + 4) return 0;
       const site = state.tiles.find(tile => tile.id === action.tileId);
       const output = site ? siteProduction(state, site) : {};
@@ -354,6 +384,7 @@ function laneOf(action: GameAction, lanes: Map<string, Set<string>>): string | n
 
 function urgent(candidate: Candidate, context: Situation): boolean {
   const action = candidate.option.action;
+  if (!context.foodRisk && (progressionOperationalPriority(candidate.option, context.progression) || progressionTransportPriority(candidate.option, context.state, context.progression))) return true;
   if (context.foodRisk) {
     if (action.type === 'focus' && action.focus === 'growth') return true;
     if (action.type === 'build' && (BUILDINGS.find(building => building.id === action.project)?.production.food ?? 0) > 0) return true;
@@ -417,10 +448,10 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   const actor = state.civilizations.find(candidate => candidate.id === seat);
   if (!actor || options.length === 0) return noDecision(memory, 'No action is currently admitted by the world.');
   const profile = civilizationBehaviorProfile(state.seed, seat);
-  const context = situation(state, actor, profile, memory);
+  const context = situation(state, actor, profile, memory, options);
   context.phase = selectPhase(context, options);
   const lanes = requiredLanes(state, seat);
-  const candidates = options.map(option => ({ option, weight: actionWeight(option, context), ...classify(option.action), lane: laneOf(option.action, lanes) }));
+  const candidates = options.map(option => ({ option, weight: progressionWeight(option, actionWeight(option, context), state, actor, profile, context.progression), ...classify(option.action), lane: laneOf(option.action, lanes) }));
   const required = candidates.filter(candidate => candidate.lane !== null);
   const emergencies = candidates.filter(candidate => candidate.weight > 0 && urgent(candidate, context));
   let pool: Candidate[];
@@ -440,6 +471,8 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   }
   if (!pool.length) return noDecision(memory, 'No useful legal action is available; existing commitments remain unchanged.');
   const choice = weightedChoice(pool, behaviorSeed(`${BEHAVIOR_POLICY_VERSION}:${state.seed}:${seat}:${memory.decisionCount}`));
+  if (isUrgent && !context.foodRisk && progressionOperationalPriority(choice.option, context.progression)) reason = 'Budget local residents and opening supplies for useful production and learning.';
+  else if (isUrgent && !context.foodRisk && progressionTransportPriority(choice.option, state, context.progression)) reason = 'Seek fresh consent for a funded steam exchange whose paid rails improve delivery cadence.';
   return committedDecision(state, memory, choice, context.phase, reason, profile, isUrgent);
 }
 

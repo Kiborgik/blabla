@@ -40,19 +40,38 @@ html, body { height: 100%; overflow: hidden; }
 #app .civilization-row[aria-pressed='true']::before { left: 0; right: 0; top: auto; bottom: -1px; width: auto; height: 3px; background: var(--civ-color); }
 #app .inspection { top: 144px; right: 18px; bottom: auto; width: 320px; max-height: calc(100% - 210px); padding: 14px; border: 1px solid var(--hud-line); border-top: 3px solid var(--civ-color, var(--hud-brass)); border-radius: 3px; box-shadow: 0 8px 30px #07142370; overflow: auto; scrollbar-width: thin; z-index: 5; }
 #app .inspection .sheet-close { top: -4px; min-width: 64px; min-height: 44px; margin: -5px -4px 0 6px; padding: 6px 8px; font-size: 12px; border-radius: 2px; }
-#app .inspection-top { display: flex; min-height: 28px; align-items: center; }
+#app .inspection-top { display: flex; min-height: 18px; align-items: center; }
 #app .inspection-top .eyebrow { font-size: 10px; letter-spacing: 1px; }
 #app .preview-tag { display: none; }
-#app .inspection-title { margin: 2px 0 11px; padding: 0; gap: 10px; min-height: 40px; }
+#app .inspection-title { margin: 2px 0 6px; padding: 0; gap: 10px; min-height: 40px; }
 #app .inspection-title .focus-symbol { display: grid; place-items: center; width: 38px; height: 42px; border: 1px solid var(--civ-color); color: var(--civ-color); font-size: 26px; }
 #app .inspection h2 { font: 24px Georgia, serif; line-height: 1.15; letter-spacing: 0; }
 #app .inspection-title p { font-size: 12px; margin: 4px 0 0; }
-#app .inspection-sections { gap: 3px; margin: 8px 0; }
+#app .inspection-sections { gap: 3px; margin: 4px 0; }
 #app .inspection-sections button { border-radius: 2px; min-height: 44px; font-size: 12px; }
 #app .inspection .resource-rail { margin: 8px 0; padding: 5px 0; }
 #app .resource-rail .resource-help { min-height: 55px; min-width: 0; gap: 3px; }
 #app .resource-rail .resource-name { font-size: 10px; }
 #app .resource-rail .resource-amount { font-size: 12px; }
+#app .resource-rail > div { min-height: 0; }
+#app .resource-rail::before { content: 'Earth stores'; grid-column: 1 / -1; font-size: 10px; color: var(--muted); }
+#app .ongoing-commitments { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(75px, 100%), 1fr)); gap: 8px; margin: 8px 0; }
+#app .ongoing-commitment { min-width: 0; padding: 0; background: none; }
+#app .ongoing-commitment > strong { display: block; font-size: 12px; line-height: 1.3; margin: 3px 0; overflow-wrap: anywhere; }
+#app .commitment-kind { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--muted); }
+#app .commitment-kind .visual-icon { width: 13px; height: 13px; flex-basis: 13px; }
+#app .commitment-amount, #app .ongoing-commitment small { display: block; font-size: 10px; line-height: 1.35; font-variant-numeric: tabular-nums; }
+#app .ongoing-commitment small { color: var(--muted); }
+#app .ongoing-commitment[data-commitment='government'] { grid-column: 1 / -1; }
+#app .ongoing-commitment[data-commitment='government'] > strong, #app .ongoing-commitment[data-commitment='government'] > .commitment-amount { display: inline; margin-right: 6px; }
+#app .commitment-meter { height: 4px; margin: 5px 0; }
+#app [data-commitment='civic'] .commitment-meter::-webkit-progress-value { background: #b58bcc; }
+#app [data-commitment='civic'] .commitment-meter::-moz-progress-bar { background: #b58bcc; }
+#app [data-commitment='construction'] .commitment-meter::-webkit-progress-value { background: #b4965c; }
+#app [data-commitment='construction'] .commitment-meter::-moz-progress-bar { background: #b4965c; }
+#app .installed-records p, #app .installed-records li { font-size: 12px; line-height: 1.5; }
+#app .installed-records ul { margin: 4px 0 12px; padding-left: 18px; }
+#app #events-open .visual-icon, #app .chronicle-location .visual-icon, #app .capability-open > .visual-icon { width: 12px; height: 12px; vertical-align: middle; margin-left: 5px; flex: 0 0 12px; }
 #app .research-detail, #app .construction-detail { padding: 10px 0 5px; margin: 0; border-bottom: 1px solid var(--border); }
 #app .research-detail > strong, #app .construction-detail > strong { display: flex; align-items: center; gap: 7px; font-size: 14px; }
 #app .research-amount, #app .civic-amount { margin: 5px 0; font-size: 12px; font-variant-numeric: tabular-nums; }

@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.1.0-live.36",
+    "date": "2026-10-22",
+    "title": "From first hearths to a supplied Mars home",
+    "changes": [
+      "New generated worlds have coherent terrain, separated inland and coastal starts, viable paid expansion and finite Iron and Coal. Earlier local and native worlds retain their original maps, resources and history.",
+      "Weighted civilization policies connect coastal settlement, staffed production, funded research and genuinely faster consensual steam trade to planetary knowledge. Decisions still pay the canonical costs; no language-model players or player orders are introduced.",
+      "A powered launch complex sends prepaid cargo and conserved settlers on a delayed journey. Landed supplies fund habitat construction and colony upkeep separately from Earth reserves. Only an inhabited, completed habitat supplied for consecutive seasons establishes a Mars home; shortage and paid recovery remain real consequences.",
+      "Retained earned milestones support explicit historical date advances without replacing the ordinary clock or unlocking mechanics through the calendar. The journey view distinguishes preparation, transport, landing, paid habitat work and stable life; its colony schematic is not a geographical surface map.",
+      "The generated observatory is separate from the read-only previous local world and shared archive. World-qualified camera preferences avoid cross-world jumps. If coordinated storage is unavailable, an explicitly labelled this-tab simulation continues without writing shared checkpoints.",
+      "A bounded default-seed campaign follows the exact local engine used by the Worker from empty settlements to sustained Mars life, including exact restart and a separately fault-injected recovery. Wider-seed balance, richer city-age visuals, supported-browser evidence and genuinely unattended hosting remain distinct acceptance work."
+    ]
+  },
+  {
     "version": "0.1.0-live.35",
     "date": "2026-10-22",
     "title": "A world that makes its own decisions",
@@ -18,8 +31,8 @@
     "changes": [
       "Chiefdom and Autocracy offer different Food, original-capital construction and policy-slot choices. Inspection keeps the active government, pending transition, commitment and current work capacity separate from historical construction.",
       "The map uses population-based residential density, broader completed Farm fields and Workshop yards, plus clearer ownership washes and borders. Terrain and exact sites remain factual; symbolic houses do not represent individual residents, and unfinished buildings are not drawn as completed.",
-      "Sanitation and Chemistry connect productive research to an era-three Research laboratory at the same town’s completed Campus. A Laboratory costs 42 Materials, 24 Credits and 18 construction work before it can operate.",
-      "A staffed Laboratory reserves two opening Credits, three local Power and three residents together for twelve base Science under existing output modifiers. Inspection shows actual Science, payments and allocations separately from base output. The town’s bounded last-positive record can be replaced by a later productive beat.",
+      "Sanitation and Chemistry connect productive research to an era-three Research laboratory at the same town\u2019s completed Campus. A Laboratory costs 42 Materials, 24 Credits and 18 construction work before it can operate.",
+      "A staffed Laboratory reserves two opening Credits, three local Power and three residents together for twelve base Science under existing output modifiers. Inspection shows actual Science, payments and allocations separately from base output. The town\u2019s bounded last-positive record can be replaced by a later productive beat.",
       "This source prepares a separate compatible activation. Actual agent government choices and Laboratory operation need their own live evidence. Matched public map views, narrow-screen use and physical-device checks remain open."
     ]
   },
@@ -51,7 +64,7 @@
     "title": "Coal powers faster trade",
     "changes": [
       "Scientific method, Shipbuilding, Industrialization and Steam power connect existing research to finite Coal. An enabled Mine uses its existing local residents to extract Coal into a separate, capacity-limited stock.",
-      "Agents can pay for exact owned Rail edges in a named town’s construction lane. A new steam agreement needs fresh consent and keeps its original path, speed and fuel cost; earlier agreements do not change.",
+      "Agents can pay for exact owned Rail edges in a named town\u2019s construction lane. A new steam agreement needs fresh consent and keeps its original path, speed and fuel cost; earlier agreements do not change.",
       "A successful due steam exchange pays all cargo, upkeep and one proposer Coal together. Town Work and route inspection show paid Rail, actual fuel use and recorded cadence beside the original unrailed comparison.",
       "The industrial capability requires two towns that actually operated supplied Foundries and one genuinely faster paid steam delivery. Civic and industrial activation remain separate from publishing this compatible source. Local Power, Factories and unattended calendar scheduling remain outside this packet."
     ]
@@ -176,7 +189,7 @@
     "title": "Turn worked hills into a manufacturing district",
     "changes": [
       "Iron working and Apprenticeship extend the connected research branches. An exact Industrial zone gains Materials from nearby completed Mines, including paused Mines; unfinished sites add no bonus.",
-      "A Guild workshop belongs to its own town’s completed Industrial zone. It pays two Energy and needs three available residents before making Materials on a later productive beat. Costs, work and recorded output stay separate.",
+      "A Guild workshop belongs to its own town\u2019s completed Industrial zone. It pays two Energy and needs three available residents before making Materials on a later productive beat. Costs, work and recorded output stay separate.",
       "Desktop and narrow map inspection preserve exact district and Mine sites, show the real adjacency bonus, and distinguish construction, current pause and historical operation. Dense map leaders remain a readability tradeoff.",
       "Publication prepares a separate compatible world update. The illustrative preview and legal local fixtures are distinct from actual model choices. Public-origin browser evidence remains blocked; physical touch, WebGL, sustained research headroom and the broader unique-wonder/map outcome remain open."
     ]
@@ -187,8 +200,8 @@
     "title": "Choose a new path for knowledge and trade",
     "changes": [
       "Five connected discoveries open two useful branches: Bronze working reveals finite Iron, while Currency, Mathematics, Education and Banking connect learning to commerce. New fixed research work uses a documented pace adjustment; past discoveries and science stocks are preserved.",
-      "A staffed Mine can extract revealed Iron without losing its ordinary Materials output. Exact deposit reserves, shared storage and later trade payments are recorded separately. Consent-based Iron-for-Food exchanges retain both parties’ exact terms and due timing.",
-      "An exact Commercial hub supports its own town’s Market and Bank. A completed Campus supports a University. All paid operations compete for real local residents and resources; construction completion precedes later output.",
+      "A staffed Mine can extract revealed Iron without losing its ordinary Materials output. Exact deposit reserves, shared storage and later trade payments are recorded separately. Consent-based Iron-for-Food exchanges retain both parties\u2019 exact terms and due timing.",
+      "An exact Commercial hub supports its own town\u2019s Market and Bank. A completed Campus supports a University. All paid operations compete for real local residents and resources; construction completion precedes later output.",
       "Map site buttons distinguish Mines, Campuses and commerce districts. Town details show current storage, reserve changes, work and recorded output; technical details remain available.",
       "Publication prepares a separate compatible world update. The illustrative preview and validated legal local fixtures remain distinct from real model choices. The public browser gate, physical touch and WebGL evidence remain unavailable; continuing research coverage and the wider resource/wonder/map outcome remain open."
     ]
@@ -211,7 +224,7 @@
     "title": "Choose where a town learns",
     "changes": [
       "Writing opens a Campus on an exact owned site near its town. Real nearby mountains add science; the site is reserved while its paid construction progresses.",
-      "A completed Campus supports its own town’s Library. Credits and local residents fund its later science production; payment, completion and output remain separate facts.",
+      "A completed Campus supports its own town\u2019s Library. Credits and local residents fund its later science production; payment, completion and output remain separate facts.",
       "The map places the Campus foundation, completed learning roofs and Library wing on their retained tile. Tap or select the site to inspect its parent town, actual work and recorded results.",
       "The current world and its actual coastal towns are preserved. Website publication prepares the compatible Writing update; it does not apply gameplay capabilities by itself. The illustrative preview and legal local fixture images remain separate from real model choices.",
       "The new desktop and 360px views were inspected with legal local states. Public follow-through is still blocked by the browser security service; dense narrow overview labels, physical touch and WebGL remain open evidence."

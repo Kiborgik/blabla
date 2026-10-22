@@ -2,15 +2,17 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createWorld } from '../core/engine.ts';
+import { projectCapabilities } from '../core/capabilities.ts';
 import { BUILDINGS, IMPROVEMENTS, WONDERS } from '../core/content.ts';
 import type { ConstructionOrder, GameEvent } from '../core/types.ts';
-import { civilizationSummary, constructionCommitment, spectatorChronicle, spectatorEventDestination, spectatorActionLabel, renderRecordedPolicyChoice, renderSpectatorChronicle } from '../web/spectator-hud.ts';
+import { civilizationSummary, constructionCommitment, ongoingCommitments, renderOngoingCommitments, installedTownEvidence, spectatorChronicle, spectatorEventDestination, spectatorActionLabel, renderRecordedPolicyChoice, renderSpectatorChronicle } from '../web/spectator-hud.ts';
+import { civicBootstrapJourney } from './fixtures/civic-bootstrap-journey.ts';
 
 const event = (round: number, type = 'research-completed'): GameEvent => ({ id: `story-${round}`, round, type, title: `Discovery ${round}`, detail: '', actor: 0, target: null, tileId: null, cause: '', effects: [], importance: 2 });
 
 void test('the chronicle is a bounded newest-first sequence of real major events, not routine output', () => {
   const state = createWorld(1701, '2026-10-16T00:00:00Z');
-  state.events = [event(1), event(2), event(3, 'settlement-production'), event(4), event(5), event(6, 'strategy-beat'), event(7, 'hold-position'), event(8, 'calm'), event(9, 'release-applied')];
+  state.events = [event(1), event(2), event(3, 'settlement-production'), event(4), event(5), event(6, 'strategy-beat'), event(7, 'hold-position'), event(8, 'calm'), event(9, 'release-applied'), event(10, 'building-operation-changed'), event(11, 'improvement-operation-changed')];
   const before = structuredClone(state);
   assert.deepEqual(spectatorChronicle(state).map(story => story.event.round), [5, 4, 2]);
   assert.deepEqual(state, before);
@@ -50,10 +52,42 @@ void test('the HUD keeps map-first observer chrome, visible history and existing
   assert.match(css, /\.civilization-list[^}]*repeat\(5, minmax\(0, 1fr\)\)/s);
   assert.match(css, /@media \(max-width: 1000px\)/);
   assert.doesNotMatch(main, /fetch\([^)]*method:\s*['"]POST/);
-  const resourcePlacement = main.indexOf('panel.insertBefore(resources, panel.querySelector(\'.city-details\'))');
-  assert.ok(resourcePlacement >= 0 && resourcePlacement < main.indexOf('panel.insertBefore(renderRecordedPolicyChoice(localChoice), resources)'));
-  assert.match(main, /section\.append\(title, meter, amount\); panel\.insertBefore\(section, capabilityOpener\)/);
+  assert.match(main, /panel\.insertBefore\(commitments, resources\)/);
+  assert.match(main, /record\.append\(researchSection\)/);
+  assert.ok(main.indexOf('panel.insertBefore(commitments, resources)') < main.indexOf('panel.insertBefore(renderRecordedPolicyChoice(localChoice)'));
+  assert.match(main, /aria-label="Civilization Earth stores"/);
+  assert.doesNotMatch(main, /↗/);
   assert.match(main, /No major changes in recent history/);
+});
+
+void test('compact commitments use active canonical work and the exact selected town, not its inventory or policy intent', () => {
+  const journey = civicBootstrapJourney(); const state = structuredClone(journey.selected);
+  const city = state.cities.find(item => item.id === journey.cityId); assert.ok(city);
+  const projection = projectCapabilities(state, journey.seat, city.id, journey.time());
+  projection.decisions = { research: { kind: 'research', cityId: null, status: 'active', targetId: 'writing', progress: { done: 7.5, required: 24 }, availableIds: [], blockers: [] }, construction: [] };
+  city.construction = { active: { ruleVersion: 1, id: 'real-work', cityId: city.id, buildingId: 'workshop', startedRound: 3, paid: { materials: 4 }, workDone: 2, workRequired: 6 }, lastCompleted: null };
+  assert.ok(projection.governance?.government);
+  projection.governance.government.pending = { targetGovernmentId: 'chiefdom', targetAssignments: [], acceptedRound: 4, completionRound: 6, paidCredits: 10, spentCompletionEventId: null };
+  const before = structuredClone({ projection, city }); const entries = ongoingCommitments(projection, city);
+  assert.deepEqual(entries.map(item => item.kind), ['research', 'civic', 'construction', 'government']);
+  assert.equal(entries[0]?.amount, '7.5 / 24 Science work'); assert.equal(entries[2]?.name, BUILDINGS.find(item => item.id === 'workshop')?.name); assert.equal(entries[2]?.detail, 'Not built yet.');
+  assert.equal(entries[3]?.progress, null); assert.equal(entries[3]?.amount, 'Scheduled round 6'); assert.match(entries[3]?.detail ?? '', /current government still applies/);
+  assert.deepEqual({ projection, city }, before);
+  assert.equal(ongoingCommitments(projection, { ...city, id: 'different-town' }).some(item => item.kind === 'construction'), false);
+  assert.equal(ongoingCommitments(projection, { ...city, civId: 99 }).some(item => item.kind === 'construction'), false);
+  projection.decisions.research.status = 'required'; projection.governance.civics!.active = null; projection.governance.government.pending = null; city.construction.active = null;
+  assert.deepEqual(ongoingCommitments(projection, city), []);
+});
+
+void test('installed town evidence excludes queued work and distinguishes buildings from exact improved tiles', () => {
+  const state = createWorld(1701, '2026-10-16T00:00:00Z'); const city = state.cities[0]; assert.ok(city);
+  city.buildings = ['farm', 'workshop'];
+  const improvement = IMPROVEMENTS[0]; assert.ok(improvement);
+  city.improvements = { '7': { improvementId: improvement.id, tileId: 7, completion: { kind: 'improvement', orderId: 'finished-land', cityId: city.id, improvementId: improvement.id, tileId: 7, startedRound: 1, completedRound: 2, paid: { materials: 3 }, workRequired: 4, eventId: 'completed-land' }, operation: { enabled: false, lastResult: null } } };
+  city.construction = { active: { ruleVersion: 1, id: 'unfinished', cityId: city.id, buildingId: 'launchpad', startedRound: 3, paid: {}, workRequired: 24, workDone: 23 }, lastCompleted: null };
+  const before = structuredClone(city); const installed = installedTownEvidence(city);
+  assert.equal(installed.length, 3); assert.equal(installed.some(item => item.name === 'Launch complex'), false);
+  assert.deepEqual(installed.at(-1), { name: improvement.name, tileId: 7 }); assert.equal(installed[0]?.tileId, null); assert.deepEqual(city, before);
 });
 
 void test('the history opener has explicit contrasting frame colors independent of the page theme', () => {
@@ -94,7 +128,8 @@ void test('recorded policy choices are labeled as concrete actions rather than i
   assert.match(main, /renderRecordedPolicyChoice\(localChoice\)/);
   assert.match(main, /not live AI-model play/);
   assert.match(main, /localSaveBlocked/);
-  assert.match(main, /stored\.steps > localSimulation\.steps/);
+  assert.match(main, /localWorldStorage\.save\(\(\) => localSimulation\)/);
+  assert.match(main, /if \(!localWasObserved \|\| localSaveBlocked \|\| localEphemeral\) return/);
   assert.match(main, /navigator\.locks\.request/);
   assert.match(main, /mode !== 'local' \|\| document\.hidden/);
 });
@@ -111,6 +146,8 @@ void test('chronicle rendering keeps event text inert and its location action ob
     tag: string;
     textContent = '';
     className = '';
+    max = 0;
+    value = 0;
     dataset: Record<string, string> = {};
     children: ElementRecord[] = [];
     attributes = new Map<string, string>();
@@ -149,6 +186,16 @@ void test('chronicle rendering keeps event text inert and its location action ob
     assert.ok(choice.all().some(node => node.textContent === 'BUILT-IN POLICY · LAST CHOICE'));
     assert.ok(choice.all().some(node => node.textContent === '<img src=x> Actual recorded reason'));
     assert.equal(choice.all().some(node => node.tag === 'img' || node.tag === 'button'), false);
+    assert.equal(renderOngoingCommitments([]), null);
+    const work = renderOngoingCommitments([
+      { kind: 'research', name: '<b>Writing</b>', amount: '7.5 / 24 Science work', detail: 'Produced Science, not inventory.', progress: { done: 7.5, required: 24 } },
+      { kind: 'government', name: 'Chiefdom', amount: 'Scheduled round 6', detail: 'Current government still applies.', progress: null },
+    ]) as unknown as ElementRecord;
+    const meters = work.all().filter(node => node.tag === 'progress'); assert.equal(meters.length, 1); assert.equal(meters[0]?.max, 24); assert.equal(meters[0]?.value, 7.5);
+    assert.equal(work.attributes.get('aria-label'), 'Ongoing commitments'); assert.equal(work.dataset['inspectionSection'], 'overview');
+    assert.match(meters[0]?.attributes.get('aria-label') ?? '', /7.5 \/ 24 Science work/);
+    assert.equal(work.all().some(node => ['button', 'form', 'input', 'b'].includes(node.tag)), false);
+    assert.ok(work.all().some(node => node.textContent === '<b>Writing</b>'));
   } finally {
     for (const [key, descriptor] of originals) if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
   }

@@ -90,7 +90,7 @@ export function civicProgressPresentation(input: CivicProgressInput) {
   }
   return {
     status: lane?.status ?? 'unknown',
-    heading: !civic ? 'Civic record unavailable' : project ? `Developing ${name(input, 'civics', project.civicId)}` : completion ? `${name(input, 'civics', completion.civicId)} completed` : lane?.status === 'required' ? 'Choose a civic' : 'No active civic',
+    heading: !civic ? 'Civic record unavailable' : project ? `Developing ${name(input, 'civics', project.civicId)}` : completion ? `${name(input, 'civics', completion.civicId)} completed` : lane?.status === 'required' ? 'Awaiting a civic choice' : 'No active civic',
     progress: project ? `${exactNumber(project.progress)} / ${exactNumber(project.requiredCulture)} Culture` : null,
     explanation: 'Culture made by towns in later seasons advances the chosen civic. Stored Culture does not speed it up. Science research stays separate.',
     choices: (lane?.availableIds ?? []).map(id => {
@@ -166,7 +166,8 @@ function disclosure(key: string, label: string): HTMLDetailsElement {
 export function createCivicProgress(input: CivicProgressInput): HTMLElement | null {
   const view = civicProgressPresentation(input);
   if (!view) return null;
-  const section = text('section', '', 'civic-progress');
+  const section = disclosure('civic-progress', 'Civics & government');
+  section.className = 'civic-progress town-receipt';
   section.dataset['inspectionSection'] = 'overview';
   section.dataset['civicStatus'] = view.status;
   section.setAttribute('aria-label', 'Civics and government');
@@ -190,7 +191,7 @@ export function createCivicProgress(input: CivicProgressInput): HTMLElement | nu
     row.setAttribute('style', `--civic-depth:${Math.min(node.level, 3)}`);
     const heading = text('div', '', 'civic-node-heading');
     heading.append(text('strong', node.name), text('span', statuses[node.status], 'civic-node-status'));
-    row.append(heading, text('p', node.requires.length ? `Requires → ${node.requires.map(parent => parent.name).join(' + ')}` : 'Starting civic', 'civic-node-parents'), text('p', `${exactNumber(node.cost)} Culture`, 'civic-node-cost'), text('p', node.explanation, 'civic-note'));
+    row.append(heading, text('p', node.requires.length ? `Requires: ${node.requires.map(parent => parent.name).join(' + ')}` : 'Starting civic', 'civic-node-parents'), text('p', `${exactNumber(node.cost)} Culture`, 'civic-node-cost'), text('p', node.explanation, 'civic-note'));
     nodes.append(row);
   }
   tree.append(nodes); section.append(tree);

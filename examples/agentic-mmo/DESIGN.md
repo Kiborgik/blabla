@@ -26,7 +26,15 @@ The first migration milestone is an observable choose-progress-complete-next-cho
 
 The era dates in the content catalogue are roadmap/presentation metadata, not a formula that maps round number to age. The regular clock and deliberate historical advances are distinct causes. A deliberate advance records its feature or event evidence, reason, old and new year, and stable identity exactly once. It never rewinds time, rebases the regular clock epoch or consumes regular clock ticks. Capability milestones normally record the current year; an explicit associated historical advance is a separate operation, never an implicit side effect of a label. A capability release should fit the current world where possible. An incompatible change requires an explicit migration or an archived restart, rather than silent reinterpretation of old state.
 
-## The first live stage
+## New-run geography and earned off-world life
+
+The current fresh-local factory builds a versioned coherent world with correlated terrain, separated mixed inland/coastal starts, viable paid expansion and finite deposits. It preserves the canonical initial economy and capital housing rather than granting technologies, buildings or resources to manufacture progress. Existing local and native worlds keep their recorded geography. The observer can select the preserved previous local world read-only; policy upgrades never disguise a replacement world as the same history.
+
+The interplanetary release completes the causal source chain from earned industrial transport and planetary knowledge to ground preparation, a staffed and powered launch complex, prepaid departure, delayed arrival and a maintained habitat. Spacefaring preparation is not an orbital or colony success. Transport carries conserved Earth settlers and paid cargo into distinct Mars reserves. Colony upkeep never spends Earth stock remotely; habitat work pays from landed reserves after upkeep. Shortage resets stability and can kill residents, while further paid transport can restore life. All same-beat successful colonies are considered before a terminal outcome, and the local runner retains that final checkpoint instead of attempting another clock transition.
+
+Historical milestones retain bounded causal proofs. An explicit once-per-cause history advance can align the displayed date with an earned milestone without altering the ordinary six-minute clock, moving time backward, fabricating old proofs or unlocking mechanics through a date alone. World stage is shared capability evidence; visible town development must still follow that town's installed and operated facts. The Mars journey view distinguishes knowledge, infrastructure, transit, arrival, paid habitat work and actual supplied residents; its colony schematic is not represented as a geographical surface map.
+
+## Historical first live stage
 
 The first operative content is settlement foundations:
 
@@ -85,7 +93,7 @@ These priorities respond to actual opening play: by round 2, four civilizations 
 
 The playable content pool must stay ahead of each civilization's immediate plan. Maintain useful choices now, connected unlocks prepared for the next delivered stage, and farther ideas in the rolling development queue. The two-item limit applies to an actor's immediate intentions, not to the technology tree or building catalogue.
 
-Completing a discovery should open a meaningful action and leave an understandable next direction. The current settlement release has only Cultivation; once it is complete, further research has no released target. That is an observed development gap to address promptly, not proof that future catalogue entries are already playable. Do not hide the gap by relabeling stored science as progress toward an unavailable technology.
+Completing a discovery should open a meaningful action and leave an understandable next direction. The historical foundations checkpoint had only Cultivation; once it was complete, further research had no released target. That was a concrete development gap, not proof that declared future catalogue entries were already playable. Later explicit releases address it. Do not hide a current gap by relabeling stored science as progress toward an unavailable technology.
 
 The source-implemented production branches are Water management leading to irrigation works, and Kiln firing leading to a kiln. One consumes materials to support more food; the other consumes energy to produce materials. Their purpose is to change what a city can supply and what it must obtain from others. Both depend on one shared, data-defined building operating rule. A civilization can pause or resume a named owned building immediately; the next strategic beat pays its inputs and produces its output, or records why it could not operate. The shared rule and registered production release are implemented and source-reviewed; the inhabited foundations release still keeps these unlocks unavailable until explicit compatible activation.
 

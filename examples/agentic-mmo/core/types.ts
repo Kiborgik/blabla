@@ -8,6 +8,17 @@ export const DIRECTOR_SEAT = 5;
 
 export type Resource = 'food' | 'materials' | 'energy' | 'credits' | 'science' | 'culture';
 export type Resources = Record<Resource, number>;
+export interface GeneratedWorldOrigin { kind: 'generated'; generatorVersion: 'coherent-geography-v1'; seed: number; clockEpoch: string }
+export type MarsMissionKind = 'settle' | 'resupply';
+export interface MarsMissionQuote { ruleVersion: 1; civId: number; mission: MarsMissionKind; sourceCityId: string; departureRound: number; arrivalRound: number; settlers: number; launchCost: Partial<Resources>; cargo: Partial<Resources>; totalCost: Partial<Resources>; sourcePopulationBefore: number; sourcePopulationAfter: number }
+export interface MarsMission extends MarsMissionQuote { id: string; eventId: string; paid: Partial<Resources> }
+export interface MarsColony { establishedRound: number; stock: Resources; shortageRounds: number }
+export interface MarsArrivalReceipt { ruleVersion: 1; missionId: string; civId: number; sourceCityId: string; round: number; eventId: string; settlers: number; cargo: Partial<Resources>; populationBefore: number; populationAfter: number; stockBefore: Resources; stockAfter: Resources }
+export interface MarsUpkeepReceipt { ruleVersion: 1; civId: number; round: number; eventId: string; status: 'supplied' | 'shortage' | 'uninhabited'; required: Partial<Resources>; paid: Partial<Resources>; missing: Partial<Resources>; stockBefore: Resources; stockAfter: Resources; populationBefore: number; populationAfter: number; habitableBefore: boolean; supplyStreakBefore: number; supplyStreakAfter: number; shortageRoundsBefore: number; shortageRoundsAfter: number }
+export interface MarsHabitatReceipt { ruleVersion: 1; civId: number; round: number; eventId: string; paid: Partial<Resources>; progressBefore: number; progressAfter: number }
+export interface MarsCivilizationState { missionsLaunched: number; activeMission: MarsMission | null; colony: MarsColony | null; lastDeparture: MarsMission | null; lastArrival: MarsArrivalReceipt | null; lastUpkeep: MarsUpkeepReceipt | null; lastHabitatWork: MarsHabitatReceipt | null }
+export interface SpaceflightState { ruleVersion: 1; civilizations: MarsCivilizationState[] }
+export interface EarnedMilestoneProof { ruleVersion: 1; milestoneId: string; round: number; revision: number; eventId: string; year: number; targetYear: number; era: number }
 export type StrategicResource = 'iron' | 'coal';
 export type StrategicResources = Partial<Record<StrategicResource, number>>;
 export interface StrategicDeposit { tileId: number; resource: StrategicResource; initialReserve: number; remaining: number }
@@ -95,11 +106,11 @@ export interface PublicProjectBase { id: string; routeId: string; agreementOffer
 export type PublicProject = PublicProjectBase & ({ status: 'pending'; expiresRound: number } | { status: 'committed'; acceptedRound: number; dueRound: number });
 export interface PublicProjectResult { projectId: string; routeId: string; agreementOfferId: string; outcome: 'completed' | 'declined' | 'cancelled' | 'expired' | 'failed' | 'no-work-needed'; reason: string; proposer: number; recipient: number; proposerPaid: Partial<Resources>; recipientPaid: Partial<Resources>; damageBefore: number | null; damageAfter: number | null }
 export interface Treaty { id: string; a: number; b: number; kind: 'trade' | 'federation' | 'peace'; since: number }
-export interface GameEvent { localPower?: LocalPowerBeatReceipt; steamDelivery?: SteamDeliveryReceipt; industrialFoundry?: IndustrialFoundryReceipt; railCompletion?: RailCompletion; territoryAcquisition?: TileAcquisitionReceipt; populationGrowth?: PopulationGrowthReceipt; wonderCompletion?: WonderCompletion; wonderLoss?: WonderLossReceipt; researchBoost?: ResearchBoostReceipt; strategicExtraction?: StrategicExtractionResult; strategicShipment?: StrategicShipmentResult; id: string; round: number; type: string; title: string; detail: string; actor: number | null; target: number | null; tileId: number | null; cause: string; effects: string[]; importance: number; publicProjectResult?: PublicProjectResult; coastalFounding?: CoastalFoundingReceipt }
+export interface GameEvent { marsDeparture?: MarsMission; marsArrival?: MarsArrivalReceipt; marsUpkeep?: MarsUpkeepReceipt; marsHabitat?: MarsHabitatReceipt; localPower?: LocalPowerBeatReceipt; steamDelivery?: SteamDeliveryReceipt; industrialFoundry?: IndustrialFoundryReceipt; railCompletion?: RailCompletion; territoryAcquisition?: TileAcquisitionReceipt; populationGrowth?: PopulationGrowthReceipt; wonderCompletion?: WonderCompletion; wonderLoss?: WonderLossReceipt; researchBoost?: ResearchBoostReceipt; strategicExtraction?: StrategicExtractionResult; strategicShipment?: StrategicShipmentResult; id: string; round: number; type: string; title: string; detail: string; actor: number | null; target: number | null; tileId: number | null; cause: string; effects: string[]; importance: number; publicProjectResult?: PublicProjectResult; coastalFounding?: CoastalFoundingReceipt }
 export interface Outcome { kind: VictoryKind; winners: number[]; round: number; reason: string }
 export interface IndependentTurns { epoch: string; strategyTicks: number; lastActionWindow: number[]; actionsInWindow: number[] }
 export interface TurnAdmission { mode: 'sequential' | 'independent'; nextActionAt: string | null; nextStrategyAt: string | null }
-export interface WorldState { coalDeposits?: StrategicDepositLayer; railEdges?: Record<string, RailCompletion>; industrialEvidence?: IndustrialEvidence; tileAcquisitions?: Record<string, TileAcquisitionReceipt>; pastoralSites?: PastoralSiteLayer; wonders?: Record<string, CompletedWonderRecord>; strategicDeposits?: StrategicDepositLayer; schemaVersion: number; gameVersion: string; releaseId: string; unlockedFeatures: string[]; calendarMilestones: string[]; seed: number; rng: number; revision: number; round: number; year: number; phase: number; width: number; height: number; tiles: HexTile[]; civilizations: Civilization[]; cities: City[]; routes: Route[]; treaties: Treaty[]; tradeOffers?: TradeOffer[]; publicProjects?: PublicProject[]; actionPlans?: Array<ActionPlan | null>; independentTurns?: IndependentTurns; events: GameEvent[]; eventCounts: Record<string, number>; directorIntervals: Record<string, string>; historyAdvances?: Record<string, HistoryAdvanceReceipt>; clockEpoch: string | null; clockTicks: number; outcome: Outcome | null; climate: number; directorCooldown: number }
+export interface WorldState { origin?: GeneratedWorldOrigin; spaceflight?: SpaceflightState; milestoneProofs?: Record<string, EarnedMilestoneProof>; coalDeposits?: StrategicDepositLayer; railEdges?: Record<string, RailCompletion>; industrialEvidence?: IndustrialEvidence; tileAcquisitions?: Record<string, TileAcquisitionReceipt>; pastoralSites?: PastoralSiteLayer; wonders?: Record<string, CompletedWonderRecord>; strategicDeposits?: StrategicDepositLayer; schemaVersion: number; gameVersion: string; releaseId: string; unlockedFeatures: string[]; calendarMilestones: string[]; seed: number; rng: number; revision: number; round: number; year: number; phase: number; width: number; height: number; tiles: HexTile[]; civilizations: Civilization[]; cities: City[]; routes: Route[]; treaties: Treaty[]; tradeOffers?: TradeOffer[]; publicProjects?: PublicProject[]; actionPlans?: Array<ActionPlan | null>; independentTurns?: IndependentTurns; events: GameEvent[]; eventCounts: Record<string, number>; directorIntervals: Record<string, string>; historyAdvances?: Record<string, HistoryAdvanceReceipt>; clockEpoch: string | null; clockTicks: number; outcome: Outcome | null; climate: number; directorCooldown: number }
 
 export type GameAction =
   | { type: 'choose-civic'; civicId: string }
@@ -127,7 +138,7 @@ export type GameAction =
   | { type: 'federate'; partner: number }
   | { type: 'repair'; routeId: string }
   | { type: 'repair-city'; cityId: string }
-  | { type: 'expedition' }
+  | { type: 'expedition'; cityId: string; mission: MarsMissionKind }
   | { type: 'event'; event: EventKind; target: number }
   | { type: 'wait' };
 export interface Command { seat: number; expectedRevision: number; action: GameAction; timestamp?: string; plan?: ActionPlanItem[]; observedRevision?: number }
@@ -169,7 +180,7 @@ export interface HistoricalMilestone { id: string; name: string; requiredFeature
 
 export interface DirectorTickCommand { expectedRevision: number; kind: 'event' | 'review' | 'clock'; intervalId: string; timestamp: string; event: EventKind; target: number }
 
-export type HistoryCause = { kind: 'feature' | 'event'; id: string };
+export type HistoryCause = { kind: 'feature' | 'event' | 'milestone'; id: string };
 export interface HistoryAdvanceCommand { expectedRevision: number; cause: HistoryCause; reason: string; deltaYears: number; timestamp: string }
 export interface HistoryAdvanceReceipt { cause: HistoryCause; reason: string; deltaYears: number; timestamp: string; revision: number; yearBefore: number; yearAfter: number; evidence: string[] }
 export interface CompatibleReleaseDefinition extends ReleaseDefinition { schemaVersion: number; compatibleFrom: readonly string[] }

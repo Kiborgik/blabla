@@ -1,6 +1,7 @@
+import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
 import { BEHAVIOR_POLICY_VERSION, chooseCivilizationBehavior, chooseDirectorBehavior, createBehaviorMemory, isBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
 import { TURN_RULES } from '../core/content.ts';
-import { applyCommand, catchUpClock, catchUpStrategy } from '../core/engine.ts';
+import { applyCommand, applyHistoryAdvance, catchUpClock, catchUpStrategy } from '../core/engine.ts';
 import { DIRECTOR_SEAT, type Command, type TransitionResult, type WorldState } from '../core/types.ts';
 import type { PublicProvenance, PublicTransition } from './public-protocol.ts';
 import { assertWorld, isRecord, RequestFailure, safeInteger, utc } from './validation.ts';
@@ -82,6 +83,11 @@ export function planAutonomousWake(world: WorldState, previous: AutonomousState,
   }
   const window = Math.floor((Date.parse(timestamp) - Date.parse(runtime.activatedAt)) / TURN_RULES.tacticalWindowMs);
   if (wake.remainingStrategyTicks > 0 || wake.remainingClockTicks > 0 || window <= runtime.lastDecisionWindow) return wake;
+  const historical = nextEarnedHistoryAdvance(wake.state, timestamp);
+  if (historical) {
+    const receiptKey = `simulation-step:${commandId}:history`;
+    append({ kind: 'history-advance', command: historical }, applyHistoryAdvance(wake.state, historical), 'history', { kind: 'procedural-policy', model: null, seat: DIRECTOR_SEAT, commandId: receiptKey, recordedAt: timestamp, policy: { version: BEHAVIOR_POLICY_VERSION, profileId: 'earned-history', phase: 'historical-continuity', reason: historical.reason, decision: runtime.wakeCount, seed: wake.state.seed } });
+  }
   for (let index = 0; index <= DIRECTOR_SEAT && !wake.state.outcome; index += 1) {
     const seat = wake.state.independentTurns ? index : wake.state.phase;
     const memory = runtime.memories[seat];

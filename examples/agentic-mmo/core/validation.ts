@@ -1,3 +1,4 @@
+import { generatedHistoryRecords, spaceflightRecords, validMarsEvent } from './spaceflight-validation.ts';
 import {
   BUILDINGS,
   COAL_RULES,
@@ -120,9 +121,10 @@ function historyAdvances(value: unknown, revision: number, year: number, feature
   for (const [key, receipt] of Object.entries(value)) {
     if (!record(receipt) || !record(receipt.cause)) return false;
     const cause = receipt.cause;
-    if ((cause.kind !== 'feature' && cause.kind !== 'event') || !text(cause.id)
+    if ((cause.kind !== 'feature' && cause.kind !== 'event' && cause.kind !== 'milestone') || !text(cause.id)
       || cause.id.trim().length === 0 || cause.id.length > 128 || key !== `${cause.kind}:${cause.id}`
       || (cause.kind === 'feature' && !features.includes(cause.id))
+      || (cause.kind === 'milestone' && !features.includes('earned-history'))
       || !text(receipt.reason) || receipt.reason.trim().length === 0 || receipt.reason.length > 1000
       || !integer(receipt.deltaYears) || !integer(receipt.revision, 1, revision)
       || !integer(receipt.yearBefore, -Number.MAX_SAFE_INTEGER)
@@ -1004,7 +1006,7 @@ function wonderRecords(hasRegistry: boolean, registry: unknown, cities: City[], 
     for (const installed of Object.values(settlement.improvements ?? {})) { occupied.add(installed.tileId); orders.add(installed.completion.orderId); identities.add(installed.completion.eventId); }
     const active = settlement.construction?.active; const last = settlement.construction?.lastCompleted;
     if (active) {
-      orders.add(active.id); if (active.tileId !== undefined) occupied.add(active.tileId);
+      orders.add(active.id); if (active.tileId !== undefined && !('kind' in active && active.kind === 'rail')) occupied.add(active.tileId);
       if ('kind' in active && active.kind === 'wonder') {
         if (Object.hasOwn(registry, active.wonderId)) return false;
         activeContenders.push(`${settlement.civId}:${active.wonderId}`);
@@ -1556,7 +1558,7 @@ function territoryRecords(present: boolean, value: unknown, cities: City[], tile
 
 export function isGameEvent(value: unknown): value is GameEvent {
   return (
-    record(value) &&
+    record(value) && validMarsEvent(value) &&
     ['id', 'type', 'title', 'cause'].every((field) => text(value[field])) &&
     typeof value.detail === 'string' &&
     integer(value.round) &&
@@ -1754,5 +1756,6 @@ export function isWorldState(
     (value.outcome !== null && value.outcome.round > round)
   )
     return false;
+  if (!spaceflightRecords(value as unknown as WorldState) || !generatedHistoryRecords(value as unknown as WorldState)) return false;
   return industrialRecords({ seed: value.seed, tiles, cities, civilizations: value.civilizations, events: value.events, routes: value.routes, unlockedFeatures: features, revision: value.revision, round, calendarMilestones: value.calendarMilestones, coalDeposits: value.coalDeposits, railEdges: value.railEdges, industrialEvidence: value.industrialEvidence, strategicDeposits: value.strategicDeposits, pastoralSites: value.pastoralSites, tradeOffers: Array.isArray(value.tradeOffers) && value.tradeOffers.every(tradeOffer) ? value.tradeOffers : [], presentFields: Object.keys(value) });
 }

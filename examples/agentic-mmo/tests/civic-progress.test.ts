@@ -23,7 +23,7 @@ await test('the released empty lane asks for a civic without adopting a governme
   const view = civicProgressPresentation(input(journey.adopted));
   assert.ok(view);
   assert.equal(view.status, 'required');
-  assert.equal(view.heading, 'Choose a civic');
+  assert.equal(view.heading, 'Awaiting a civic choice');
   assert.equal(view.progress, null);
   assert.deepEqual(view.choices, ['Code of laws · 16 Culture']);
   assert.equal(view.government.heading, 'No government adopted');
@@ -171,6 +171,7 @@ class ElementRecord {
   tag: string;
   textContent = '';
   className = '';
+  open = false;
   dataset: Record<string, string> = {};
   children: ElementRecord[] = [];
   attributes = new Map<string, string>();
@@ -199,7 +200,8 @@ await test('the read-only renderer separates Culture, Government and current eff
   assert.match(section.content(), /Urban planning/);
   assert.match(section.content(), /Government effects & construction/);
   assert.match(section.content(), /work recorded/);
-  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civic-tree', 'civics', 'government', 'government-effects']);
+  assert.equal(section.tag, 'details'); assert.equal(section.open, false); assert.equal(section.children[0]?.textContent, 'Civics & government');
+  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civic-progress', 'civic-tree', 'civics', 'government', 'government-effects']);
   assert.ok(section.all().filter(node => node.tag === 'details').every(node => node.children[0]?.tag === 'summary'));
   assert.equal(section.all().filter(node => ['button', 'input', 'select', 'form'].includes(node.tag)).length, 0);
   assert.ok(section.all().some(node => node.tag === 'svg'));
@@ -366,7 +368,7 @@ await test('second-government comparison and effects stay inside the existing sa
   definition.name = '<button>Switch government</button>';
   const section = render(source);
   assert.ok(section);
-  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civic-tree', 'civics', 'government', 'government-effects']);
+  assert.deepEqual(section.all().filter(node => node.tag === 'details').map(node => node.dataset['townDisclosure']), ['civic-progress', 'civic-tree', 'civics', 'government', 'government-effects']);
   assert.ok(section.all().filter(node => node.tag === 'details').every(node => node.children[0]?.tag === 'summary'));
   assert.match(section.content(), /<button>Switch government<\/button>/);
   assert.match(section.content(), /0 diplomatic · 1 wildcard/);

@@ -1,6 +1,7 @@
 import type { Focus, Resource } from './types.ts';
 
-export const BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v1';
+export const LEGACY_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v1';
+export const BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v2';
 
 export type BehaviorPhase = 'survival' | 'recovery' | 'development' | 'expansion' | 'trade' | 'consolidation' | 'director';
 export type BehaviorPriority = 'research' | 'construction' | 'civic' | 'expansion' | 'trade' | 'recovery';

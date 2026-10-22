@@ -1,19 +1,22 @@
-import { applyCommand, applyRelease, catchUpClock, catchUpStrategy, createWorld } from '../core/engine.ts';
-import { BEHAVIOR_POLICY_VERSION, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
-import { RELEASES } from '../core/release.ts';
+import { applyCommand, applyHistoryAdvance, catchUpClock, catchUpStrategy } from '../core/engine.ts';
+import { BEHAVIOR_POLICY_VERSION, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, isLegacyBehaviorMemory, type LegacyBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
+import { LEGACY_BEHAVIOR_POLICY_VERSION } from '../core/behavior-profiles.ts';
+import { createGeneratedWorld } from '../core/generated-world.ts';
+import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
 import { DIRECTOR_SEAT, type GameAction, type WorldState } from '../core/types.ts';
 import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v1';
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v2';
+export const PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v1';
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
 const EPOCH = '2000-01-01T00:00:00.000Z';
 const MAXIMUM_STEPS = 60;
 
 export interface LocalDecision { seat: number; action: GameAction; reason: string; profileId: string; phase: string; revision: number }
 export interface LocalSimulation {
-  version: 1;
+  version: 2;
   source: 'local-procedural';
   policyVersion: string;
   seed: number;
@@ -24,26 +27,27 @@ export interface LocalSimulation {
   decisions: LocalDecision[];
 }
 
-export function createLocalSimulation(seed = 1701): LocalSimulation {
-  let state = createWorld(seed, EPOCH);
-  for (const release of RELEASES.slice(1)) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: EPOCH });
-    if (!result.ok) throw new Error(`Local observatory release refused: ${result.error ?? release.id}`);
-    state = result.state;
-  }
-  return { version: 1, source: 'local-procedural', policyVersion: BEHAVIOR_POLICY_VERSION, seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
+export interface PreviousLocalSimulation extends Omit<LocalSimulation, 'version' | 'memories'> {
+  readonly version: 1;
+  readonly memories: ReadonlyArray<LegacyBehaviorMemory | null>;
 }
 
-export function parseLocalSimulation(value: unknown): LocalSimulation | null {
+export function createLocalSimulation(seed = 1701): LocalSimulation {
+  const state = createGeneratedWorld(seed, EPOCH);
+  return { version: 2, source: 'local-procedural', policyVersion: BEHAVIOR_POLICY_VERSION, seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
+}
+
+function parseRun(value: unknown, previous: boolean): LocalSimulation | PreviousLocalSimulation | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const run = value as Record<string, unknown>;
-  if (run.version !== 1 || run.source !== 'local-procedural' || run.policyVersion !== BEHAVIOR_POLICY_VERSION
+  if (run.version !== (previous ? 1 : 2) || run.source !== 'local-procedural' || run.policyVersion !== (previous ? LEGACY_BEHAVIOR_POLICY_VERSION : BEHAVIOR_POLICY_VERSION)
     || !Number.isSafeInteger(run.seed) || Number(run.seed) < 0 || Number(run.seed) > 0xffffffff
     || !Number.isSafeInteger(run.steps) || Number(run.steps) < 0
     || typeof run.timestamp !== 'string' || Date.parse(run.timestamp) !== Date.parse(EPOCH) + Number(run.steps) * LOCAL_SIMULATION_STEP_MS
     || !isWorldState(run.state) || run.state.seed !== run.seed || run.state.clockEpoch !== EPOCH
+    || (previous ? run.state.origin !== undefined || run.state.unlockedFeatures.includes('interplanetary-logistics') : run.state.origin?.generatorVersion !== 'coherent-geography-v1')
     || !Array.isArray(run.memories) || run.memories.length !== DIRECTOR_SEAT + 1
-    || !run.memories.every((memory, seat) => memory === null || isBehaviorMemory(memory) && memory.seat === seat && memory.seed === run.seed && memory.lastDecisionRound <= (run.state as WorldState).round && memory.decisionCount <= Number(run.steps))
+    || !run.memories.every((memory, seat) => memory === null || (previous ? isLegacyBehaviorMemory(memory) : isBehaviorMemory(memory)) && memory.seat === seat && memory.seed === run.seed && memory.lastDecisionRound <= (run.state as WorldState).round && memory.decisionCount <= Number(run.steps))
     || !Array.isArray(run.decisions) || run.decisions.length > DIRECTOR_SEAT + 1) return null;
   const seats = new Set<number>();
   for (const value of run.decisions) {
@@ -55,8 +59,11 @@ export function parseLocalSimulation(value: unknown): LocalSimulation | null {
       || !Number.isSafeInteger(decision.revision) || Number(decision.revision) < 0 || Number(decision.revision) > run.state.revision) return null;
     seats.add(Number(decision.seat));
   }
-  return structuredClone(run) as unknown as LocalSimulation;
+  return structuredClone(run) as unknown as LocalSimulation | PreviousLocalSimulation;
 }
+
+export function parseLocalSimulation(value: unknown): LocalSimulation | null { return parseRun(value, false) as LocalSimulation | null; }
+export function parsePreviousLocalSimulation(value: unknown): PreviousLocalSimulation | null { return parseRun(value, true) as PreviousLocalSimulation | null; }
 
 export function advanceLocalSimulation(run: LocalSimulation, steps = 1): LocalSimulation {
   if (!Number.isSafeInteger(steps) || steps < 1 || steps > MAXIMUM_STEPS) throw new RangeError('Local advancement needs between one and sixty virtual steps');
@@ -66,10 +73,18 @@ export function advanceLocalSimulation(run: LocalSimulation, steps = 1): LocalSi
   for (let index = 0; index < steps && !next.state.outcome; index += 1) {
     const timestamp = new Date(Date.parse(EPOCH) + (next.steps + 1) * LOCAL_SIMULATION_STEP_MS).toISOString();
     const strategic = catchUpStrategy(next.state, timestamp);
-    if (!strategic.ok || strategic.remainingTicks > 0) throw new Error(`Local economy refused: ${strategic.error ?? 'bounded catchup exceeded'}`);
+    if (!strategic.ok || strategic.remainingTicks > 0 && !strategic.state.outcome) throw new Error(`Local economy refused: ${strategic.error ?? 'bounded catchup exceeded'}`);
+    next.state = strategic.state;
+    if (next.state.outcome) { next.steps += 1; next.timestamp = timestamp; break; }
     const clock = catchUpClock(strategic.state, timestamp);
     if (!clock.ok || clock.remainingTicks > 0) throw new Error(`Local clock refused: ${clock.error ?? 'bounded catchup exceeded'}`);
     next.state = clock.state;
+    const historical = nextEarnedHistoryAdvance(next.state, timestamp);
+    if (historical) {
+      const result = applyHistoryAdvance(next.state, historical);
+      if (!result.ok) throw new Error(`Earned history refused: ${result.error ?? 'unknown refusal'}`);
+      next.state = result.state;
+    }
     for (let seat = 0; seat <= DIRECTOR_SEAT && !next.state.outcome; seat += 1) {
       const memory = next.memories[seat] ?? undefined;
       const decision = seat === DIRECTOR_SEAT ? chooseDirectorBehavior(next.state, memory, timestamp) : chooseCivilizationBehavior(next.state, seat, memory, timestamp);
@@ -87,6 +102,6 @@ export function advanceLocalSimulation(run: LocalSimulation, steps = 1): LocalSi
   return next;
 }
 
-export function localSimulationSnapshot(run: LocalSimulation): LiveSnapshot {
-  return { identity: `local:${run.version}:${run.policyVersion}:${run.seed}`, state: run.state };
+export function localSimulationSnapshot(run: LocalSimulation | PreviousLocalSimulation): LiveSnapshot {
+  return { identity: `local:${run.state.origin?.generatorVersion ?? 'legacy-foundation-v1'}:${run.seed}:${run.state.clockEpoch}`, state: run.state };
 }

@@ -1,3 +1,4 @@
+import { spaceflightActionBlock } from './simulation/spaceflight.ts';
 import { railEdgeId, railTownBlock, railSiteBlock } from './simulation/rail.ts';
 import { governmentActionBlock } from './simulation/government.ts';
 import { civicActionBlock } from './simulation/civics.ts';
@@ -117,6 +118,7 @@ export function isGameAction(value: unknown): value is GameAction {
     case 'event':
       return fields(value, ['type', 'event', 'target']) && integer(value.target, CIV_COUNT - 1) && DIRECTOR_EVENTS.some((event) => event.id === value.event);
     case 'expedition':
+      return fields(value, ['type', 'cityId', 'mission']) && text(value.cityId, 128) && ['settle', 'resupply'].includes(String(value.mission));
     case 'wait':
       return fields(value, ['type']);
     default:
@@ -314,6 +316,7 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
     case 'event':
       return seat !== DIRECTOR_SEAT ? invalidated('Only the World Director can submit an event') : null;
     case 'expedition':
+      return !cities.some(city => city.id === action.cityId) ? invalidated('The exact mission source town is no longer owned') : null;
     case 'wait':
       return null;
     default:
@@ -322,6 +325,7 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
 }
 
 function unavailableReason(state: WorldState, seat: number, action: GameAction): string {
+  if (action.type === 'expedition') return spaceflightActionBlock(state, seat, action) ?? 'Review the exact paid mission and powered source town';
   if (action.type === 'build-rail') return railTownBlock(state, seat, action.cityId) ?? 'Review the exact local Rail edge';
   if (action.type === 'adopt-government') return governmentActionBlock(state, seat, action.governmentId, action.assignments) ?? 'Review current arrangement admission';
   if (action.type === 'choose-civic') return civicActionBlock(state, seat, action.civicId) ?? 'Review current civic admission';
@@ -371,7 +375,6 @@ function unavailableReason(state: WorldState, seat: number, action: GameAction):
       if (source && source.population < required) return `Source ${source.id} has ${source.population} people; ${required} are required to transfer ${ECONOMY_RULES.settle.population} and retain ${ECONOMY_RULES.settle.minimumSourcePopulation}`;
     }
   }
-  else if (action.type === 'expedition') cost = ECONOMY_RULES.expedition.cost;
   else if (action.type === 'event') {
     const event = DIRECTOR_EVENTS.find((candidate) => candidate.id === action.event);
     if (event) requiredFeatures.push(...event.requiredFeatures);

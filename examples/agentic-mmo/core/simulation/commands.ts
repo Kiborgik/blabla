@@ -1,3 +1,4 @@
+import { launchMarsMission } from './spaceflight.ts';
 import { executeRailAction } from './rail.ts';
 import { adoptGovernment } from './government.ts';
 import { chooseCivic } from './civics.ts';
@@ -263,8 +264,10 @@ export function executeAction(
       });
       return;
     }
-    case 'federate':
     case 'expedition':
+      launchMarsMission(state, seat, action, events);
+      return;
+    case 'federate':
       throw new RangeError('This action has no released implementation');
   }
 }

@@ -1,3 +1,7 @@
+import { DEFAULT_WORLD_CAMERA, parseWorldCamera, parseWorldSource, parseWorldViews } from './world-view.ts';
+import type { WorldViewPreferences } from './world-view.ts';
+export { MAP_ZOOM } from './world-view.ts';
+
 export interface Release {
   schemaVersion: 1;
   version: string;
@@ -5,7 +9,7 @@ export interface Release {
   publishedAt: string;
 }
 
-export interface ViewerPreferences {
+export interface ViewerPreferences extends WorldViewPreferences {
   schemaVersion: 1;
   zoom: number;
   x: number;
@@ -20,15 +24,9 @@ export interface ViewerPreferences {
   effects: 'calm' | 'rich' | 'cinematic';
 }
 
-export const MAP_ZOOM = { minimum: .25, maximum: 4 } as const;
-
 export const DEFAULT_PREFERENCES: ViewerPreferences = {
   schemaVersion: 1,
-  zoom: 1,
-  x: 0,
-  z: 0,
-  selected: 0,
-  selectedCity: null,
+  ...DEFAULT_WORLD_CAMERA,
   speed: 1,
   paused: false,
   borders: true,
@@ -54,18 +52,13 @@ function bounded(value: unknown, fallback: number, min: number, max: number): nu
 export function parsePreferences(value: unknown): ViewerPreferences {
   const data = object(value);
   if (data?.['schemaVersion'] !== 1) return { ...DEFAULT_PREFERENCES };
-  const selected = data['selected'];
-  const selectedCity = data['selectedCity'];
+  const worldSource = parseWorldSource(data['worldSource']);
+  const worldViews = parseWorldViews(data['worldViews']);
   return {
     schemaVersion: 1,
-    zoom: bounded(data['zoom'], 1, MAP_ZOOM.minimum, MAP_ZOOM.maximum),
-    x: bounded(data['x'], 0, -100, 100),
-    z: bounded(data['z'], 0, -100, 100),
-    selected:
-      typeof selected === 'number' && Number.isInteger(selected) && selected >= 0 && selected < 5
-        ? selected
-        : 0,
-    selectedCity: typeof selectedCity === 'string' && selectedCity.length > 0 && selectedCity.length <= 160 ? selectedCity : null,
+    ...parseWorldCamera(data),
+    ...(worldSource ? { worldSource } : {}),
+    ...(worldViews.length ? { worldViews } : {}),
     speed: bounded(data['speed'], 1, 0.5, 4),
     paused: typeof data['paused'] === 'boolean' ? data['paused'] : false,
     borders: typeof data['borders'] === 'boolean' ? data['borders'] : true,
