@@ -1,7 +1,11 @@
 import { advanceLocalSimulationAsync, disposeLocalSimulationWorker } from './local-simulation-client.ts';
 import { localSimulationSnapshot } from './local-simulation.ts';
 import { createLocalWorldStorage, type LocalCheckpointResult } from './local-world-storage.ts';
-import { createWorldViewSession, parseWorldSource, worldSourceHref, type WorldSource } from './world-view.ts';
+import { createWorldViewSession, parseWorldBody, parseWorldSource, worldSourceHref, type WorldBody, type WorldSource } from './world-view.ts';
+import { bodySelection, bodyViewContext, bodyViewDescription, worldBodyHref } from './body-view.ts';
+import { projectMarsBody, marsSelectionId } from '../visuals/mars-body.ts';
+import { createMarsBodyRenderer } from './mars-body-renderer.ts';
+import { renderMarsBodyInspection } from './mars-body-inspection.ts';
 import './spectator-hud.css';
 import './mars-observation.css';
 import { renderMarsObservation, worldJourney } from './mars-observation.ts';
@@ -17,7 +21,7 @@ import { createCivicProgress } from './civic-progress.ts';
 import { eventLogEntries, latestStoryEvent, renderEventLog } from './event-log.ts';
 import { routeInspectionCity } from '../visuals/route-visuals.ts';
 import { renderRouteCard, renderRouteList, retainedRoutePathInspection, routeInspectionIdentity } from './route-inspection.ts';
-import { cityKey, resolveCitySelection, retainedReceiptBuilding } from './city-selection.ts';
+import { cityKey, retainedReceiptBuilding } from './city-selection.ts';
 import { renderPastoralInspection, renderSettlementInspection, residentSupportForWorld, renderStrategicInspection } from './settlement-inspection.ts';
 import { researchProgressPresentation } from './research-progress.ts';
 import releaseData from '../public/version.json';
@@ -40,7 +44,7 @@ import type { RouteResultCue } from '../visuals/route-cues.ts';
 import { createCueStream, renderDeltas, routeResultPresentation, visualIcon } from './world-cues.ts';
 import { resourceGuide } from './viewer-appearance.ts';
 import { mountViewerSettings } from './viewer-settings.ts';
-import type { Resource } from '../core/types.ts';
+import type { Resource, WorldState } from '../core/types.ts';
 
 const PREFERENCES_KEY = 'civitas:viewer:v1';
 const RELOAD_KEY = 'civitas:attempted-deployments';
@@ -65,6 +69,8 @@ function readHistory(): unknown {
 let preferences = preferencesAfterUpdate(currentRelease.buildId, readStored(PREFERENCES_KEY), readHistory());
 const worldView = createWorldViewSession();
 let worldSource: WorldSource = preferences.worldSource ?? 'local';
+let worldBody: WorldBody = parseWorldBody(new URL(window.location.href).searchParams.get('body')) ?? preferences.worldBody ?? 'earth';
+preferences = { ...preferences, worldBody };
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('The spectator application mount is missing.');
 
@@ -76,7 +82,7 @@ app.innerHTML = `
   </header>
   <main class="observatory live-observatory">
     <div id="map" class="map"><div id="city-labels" class="city-labels"></div></div>
-    <section class="world-heading" aria-label="Current world status"><span id="world-id" class="eyebrow">SHARED WORLD</span><h1 id="world-title">Connecting to the world</h1><p id="world-detail">Looking for the latest committed state.</p></section>
+    <section class="world-heading" aria-label="Current world status"><div class="world-calendar"><span id="world-id" class="eyebrow">SHARED WORLD</span><h1 id="world-title">Connecting to the world</h1><p id="world-detail">Looking for the latest committed state.</p><span class="world-mode" hidden></span></div><div class="body-switch" role="group" aria-label="World body to observe" aria-describedby="body-context-description"><button type="button" data-body="earth" aria-pressed="true" disabled>Earth</button><button type="button" data-body="mars" aria-pressed="false" disabled>Mars</button></div><p id="body-context" class="body-context" hidden></p><span id="body-context-description" class="sr-only"></span></section>
     <button class="era-pill" id="journey-open" data-open-journey type="button" aria-haspopup="dialog" aria-controls="journey-dialog" aria-label="Inspect world history and Earth to Mars journey" disabled><span><strong id="era-name">Early settlements</strong><small id="era-detail">A GROWING WORLD</small></span></button>
     <aside class="civilization-panel panel" aria-label="Civilizations" hidden><h2 class="sr-only">Civilizations · Select to inspect</h2><div class="civilization-list"></div></aside>
     <aside class="inspection panel" aria-label="Civilization inspection" hidden></aside>
@@ -167,7 +173,7 @@ const capabilityTree = createCapabilityTreeSheet(capabilityDialog, (id) => {
 });
 
 function currentCapabilityInput(): CapabilityTreeInput | null {
-  if (!snapshot || mode === 'sample' || !observedAt) return null;
+  if (!snapshot || mode === 'sample' || worldBody !== 'earth' || !observedAt) return null;
   const civilization = snapshot.state.civilizations.find(candidate => candidate.id === preferences.selected);
   if (!civilization) return null;
   return {
@@ -186,8 +192,8 @@ function savePreferences(): void {
 
 function observeWorldIdentity(next: LiveSnapshot, source: WorldSource): void {
   const prior = worldView.identity();
-  if (prior && (prior.identity !== next.identity || prior.source !== source || prior.body !== 'earth')) savePreferences();
-  const view = worldView.observe(preferences, { source, identity: next.identity, body: 'earth' });
+  if (prior && (prior.identity !== next.identity || prior.source !== source || prior.body !== worldBody)) savePreferences();
+  const view = worldView.observe(preferences, { source, identity: next.identity, body: worldBody });
   if (!view.changed) return;
   atlas?.dispose(); atlas = null; mapFingerprint = ''; inspectionFingerprint = '';
   inspectionCamera.release(); preferences = view.preferences; initialOverview = !view.restored;
@@ -196,6 +202,22 @@ function observeWorldIdentity(next: LiveSnapshot, source: WorldSource): void {
 function renderInspection(): void {
   const civ = uniqueCivilizations(displayed).find((entry) => entry.id === preferences.selected);
   const panel = element('.inspection');
+  if (worldBody === 'mars' && snapshot && mode !== 'sample') {
+    const observation = projectMarsBody(snapshot.state);
+    const selected = observation.civilizations.find(entry => entry.id === preferences.selected);
+    panel.hidden = !selected;
+    if (!selected) return;
+    const fingerprint = JSON.stringify(['mars', snapshot.identity, observation, selected.id]);
+    if (fingerprint === inspectionFingerprint) return;
+    const scroll = panel.scrollTop;
+    const closeFocused = document.activeElement === panel.querySelector('.sheet-close');
+    inspectionFingerprint = fingerprint;
+    panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close Mars details">Close ×</button><div class="inspection-top"><span class="eyebrow">MARS RECORDS</span><span class="preview-tag">VIEW ONLY</span></div><div class="inspection-title"><h2>${escapeText(selected.name)}</h2></div><section class="mars-body-facts" aria-label="Recorded Mars settlement and mission"></section>`;
+    renderMarsBodyInspection(element('.mars-body-facts'), observation, selected.id);
+    panel.scrollTop = scroll;
+    if (closeFocused) panel.querySelector<HTMLButtonElement>('.sheet-close')?.focus({ preventScroll: true });
+    return;
+  }
   const route = displayed.routes.find((entry) => entry.id === selectedRoute);
   panel.hidden = !civ && !route;
   if (route) {
@@ -406,6 +428,7 @@ function selectRoutePage(page: number): void {
 }
 
 function selectRoute(id: string): void {
+  if (worldBody !== 'earth') changeWorldBody('earth');
   const route = displayed.routes.find((entry) => entry.id === id);
   if (!route) return;
   const city = displayed.cities.find((entry) => cityKey(entry) === routeInspectionCity(route));
@@ -422,6 +445,7 @@ function selectRoute(id: string): void {
 }
 
 function selectCity(id: string, workId?: string): void {
+  if (worldBody !== 'earth') changeWorldBody('earth');
   const fromRoute = selectedRoute !== null;
   const city = displayed.cities.find((entry) => cityKey(entry) === id);
   if (!city) return;
@@ -447,19 +471,55 @@ function navigateStory(destination: SpectatorDestination): void {
 }
 
 function selectCivilization(id: number): void {
+  if (worldBody === 'mars') { selectMarsCivilization(marsSelectionId(id)); return; }
   const city = displayed.cities.find((entry) => entry.id === id && cityKey(entry) === preferences.selectedCity)
     ?? displayed.cities.find((entry) => entry.id === id);
   if (city) selectCity(cityKey(city));
 }
 
+function selectMarsCivilization(id: string): void {
+  if (!snapshot || worldBody !== 'mars') return;
+  const civilization = projectMarsBody(snapshot.state).civilizations.find(entry => marsSelectionId(entry.id) === id);
+  if (!civilization) return;
+  preferences = { ...preferences, selected: civilization.id, selectedCity: id };
+  selectedRoute = null;
+  for (const row of document.querySelectorAll<HTMLElement>('[data-civ]')) row.setAttribute('aria-pressed', String(Number(row.dataset['civ']) === civilization.id));
+  atlas?.select(id); renderInspection(); setInspectionOpen(true); savePreferences();
+}
+
+function changeWorldBody(body: WorldBody): void {
+  if (body === worldBody || !snapshot || mode === 'sample') return;
+  savePreferences(); quietCues(); capabilityTree.close(); setInspectionOpen(false); inspectionCamera.release();
+  worldBody = body; selectedRoute = null;
+  observeWorldIdentity(snapshot, worldSource);
+  renderWorld(projectWorld(snapshot.state)); renderConnection(); savePreferences();
+  try { history.replaceState(history.state as unknown, '', worldBodyHref(window.location.href, body)); } catch {}
+}
+
+function renderBodyControls(state: WorldState | null): void {
+  element('.observatory').dataset['body'] = worldBody;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.body-switch [data-body]')) {
+    button.disabled = !state;
+    button.setAttribute('aria-pressed', String(button.dataset['body'] === worldBody));
+  }
+  element('#body-context').textContent = state ? bodyViewContext(worldBody, state) : '';
+  element('#body-context').hidden = !state || worldBody === 'earth';
+  element('#body-context-description').textContent = state ? bodyViewDescription(worldBody, state) : '';
+}
+
 function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
-  const shift = retainCoordinates ? atlasCoordinateShift(displayed, world) : null;
+  renderBodyControls(mode === 'sample' ? null : snapshot?.state ?? null);
+  const shift = retainCoordinates && worldBody === 'earth' ? atlasCoordinateShift(displayed, world) : null;
   displayed = world;
   if (!world.routes.some((route) => route.id === selectedRoute)) selectedRoute = null;
-  preferences = { ...preferences, ...resolveCitySelection(world, preferences) };
+  preferences = { ...preferences, ...bodySelection(worldBody, world, preferences) };
+  const mars = worldBody === 'mars' && snapshot && mode !== 'sample' ? projectMarsBody(snapshot.state) : null;
   const civs = uniqueCivilizations(world);
   element('.civilization-panel').hidden = civs.length === 0;
-  const summaries = new Map(civs.map(civ => [civ.id, snapshot && mode !== 'sample' ? civilizationSummary(snapshot.state, civ.id) : 'Sample civilization']));
+  const summaries = new Map(civs.map(civ => {
+    const colony = mars?.civilizations.find(entry => entry.id === civ.id);
+    return [civ.id, colony ? `${colony.status.replaceAll('-', ' ')} · ${colony.population} on Mars` : snapshot && mode !== 'sample' ? civilizationSummary(snapshot.state, civ.id) : 'Sample civilization'];
+  }));
   const focusedCiv = document.activeElement instanceof HTMLElement ? document.activeElement.dataset['civ'] : undefined;
   const listFingerprint = JSON.stringify(civs.map(({ id, name, character, color, symbol }) => ({ id, name, character, color, symbol, summary: summaries.get(id) })));
   if (listFingerprint !== civilizationFingerprint) {
@@ -469,7 +529,7 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
   if (focusedCiv) document.querySelector<HTMLButtonElement>(`[data-civ="${focusedCiv}"]`)?.focus({ preventScroll: true });
   }
   for (const row of document.querySelectorAll<HTMLElement>('[data-civ]')) row.setAttribute('aria-pressed', String(Number(row.dataset['civ']) === preferences.selected));
-  const fingerprint = JSON.stringify(world);
+  const fingerprint = JSON.stringify([worldBody, mars ?? world]);
   if (fingerprint !== mapFingerprint) {
     savePreferences();
     if (shift && (shift.x || shift.z)) {
@@ -482,20 +542,22 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
     element('#city-labels').replaceChildren();
     try {
       if (!webgl) throw new Error('Use the supported 2D map');
-      atlas = createAtlasRenderer(element('#map'), element('#city-labels'), world, preferences, selectCity, selectRoute);
+      atlas = mars ? createMarsBodyRenderer(element('#map'), element('#city-labels'), mars, preferences, selectMarsCivilization, 'webgl')
+        : createAtlasRenderer(element('#map'), element('#city-labels'), world, preferences, selectCity, selectRoute);
     } catch {
       webgl = false;
       element('#map').querySelector('canvas')?.remove();
       element('#city-labels').replaceChildren();
-      atlas = createFlatAtlasRenderer(element('#map'), world, preferences, selectCity, selectRoute);
+      atlas = mars ? createMarsBodyRenderer(element('#map'), element('#city-labels'), mars, preferences, selectMarsCivilization, 'flat')
+        : createFlatAtlasRenderer(element('#map'), world, preferences, selectCity, selectRoute);
     }
-    if (initialOverview && world.tiles.length) { atlas.reset(); initialOverview = false; savePreferences(); }
+    if (initialOverview && (mars || world.tiles.length)) { atlas.reset(); initialOverview = false; savePreferences(); }
     mapFingerprint = fingerprint;
     viewerSettings.refresh();
   }
   atlas?.selectRoute(selectedRoute);
-  element('#render-mode').textContent = webgl ? '3D map' : '2D map';
-  element('#render-mode').title = 'The same committed geography in a supported map renderer';
+  element('#render-mode').textContent = `${webgl ? '3D' : '2D'} ${mars ? 'Mars view' : 'map'}`;
+  element('#render-mode').title = mars ? 'Recorded missions and colonies; red terrain is visual context, not simulated geography' : 'The same committed geography in a supported map renderer';
   renderInspection();
   if (capabilityDialog?.open) {
     const input = currentCapabilityInput();
@@ -507,8 +569,12 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
 function renderConnection(): void {
   const state = mode === 'sample' ? null : snapshot?.state;
   const journey = state ? worldJourney(state) : null;
+  renderBodyControls(state ?? null);
+  element('#map-hint').textContent = worldBody === 'mars' ? 'Drag to explore · Select a recorded colony or mission' : 'Drag to explore · Select a civilization or town';
   const labels = { loading: 'Connecting', local: localStopped ? 'Local simulation stopped' : state?.outcome ? 'World complete' : localEphemeral ? 'This-tab world' : 'Generated world', previous: 'Previous local world', unavailable: 'Saved world unavailable', live: 'Native world archive', offline: 'Connection lost', uninitialized: 'Waiting for world', sample: 'Sample atlas' };
   element('#connection-label').textContent = labels[mode];
+  element('.world-mode').textContent = `${labels[mode]}${mode === 'local' && localEphemeral ? ' · Not saved' : ''}`;
+  element('.world-mode').hidden = mode === 'local' && !!journey?.outcome && !localEphemeral && !localStopped;
   element('.mode').dataset['connection'] = mode;
   element('.mode-detail').textContent = mode === 'local' ? localEphemeral ? 'Not saved' : 'Built-in policies' : 'Read only';
   const sourceNotice = worldSource === 'previous' ? previousSaveMessage : worldSource === 'local' ? localSaveMessage : 'Native world archive · Read-only committed records.';
@@ -551,7 +617,7 @@ function renderConnection(): void {
   element('#connection-story').hidden = stories.length > 0;
   element('#sample-open').hidden = snapshot !== null || mode === 'sample' || mode === 'loading';
   element('#live-open').hidden = mode !== 'sample';
-  for (const button of document.querySelectorAll<HTMLButtonElement>('.map-tools button, .layer-controls button')) button.disabled = atlas === null;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.map-tools button, .layer-controls button')) button.disabled = atlas === null || button.hasAttribute('data-layer') && worldBody === 'mars';
   renderInspection();
   if (dialogs.get('events')?.open && !eventHistoryCaptured) renderEventHistory();
   if (dialogs.get('events')?.open && snapshot) element('#events-refresh').hidden = snapshot.state.revision <= eventHistoryRevision;
@@ -563,7 +629,7 @@ function quietCues(): void {
 }
 
 function showSample(): void {
-  savePreferences(); worldView.release();
+  savePreferences(); worldView.release(); worldBody = 'earth';
   capabilityTree.close();
   quietCues();
   atlas?.dispose(); atlas = null; mapFingerprint = ''; inspectionCamera.release();
@@ -597,7 +663,7 @@ function observeLocalSimulation(): void {
   observedAt = run.timestamp;
   lastRead = '';
   const world = projectWorld(snapshot.state);
-  const quiet = mode === 'previous' || document.hidden || dialogs.get('events')?.open || dialogs.get('journey')?.open || capabilityDialog?.open;
+  const quiet = worldBody === 'mars' || mode === 'previous' || document.hidden || dialogs.get('events')?.open || dialogs.get('journey')?.open || capabilityDialog?.open;
   const cues = eventCues.observe({ identity: snapshot.identity, revision: snapshot.state.revision, mode: quiet ? 'history' : 'live', events: snapshot.state.events, routes: world.routes }, element('#map').clientWidth < 700 ? 1 : 3);
   if (cues.routeResults.length) observedRouteResults = [...cues.routeResults, ...observedRouteResults].slice(0, 3);
   renderWorld(world, true);
@@ -606,7 +672,7 @@ function observeLocalSimulation(): void {
 }
 
 function changeWorldSource(source: WorldSource): void {
-  savePreferences(); worldView.release(); worldSource = source;
+  savePreferences(); worldView.release(); worldSource = source; worldBody = preferences.worldBody ?? worldBody;
   quietCues(); capabilityTree.close(); setInspectionOpen(false); inspectionCamera.release();
   atlas?.dispose(); atlas = null; mapFingerprint = ''; inspectionFingerprint = ''; chronicleFingerprint = '';
   displayed = { tiles: [], cities: [], routes: [] }; snapshot = null; selectedRoute = null; observedRouteResults = [];
@@ -637,7 +703,7 @@ async function readWorld(): Promise<void> {
       observedAt = new Date().toISOString();
       lastRead = new Date(observedAt).toLocaleTimeString('en-GB', { timeZone: 'UTC', hour12: false }) + ' UTC';
       const world = projectWorld(snapshot.state);
-      const quiet = document.hidden || dialogs.get('events')?.open || dialogs.get('journey')?.open || capabilityDialog?.open;
+      const quiet = worldBody === 'mars' || document.hidden || dialogs.get('events')?.open || dialogs.get('journey')?.open || capabilityDialog?.open;
       const cues = eventCues.observe({ identity: snapshot.identity, revision: snapshot.state.revision, mode: quiet ? 'history' : 'live', events: snapshot.state.events, routes: world.routes }, element('#map').clientWidth < 700 ? 1 : 3);
       if (cues.routeResults.length) observedRouteResults = [...cues.routeResults, ...observedRouteResults].slice(0, 3);
       renderWorld(world, retainCoordinates);
@@ -676,6 +742,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>('[data-layer]'
   preferences = { ...preferences, [layer]: visible };
   savePreferences();
 });
+for (const button of document.querySelectorAll<HTMLButtonElement>('.body-switch [data-body]')) button.addEventListener('click', () => { const body = parseWorldBody(button.dataset['body']); if (body) changeWorldBody(body); });
 element('#sample-open').addEventListener('click', showSample);
 element('#live-open').addEventListener('click', () => changeWorldSource(worldSource));
 

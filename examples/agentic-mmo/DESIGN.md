@@ -34,6 +34,12 @@ The interplanetary release completes the causal source chain from earned industr
 
 Historical milestones retain bounded causal proofs. An explicit once-per-cause history advance can align the displayed date with an earned milestone without altering the ordinary six-minute clock, moving time backward, fabricating old proofs or unlocking mechanics through a date alone. World stage is shared capability evidence; visible town development must still follow that town's installed and operated facts. The Mars journey view distinguishes knowledge, infrastructure, transit, arrival, paid habitat work and actual supplied residents; its colony schematic is not represented as a geographical surface map.
 
+## Factual planetary presentation
+
+The main viewport keeps the original navy, gold and ivory observer framing. Earth homes, civic fabric, industry and launch infrastructure derive from local installed assets and population, never an empire-wide era repaint. Paid construction remains unfinished; smoke and power activity require enabled current-round operation receipts, and terminal worlds are static. Physical district attachments stay on their actual sites.
+
+An Earth/Mars viewing switch uses a shared canonical-derived Mars observation for flat and WebGL scenes. Mars terrain and layout are explicitly illustrative context, not simulated territory or a new resource layer. Flight markers do not imply arrival. Landed habitats use paid progress, actual inhabitants and delivered reserve cargo; there are no decorative greenhouses, solar production, rovers or invented facilities. Empty, building, habitable, short-supplied, uninhabited and terminal records remain distinct. Existing Journey records stay accessible. Camera and selection are independently qualified by source, immutable genesis and body, and viewing never changes the simulation. Meaningful visual delivery still needs matched-camera browser comparison; model or mesh tests are not pixel acceptance.
+
 ## Historical first live stage
 
 The first operative content is settlement foundations:

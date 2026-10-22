@@ -1,4 +1,4 @@
-import { DEFAULT_WORLD_CAMERA, parseWorldCamera, parseWorldSource, parseWorldViews } from './world-view.ts';
+import { DEFAULT_WORLD_CAMERA, parseWorldBody, parseWorldCamera, parseWorldSource, parseWorldViews } from './world-view.ts';
 import type { WorldViewPreferences } from './world-view.ts';
 export { MAP_ZOOM } from './world-view.ts';
 
@@ -53,11 +53,13 @@ export function parsePreferences(value: unknown): ViewerPreferences {
   const data = object(value);
   if (data?.['schemaVersion'] !== 1) return { ...DEFAULT_PREFERENCES };
   const worldSource = parseWorldSource(data['worldSource']);
+  const worldBody = parseWorldBody(data['worldBody']);
   const worldViews = parseWorldViews(data['worldViews']);
   return {
     schemaVersion: 1,
     ...parseWorldCamera(data),
     ...(worldSource ? { worldSource } : {}),
+    ...(worldBody ? { worldBody } : {}),
     ...(worldViews.length ? { worldViews } : {}),
     speed: bounded(data['speed'], 1, 0.5, 4),
     paused: typeof data['paused'] === 'boolean' ? data['paused'] : false,

@@ -14,6 +14,8 @@ Compatible source increments add consent-based trade, independent tactical allow
 
 The regular clock accounts for ten years per six-minute interval. An external caller explicitly realizes due ticks; a late caller realizes them late. Ordinary turns, spectator reads and routine Director events do not add calendar years. Deliberate hybrid history advances and compatible release application have explicit causes and exactly-once receipts without changing baseline clock accounting. The hosted history already records an explained farming advance separately from regular ticks.
 
+The main viewport offers observational Earth and Mars bodies with separate source/genesis-qualified cameras and selection. Earth settlement and district forms follow local installed assets; active production cues require a current operation, not a shared era label. Mars is an original illustrative red-terrain diorama of recorded flights, paid habitat work, residents and delivered reserves, not new simulated geography, ownership or local production. The Journey history remains available. Switching bodies never advances a completed world. Source and focused rendering checks do not establish matched-camera visual acceptance or WebGL/touch performance.
+
 ## Procedural direction
 
 The engine remains authoritative. Versioned behavior profiles choose legal actions with seeded randomness, required-lane fairness and persistent strategic state. Development agents continue the complete BlaBla workflow; they no longer act as the runtime civilizations. Existing model-agent history keeps its true attribution.

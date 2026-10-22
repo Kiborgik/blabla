@@ -240,6 +240,21 @@ h1 {
   color: #c4d0bf;
   letter-spacing: 0.2px;
 }
+.body-switch { display: inline-flex; gap: 4px; margin-top: 8px; padding: 3px; border: 1px solid #b7a77e70; border-radius: 7px; background: #102b35ed; pointer-events: auto; }
+.body-switch button { min-width: 62px; min-height: 40px; padding: 7px 12px; border: 1px solid transparent; border-radius: 4px; color: #efe6ce; background: transparent; font-size: 12px; }
+.body-switch button[aria-pressed='true'] { color: #172e36; background: #e5c784; border-color: #f5e4b7; }
+.body-switch button:focus-visible { outline: 2px solid #fff5d8; outline-offset: 2px; }
+.body-switch button:disabled { opacity: .5; }
+.world-heading .body-context { max-width: 520px; margin: 7px 0 0; font-size: 11px; }
+.mars-body-facts { font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.mars-body-facts h3 { font-size: 15px; margin: 18px 0 7px; }
+.mars-body-facts dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; }
+.mars-body-facts dt, .mars-body-facts dd { margin: 0; }
+@media (max-width: 1000px) {
+  .body-switch { margin-top: 6px; }
+  .body-switch button { min-width: 62px; min-height: 44px; }
+  .live-observatory .world-heading .body-context { max-width: 42ch; font-size: 10px; }
+}
 .era-pill {
   position: absolute;
   right: 36px;

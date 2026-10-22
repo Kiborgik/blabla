@@ -1,5 +1,7 @@
 export const WORLD_SOURCES = ['local', 'previous', 'shared'] as const;
 export type WorldSource = typeof WORLD_SOURCES[number];
+export const WORLD_BODIES = ['earth', 'mars'] as const;
+export type WorldBody = typeof WORLD_BODIES[number];
 export const MAP_ZOOM = { minimum: .25, maximum: 4 } as const;
 export const MAX_WORLD_VIEWS = 12;
 
@@ -18,7 +20,7 @@ export interface WorldViewIdentity {
 }
 
 export interface SavedWorldView extends WorldViewIdentity { camera: WorldCamera }
-export interface WorldViewPreferences extends WorldCamera { worldSource?: WorldSource; worldViews?: SavedWorldView[] }
+export interface WorldViewPreferences extends WorldCamera { worldSource?: WorldSource; worldBody?: WorldBody; worldViews?: SavedWorldView[] }
 export const DEFAULT_WORLD_CAMERA: WorldCamera = { zoom: 1, x: 0, z: 0, selected: 0, selectedCity: null };
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -31,6 +33,10 @@ function bounded(value: unknown, fallback: number, min: number, max: number): nu
 
 export function parseWorldSource(value: unknown): WorldSource | null {
   return value === 'local' || value === 'previous' || value === 'shared' ? value : null;
+}
+
+export function parseWorldBody(value: unknown): WorldBody | null {
+  return value === 'earth' || value === 'mars' ? value : null;
 }
 
 export function worldSourceHref(href: string, source: WorldSource): string {
@@ -76,7 +82,8 @@ export function parseWorldViews(value: unknown): SavedWorldView[] {
 export function saveWorldView<T extends WorldViewPreferences>(preferences: T, identity: WorldViewIdentity, camera: WorldCamera): T {
   const retained = parseWorldViews(preferences.worldViews).filter(view => viewKey(view) !== viewKey(identity));
   const worldViews = [...retained, { ...identity, camera: parseWorldCamera(camera) }].slice(-MAX_WORLD_VIEWS);
-  return { ...preferences, ...parseWorldCamera(camera), worldSource: identity.source, worldViews };
+  const body = parseWorldBody(identity.body);
+  return { ...preferences, ...parseWorldCamera(camera), worldSource: identity.source, ...(body ? { worldBody: body } : {}), worldViews };
 }
 
 export function createWorldViewSession() {
@@ -91,7 +98,8 @@ export function createWorldViewSession() {
       if (active && viewKey(active) === viewKey(identity)) return { preferences, changed: false, restored: true };
       const saved = parseWorldViews(preferences.worldViews).find(view => viewKey(view) === viewKey(identity));
       active = { ...identity };
-      return { preferences: { ...preferences, ...(saved?.camera ?? DEFAULT_WORLD_CAMERA), worldSource: identity.source }, changed: true, restored: Boolean(saved) };
+      const body = parseWorldBody(identity.body);
+      return { preferences: { ...preferences, ...(saved?.camera ?? DEFAULT_WORLD_CAMERA), worldSource: identity.source, ...(body ? { worldBody: body } : {}) }, changed: true, restored: Boolean(saved) };
     },
   };
 }

@@ -289,7 +289,7 @@ await test('renderer projection carries exact committed settlement facts and nor
   land[1].elevation = 99;
   const world = projectWorld(state);
   assert.deepEqual(world.cities[0]?.settlement, { id: city.id, civId: city.civId, tileId: city.tileId, name: city.name,
-    population: city.population, wellbeing: 34, damage: 12, buildings: ['farm', 'workshop'] });
+    population: city.population, wellbeing: 34, damage: 12, buildings: ['farm', 'workshop'], round: state.round, terminal: false });
   assert.equal(world.tiles.find((tile) => tile.id === land[0]?.id)?.height, .25);
   assert.equal(world.tiles.find((tile) => tile.id === land[1]?.id)?.height, .25 + .99 * .22);
 });
@@ -560,13 +560,13 @@ await test('the committed inspector wires canonical exact-town capability projec
   assert.match(main, /projectCapabilities\(snapshot\.state, civilization\.id, preferences\.selectedCity, observedAt\)/);
   assert.match(main, /runId: snapshot\.identity/);
   assert.match(main, /towns: snapshot\.state\.cities\.filter\(city => city\.civId === civilization\.id\)/);
-  assert.match(main, /if \(!snapshot \|\| mode === 'sample' \|\| !observedAt\) return null/);
+  assert.match(main, /if \(!snapshot \|\| mode === 'sample' \|\| worldBody !== 'earth' \|\| !observedAt\) return null/);
   assert.match(main, /capabilityTree\.observe\(input\)/);
   assert.match(main, /capabilityTree\.open\(input, treeOpener\)/);
   assert.match(main, /renderEventLog\(element\('#event-list'\), events/);
   assert.doesNotMatch(main, /element\('#event-list'\)\.innerHTML/);
   assert.match(main, /if \(dialogs\.get\('events'\)\?\.open && !eventHistoryCaptured\) renderEventHistory\(\)/);
-  assert.match(main, /const quiet = document\.hidden \|\| dialogs\.get\('events'\)\?\.open \|\| capabilityDialog\?\.open/);
+  assert.match(main, /const quiet = worldBody === 'mars' \|\| document\.hidden \|\| dialogs\.get\('events'\)\?\.open \|\| dialogs\.get\('journey'\)\?\.open \|\| capabilityDialog\?\.open/);
   assert.match(html, /web\/event-log\.css/);
   assert.match(html, /web\/capability-tree\.css/);
 });
@@ -661,7 +661,7 @@ await test('narrow Work leaves a selected-town window and culled site geometry i
   assert.ok(viewportBound && Number(viewportBound) <= 48);
   assert.match(work, /bottom: 118px/);
   assert.match(responsive, /#app \.live-observatory\[data-inspection='true'\] \.chronicle \{ display: none/);
-  assert.match(responsive, /#app \.live-observatory\[data-inspection='true'\] \.world-heading \{ display: block/);
+  assert.match(responsive, /#app \.live-observatory\[data-inspection='true'\] \.world-heading \{ display: grid/);
   const flat = readFileSync(new URL('../web/flat-renderer.ts', import.meta.url), 'utf8');
   assert.match(flat, /entry\.element\.setAttribute\('aria-hidden', String\(!mark\)\)/);
 });

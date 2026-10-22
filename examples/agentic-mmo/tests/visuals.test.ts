@@ -342,7 +342,8 @@ await test('optional detail spends spare parts fairly after all family cores are
   }
   assert.deepEqual(appearances, before);
   assert.deepEqual(allocateBuildingParts(appearances, 1000), appearances.flatMap((entry) => entry.parts));
-  assert.throws(() => allocateBuildingParts(appearances, coreIds.length - 1), RangeError);
+  assert.equal(allocateBuildingParts(appearances, coreIds.length - 1).length, coreIds.length - 1);
+  assert.deepEqual(allocateBuildingParts(appearances, 0), []);
 });
 
 await test('civic families use distinct original silhouettes and canonical familiar names', () => {

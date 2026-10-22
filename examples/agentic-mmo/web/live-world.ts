@@ -67,6 +67,9 @@ export function projectWorld(state: WorldState): AtlasWorld {
       population: city.population, buildings: [...city.buildings],
       settlement: { id: city.id, civId: city.civId, tileId: city.tileId, name: city.name,
         population: city.population, wellbeing: city.wellbeing, damage: city.damage, buildings: [...city.buildings],
+        round: state.round, terminal: state.outcome !== null,
+        ...(city.construction ? { construction: structuredClone(city.construction) } : {}),
+        ...(city.localPower ? { localPower: structuredClone(city.localPower) } : {}),
         ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}) },
     };
   });
@@ -91,6 +94,9 @@ export function projectWorld(state: WorldState): AtlasWorld {
         status: built ? 'built' : 'building', library: attachments.find(item => item.buildingId === 'library')?.status ?? 'absent',
         construction: active && (active.buildingId === definition.id || attachments.some(item => item.buildingId === active.buildingId)) ? structuredClone(active) : null,
         baseProduction: buildingBaseProduction(state, city, definition, tile.id),
+        round: state.round, terminal: state.outcome !== null,
+        ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}),
+        ...(city.localPower ? { localPower: structuredClone(city.localPower) } : {}),
         ...((definition.district?.adjacency?.improvement || definition.district?.adjacency?.wonder) ? { adjacency: districtAdjacencyFacts(state, definition, tile.id) } : {}) }];
     });
   }).toSorted((a, b) => a.tileId - b.tileId || a.id.localeCompare(b.id));

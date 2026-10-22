@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.1.0-live.37",
+    "date": "2026-10-22",
+    "title": "Two worlds, one recorded history",
+    "changes": [
+      "Earth towns distinguish hearth settlements, civic fabric, installed industry and launch infrastructure from local built assets rather than the shared world stage. Unfinished paid work stays visibly unfinished; active cues require actual current operations.",
+      "An observational Earth/Mars switch brings recorded colony habitats, inhabitants, delivered reserve cargo and in-flight missions into the main viewport. Red terrain is illustrative context, not new simulated territory, resources or local production.",
+      "Earth and Mars retain separate source- and genesis-qualified cameras and selections. Journey history remains available, and a completed world never advances because another body is inspected.",
+      "Versioned bounded history readers expose exact recorded construction and operation details with strict revision fences and private-field exclusions. Existing public archive reads retain their original format.",
+      "Rendering models, interaction tests and typed history evidence remain separate from browser art acceptance, WebGL/touch performance and managed-host validation."
+    ]
+  },
+  {
     "version": "0.1.0-live.36",
     "date": "2026-10-22",
     "title": "From first hearths to a supplied Mars home",

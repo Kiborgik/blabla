@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { createWorld } from '../core/engine.ts';
 import { projectWorld } from '../web/live-world.ts';
 import { districtCaptionPlacement, districtParts, districtLabel, DISTRICT_PART_BUDGETS } from '../visuals/district-visuals.ts';
+import type { DistrictView } from '../visuals/district-visuals.ts';
 import { createDistrictMeshes } from '../web/settlement-three.ts';
 import { createLandscapeMeshes } from '../web/landscape-three.ts';
 import { projectLandscape } from '../visuals/landscape.ts';
@@ -140,4 +141,64 @@ await test('worked-site captions use the narrow gap between a header and town wi
   ], 360, 507, 44);
   assert.ok(placed);
   assert.equal(placed.y, 145);
+});
+
+await test('late industrial and scientific attachments remain recognizable at their actual district under every budget', () => {
+  const { state, city } = fixture();
+  city.buildings = ['campus', 'library', 'university', 'observatory', 'research-lab', 'industrial-zone', 'guild-workshop', 'foundry', 'coal-plant', 'factory'];
+  city.districtSites = { campus: 39, 'industrial-zone': 56 };
+  const world = projectWorld(state);
+  const industrial = world.districts?.find(district => district.buildingId === 'industrial-zone');
+  const campus = world.districts?.find(district => district.buildingId === 'campus');
+  assert.ok(industrial && campus);
+  assert.equal(industrial.tileId, 56);
+  assert.equal(campus.tileId, 39);
+  const installedDistricts: readonly DistrictView[] = [industrial, campus];
+  for (const detail of ['far', 'mid', 'close'] as const) {
+    for (const districtView of installedDistricts) {
+      const parts = districtParts(districtView, detail);
+      assert.ok(parts.length <= DISTRICT_PART_BUDGETS[detail]);
+      assert.equal(new Set(parts.map(part => part.id)).size, parts.length);
+      assert.ok(parts.every(part => [...part.position, ...part.scale, part.rotation].every(Number.isFinite)));
+      assert.deepEqual(districtParts({ ...districtView, attachments: districtView.attachments?.toReversed() ?? [] }, detail), parts);
+    }
+    for (const id of ['coal-plant-stack', 'factory-roof', 'guild-roof', 'foundry-cap']) assert.ok(districtParts(industrial, detail).some(part => part.id.endsWith(`:${id}`)), `${detail}: ${id}`);
+    for (const id of ['research-lab-block', 'library-roof', 'university-roof', 'observatory-crown']) assert.ok(districtParts(campus, detail).some(part => part.id.endsWith(`:${id}`)), `${detail}: ${id}`);
+  }
+});
+
+await test('paid power buildings under construction have open frames, never completed plant or laboratory silhouettes', () => {
+  const { state, city } = fixture();
+  city.buildings = ['campus', 'industrial-zone'];
+  city.districtSites = { campus: 39, 'industrial-zone': 56 };
+  for (const buildingId of ['coal-plant', 'factory', 'research-lab']) {
+    city.construction = { active: { id: `build-${buildingId}`, cityId: city.id, buildingId, ruleVersion: 1, startedRound: 3, paid: { materials: 40 }, workDone: 5, workRequired: 18 }, lastCompleted: null };
+    const district = projectWorld(state).districts?.find(value => value.attachments?.some(attachment => attachment.buildingId === buildingId));
+    assert.ok(district);
+    for (const detail of ['far', 'mid', 'close'] as const) {
+      const parts = districtParts(district, detail);
+      assert.ok(parts.some(part => part.id.endsWith(`${buildingId}-foundation`)));
+      assert.ok(parts.some(part => part.id.endsWith(`${buildingId}-frame`)));
+      assert.ok(!parts.some(part => part.id.endsWith('coal-plant-stack') || part.id.endsWith('factory-roof') || part.id.endsWith('research-lab-block')));
+      assert.ok(parts.length <= DISTRICT_PART_BUDGETS[detail]);
+    }
+  }
+});
+
+await test('district smoke and powered work require fresh enabled successful receipts, not an old productive beat', () => {
+  const { state, city } = fixture();
+  city.buildings = ['industrial-zone', 'coal-plant', 'factory'];
+  city.districtSites = { 'industrial-zone': 56 };
+  const district = projectWorld(state).districts?.[0];
+  assert.ok(district);
+  const result = { round: 8, status: 'operated' as const, paid: {}, produced: {}, shortages: [], localPower: { ruleVersion: 1 as const, required: 0, availableBefore: 0, consumed: 0, generated: 8, shortage: 0 } };
+  const active = { ...district, round: 8, terminal: false, buildingOperations: { 'coal-plant': { enabled: true, lastResult: result }, factory: { enabled: true, lastResult: { ...result, produced: { materials: 12 }, localPower: { ...result.localPower, generated: 0, consumed: 3, required: 3, availableBefore: 8 } } } } };
+  const fresh = districtParts(active, 'close');
+  assert.ok(fresh.some(part => part.id.endsWith('operation:coal-plant:smoke')));
+  assert.ok(fresh.some(part => part.id.endsWith('operation:factory:power')));
+  for (const context of [
+    { ...active, round: 9 }, { ...active, terminal: true }, { ...district, buildingOperations: active.buildingOperations },
+    { ...active, buildingOperations: { 'coal-plant': { enabled: false, lastResult: result } } },
+    { ...active, buildingOperations: { 'coal-plant': { enabled: true, lastResult: { ...result, status: 'blocked' as const, strategicShortages: [{ resource: 'coal' as const, required: 2, available: 0 }] } } } },
+  ]) assert.ok(!districtParts(context, 'close').some(part => part.id.includes('operation:')));
 });

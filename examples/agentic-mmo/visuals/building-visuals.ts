@@ -1,3 +1,4 @@
+import { BUILDINGS } from '../core/content.ts';
 import type { VisualPart } from './world-visuals.ts';
 import { DETAIL_BUDGETS } from './visual-language.ts';
 import type { DetailLevel, VisualIcon } from './visual-language.ts';
@@ -15,6 +16,22 @@ export interface BuildingAppearance {
 }
 
 const APPEARANCES: Record<string, { icon: VisualIcon; label: string; corePartIds: readonly string[]; parts: (detail: DetailLevel) => VisualPart[] }> = {
+  granary: {
+    icon: 'food', label: 'Granary', corePartIds: ['granary-silo'], parts: (detail) => [
+      part('granary-silo', 'cylinder', 'plaster', [.38, .3, -1.21], [.38, .6, .38]),
+      part('granary-cap', 'cone', 'roof', [.38, .69, -1.21], [.46, .2, .46]),
+      ...(detail === 'far' ? [] : [part('granary-bin', 'cylinder', 'timber', [.03, .22, -1.21], [.25, .44, .25])]),
+      ...(detail === 'close' ? [part('granary-door', 'box', 'timber', [.38, .17, -1.01], [.13, .26, .04])] : []),
+    ],
+  },
+  launchpad: {
+    icon: 'infrastructure', label: 'Launch complex', corePartIds: ['launchpad-gantry', 'launchpad-apron', 'launchpad-service-arm'], parts: (detail) => [
+      part('launchpad-apron', 'cylinder', 'stone', [-.94, .075, .87], [1.05, .15, 1.05]),
+      part('launchpad-gantry', 'box', 'metal', [-1.22, .79, .54], [.15, 1.58, .2]),
+      ...(detail === 'far' ? [] : [part('launchpad-service-arm', 'box', 'metal', [-.99, 1.48, .54], [.59, .12, .18]), part('launchpad-pad', 'cylinder', 'water', [-.9, .16, .94], [.58, .025, .58]), part('launchpad-gantry-foot', 'box', 'stone', [-1.22, .16, .54], [.33, .2, .33])]),
+      ...(detail === 'close' ? [part('launchpad-service-tank', 'cylinder', 'plaster', [-1.34, .37, 1.23], [.24, .58, .24]), part('launchpad-gantry-crossbar', 'box', 'grain', [-1.22, .85, .66], [.16, .09, .03])] : []),
+    ],
+  },
   'water-mill': {
     icon: 'irrigation', label: 'Water mill', corePartIds: ['water-mill-wheel', 'water-mill-roof'], parts: (detail) => [
       part('water-mill-wheel', 'cylinder', 'timber', [1.25, .3, .98], [.48, .25, .48]),
@@ -100,7 +117,7 @@ export function buildingIdentity(id: string): { icon: VisualIcon; label: string 
 
 export function buildingAppearance(id: string, detail: DetailLevel): BuildingAppearance | null {
   const appearance = Object.hasOwn(APPEARANCES, id) ? APPEARANCES[id] : undefined;
-  return appearance ? { id, icon: appearance.icon, label: appearance.label, corePartIds: [...appearance.corePartIds], parts: appearance.parts(detail) } : null;
+  return appearance ? { id, icon: appearance.icon, label: appearance.label, corePartIds: detail === 'far' ? appearance.corePartIds.slice(0, 1) : [...appearance.corePartIds], parts: appearance.parts(detail) } : null;
 }
 
 export function buildingAppearances(ids: readonly string[], detail: DetailLevel): BuildingAppearance[] {
@@ -113,7 +130,10 @@ export function buildingAppearances(ids: readonly string[], detail: DetailLevel)
 
 export function allocateBuildingParts(appearances: readonly BuildingAppearance[], budget: number): VisualPart[] {
   const selected = new Set(appearances.flatMap((appearance) => appearance.corePartIds));
-  if (selected.size > budget) throw new RangeError('Settlement building cores exceed part budget');
+  if (selected.size > budget) {
+    const cores = appearances.flatMap(appearance => appearance.corePartIds.flatMap(id => appearance.parts.filter(entry => entry.id === id)));
+    return cores.slice(0, Math.max(0, budget));
+  }
   const optional = appearances.map((appearance) => appearance.parts.filter((entry) => !selected.has(entry.id)));
   const rounds = Math.max(0, ...optional.map((parts) => parts.length));
   for (let index = 0; index < rounds && selected.size < budget; index += 1) {
@@ -123,4 +143,13 @@ export function allocateBuildingParts(appearances: readonly BuildingAppearance[]
     }
   }
   return appearances.flatMap((appearance) => appearance.parts.filter((entry) => selected.has(entry.id)));
+}
+
+export function installedBuildingBadges(ids: readonly string[]): Array<{ icon: VisualIcon; label: string; value: number }> {
+  const built = new Set(ids);
+  const local = buildingAppearances(ids, 'far').map(({ icon, label }) => ({ icon, label, value: 1 }));
+  return [...local, ...BUILDINGS.filter(building => built.has(building.id) && !Object.hasOwn(APPEARANCES, building.id)).map(building => ({
+    icon: building.id === 'coal-plant' ? 'energy' as const : building.production.science ? 'science' as const : building.production.culture ? 'culture' as const : building.production.credits ? 'credits' as const : 'infrastructure' as const,
+    label: building.name, value: 1,
+  }))];
 }

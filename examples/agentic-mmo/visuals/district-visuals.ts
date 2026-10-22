@@ -1,9 +1,11 @@
 import type { DistrictAdjacencyFacts } from '../core/simulation/districts.ts';
 import { METRIC_LABELS } from './visual-language.ts';
+import { currentBuildingOperation } from './settlement-development.ts';
+import type { OperationContext } from './settlement-development.ts';
 import type { ConstructionOrder, Resources } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
-export interface DistrictView {
+export interface DistrictView extends OperationContext {
   id: string;
   cityId: string;
   townName: string;
@@ -60,7 +62,7 @@ export function districtParts(district: DistrictView, detail: DetailLevel): Visu
   const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale']): void => {
     parts.push({ id: `${district.id}:${id}`, shape, material, position, scale, rotation: 0 });
   };
-  add('site', 'box', district.status === 'building' ? 'soil' : 'plaster', [0, .045, 0], [1.55, .09, 1.35]);
+  add('site', 'box', district.status === 'building' ? 'soil' : district.buildingId === 'industrial-zone' ? 'rock' : 'plaster', [0, .045, 0], [1.55, .09, 1.35]);
   add('identity', 'box', 'identity', [0, .1, .68], [1.55, .06, .08]);
   if (district.status === 'building') {
     for (const x of [-.55, .55]) add(`foundation-${x}`, 'box', 'timber', [x, .16, -.12], [.12, .2, .9]);
@@ -85,28 +87,48 @@ export function districtParts(district: DistrictView, detail: DetailLevel): Visu
     }
     if (detail === 'close' && printing?.status === 'built') add('printing-sign', 'box', 'grain', [.53, .4, -.05], [.25, .18, .04]);
   } else if (district.buildingId === 'industrial-zone') {
-    add('industrial-yard', 'box', 'stone', [0, .12, 0], [1.35, .06, 1.12]);
-    add('industrial-wall', 'box', 'stone', [-.16, .32, -.25], [.98, .42, .59]);
-    for (const x of [-.4, .08]) add(`industrial-roof-${x}`, 'gable', 'metal', [x, .66, -.25], [.53, .28, .7]);
-    add('industrial-chimney', 'box', 'stone', [.53, .6, -.36], [.2, 1.02, .22]);
+    const factory = district.attachments?.find(item => item.buildingId === 'factory');
+    const coal = district.attachments?.find(item => item.buildingId === 'coal-plant');
     const guild = district.attachments?.find(item => item.buildingId === 'guild-workshop');
-    if (guild?.status === 'building') add('guild-foundation', 'box', 'timber', [-.08, .14, .38], [1.08, .12, .41]);
-    else if (guild) {
-      add('guild-wall', 'box', 'timber', [-.08, .31, .38], [1.06, .4, .42]);
-      add('guild-roof', 'gable', 'roof', [-.08, .64, .38], [1.2, .25, .53]);
-    }
     const foundry = district.attachments?.find(item => item.buildingId === 'foundry');
-    if (foundry?.status === 'building') add('foundry-foundation', 'box', 'timber', [.6, .14, .33], [.4, .12, .53]);
+    add('industrial-yard', 'box', 'stone', [0, .12, 0], [1.35, .06, 1.12]);
+    add('industrial-wall', 'box', 'stone', [-.3, .32, -.35], [.76, .42, .42]);
+    for (const x of [-.5, -.1]) add(`industrial-roof-${x}`, 'gable', 'metal', [x, .63, -.35], [.43, .24, .53]);
+    if (!coal) add('industrial-chimney', 'box', 'stone', [.53, .6, -.36], [.2, 1.02, .22]);
+    if (guild?.status === 'building') add('guild-foundation', 'box', 'timber', [-.46, .14, .47], [.48, .12, .37]);
+    else if (guild) {
+      add('guild-wall', 'box', 'timber', [-.46, .28, .47], [.48, .28, .37]);
+      add('guild-roof', 'gable', 'roof', [-.46, .51, .47], [.58, .18, .45]);
+    }
+    if (foundry?.status === 'building') add('foundry-foundation', 'box', 'timber', [.54, .14, .4], [.37, .12, .42]);
     else if (foundry) {
-      add('foundry-body', 'cylinder', 'stone', [.6, .35, .33], [.4, .5, .53]);
-      add('foundry-cap', 'cone', 'metal', [.6, .73, .33], [.49, .28, .61]);
-      add('foundry-stack', 'box', 'stone', [.68, .65, .08], [.13, 1.05, .15]);
+      add('foundry-body', 'cylinder', 'stone', [.54, .36, .4], [.37, .48, .42]);
+      add('foundry-cap', 'cone', 'metal', [.54, .73, .4], [.45, .26, .5]);
+      add('foundry-stack', 'box', 'stone', [.67, .65, .19], [.12, 1.05, .13]);
     }
-    if (detail !== 'far') {
-      add('industrial-door', 'box', 'timber', [-.16, .27, .06], [.23, .3, .04]);
-      if (!foundry) add('industrial-stock', 'box', 'metal', [.54, .22, .36], [.25, .22, .36]);
+    if (factory?.status === 'building') {
+      add('factory-foundation', 'box', 'soil', [-.17, .13, .08], [.94, .12, .5]);
+      add('factory-frame', 'box', 'timber', [-.55, .36, -.08], [.08, .58, .08]);
+      if (detail !== 'far') add('factory-frame-beam', 'box', 'timber', [-.17, .63, -.08], [.86, .07, .08]);
+    } else if (factory) {
+      add('factory-hall', 'box', 'stone', [-.17, .4, .08], [.94, .58, .5]);
+      add('factory-roof', 'gable', 'metal', [-.4, .82, .08], [.49, .26, .59]);
+      add('factory-roof-east', 'gable', 'metal', [.07, .82, .08], [.49, .26, .59]);
+      if (detail !== 'far') add('factory-windows', 'box', 'water', [-.17, .46, .34], [.75, .14, .025]);
+      if (detail !== 'far' && currentBuildingOperation(district, 'factory')?.localPower?.consumed) add('operation:factory:power', 'box', 'grain', [-.17, .46, .36], [.59, .07, .03]);
     }
-    if (detail === 'close' && guild?.status === 'built') add('guild-sign', 'box', 'grain', [-.08, .4, .62], [.22, .15, .04]);
+    if (coal?.status === 'building') {
+      add('coal-plant-foundation', 'box', 'soil', [.47, .13, -.41], [.45, .12, .49]);
+      add('coal-plant-frame', 'box', 'timber', [.66, .49, -.56], [.08, .82, .08]);
+      if (detail !== 'far') add('coal-plant-frame-beam', 'box', 'timber', [.47, .87, -.56], [.45, .07, .08]);
+    } else if (coal) {
+      add('coal-plant-boiler', 'cylinder', 'metal', [.42, .43, -.4], [.45, .66, .48]);
+      add('coal-plant-stack', 'cylinder', 'stone', [.62, .88, -.54], [.2, 1.7, .2]);
+      if (detail !== 'far') add('coal-plant-stack-cap', 'cylinder', 'water', [.62, 1.74, -.54], [.25, .08, .25]);
+      if (detail !== 'far' && (currentBuildingOperation(district, 'coal-plant')?.localPower?.generated ?? 0) > 0) add('operation:coal-plant:smoke', 'canopy', 'rockLight', [.65, 1.99, -.54], [.3, .4, .3]);
+    }
+    if (detail !== 'far' && foundry?.status === 'built' && currentBuildingOperation(district, 'foundry')) add('operation:foundry:smoke', 'canopy', 'rockLight', [.67, 1.35, .19], [.2, .28, .2]);
+    if (detail === 'close' && guild?.status === 'built') add('guild-sign', 'box', 'grain', [-.46, .32, .67], [.2, .12, .03]);
   } else if (district.buildingId === 'commercial-hub') {
     add('commerce-court', 'box', 'grain', [0, .12, 0], [1.3, .06, 1.1]);
     for (const x of [-.48, .48]) {
@@ -145,6 +167,17 @@ export function districtParts(district: DistrictView, detail: DetailLevel): Visu
       add('observatory-body', 'cylinder', 'plaster', [-.69, .49, .24], [.47, .76, .47]);
       add('observatory-crown', 'canopy', 'metal', [-.69, .99, .24], [.62, .42, .62]);
     }
+    const lab = district.attachments?.find(item => item.buildingId === 'research-lab');
+    if (lab?.status === 'building') {
+      add('research-lab-foundation', 'box', 'soil', [.56, .14, .34], [.47, .12, .55]);
+      add('research-lab-frame', 'box', 'timber', [.73, .41, .13], [.07, .66, .07]);
+      if (detail !== 'far') add('research-lab-frame-beam', 'box', 'timber', [.56, .71, .13], [.47, .07, .07]);
+    } else if (lab) {
+      add('research-lab-block', 'box', 'plaster', [.56, .61, .34], [.47, 1.06, .55]);
+      add('research-lab-roof', 'box', 'metal', [.56, 1.19, .34], [.57, .1, .65]);
+      if (detail !== 'far') add('research-lab-windows', 'box', 'water', [.56, .75, .63], [.34, .2, .025]);
+      if (detail !== 'far' && (currentBuildingOperation(district, 'research-lab')?.localPower?.consumed ?? 0) > 0) add('operation:research-lab:power', 'box', 'grain', [.56, .75, .65], [.29, .08, .03]);
+    }
     add('courtyard', 'box', 'grain', [0, .11, .18], [.24, .04, .6]);
     if (detail !== 'far') {
       for (const x of [-.43, .43]) add(`door-${x}`, 'box', 'timber', [x, .23, .11], [.13, .27, .04]);
@@ -152,5 +185,12 @@ export function districtParts(district: DistrictView, detail: DetailLevel): Visu
     }
     if (detail === 'close') for (const x of [-.68, .68]) add(`garden-${x}`, 'box', 'canopy', [x, .15, .3], [.11, .12, .4]);
   }
-  return parts.slice(0, DISTRICT_PART_BUDGETS[detail]);
+  const priority = (part: VisualPart): number => {
+    const id = part.id.slice(district.id.length + 1);
+    if (id.endsWith('-foundation') || id.endsWith('-frame') || /^(coal-plant-stack|factory-roof|research-lab-block)$/.test(id)) return 0;
+    if (/^(hall-roof-|industrial-roof-|awning-)/.test(id) || /^(guild-roof|foundry-body|foundry-cap|library-roof|university-tower|university-roof|observatory-body|observatory-crown|coal-plant-boiler|factory-hall|factory-roof-east|research-lab-roof|theater-stage|theater-backdrop)$/.test(id) || id.startsWith('operation:')) return 1;
+    return id === 'site' || id === 'identity' ? 2 : 3;
+  };
+  const selected = new Set(parts.toSorted((left, right) => priority(left) - priority(right)).slice(0, DISTRICT_PART_BUDGETS[detail]).map(part => part.id));
+  return parts.filter(part => selected.has(part.id));
 }
