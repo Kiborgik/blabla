@@ -8,11 +8,166 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, SyncSender};
 use std::time::{Instant, SystemTime};
 use tempfile::TempDir;
 
 const OUTPUT_LIMIT: usize = 2 * 1024 * 1024;
 const INPUT_LIMIT: usize = 16 * 1024 * 1024;
+
+const DIAGNOSTIC_RECORD_LIMIT: usize = 256;
+const DIAGNOSTIC_LINE_LIMIT: usize = 4096;
+static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
+const DIAGNOSTIC_QUEUE_CAPACITY: usize = 64;
+static DIAGNOSTIC_STARTING: AtomicBool = AtomicBool::new(false);
+static DIAGNOSTIC_SENDER: OnceLock<SyncSender<String>> = OnceLock::new();
+static DIAGNOSTIC_DROPPED: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static DIAGNOSTIC_ATTEMPTED: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static DIAGNOSTIC_WRITTEN: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static DIAGNOSTIC_WRITERS_STARTED: AtomicU64 = AtomicU64::new(0);
+
+fn publish_diagnostic(line: String) {
+    #[cfg(test)]
+    DIAGNOSTIC_ATTEMPTED.fetch_add(1, Ordering::Relaxed);
+    if !DIAGNOSTIC_STARTING.swap(true, Ordering::Relaxed) {
+        let (sender, receiver) = mpsc::sync_channel::<String>(DIAGNOSTIC_QUEUE_CAPACITY);
+        if std::thread::Builder::new()
+            .name("blabla-diagnostics".into())
+            .spawn(move || {
+                #[cfg(test)]
+                DIAGNOSTIC_WRITERS_STARTED.fetch_add(1, Ordering::Relaxed);
+                while let Ok(line) = receiver.recv() {
+                    if writeln!(std::io::stderr().lock(), "{line}").is_err() {
+                        DIAGNOSTIC_DROPPED.fetch_add(1, Ordering::Relaxed);
+                        break;
+                    }
+                    #[cfg(test)]
+                    DIAGNOSTIC_WRITTEN.fetch_add(1, Ordering::Relaxed);
+                }
+            })
+            .is_ok()
+        {
+            let _ = DIAGNOSTIC_SENDER.set(sender);
+        }
+    }
+    if DIAGNOSTIC_SENDER
+        .get()
+        .is_none_or(|sender| sender.try_send(line).is_err())
+    {
+        DIAGNOSTIC_DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) struct DiagnosticPublication {
+    pub attempted: u64,
+    pub dropped: u64,
+    pub written: u64,
+    pub writers_started: u64,
+    pub queue_capacity: usize,
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) fn diagnostic_publication() -> DiagnosticPublication {
+    DiagnosticPublication {
+        attempted: DIAGNOSTIC_ATTEMPTED.load(Ordering::Relaxed),
+        dropped: DIAGNOSTIC_DROPPED.load(Ordering::Relaxed),
+        written: DIAGNOSTIC_WRITTEN.load(Ordering::Relaxed),
+        writers_started: DIAGNOSTIC_WRITERS_STARTED.load(Ordering::Relaxed),
+        queue_capacity: DIAGNOSTIC_QUEUE_CAPACITY,
+    }
+}
+
+struct RequestDiagnostics {
+    id: u64,
+    started: Instant,
+    deadline: Instant,
+    caller: &'static std::panic::Location<'static>,
+    invocation: Cell<u64>,
+    fixture: Cell<usize>,
+    roots: RefCell<Vec<PathBuf>>,
+    records: Cell<usize>,
+}
+
+impl RequestDiagnostics {
+    #[track_caller]
+    fn new(deadline: Instant) -> Option<Self> {
+        let caller = std::panic::Location::caller();
+        (std::env::var_os("BLABLA_SOURCE_CLI_DIAGNOSTICS").as_deref()
+            == Some(std::ffi::OsStr::new("1")))
+        .then(|| Self {
+            id: NEXT_REQUEST.fetch_add(1, Ordering::Relaxed),
+            started: Instant::now(),
+            deadline,
+            caller,
+            invocation: Cell::new(0),
+            fixture: Cell::new(0),
+            roots: RefCell::new(Vec::new()),
+            records: Cell::new(0),
+        })
+    }
+
+    fn begin(&self, root: &Path) {
+        self.invocation.set(self.invocation.get().saturating_add(1));
+        let mut roots = self.roots.borrow_mut();
+        let fixture = if let Some(index) = roots.iter().position(|known| known == root) {
+            index + 1
+        } else if roots.len() < 32 && root.as_os_str().len() <= 4096 {
+            roots.push(root.to_owned());
+            roots.len()
+        } else {
+            0
+        };
+        self.fixture.set(fixture);
+        self.emit(format_args!("stage=invocation-entry"));
+    }
+
+    fn emit(&self, body: std::fmt::Arguments<'_>) {
+        let records = self.records.get();
+        if records >= DIAGNOSTIC_RECORD_LIMIT {
+            return;
+        }
+        self.records.set(records + 1);
+        let file = self.caller.file().rsplit(['/', '\\']).next().unwrap_or("");
+        let file: String = file.chars().take(64).collect();
+        let now = Instant::now();
+        let mut line = format!(
+            "source-cli-diagnostic request={} invocation={} fixture={} caller={}:{}:{} elapsed_us={} remaining_us={} telemetry=best-effort missing=not-evidence dropped_at_least={} ",
+            self.id,
+            self.invocation.get(),
+            self.fixture.get(),
+            file,
+            self.caller.line(),
+            self.caller.column(),
+            now.duration_since(self.started).as_micros(),
+            self.deadline.saturating_duration_since(now).as_micros(),
+            DIAGNOSTIC_DROPPED.load(Ordering::Relaxed),
+        );
+        if records + 1 == DIAGNOSTIC_RECORD_LIMIT {
+            line.push_str("stage=trace-limit");
+        } else {
+            use std::fmt::Write;
+            let _ = write!(line, "{body}");
+        }
+        if line.len() >= DIAGNOSTIC_LINE_LIMIT {
+            let mut end = DIAGNOSTIC_LINE_LIMIT - 16;
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            line.truncate(end);
+            line.push_str(" truncated=true");
+        }
+        publish_diagnostic(line);
+    }
+}
 
 type Inventory = BTreeMap<PathBuf, Option<Vec<u8>>>;
 
@@ -51,11 +206,13 @@ impl Campaign {
         }))
     }
 
+    #[track_caller]
     pub(crate) fn request(&self, deadline: Instant) -> Request {
         Request {
             campaign: self.clone(),
             deadline,
             verified: Cell::new(false),
+            diagnostics: RequestDiagnostics::new(deadline),
         }
     }
 }
@@ -64,6 +221,7 @@ pub(crate) struct Request {
     campaign: Campaign,
     deadline: Instant,
     verified: Cell<bool>,
+    diagnostics: Option<RequestDiagnostics>,
 }
 
 fn check_time(deadline: Instant) -> Result<(), String> {
@@ -75,12 +233,7 @@ fn check_time(deadline: Instant) -> Result<(), String> {
 }
 
 fn during<T>(stage: &str, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
-    #[cfg(test)]
-    let started = Instant::now();
-    let result = action();
-    #[cfg(test)]
-    eprintln!("source CLI {stage}: {} ms", started.elapsed().as_millis());
-    result.map_err(|error| format!("{error}; source CLI stage: {stage}"))
+    action().map_err(|error| format!("{error}; source CLI stage: {stage}"))
 }
 
 fn configurations(source: &Path) -> Vec<PathBuf> {
@@ -521,11 +674,13 @@ pub(crate) fn owned_artifact(
 
 impl Request {
     #[allow(dead_code)]
+    #[track_caller]
     pub(crate) fn new(deadline: Instant) -> Self {
         Campaign::new().request(deadline)
     }
 
     #[allow(dead_code)]
+    #[track_caller]
     pub(crate) fn from_source(source: PathBuf, deadline: Instant) -> Self {
         Campaign::from_source(source).request(deadline)
     }
@@ -539,10 +694,54 @@ impl Request {
         }
     }
 
+    fn observe<T>(
+        &self,
+        stage: &'static str,
+        action: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let Some(diagnostics) = &self.diagnostics else {
+            return action();
+        };
+        let started = Instant::now();
+        let result = action();
+        diagnostics.emit(format_args!(
+            "stage={stage:?} duration_us={} succeeded={}",
+            started.elapsed().as_micros(),
+            result.is_ok()
+        ));
+        result
+    }
+
+    fn during<T>(
+        &self,
+        stage: &'static str,
+        action: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.observe(stage, || during(stage, action))
+    }
+
+    fn process(
+        &self,
+        stage: &'static str,
+        child: &mut Command,
+    ) -> Result<std::process::Output, String> {
+        let Some(diagnostics) = &self.diagnostics else {
+            return command::run(child, self.deadline, OUTPUT_LIMIT);
+        };
+        let (result, process) = command::run_with_diagnostics(child, self.deadline, OUTPUT_LIMIT);
+        diagnostics.emit(format_args!(
+            "stage={stage:?} succeeded={} process={process:?}",
+            result.is_ok()
+        ));
+        result
+    }
+
     fn acquire(&self) -> Result<Transport, String> {
         check_time(self.deadline)?;
         let environment = std::env::vars_os().collect();
-        let inputs = match inventory(&self.campaign.0.source, self.deadline) {
+        let inputs = match self.observe("initial inventory", || {
+            inventory(&self.campaign.0.source, self.deadline)
+        }) {
             Ok(inputs) => inputs,
             Err(_) => {
                 check_time(self.deadline)?;
@@ -568,11 +767,14 @@ impl Request {
             ])
             .arg(self.campaign.0.source.join("Cargo.toml"))
             .current_dir(&self.campaign.0.source);
-        let output = during("first Cargo provenance build", || {
-            command::run(&mut build, self.deadline, OUTPUT_LIMIT)
+        let output = self.during("first Cargo provenance build", || {
+            self.process("first-provenance-process", &mut build)
         })?;
         let executable = successful_artifact(&output, &self.campaign.0.source)?;
-        if inventory(&self.campaign.0.source, self.deadline)? != inputs {
+        if self.observe("post-build inventory", || {
+            inventory(&self.campaign.0.source, self.deadline)
+        })? != inputs
+        {
             return Err("source CLI inputs changed during Cargo build".into());
         }
         let Some(original) = executable else {
@@ -580,23 +782,26 @@ impl Request {
                 inputs: Some(inputs),
             });
         };
-        let (owner, executable, identity) =
-            during("owned artifact copy and source SHA-256", || {
+        let (owner, executable, identity) = self
+            .during("owned artifact copy and source SHA-256", || {
                 owned_artifact(&original, self.deadline)
             })?;
-        during("owned artifact SHA-256", || {
+        self.during("owned artifact SHA-256", || {
             verify_artifact(&executable, &identity, self.deadline)
         })?;
-        let verified = during("second Cargo provenance build", || {
-            command::run(&mut build, self.deadline, OUTPUT_LIMIT)
+        let verified = self.during("second Cargo provenance build", || {
+            self.process("second-provenance-process", &mut build)
         })?;
         if successful_artifact(&verified, &self.campaign.0.source)?.as_ref() != Some(&original) {
             return Err("source Cargo artifact changed during verification".into());
         }
-        during("reverified artifact SHA-256", || {
+        self.during("reverified artifact SHA-256", || {
             verify_artifact(&original, &identity, self.deadline)
         })?;
-        if inventory(&self.campaign.0.source, self.deadline)? != inputs {
+        if self.observe("post-acquisition inventory", || {
+            inventory(&self.campaign.0.source, self.deadline)
+        })? != inputs
+        {
             return Err("source CLI inputs changed during artifact acquisition".into());
         }
         Ok(Transport::Artifact {
@@ -670,6 +875,10 @@ impl Request {
     }
 
     pub(crate) fn finish(&self) -> Result<(), String> {
+        self.observe("request finish", || self.finish_inner())
+    }
+
+    fn finish_inner(&self) -> Result<(), String> {
         check_time(self.deadline)?;
         if !self.verified.get() {
             return Ok(());
@@ -685,15 +894,29 @@ impl Request {
         arguments: &[&str],
         json: bool,
     ) -> Result<(i32, Value), String> {
-        self.check_inputs()?;
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.begin(root);
+        }
+        self.observe("invocation complete", || {
+            self.invoke_inner(root, arguments, json)
+        })
+    }
+
+    fn invoke_inner(
+        &self,
+        root: &Path,
+        arguments: &[&str],
+        json: bool,
+    ) -> Result<(i32, Value), String> {
+        self.observe("entry input validation", || self.check_inputs())?;
         if self.campaign.0.transport.borrow().is_none() {
             let acquired =
-                self.retain_failure(during("transport acquisition", || self.acquire()))?;
+                self.retain_failure(self.during("transport acquisition", || self.acquire()))?;
             *self.campaign.0.transport.borrow_mut() = Some(acquired);
         }
-        during("pre-launch artifact validation", || self.check_artifact())?;
+        self.during("pre-launch artifact validation", || self.check_artifact())?;
         self.verified.set(true);
-        during("before CLI invocation", || self.check_inputs())?;
+        self.during("before CLI invocation", || self.check_inputs())?;
         let transport = self.campaign.0.transport.borrow();
         let mut child = match transport.as_ref().unwrap() {
             Transport::Cargo { .. } => {
@@ -714,8 +937,10 @@ impl Request {
             child.arg("--json");
         }
         child.args(arguments);
-        let output = during(&format!("CLI child {arguments:?}"), || {
-            command::run(&mut child, self.deadline, OUTPUT_LIMIT)
+        let output = self.observe("CLI child", || {
+            during(&format!("CLI child {arguments:?}"), || {
+                self.process("CLI-process", &mut child)
+            })
         })?;
         let value = if json {
             serde_json::from_slice(&output.stdout).map_err(|e| {
@@ -727,7 +952,7 @@ impl Request {
         } else {
             Value::String(String::from_utf8(output.stdout).map_err(|e| e.to_string())?)
         };
-        during("after CLI invocation", || self.check_inputs())?;
+        self.during("after CLI invocation", || self.check_inputs())?;
         Ok((
             output
                 .status

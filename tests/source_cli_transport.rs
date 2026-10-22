@@ -546,3 +546,270 @@ fn original_cargo_fallback_honors_configuration_and_guards_observable_drift() {
         "must remain"
     );
 }
+
+fn diagnostic_subprocess(case: &str, enabled: bool) -> std::process::Output {
+    let mut child = Command::new(std::env::current_exe().unwrap());
+    child
+        .args(["--exact", case, "--nocapture"])
+        .env("SOURCE_CLI_DIAGNOSTIC_TEST_CHILD", "1");
+    if enabled {
+        child.env("BLABLA_SOURCE_CLI_DIAGNOSTICS", "1");
+    } else {
+        child.env_remove("BLABLA_SOURCE_CLI_DIAGNOSTICS");
+    }
+    let output = command::run(
+        &mut child,
+        Instant::now() + Duration::from_secs(12),
+        2 * 1024 * 1024,
+    )
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output
+}
+
+#[test]
+fn diagnostics_keep_json_exit_and_provenance_with_no_payload_or_argv() {
+    for enabled in [false, true] {
+        let output = diagnostic_subprocess("diagnostic_request_child", enabled);
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(
+            !String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("source-cli-diagnostic")
+        );
+        for secret in [
+            "private-argument",
+            "private-output",
+            "private-stderr",
+            "private-root",
+        ] {
+            assert!(!stderr.contains(secret), "{stderr}");
+        }
+        let lines: Vec<_> = stderr
+            .lines()
+            .filter(|line| line.starts_with("source-cli-diagnostic "))
+            .collect();
+        if !enabled {
+            assert!(lines.is_empty(), "{stderr}");
+            continue;
+        }
+        assert!(!lines.is_empty());
+        assert!(lines.len() < 256);
+        assert!(lines.iter().all(|line| line.len() < 4096));
+        assert!(lines.iter().any(|line| line.contains("process=Diagnostics")
+            && line.contains("ExitWaiter")
+            && line.contains("StdoutReader")
+            && line.contains("StderrReader")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("first-provenance-process"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("second-provenance-process"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("invocation=1 fixture=1"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("invocation=2 fixture=2"))
+        );
+        assert!(lines.iter().any(
+            |line| line.contains("invocation=3 fixture=1") && line.contains("succeeded=false")
+        ));
+        assert!(
+            lines
+                .iter()
+                .all(|line| line.contains("caller=source_cli_transport.rs:")
+                    && line.contains("elapsed_us=")
+                    && line.contains("remaining_us="))
+        );
+    }
+}
+
+#[test]
+fn diagnostic_request_child() {
+    if std::env::var_os("SOURCE_CLI_DIAGNOSTIC_TEST_CHILD").is_none() {
+        return;
+    }
+    let dir = locked_source();
+    std::fs::write(dir.path().join("src/main.rs"), r#"fn main() { println!("{{\"payload\":\"private-output\"}}"); eprintln!("private-stderr"); std::process::exit(7); }"#).unwrap();
+    let root = dir.path().join("private-root");
+    std::fs::create_dir(&root).unwrap();
+    let campaign = source_cli::Campaign::from_source(dir.path().to_owned());
+    let request = campaign.request(Instant::now() + blabla::runtime::MAX_TIMEOUT);
+    for root in [&root, &dir.path().to_owned()] {
+        let (exit, value) = request.invoke(root, &["private-argument"], true).unwrap();
+        assert_eq!(exit, 7);
+        assert_eq!(value, json!({"payload":"private-output"}));
+    }
+    request.finish().unwrap();
+    let artifact = request.artifact_path().unwrap();
+    std::fs::write(dir.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+    assert!(
+        request
+            .invoke(&root, &["private-argument"], true)
+            .unwrap_err()
+            .contains("inputs changed")
+    );
+    assert!(request.finish().unwrap_err().contains("inputs changed"));
+    drop(request);
+    drop(campaign);
+    assert!(!artifact.exists());
+    await_diagnostic_delivery();
+}
+
+#[test]
+fn expired_request_traces_are_capped_and_do_not_launch() {
+    let output = diagnostic_subprocess("diagnostic_expired_child", true);
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let lines: Vec<_> = stderr
+        .lines()
+        .filter(|line| line.starts_with("source-cli-diagnostic "))
+        .collect();
+    assert!(!lines.is_empty());
+    assert!(lines.len() <= 256);
+    assert!(
+        lines
+            .iter()
+            .all(|line| line.len() < 4096 && line.contains("remaining_us=0"))
+    );
+    assert!(!stderr.contains("private-argument"));
+    assert!(!stderr.contains("private-root"));
+    assert!(!stderr.contains("process=Diagnostics"));
+}
+
+#[test]
+fn diagnostic_expired_child() {
+    if std::env::var_os("SOURCE_CLI_DIAGNOSTIC_TEST_CHILD").is_none() {
+        return;
+    }
+    let request = source_cli::Request::new(Instant::now());
+    for _ in 0..300 {
+        assert!(
+            request
+                .invoke(Path::new("private-root"), &["private-argument"], true)
+                .unwrap_err()
+                .contains("deadline")
+        );
+    }
+    assert!(request.finish().unwrap_err().contains("deadline"));
+    assert!(request.artifact_path().is_none());
+    assert_eq!(source_cli::diagnostic_publication().attempted, 256);
+    await_diagnostic_delivery();
+}
+
+fn await_diagnostic_delivery() {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let publication = source_cli::diagnostic_publication();
+        if publication.written + publication.dropped == publication.attempted {
+            return;
+        }
+        assert!(Instant::now() < deadline, "{publication:?}");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn stalled_diagnostic_sink_does_not_block_requests_or_grow_writers() {
+    let output = diagnostic_subprocess("diagnostic_stalled_sink_child", true);
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let lines: Vec<_> = stderr
+        .lines()
+        .filter(|line| line.starts_with("source-cli-diagnostic "))
+        .collect();
+    assert!(!lines.is_empty());
+    assert!(
+        lines
+            .iter()
+            .all(|line| line.contains("telemetry=best-effort missing=not-evidence"))
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| !line.contains("dropped_at_least=0 "))
+    );
+}
+
+#[test]
+fn diagnostic_stalled_sink_child() {
+    if std::env::var_os("SOURCE_CLI_DIAGNOSTIC_TEST_CHILD").is_none() {
+        return;
+    }
+    let (locked, acquired) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let stderr = std::io::stderr();
+        let _guard = stderr.lock();
+        locked.send(()).unwrap();
+        released.recv().unwrap();
+    });
+    acquired.recv_timeout(Duration::from_secs(2)).unwrap();
+    let started = Instant::now();
+    let requests: Vec<_> = (0..8)
+        .map(|_| {
+            std::thread::spawn(|| {
+                for _ in 0..16 {
+                    let request = source_cli::Request::new(Instant::now());
+                    assert!(
+                        request
+                            .invoke(Path::new("private-root"), &["private-argument"], true)
+                            .unwrap_err()
+                            .contains("deadline")
+                    );
+                    assert!(request.finish().unwrap_err().contains("deadline"));
+                }
+            })
+        })
+        .collect();
+    for request in requests {
+        request.join().unwrap();
+    }
+    assert!(started.elapsed() < Duration::from_secs(2));
+
+    let dir = locked_source();
+    std::fs::write(
+        dir.path().join("src/main.rs"),
+        r#"fn main() { println!("{{\"value\":7}}"); std::process::exit(7); }"#,
+    )
+    .unwrap();
+    let request = source_cli::Request::from_source(
+        dir.path().to_owned(),
+        Instant::now() + blabla::runtime::MAX_TIMEOUT,
+    );
+    assert_eq!(
+        request.invoke(dir.path(), &[], true).unwrap(),
+        (7, json!({"value":7}))
+    );
+    request.finish().unwrap();
+    let publication = source_cli::diagnostic_publication();
+    assert_eq!(publication.written, 0);
+    assert_eq!(publication.writers_started, 1);
+    assert!(publication.dropped > 0);
+    assert!(publication.attempted - publication.dropped <= publication.queue_capacity as u64 + 1);
+
+    release.send(()).unwrap();
+    holder.join().unwrap();
+    await_diagnostic_delivery();
+    let expired = source_cli::Request::new(Instant::now());
+    assert!(
+        expired
+            .invoke(dir.path(), &[], false)
+            .unwrap_err()
+            .contains("deadline")
+    );
+    await_diagnostic_delivery();
+    assert_eq!(source_cli::diagnostic_publication().writers_started, 1);
+}
