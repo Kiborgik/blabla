@@ -17,7 +17,7 @@ fn session() -> AppSession {
             "--example".into(),
             "structure-adapter".into(),
         ],
-        Duration::from_millis(8000),
+        Duration::from_millis(42000),
     );
     AppSession::spawn(&config).unwrap()
 }

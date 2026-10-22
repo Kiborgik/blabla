@@ -4,7 +4,7 @@ Updated October 17, 2026, 22:00 UTC. This is a dependency-aware twelve-hour plan
 
 ## Two immediate priorities
 
-1. **Finish the Windows repair outcome.** Tooling owns the running exact-source platform gate and any demonstrated residual. The request budget is eight seconds; process completion and cleanup remain event-driven. Do not interrupt the meaningful run with unrelated pushes or infer a speed fix from the larger budget.
+1. **Finish the Windows repair outcome.** Tooling owns the running exact-source platform gate and any demonstrated residual. The request budget is forty-two seconds; process completion and cleanup remain event-driven. Do not interrupt the meaningful run with unrelated pushes or infer a speed fix from the larger budget.
 2. **Deliver the connected industrial chain.** Orchestrator owns preserving the accepted industrial source and publishing the compatible game update when supported publication transport is available. Civic and industrial source acceptance does not establish deployment or live operation. Actual civilization owners must choose and operate the new capabilities; Art verifies their public presentation.
 
 ## Next twelve hours

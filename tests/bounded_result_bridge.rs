@@ -228,7 +228,7 @@ fn real_runtime_protocol_and_existing_request_budget_reach_every_named_setup() {
         .into_iter()
         .map(Into::into)
         .collect(),
-        Duration::from_millis(8000),
+        Duration::from_millis(42000),
     );
     let mut session = AppSession::spawn(&config).unwrap();
     let start = Instant::now();

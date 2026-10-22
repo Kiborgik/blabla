@@ -130,7 +130,7 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn ready(root: &Path, name: &str, review: bool, deadline: &Request) -> Result<(), String> {
+    fn ready(root: &Path, name: &str, review: bool, deadline: &Request) -> Result<Value, String> {
         let model = if review { "reviewer" } else { "worker" };
         let scope = if review { "report.md" } else { "src" };
         let mut args = vec![
@@ -166,8 +166,7 @@ impl Fixture {
             0,
             deadline,
         )?;
-        expected(root, &["task", "evidence", name, "--run"], 0, deadline)?;
-        let view = expected(root, &["task", "show", name], 0, deadline)?;
+        let view = expected(root, &["task", "evidence", name, "--run"], 0, deadline)?;
         for row in view["affected_intent"]
             .as_array()
             .ok_or("missing affected identities")?
@@ -196,8 +195,7 @@ impl Fixture {
         if challenge["assignment_clear"] != true {
             return Err("fixture did not establish a clear actual challenge".into());
         }
-        expected(root, &["task", "ready", name], 0, deadline)?;
-        Ok(())
+        expected(root, &["task", "ready", name], 0, deadline)
     }
 
     fn prepare(kind: i64, deadline: &Request) -> Result<Self, String> {
@@ -227,15 +225,14 @@ impl Fixture {
         ] {
             write(path, file, content)?;
         }
-        Self::ready(path, "work", false, deadline)?;
+        let mut ready = Self::ready(path, "work", false, deadline)?;
         let review = matches!(kind, 5 | 10);
         if review {
-            Self::ready(path, "review", true, deadline)?;
+            ready = Self::ready(path, "review", true, deadline)?;
         }
         let name = if review { "review" } else { "work" }.to_owned();
         let mut model = if review { "reviewer" } else { "worker" }.to_owned();
-        let writer =
-            expected(path, &["task", "show", &name], 0, deadline)?["task"]["build"].clone();
+        let writer = ready["task"]["build"].clone();
         match kind {
             1 => {
                 expected(

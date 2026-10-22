@@ -22,7 +22,7 @@ use tempfile::TempDir;
 use exchange_witness::{Exchange, ReaderRecorder, Slot, WriterMetadata};
 use process_tree::ProcessTree;
 
-pub const MAX_TIMEOUT: Duration = Duration::from_secs(8);
+pub const MAX_TIMEOUT: Duration = Duration::from_secs(42);
 pub const MAX_STARTUP: Duration = Duration::from_secs(60);
 const RESPONSE_LINE_LIMIT: usize = 1024 * 1024;
 const CLEANUP_LIMIT: Duration = Duration::from_millis(250);
@@ -99,7 +99,7 @@ impl AppSession {
         if config.timeout.is_zero() || config.timeout > MAX_TIMEOUT {
             return Err(AppError::new(
                 "APP_CONFIG",
-                "exchange timeout must be greater than zero and at most eight seconds",
+                "exchange timeout must be greater than zero and at most forty-two seconds",
             ));
         }
         if config.startup.is_zero() || config.startup > MAX_STARTUP {

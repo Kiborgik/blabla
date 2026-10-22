@@ -38,7 +38,7 @@ Group names default to the file stem; rule IDs are `group::label`. These group n
 | `command [...]` | launch argv; relative paths resolve from the manifest (required) |
 | `prepare [...]` | optional build step, run once before launch; write output under `.blabla/` or an ignored path, or the run goes STALE |
 | `seed`, `cases`, `steps`, `shrink_budget` | 0, 16, 32, 256 (max 256) |
-| `timeout_ms` | per response, 1–8000; default 1000 |
+| `timeout_ms` | per response, 1–42000; default 1000 |
 | `startup_ms` | first exchange after each start, up to 60000; default `timeout_ms` |
 
 **Ignore rules** use gitignore syntax, including `!` and `**`; the last match wins. Only the lists you name are read, never nested `.gitignore` files, and a list's patterns anchor to its own directory. The manifest, contracts, memory and ignore lists are always tracked. Windows paths match without case; Unix paths match with case.

@@ -73,7 +73,7 @@ fn invalid_budgets_fail_without_launching_an_application() {
         "run",
         "examples/hello.bla",
         "--timeout-ms",
-        "8000",
+        "42000",
         "--json",
         "--",
         "blabla-nonexistent-test-app",
@@ -84,7 +84,7 @@ fn invalid_budgets_fail_without_launching_an_application() {
     for (flag, value) in [
         ("--cases", "0"),
         ("--steps", "0"),
-        ("--timeout-ms", "8001"),
+        ("--timeout-ms", "42001"),
         ("--timeout-ms", "0"),
         ("--shrink-budget", "257"),
     ] {

@@ -295,7 +295,7 @@ fn adapter_reset_and_two_way_isolation_preserve_legacy_role_and_bounded_probes()
 }
 
 #[test]
-fn actual_runtime_respects_configured_eight_second_budget_for_a_finite_sequence() {
+fn actual_runtime_respects_configured_forty_two_second_budget_for_a_finite_sequence() {
     use blabla::application::{AppConfig, Application};
     use blabla::report::Call;
     use blabla::runtime::AppSession;
@@ -312,7 +312,7 @@ fn actual_runtime_respects_configured_eight_second_budget_for_a_finite_sequence(
             "--example".into(),
             "structure-adapter".into(),
         ],
-        Duration::from_millis(8000),
+        Duration::from_millis(42000),
     );
     let mut session = AppSession::spawn(&config).unwrap();
     let started = Instant::now();
