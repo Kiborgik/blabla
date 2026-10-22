@@ -1993,8 +1993,17 @@ pub(super) struct CheckAmendment {
     pub command: Option<String>,
     pub argv: Vec<String>,
     pub inputs: Vec<String>,
+    pub reset_inputs: bool,
     pub add_scope: Vec<String>,
     pub model: Option<String>,
+}
+
+fn amended_check_inputs(task: &Task, inputs: Vec<String>, reset_inputs: bool) -> Vec<String> {
+    if inputs.is_empty() && !reset_inputs {
+        task.check_inputs.clone()
+    } else {
+        inputs
+    }
 }
 
 pub(super) fn declare_check(
@@ -2008,6 +2017,7 @@ pub(super) fn declare_check(
         command,
         argv,
         inputs,
+        reset_inputs,
         add_scope,
         model,
     } = amendment;
@@ -2016,10 +2026,24 @@ pub(super) fn declare_check(
     {
         return exit;
     }
-    let inputs = match tracked_declarations(project, "input", inputs) {
-        Ok(paths) => paths,
-        Err(message) => return emit_error(error("task", message, None), json, 2),
-    };
+    if command.is_none()
+        && argv.is_empty()
+        && inputs.is_empty()
+        && add_scope.is_empty()
+        && !reset_inputs
+    {
+        return emit_error(
+            error(
+                "task",
+                format!(
+                    "task check {name} needs a command, --argv values, --input, --add-scope or --reset-inputs; use blabla task show {name} to inspect its current check"
+                ),
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     let mut task = match mutate(project, name, json) {
         Ok(task) => task,
         Err(exit) => return exit,
@@ -2027,6 +2051,17 @@ pub(super) fn declare_check(
     if !add_scope.is_empty()
         && let Err(message) = widen_scope(project, &mut task, &add_scope)
     {
+        return emit_error(error("task", message, None), json, 2);
+    }
+    task.check_inputs = match tracked_declarations(
+        project,
+        "input",
+        amended_check_inputs(&task, inputs, reset_inputs),
+    ) {
+        Ok(paths) => paths,
+        Err(message) => return emit_error(error("task", message, None), json, 2),
+    };
+    if let Some(message) = task::tracking_error(&task, &project.manifest.root, &project.ignore) {
         return emit_error(error("task", message, None), json, 2);
     }
     if let Some(cmd) = command {
@@ -2037,12 +2072,6 @@ pub(super) fn declare_check(
         task.check_argv = Some(argv);
         task.check = None;
     }
-    if inputs.is_empty()
-        && let Err(message) = tracked_declarations(project, "input", task.scope.clone())
-    {
-        return emit_error(error("task", message, None), json, 2);
-    }
-    task.check_inputs = inputs;
     task.challenged = None;
     let verb = if add_scope.is_empty() {
         "check"

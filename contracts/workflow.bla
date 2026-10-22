@@ -94,3 +94,5 @@ forbid "the-task-record-stays-below-the-cli": dependency task -> clitask
 require "handback-recovery-shares-authoritative-diagnostics": symbol clitask::handback_recovery
 
 require "ready-delivery-refresh-is-explicit-and-guarded": symbol delivery::ClaimInput.refresh_ready
+
+require "check-amendment-input-binding-is-explicit": symbol clitask::amended_check_inputs

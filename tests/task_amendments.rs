@@ -193,7 +193,13 @@ fn invalid_combined_amendments_leave_the_entire_task_record_unchanged() {
             "--input",
             "ignored/check.py",
         ],
-        vec!["--add-scope", "ignored", "--model", "owner"],
+        vec![
+            "--add-scope",
+            "ignored",
+            "--reset-inputs",
+            "--model",
+            "owner",
+        ],
     ] {
         let mut command = vec!["task", "check", "work", "replacement"];
         command.extend(arguments);
@@ -285,7 +291,7 @@ fn combined_amendment_stales_bound_review_and_reacceptance_still_stales_evidence
         success(&temp, &["task", "show", "review"])["review_current"],
         false
     );
-    assert!(record(&temp).check_inputs.is_empty());
+    assert_eq!(record(&temp).check_inputs, ["src/app.rs", "tests/check.py"]);
     success(&temp, &["task", "evidence", "work", "--run"]);
     assert!(task::readiness(&record(&temp), &tree(&temp)).supported);
     let epoch = record(&temp).acceptance_epoch;
@@ -303,7 +309,7 @@ fn legacy_scope_and_check_commands_keep_their_unattributed_history() {
     assert_eq!(work.scope, ["src/app.rs", "tests"]);
     assert_eq!(work.check.as_deref(), Some("replacement"));
     assert!(work.check_argv.is_none());
-    assert!(work.check_inputs.is_empty());
+    assert_eq!(work.check_inputs, ["src/app.rs", "tests/check.py"]);
     assert!(
         work.orchestrator_records
             .iter()

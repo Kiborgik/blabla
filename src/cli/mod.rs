@@ -673,8 +673,14 @@ enum TaskAction {
             help = "Check as argv list: program and arguments"
         )]
         argv: Vec<String>,
-        #[arg(long, value_name = "PATH", num_args = 1.., help = "Check inputs; defaults to write scope. Deliverables are always included")]
+        #[arg(long, value_name = "PATH", num_args = 1.., help = "Replace the check inputs; omission preserves the current binding. Deliverables are always included")]
         input: Vec<String>,
+        #[arg(
+            long,
+            conflicts_with = "input",
+            help = "Explicitly reset check inputs to the write-scope default; deliverables remain included"
+        )]
+        reset_inputs: bool,
         #[arg(long, value_name = "PATH", num_args = 1.., help = "Also add write-scope paths in the same atomic check amendment")]
         add_scope: Vec<String>,
         #[arg(
@@ -1694,6 +1700,7 @@ fn execute(cli: Cli) -> i32 {
                         command,
                         argv,
                         input,
+                        reset_inputs,
                         add_scope,
                         model,
                     } => task::declare_check(
@@ -1703,6 +1710,7 @@ fn execute(cli: Cli) -> i32 {
                             command,
                             argv,
                             inputs: input,
+                            reset_inputs,
                             add_scope,
                             model,
                         },
