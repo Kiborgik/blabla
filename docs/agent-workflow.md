@@ -108,6 +108,53 @@ Scope, check, attribution and withdrawal changes are the orchestrator's. Resolvi
 
 Running several tasks at once: author the rules for work not started yet in a `draft` contract and promote it to `use` when its task opens. An active RED rule keeps `finish` from passing. Ordinary `task close` still requires current passing project verification.
 
+### Own nested-project work at both roots
+
+Attribution reads the selected project's `.blabla/tasks/`, not nested projects'
+ledgers. A changed path covered by another active task's scope or deliverable in
+that same ledger is attributable; a nested worker's task alone does not explain
+the change to a parent-root task. This is recorded ownership, not proof of who
+wrote the file or whether the feature is correct.
+
+Before nested writers start, the orchestrator opens and personally accepts a
+real integration task at the parent root. Its statement names the integration
+responsibility, its scope lists the exact authorized delegated paths relative to
+that root, and its check covers the promised integration result. Do not claim an
+entire nested directory merely to suppress attribution challenges. Keep parent
+tasks' live write scopes disjoint; retain each nested worker's narrower assignment,
+acceptance, evidence, independent review and owner integration in its own ledger.
+The parent record grants no additional permission and replaces none of that work.
+
+Illustrative syntax only: replace every angle-bracket placeholder with the actual
+project, task, authorized paths, permitted model and meaningful check before use.
+In BlaBla's checkout, replace `blabla` with the current-source Cargo invocation above.
+
+```text
+blabla --project <parent-root> task open <integration-task> --role orchestrator --statement "<actual integration responsibility>" --scope <nested-path-one> <nested-path-two> --check-argv <program> <arguments...>
+blabla --project <parent-root> task accept <integration-task> --model <owner-model>
+```
+
+Open and accept the nested assignments with `--project <nested-root>` before their
+edits; their paths are relative to that nested root. Neither root discovers or
+accepts the other's tasks automatically.
+
+For existing `attribution-unknown` changes, the orchestrator first establishes
+their origin, then may record the supported recovery on the affected parent task:
+
+```text
+blabla --project <parent-root> task attribute <affected-task> <exact-changed-path> --kind concurrent --model <owner-model>
+```
+
+This is an owner attestation, not actor authentication. Preserve uncertain changes
+and ask the owner to reconcile; never relabel this task's own out-of-scope work or
+revert another worker's work to clear a challenge. Unrelated attribution
+reconciliation alone is not a reason to rerun unchanged behavioral suites. Inspect
+`task freshness`, use only the existing guarded recovery routes when eligible,
+and challenge again. Changed scope, inputs or review targets still require current
+evidence and receipts; all independent-review, confirmation, closure and project
+verification obligations remain. Batch execution and review at substantial feature
+boundaries, not each bookkeeping correction.
+
 ### Accept a bounded result while integration is pending
 
 An orchestrator can explicitly accept a current READY result after a previously overall GREEN canonical finish has become stale **only because implementation inputs changed**:

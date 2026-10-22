@@ -565,7 +565,7 @@ fn expert_packets_keep_invalid_legacy_attempts_without_current_observed_credit()
 }
 
 #[test]
-fn implicit_evidence_inputs_cannot_restore_unobservable_scope_defaults() {
+fn omitted_inputs_preserve_tracking_and_explicit_reset_refuses_unobservable_defaults() {
     let temp = fixture();
     let (exit, report) = cli(
         &temp,
@@ -604,10 +604,21 @@ fn implicit_evidence_inputs_cannot_restore_unobservable_scope_defaults() {
         ],
     );
     assert_eq!(exit, 0, "{report}");
+    success(&temp, &["task", "check", "work", "portable check"]);
+    let work = task::read(temp.path(), "work").unwrap().unwrap();
+    assert_eq!(work.check_inputs, ["src"]);
+    assert_eq!(work.scope, [".blabla/scratch/work"]);
+    assert_eq!(work.check.as_deref(), Some("portable check"));
+    assert!(work.evidence.is_empty());
     let before = std::fs::read(temp.path().join(".blabla/tasks/work.json")).unwrap();
-    assert_eq!(
-        cli(&temp, &["task", "check", "work", "portable check"]).0,
-        2
+    let (exit, report) = cli(&temp, &["task", "check", "work", "--reset-inputs"]);
+    assert_eq!(exit, 2, "{report}");
+    assert!(
+        report["message"]
+            .as_str()
+            .unwrap()
+            .contains("left out of change tracking"),
+        "{report}"
     );
     assert_eq!(
         std::fs::read(temp.path().join(".blabla/tasks/work.json")).unwrap(),

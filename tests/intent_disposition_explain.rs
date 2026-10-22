@@ -94,6 +94,50 @@ fn show(temp: &TempDir) -> Value {
     success(temp, &["task", "show", "work"])
 }
 
+fn human_show(temp: &TempDir) -> String {
+    let output = support::run_in(Some(temp.path()), &support::args(&["task", "show", "work"]));
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn human_row<'a>(human: &'a str, identity: &str) -> &'a str {
+    let start = human.find(&format!("  {identity}  ")).unwrap();
+    let rest = &human[start..];
+    let end = rest
+        .match_indices("\n  ")
+        .find(|(index, _)| !rest[index + 3..].starts_with(' '))
+        .map(|(index, _)| index)
+        .unwrap();
+    &rest[..end]
+}
+
+fn assert_human_identities(human: &str, view: &Value) {
+    let mut previous = None;
+    for entry in view["affected_intent"].as_array().unwrap() {
+        let identity = entry["identity"].as_str().unwrap();
+        let state = entry["state"].as_str().unwrap().to_uppercase();
+        let line = format!("  {identity}  {state}\n");
+        assert_eq!(human.matches(&line).count(), 1, "{line}");
+        let position = human.find(&line).unwrap();
+        assert!(previous.is_none_or(|previous| previous < position));
+        previous = Some(position);
+        if let Some(reason) = entry["reason"].as_str() {
+            let disposition = entry["disposition"].as_str().unwrap();
+            assert!(human_row(human, identity).contains(&format!("{disposition}: {reason}")));
+        }
+    }
+}
+
+fn add_policies(temp: &TempDir, count: usize) {
+    let mut process = std::fs::read_to_string(temp.path().join("process.bla")).unwrap();
+    for index in 0..count {
+        process.push_str(&format!(
+            "policy \"extra-{index:03}\" {{ applies_to [\"worker\"] statement \"Original boundary {index}\" }}\n"
+        ));
+    }
+    write(temp.path(), "process.bla", &process);
+}
+
 fn row<'a>(view: &'a Value, identity: &str) -> &'a Value {
     view["affected_intent"]
         .as_array()
@@ -163,8 +207,14 @@ fn missing_receipts_have_no_invented_revision_and_current_receipts_have_empty_de
     let missing = row(&view, "system::app");
     assert_eq!(missing["state"], "missing");
     assert_eq!(missing.get("freshness"), Some(&Value::Null));
+    let human = human_show(&temp);
+    assert_human_identities(&human, &view);
+    assert!(!human.contains("Shared input diagnostic groups:"));
     complete(&temp);
     let view = show(&temp);
+    let human = human_show(&temp);
+    assert_human_identities(&human, &view);
+    assert!(!human.contains("Shared input diagnostic groups:"));
     for row in view["affected_intent"].as_array().unwrap() {
         assert_eq!(row["state"], "current");
         assert_eq!(
@@ -222,6 +272,22 @@ fn one_identity_change_is_named_for_all_receipts_without_implying_their_own_iden
         assert_eq!(changes[0]["identity"], "system::app");
         assert_eq!(changes[0]["change"], "changed");
     }
+    let human = human_show(&temp);
+    assert_human_identities(&human, &view);
+    assert_eq!(
+        human
+            .matches("      identity: system::app (changed)")
+            .count(),
+        1
+    );
+    assert_eq!(
+        human
+            .matches("    Own identity fingerprint: changed\n")
+            .count(),
+        1
+    );
+    assert!(human_row(&human, "system::app").contains("Own identity fingerprint: changed"));
+    assert!(human_row(&human, "role::worker").contains("Own identity fingerprint: unchanged"));
 }
 
 #[test]
@@ -318,6 +384,12 @@ fn removed_intent_keeps_its_explicit_absence_fingerprint() {
         .unwrap();
     assert_eq!(old["change"], "changed");
     assert_eq!(old["current"], "absent");
+    let human = human_show(&temp);
+    assert!(human_row(&human, "goal::deliver").contains("Own identity fingerprint: changed"));
+    assert!(human.contains(&format!(
+        "identity: goal::deliver (changed); recorded: {}; current: \"absent\"",
+        old["recorded"]
+    )));
 }
 
 #[test]
@@ -390,13 +462,30 @@ fn explanation_is_deterministic_read_only_and_does_not_change_challenge_or_readi
     let before = files(temp.path());
     let first = show(&temp);
     assert_eq!(show(&temp), first);
-    let output = support::run_in(Some(temp.path()), &support::args(&["task", "show", "work"]));
-    assert!(output.status.success());
-    let human = String::from_utf8(output.stdout).unwrap();
+    let json_before = support::run_in(
+        Some(temp.path()),
+        &support::args(&["--json", "task", "show", "work"]),
+    );
+    assert!(json_before.status.success());
+    let human = human_show(&temp);
+    assert_eq!(human_show(&temp), human);
+    assert_eq!(show(&temp), first);
+    let json_after = support::run_in(
+        Some(temp.path()),
+        &support::args(&["--json", "task", "show", "work"]),
+    );
+    assert!(json_after.status.success());
+    assert_eq!(json_after.stdout, json_before.stdout);
+    assert_human_identities(&human, &first);
     assert!(human.contains("Shared input changes"));
     assert!(human.contains("core (changed)"));
     assert!(human.contains("Own identity fingerprint: unchanged"));
     assert!(human.contains("directory fingerprints do not identify changed child files"));
+    assert!(human.contains("Assignment digests do not identify changed fields"));
+    assert!(
+        human.contains("Shared input changes do not establish a semantic change to each identity")
+    );
+    assert!(human.contains("Reasons are accountable review claims; they never mark goals done or replace evidence, scope or contract authority"));
     assert_eq!(files(temp.path()), before);
     let challenge_after = cli(&temp, &["challenge", "work"]);
     let ready_after = cli(&temp, &["task", "ready", "work"]);
@@ -423,5 +512,269 @@ fn unrelated_intent_change_leaves_current_receipts_without_deltas() {
     assert_eq!(
         row(&view, "system::app")["freshness"]["changed_identities"],
         json!([])
+    );
+}
+
+#[test]
+fn shared_diagnostics_keep_more_than_64_identities_and_all_paths_and_identity_changes() {
+    let temp = fixture();
+    add_policies(&temp, 70);
+    let paths: Vec<String> = (0..21)
+        .map(|index| format!("inputs/{index:03}.txt"))
+        .collect();
+    for path in &paths {
+        write(temp.path(), path, "original\n");
+    }
+    let mut args = vec![
+        "task", "check", "work", "--model", "owner", "--input", "core", "check.py",
+    ];
+    args.extend(paths.iter().map(String::as_str));
+    success(&temp, &args);
+    complete(&temp);
+    for path in &paths {
+        write(temp.path(), path, "revised\n");
+    }
+    let process = std::fs::read_to_string(temp.path().join("process.bla")).unwrap();
+    write(
+        temp.path(),
+        "process.bla",
+        &process.replace("Original boundary", "Revised boundary"),
+    );
+    let view = show(&temp);
+    let entries = view["affected_intent"].as_array().unwrap();
+    assert!(entries.len() > 64);
+    assert_eq!(
+        entries[0]["freshness"]["changed_paths"]
+            .as_array()
+            .unwrap()
+            .len(),
+        21
+    );
+    assert_eq!(
+        entries[0]["freshness"]["changed_identities"]
+            .as_array()
+            .unwrap()
+            .len(),
+        70
+    );
+    let human = human_show(&temp);
+    assert_human_identities(&human, &view);
+    assert_eq!(
+        human.matches("    Shared input changes: group 1\n").count(),
+        entries.len()
+    );
+    assert_eq!(
+        human.matches("  Shared input diagnostic groups:\n").count(),
+        1
+    );
+    assert!(human.contains(&format!("    group 1 ({} references):\n", entries.len())));
+    assert!(!human.contains("    group 2 ("));
+    for path in paths {
+        assert_eq!(
+            human
+                .matches(&format!("      path: {path} (changed)"))
+                .count(),
+            1
+        );
+    }
+    for index in 0..70 {
+        assert_eq!(
+            human
+                .matches(&format!(
+                    "      identity: policy::extra-{index:03} (changed)"
+                ))
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        human
+            .matches("    Own identity fingerprint: changed\n")
+            .count(),
+        70
+    );
+    assert_eq!(
+        human
+            .matches("    Own identity fingerprint: unchanged\n")
+            .count(),
+        entries.len() - 70
+    );
+}
+
+#[test]
+fn equal_path_labels_with_different_recorded_fingerprints_stay_in_separate_groups() {
+    let temp = fixture();
+    complete(&temp);
+    write(temp.path(), "core/extra.rs", "pub fn middle() {}\n");
+    disposition(&temp, "system::app");
+    write(temp.path(), "core/extra.rs", "pub fn latest() {}\n");
+    let view = show(&temp);
+    let older = &row(&view, "role::worker")["freshness"]["changed_paths"][0];
+    let newer = &row(&view, "system::app")["freshness"]["changed_paths"][0];
+    assert_eq!(older["path"], newer["path"]);
+    assert_eq!(older["change"], newer["change"]);
+    assert_eq!(older["current"], newer["current"]);
+    assert_ne!(older["recorded"], newer["recorded"]);
+    let human = human_show(&temp);
+    assert_human_identities(&human, &view);
+    assert!(human_row(&human, "role::worker").contains("Shared input changes: group 1"));
+    assert!(human_row(&human, "system::app").contains("Shared input changes: group 2"));
+    assert_eq!(human.matches("      path: core (changed)").count(), 2);
+    for delta in [older, newer] {
+        assert!(human.contains(&format!(
+            "recorded: {}; current: {}",
+            delta["recorded"], delta["current"]
+        )));
+    }
+}
+
+#[test]
+fn grouping_preserves_interleaved_current_missing_and_stale_rows() {
+    let temp = fixture();
+    complete(&temp);
+    write(temp.path(), "core/extra.rs", "pub fn revised() {}\n");
+    disposition(&temp, "system::app");
+    amend_record(&temp, |record| {
+        record["intent_dispositions"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|entry| entry["identity"] != "role::worker");
+    });
+    let view = show(&temp);
+    let human = human_show(&temp);
+    assert_human_identities(&human, &view);
+    assert!(human_row(&human, "system::app").starts_with("  system::app  CURRENT\n"));
+    assert_eq!(human_row(&human, "role::worker"), "  role::worker  MISSING");
+    assert!(!human_row(&human, "system::app").contains("Shared input changes"));
+    let stale = view["affected_intent"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["state"] == "stale")
+        .count();
+    assert!(human.contains(&format!("    group 1 ({stale} references):\n")));
+    assert_eq!(
+        human.matches("    Shared input changes: group 1\n").count(),
+        stale
+    );
+}
+
+#[test]
+fn claim_only_staleness_shares_empty_deltas_without_sharing_claim_problems() {
+    let temp = fixture();
+    complete(&temp);
+    amend_record(&temp, |record| {
+        for entry in record["intent_dispositions"].as_array_mut().unwrap() {
+            match entry["identity"].as_str().unwrap() {
+                "system::app" => entry["model"] = json!("another-worker"),
+                "role::worker" => entry["status"] = json!("unrecognized"),
+                "policy::bounded" => entry["reason"] = json!(" "),
+                _ => {}
+            }
+        }
+    });
+    let view = show(&temp);
+    let human = human_show(&temp);
+    assert_human_identities(&human, &view);
+    assert!(human.contains("    group 1 (3 references):\n      none\n"));
+    assert!(!human.contains("    group 2 ("));
+    for (identity, problem) in [
+        ("system::app", "accepted-model-mismatch"),
+        ("role::worker", "invalid-status"),
+        ("policy::bounded", "blank-reason"),
+    ] {
+        let entry = human_row(&human, identity);
+        assert!(entry.contains("Shared input changes: group 1"));
+        assert!(entry.contains(&format!("Claim problems: {problem}")));
+        assert_eq!(entry.matches("Claim problems:").count(), 1);
+        assert!(entry.contains("Own identity fingerprint: unchanged"));
+    }
+}
+
+#[test]
+fn exact_shared_delta_keys_distinguish_epochs_assignment_and_added_removed_or_missing_fingerprints()
+{
+    let temp = fixture();
+    add_policies(&temp, 14);
+    complete(&temp);
+    amend_record(&temp, |record| {
+        for (index, entry) in record["intent_dispositions"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .take(14)
+            .enumerate()
+        {
+            entry["model"] = json!("another-worker");
+            let revision = &mut entry["revision"];
+            match index {
+                0 => {}
+                1 => revision["acceptance_epoch"] = json!(0),
+                2 => revision["acceptance_epoch"] = json!(2),
+                3 => revision["task_digest"] = json!("first-opaque-assignment"),
+                4 => revision["task_digest"] = json!("second-opaque-assignment"),
+                5 => {
+                    revision["paths"].as_object_mut().unwrap().remove("core");
+                }
+                6 => revision["paths"]["core"] = Value::Null,
+                7 => revision["paths"]["removed"] = Value::Null,
+                8 => revision["paths"]["removed"] = json!("absent"),
+                9 => {
+                    revision["identities"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("system::app");
+                }
+                10 => revision["identities"]["system::app"] = json!("absent"),
+                11 => revision["identities"]["system::app"] = json!("different-baseline"),
+                12 => revision["identities"]["removed::identity"] = json!("absent"),
+                13 => revision["identities"]["removed::identity"] = json!("different-baseline"),
+                _ => unreachable!(),
+            }
+        }
+    });
+    let view = show(&temp);
+    let human = human_show(&temp);
+    assert_human_identities(&human, &view);
+    let expected = [1, 2, 3, 4, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+    for (entry, group) in view["affected_intent"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(expected)
+    {
+        let identity = entry["identity"].as_str().unwrap();
+        assert!(
+            human_row(&human, identity).contains(&format!("Shared input changes: group {group}\n")),
+            "{identity}: expected group {group}\n{human}"
+        );
+    }
+    for group in 1..=13 {
+        let references = if group == 4 { 2 } else { 1 };
+        assert_eq!(
+            human
+                .matches(&format!("    group {group} ({references} references):\n"))
+                .count(),
+            1
+        );
+    }
+    assert!(!human.contains("    group 14 ("));
+    assert!(human.contains("acceptance epoch: 0 -> 1"));
+    assert!(human.contains("acceptance epoch: 2 -> 1"));
+    assert_eq!(
+        human
+            .matches("assignment digest changed (includes the acceptance epoch)")
+            .count(),
+        1
+    );
+    assert!(human.contains("path: core (added); recorded: null; current:"));
+    assert!(human.contains("path: core (changed); recorded: null; current:"));
+    assert!(human.contains("path: removed (removed); recorded: null; current: null"));
+    assert!(human.contains("path: removed (removed); recorded: \"absent\"; current: null"));
+    assert!(human.contains("identity: system::app (added); recorded: null; current:"));
+    assert!(human.contains("identity: system::app (changed); recorded: \"absent\"; current:"));
+    assert!(
+        human
+            .contains("identity: removed::identity (removed); recorded: \"absent\"; current: null")
     );
 }

@@ -67,27 +67,27 @@ struct IntentFreshness {
     claim_problems: Vec<&'static str>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct EpochChange {
     recorded: u64,
     current: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct FingerprintChange {
     change: &'static str,
     recorded: Option<String>,
     current: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct PathFingerprintChange {
     path: String,
     #[serde(flatten)]
     difference: FingerprintChange,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct IdentityFingerprintChange {
     identity: String,
     #[serde(flatten)]
@@ -190,42 +190,80 @@ fn intent_freshness(
     }
 }
 
-fn write_intent_freshness(output: &mut impl Write, freshness: &IntentFreshness) -> io::Result<()> {
-    writeln!(output, "    Shared input changes:")?;
-    if let Some(epoch) = &freshness.acceptance_epoch {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SharedIntentChanges<'a> {
+    acceptance_epoch: &'a Option<EpochChange>,
+    assignment_digest_changed: bool,
+    changed_paths: &'a [PathFingerprintChange],
+    changed_identities: &'a [IdentityFingerprintChange],
+}
+
+fn shared_intent_changes(freshness: &IntentFreshness) -> SharedIntentChanges<'_> {
+    SharedIntentChanges {
+        acceptance_epoch: &freshness.acceptance_epoch,
+        assignment_digest_changed: freshness.assignment_digest_changed,
+        changed_paths: &freshness.changed_paths,
+        changed_identities: &freshness.changed_identities,
+    }
+}
+
+fn write_intent_fingerprint_change(
+    output: &mut impl Write,
+    difference: &FingerprintChange,
+) -> io::Result<()> {
+    write!(output, " ({}); recorded: ", difference.change)?;
+    match &difference.recorded {
+        Some(value) => write!(output, "{value:?}")?,
+        None => write!(output, "null")?,
+    }
+    write!(output, "; current: ")?;
+    match &difference.current {
+        Some(value) => writeln!(output, "{value:?}"),
+        None => writeln!(output, "null"),
+    }
+}
+
+fn write_shared_intent_changes(
+    output: &mut impl Write,
+    changes: SharedIntentChanges<'_>,
+) -> io::Result<()> {
+    if let Some(epoch) = changes.acceptance_epoch {
         writeln!(
             output,
             "      acceptance epoch: {} -> {}",
             epoch.recorded, epoch.current
         )?;
     }
-    if freshness.assignment_digest_changed {
+    if changes.assignment_digest_changed {
         writeln!(
             output,
             "      assignment digest changed (includes the acceptance epoch)"
         )?;
     }
-    for entry in &freshness.changed_paths {
-        writeln!(
-            output,
-            "      path: {} ({})",
-            entry.path, entry.difference.change
-        )?;
+    for entry in changes.changed_paths {
+        write!(output, "      path: {}", entry.path)?;
+        write_intent_fingerprint_change(output, &entry.difference)?;
     }
-    for entry in &freshness.changed_identities {
-        writeln!(
-            output,
-            "      identity: {} ({})",
-            entry.identity, entry.difference.change
-        )?;
+    for entry in changes.changed_identities {
+        write!(output, "      identity: {}", entry.identity)?;
+        write_intent_fingerprint_change(output, &entry.difference)?;
     }
-    if freshness.acceptance_epoch.is_none()
-        && !freshness.assignment_digest_changed
-        && freshness.changed_paths.is_empty()
-        && freshness.changed_identities.is_empty()
+    if changes.acceptance_epoch.is_none()
+        && !changes.assignment_digest_changed
+        && changes.changed_paths.is_empty()
+        && changes.changed_identities.is_empty()
     {
         writeln!(output, "      none")?;
     }
+    Ok(())
+}
+
+fn write_intent_freshness(
+    output: &mut impl Write,
+    freshness: &IntentFreshness,
+    group: usize,
+) -> io::Result<()> {
+    writeln!(output, "    Shared input changes: group {group}")?;
     writeln!(
         output,
         "    Own identity fingerprint: {}",
@@ -241,6 +279,55 @@ fn write_intent_freshness(output: &mut impl Write, freshness: &IntentFreshness) 
             "    Claim problems: {}",
             freshness.claim_problems.join(", ")
         )?;
+    }
+    Ok(())
+}
+
+fn write_affected_intent(output: &mut impl Write, entries: &[IntentView]) -> io::Result<()> {
+    let mut groups = Vec::new();
+    let mut group_ids = BTreeMap::new();
+    let references: Vec<Option<usize>> = entries
+        .iter()
+        .map(|entry| {
+            if entry.state != "stale" {
+                return None;
+            }
+            let changes = shared_intent_changes(entry.freshness.as_ref()?);
+            let next = groups.len();
+            let index = *group_ids.entry(changes).or_insert_with(|| {
+                groups.push((changes, 0));
+                next
+            });
+            groups[index].1 += 1;
+            Some(index + 1)
+        })
+        .collect();
+    for (entry, group) in entries.iter().zip(references) {
+        writeln!(
+            output,
+            "  {}  {}",
+            entry.identity,
+            entry.state.to_uppercase()
+        )?;
+        if let Some(reason) = &entry.reason {
+            writeln!(
+                output,
+                "    {}: {reason}",
+                entry.disposition.as_deref().unwrap_or("unrecorded")
+            )?;
+        }
+        if let Some(group) = group
+            && let Some(freshness) = &entry.freshness
+        {
+            write_intent_freshness(output, freshness, group)?;
+        }
+    }
+    if !groups.is_empty() {
+        writeln!(output, "  Shared input diagnostic groups:")?;
+        for (index, (changes, references)) in groups.into_iter().enumerate() {
+            writeln!(output, "    group {} ({references} references):", index + 1)?;
+            write_shared_intent_changes(output, changes)?;
+        }
     }
     Ok(())
 }
@@ -3938,26 +4025,7 @@ fn write_task(
                 "INCOMPLETE"
             }
         )?;
-        for entry in &view.affected_intent {
-            writeln!(
-                output,
-                "  {}  {}",
-                entry.identity,
-                entry.state.to_uppercase()
-            )?;
-            if let Some(reason) = &entry.reason {
-                writeln!(
-                    output,
-                    "    {}: {reason}",
-                    entry.disposition.as_deref().unwrap_or("unrecorded")
-                )?;
-            }
-            if entry.state == "stale"
-                && let Some(freshness) = &entry.freshness
-            {
-                write_intent_freshness(&mut output, freshness)?;
-            }
-        }
+        write_affected_intent(&mut output, &view.affected_intent)?;
         writeln!(
             output,
             "  Assignment digests do not identify changed fields; directory fingerprints do not identify changed child files. Shared input changes do not establish a semantic change to each identity."
