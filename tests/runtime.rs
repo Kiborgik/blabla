@@ -364,8 +364,8 @@ fn bounds_read_and_blocking_write_deadlines() {
     ))
     .unwrap();
     write_session.reset().unwrap();
-    let secret = "EXCHANGE_ARGUMENT_SECRET_MARKER";
-    let payload = json!(format!("{secret}{}", "x".repeat(8 * 1024 * 1024)));
+    let argument_marker = "EXCHANGE_ARGUMENT_SECRET_MARKER";
+    let payload = json!(format!("{argument_marker}{}", "x".repeat(8 * 1024 * 1024)));
     let write_start = Instant::now();
     let write_error = write_session
         .call(&Call {
@@ -381,7 +381,7 @@ fn bounds_read_and_blocking_write_deadlines() {
     );
     assert!(write_start.elapsed() < Duration::from_millis(1500));
     let encoded = serde_json::to_string(&write_error).unwrap();
-    assert!(!encoded.contains(secret));
+    assert!(!encoded.contains(argument_marker));
     assert!(!encoded.contains("EXCHANGE_ACTION_SECRET_MARKER"));
     assert!(encoded.len() < 2048);
     let write_json: serde_json::Value = serde_json::from_str(&encoded).unwrap();
