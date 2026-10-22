@@ -174,3 +174,20 @@ await test('full installed towns can reserve paid work without overflowing or hi
     }
   }
 });
+
+await test('reserved construction does not move installed centers, annexes or existing home anchors', () => {
+  for (const worldSeed of [0, 1, 1701, 999]) {
+    const installed = { ...city, worldSeed, population: 40, buildings: ['academy', 'granary', 'kiln'] };
+    const baseline = settlementVisual(installed, 'close');
+    for (const detail of ['far', 'mid', 'close'] as const) {
+      const active = settlementVisual({ ...installed, construction: order('launchpad') }, detail);
+      for (const part of active.parts.filter(part => !part.id.startsWith('construction:'))) {
+        const previous = baseline.parts.find(value => value.id === part.id);
+        assert.ok(previous, part.id);
+        assert.deepEqual(part, previous, `${worldSeed}/${detail}: ${part.id}`);
+      }
+      assert.ok(active.parts.some(part => part.id === 'construction:order-launchpad:foundation'));
+      assert.ok(!active.parts.some(part => part.id.startsWith('launchpad-')));
+    }
+  }
+});

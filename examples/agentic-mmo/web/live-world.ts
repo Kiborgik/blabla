@@ -67,7 +67,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
       population: city.population, buildings: [...city.buildings],
       settlement: { id: city.id, civId: city.civId, tileId: city.tileId, name: city.name,
         population: city.population, wellbeing: city.wellbeing, damage: city.damage, buildings: [...city.buildings],
-        round: state.round, terminal: state.outcome !== null,
+        worldSeed: state.seed, round: state.round, terminal: state.outcome !== null,
         ...(city.construction ? { construction: structuredClone(city.construction) } : {}),
         ...(city.localPower ? { localPower: structuredClone(city.localPower) } : {}),
         ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}) },

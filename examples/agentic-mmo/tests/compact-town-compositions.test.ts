@@ -112,3 +112,17 @@ await test('geometry summaries never invent central districts or let hidden oper
   assert.ok(settlementVisual(active, 'mid').parts.some(part => part.id === 'operation:kiln:smoke'));
   assert.ok(!settlementVisual({ ...active, terminal: true }, 'close').parts.some(part => part.id.startsWith('operation:')));
 });
+
+await test('seeded internal layouts leave all external geographic projections at their exact recorded sites', () => {
+  const state = createWorld(1701);
+  const town = state.cities[0]!;
+  town.buildings = ['academy', 'campus', 'library', 'industrial-zone', 'factory'];
+  town.districtSites = { campus: 39, 'industrial-zone': 56 };
+  const before = structuredClone(state);
+  const baseline = projectWorld(state);
+  const varied = projectWorld({ ...state, seed: 999 });
+  for (const key of ['districts', 'improvements', 'pastoralSites', 'catchments', 'wonders', 'deposits', 'routes', 'tiles'] as const) assert.deepEqual(varied[key], baseline[key], key);
+  assert.deepEqual(varied.cities.map(value => [value.cityId, value.q, value.r]), baseline.cities.map(value => [value.cityId, value.q, value.r]));
+  assert.notDeepEqual(settlementVisual(varied.cities[0]!.settlement!, 'close').parts, settlementVisual(baseline.cities[0]!.settlement!, 'close').parts);
+  assert.deepEqual(state, before);
+});

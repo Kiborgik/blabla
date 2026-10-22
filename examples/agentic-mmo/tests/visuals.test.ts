@@ -247,7 +247,7 @@ await test('damage marks all affected settlements without erasing buildings or a
     for (const [index, entry] of state.cities.entries()) {
       const visual = visuals[index];
       assert.ok(visual);
-      const healthy = settlementVisual({ ...entry, damage: 0 }, detail);
+      const healthy = settlementVisual({ ...entry, worldSeed: state.seed, damage: 0 }, detail);
       assert.deepEqual(visual.buildings, healthy.buildings);
       assert.equal(visual.houses, healthy.houses);
       assert.equal(visual.population, entry.population);
@@ -413,4 +413,20 @@ await test('civic operation cues use shared identity and exact receipts without 
     assert.deepEqual(source, before);
   }
   assert.equal(eventVisual(event({ type: 'building-operation', detail: 'hearth/unknown at strategic round 8', effects: [] }))?.icon, 'infrastructure');
+});
+
+await test('seeded town variants retain factual family silhouettes, faction roofs and bounded shared geometry', () => {
+  const buildings = BUILDINGS.map(building => building.id);
+  for (const worldSeed of [0, 1, 2, 1701, 9001]) for (let civId = 0; civId < 5; civId++) for (const detail of ['far', 'mid', 'close'] as const) {
+    const source = { ...city, worldSeed, civId, population: 10000, buildings, damage: 100 };
+    const before = structuredClone(source);
+    const visual = settlementVisual(source, detail);
+    assert.equal(visual.landmarks[0], 'launchpad');
+    assert.equal(visual.buildings.length, buildings.length);
+    assert.ok(visual.parts.length <= DETAIL_BUDGETS[detail].parts);
+    assert.ok(visual.parts.every(part => !/road|route|rocket|plume/.test(part.id)));
+    assert.ok(visual.parts.every(part => [...part.position, ...part.scale, part.rotation].every(Number.isFinite)));
+    assert.deepEqual(settlementVisual({ ...source, buildings: buildings.toReversed() }, detail), visual);
+    assert.deepEqual(source, before);
+  }
 });
