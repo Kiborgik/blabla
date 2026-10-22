@@ -3,6 +3,7 @@ import type { City, GameAction, GameEvent, WorldState } from '../core/types.ts';
 import type { CapabilityProjection } from '../core/capabilities.ts';
 import { eventLogEntries, recordedPublicProjectResult, type EventLogEntry } from './event-log.ts';
 import { exactNumber } from './number-format.ts';
+import { storyLanguage, type StoryLanguage } from './story-language.ts';
 import { visualIcon } from './world-cues.ts';
 
 export type SpectatorDestination =
@@ -12,6 +13,7 @@ export type SpectatorDestination =
 
 export interface SpectatorStory {
   event: EventLogEntry;
+  display: StoryLanguage;
   destination: SpectatorDestination | null;
 }
 
@@ -67,7 +69,7 @@ export function spectatorChronicle(state: StoryWorld & Pick<WorldState, 'events'
     chosen.add(best); families.add(candidate.event.family);
     for (const id of [candidate.source.actor, candidate.source.target]) if (id !== null) participants.add(id);
   }
-  return candidates.filter((_candidate, index) => chosen.has(index)).map(({ event, destination }) => ({ event, destination }));
+  return candidates.filter((_candidate, index) => chosen.has(index)).map(({ event, source, destination }) => ({ event, display: storyLanguage(state, source, event), destination }));
 }
 
 export function civilizationSummary(state: Pick<WorldState, 'cities'>, id: number): string {
@@ -234,26 +236,26 @@ export function renderSpectatorChronicle(host: HTMLElement, stories: readonly Sp
   const focused = host.dataset['sourceIdentity'] === sourceIdentity && document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement.dataset['storyId'] : undefined;
   host.dataset['sourceIdentity'] = sourceIdentity;
   host.replaceChildren();
-  for (const { event, destination } of stories) {
+  for (const { event, display, destination } of stories) {
     const item = document.createElement('li');
     const row = document.createElement(destination ? 'button' : 'div');
     row.className = 'chronicle-story';
     row.dataset['storyId'] = event.id;
-    const consequence = event.summary || event.effects.slice(0, 2).join(' ');
+    const { title: headline, cause: reason, consequence } = display;
     if (row instanceof HTMLButtonElement && destination) {
       row.type = 'button';
       row.addEventListener('click', () => navigate(destination));
-      row.setAttribute('aria-label', `${event.title}. Round ${event.round}.${event.cause ? ` Why: ${event.cause}.` : ''}${consequence ? ` Result: ${consequence}.` : ''} ${destination.kind === 'civilization' ? 'Inspect civilization' : 'Show on map'}: ${destination.label}`);
+      row.setAttribute('aria-label', `${headline}. Round ${event.round}.${reason ? ` Why: ${reason}.` : ''}${consequence ? ` Result: ${consequence}.` : ''} ${destination.kind === 'civilization' ? 'Inspect civilization' : 'Show on map'}: ${destination.label}`);
     }
     const marker = document.createElement('span'); marker.className = 'chronicle-marker'; marker.append(visualIcon(event.icon));
     const body = document.createElement('span'); body.className = 'chronicle-story-body';
     const meta = document.createElement('span'); meta.className = 'chronicle-story-meta'; meta.textContent = `Round ${event.round} · ${event.category}`;
-    const title = document.createElement('strong'); title.textContent = event.title;
+    const title = document.createElement('strong'); title.textContent = headline;
     const location = document.createElement('span'); location.className = 'chronicle-location';
     location.textContent = destination ? `${destination.kind === 'civilization' ? 'View civilization' : 'On the map'} · ${destination.label}` : 'World event';
     if (destination) location.append(visualIcon('inspect'));
     body.append(meta, title);
-    if (event.cause) { const cause = document.createElement('span'); cause.className = 'chronicle-cause'; cause.textContent = `Why: ${event.cause}`; body.append(cause); }
+    if (reason) { const cause = document.createElement('span'); cause.className = 'chronicle-cause'; cause.textContent = `Why: ${reason}`; body.append(cause); }
     if (consequence) { const result = document.createElement('span'); result.className = 'chronicle-result'; result.textContent = `Result: ${consequence}`; body.append(result); }
     body.append(location); row.append(marker, body); item.append(row); host.append(item);
     if (focused === event.id) row.focus({ preventScroll: true });

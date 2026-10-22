@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
+import { hexPosition } from '../web/atlas.ts';
 import { createImprovementMeshes } from '../web/settlement-three.ts';
 import { createWorld } from '../core/engine.ts';
 import { improvementParts, improvementLastLabel, IMPROVEMENT_PART_BUDGETS } from '../visuals/improvement-visuals.ts';
@@ -95,10 +96,21 @@ await test('frontier Mine instances batch at retained sites and never attach to 
   const before = structuredClone(world);
   const material = new THREE.MeshBasicMaterial();
   const meshes = createImprovementMeshes(world, () => material);
-  meshes.update(60);
-  const instances = meshes.group.children.filter(child => child instanceof THREE.InstancedMesh);
-  assert.equal(instances.reduce((sum, mesh) => sum + mesh.count, 0), improvementParts(view, 'close').length);
-  assert.ok(instances.every(mesh => mesh.boundingSphere !== null));
+  const origin = hexPosition(view.q, view.r);
+  for (const [pixels, detail] of [[30, 'mid'], [23, 'mid'], [21, 'far'], [25, 'far'], [27, 'mid'], [49, 'mid'], [53, 'close'], [45, 'close'], [43, 'mid']] as const) {
+    assert.equal(meshes.update(pixels), detail);
+    const instances = meshes.group.children.filter(child => child instanceof THREE.InstancedMesh);
+    const parts = improvementParts(view, detail);
+    assert.equal(instances.reduce((sum, mesh) => sum + mesh.count, 0), parts.length);
+    assert.ok(instances.every(mesh => mesh.boundingSphere !== null));
+    const actual: number[][] = [];
+    for (const mesh of instances) for (let index = 0; index < mesh.count; index++) {
+      const matrix = new THREE.Matrix4(); mesh.getMatrixAt(index, matrix);
+      actual.push([matrix.elements[12] ?? 0, matrix.elements[13] ?? 0, matrix.elements[14] ?? 0].map(value => Math.round(value * 1e5) / 1e5));
+    }
+    const expected: number[][] = parts.map(part => [origin.x + part.position[0], view.height + part.position[1], origin.z + part.position[2]].map(value => Math.round(value * 1e5) / 1e5));
+    assert.deepEqual(actual.sort(), expected.sort());
+  }
   assert.deepEqual(world, before);
   meshes.dispose(); material.dispose();
   assert.equal(meshes.group.children.length, 0);

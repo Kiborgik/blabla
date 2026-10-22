@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { createWorld } from '../core/engine.ts';
 import { PUBLIC_PROJECT_RECIPES, TRADE_RECIPES } from '../core/content.ts';
 import type { GameEvent, PublicProjectResult } from '../core/types.ts';
-import { eventLogEntries, recordedPublicProjectResult } from '../web/event-log.ts';
+import { eventLogEntries, recordedPublicProjectResult, renderEventLog } from '../web/event-log.ts';
 import { spectatorChronicle, spectatorEventDestination, developingTowns, renderDevelopingTowns, renderSpectatorChronicle } from '../web/spectator-hud.ts';
 
 const epoch = '2026-10-16T00:00:00Z';
@@ -170,4 +170,37 @@ void test('new event outcomes show only recorded effects and a trade fair naviga
   const [move] = eventLogEntries([migration], { civilizations: state.civilizations }); assert.ok(move);
   assert.equal(move.family, 'population'); assert.match(move.summary, /Source population 6 → 4/); assert.match(move.summary, /Destination population 3 → 5/);
   assert.doesNotMatch(move.summary, /new residents|population grew/);
+});
+
+void test('compact display uses exact named facts while Events Details retains every original cause effect and proof', () => {
+  const original = new Map(['document', 'HTMLElement', 'HTMLButtonElement'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const dom = { activeElement: null as ElementRecord | null, createElement: (tag: string) => new ElementRecord(tag), createElementNS: (_ns: string, tag: string) => new ElementRecord(tag) };
+  for (const key of ['HTMLElement', 'HTMLButtonElement']) Object.defineProperty(globalThis, key, { configurable: true, value: ElementRecord });
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: dom });
+  try {
+    const state = world(); state.civilizations[0]!.name = '<strong>Exact partner</strong>';
+    const receipt = result();
+    const committed = { ...finalEvent(receipt), cause: receipt.reason, effects: ['Proposer paid: materials 1.125, credits 2.5', 'Recipient paid: energy 3.75', 'Route damage 42.75 → 12.25', 'No shipment is created by this charter outcome', '<proof> exact raw proof'] };
+    state.events = [committed];
+    const before = structuredClone(state);
+    const stories = spectatorChronicle(state); const story = stories[0]; assert.ok(story);
+    assert.deepEqual(story.event, eventLogEntries(state.events, { civilizations: state.civilizations })[0]);
+    const compact = new ElementRecord('ol'); let selected = '';
+    renderSpectatorChronicle(compact as unknown as HTMLElement, stories, destination => { selected = destination.id.toString(); }, 'archive:raw-proof');
+    const button = compact.all().find(node => node.tag === 'button'); assert.ok(button);
+    assert.equal(button.dataset['storyId'], committed.id);
+    assert.match(compact.content(), /<strong>Exact partner<\/strong>/);
+    assert.match(compact.content(), /42.75 → 12.25/); assert.match(compact.content(), /1.125 Materials/);
+    assert.doesNotMatch(compact.content(), /project-1|route-1|<proof>/);
+    assert.match(button.attributes.get('aria-label') ?? '', /No cargo delivered/);
+    button.listeners.get('click')?.(); assert.equal(selected, 'route-1');
+    const full = new ElementRecord('ol');
+    renderEventLog(full as unknown as HTMLElement, state.events, { civilizations: state.civilizations });
+    const details = full.all().find(node => node.tag === 'details'); assert.ok(details);
+    assert.ok(details.all().some(node => node.textContent === `Cause: ${committed.cause}`));
+    assert.ok(details.all().some(node => node.textContent === `Record: ${committed.detail}`));
+    for (const effect of committed.effects) assert.ok(details.all().some(node => node.textContent === effect), effect);
+    assert.equal([...compact.all(), ...full.all()].some(node => node.tag === 'proof'), false);
+    assert.deepEqual(state, before);
+  } finally { for (const [key, descriptor] of original) if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
 });

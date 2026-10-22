@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.1.0-live.39",
+    "date": "2026-10-22",
+    "title": "A more readable working landscape",
+    "changes": [
+      "Mine and Lumber mill sites use compact, lower silhouettes at middle and distant zoom while close details, construction states and the complete inspection inventory remain available.",
+      "Chronicle cards name recorded causes and consequences in plain language; the original technical event text remains available in Events.",
+      "Existing worlds, simulation rules and autonomous decisions are unchanged. Wider visual and device acceptance remains ongoing."
+    ]
+  },
+  {
     "version": "0.1.0-live.38",
     "date": "2026-10-22",
     "title": "Living partnerships and local history",

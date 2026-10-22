@@ -41,6 +41,7 @@ export function improvementParts(view: ImprovementView, detail: DetailLevel): Vi
   if (view.improvementId === 'lumber-mill') return lumberParts(view, detail);
   if (view.improvementId === 'pasture') return pastureParts(view, detail);
   if (view.improvementId !== 'mine') return [];
+  if (detail !== 'close') return mineOverviewParts(view, detail);
   const parts: VisualPart[] = [];
   const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale'], rotation = 0): void => {
     parts.push({ id: `${view.id}:${id}`, shape, material, position, scale, rotation });
@@ -51,17 +52,36 @@ export function improvementParts(view: ImprovementView, detail: DetailLevel): Vi
   add('identity', 'box', 'identity', [-.79, .16, 0], [.08, .12, 1.3]);
   if (view.status === 'building') {
     for (const x of [-.52, .35]) add(`survey-frame-${x}`, 'box', 'timber', [x, .38, -.18], [.1, .6, .12]);
-    if (detail !== 'far') add('survey-beam', 'box', 'timber', [-.085, .7, -.18], [.97, .1, .14]);
+    add('survey-beam', 'box', 'timber', [-.085, .7, -.18], [.97, .1, .14]);
   } else {
     add('opening', 'box', 'timber', [-.15, .25, -.26], [.7, .44, .24]);
     for (const x of [-.56, .26]) add(`portal-${x}`, 'box', 'stone', [x, .32, -.19], [.14, .54, .32]);
     add('portal-top', 'box', 'stone', [-.15, .65, -.19], [1, .16, .38]);
     add('spoil', 'cone', 'stone', [.53, .25, .38], [.55, .45, .55]);
-    if (detail !== 'far') {
-      for (const x of [-.33, .03]) add(`track-${x}`, 'box', 'metal', [x, .17, .33], [.045, .045, .72]);
-      add('stack', 'box', 'stone', [.51, .16, -.08], [.3, .2, .3]);
+    for (const x of [-.33, .03]) add(`track-${x}`, 'box', 'metal', [x, .17, .33], [.045, .045, .72]);
+    add('stack', 'box', 'stone', [.51, .16, -.08], [.3, .2, .3]);
+    for (const z of [.05, .27, .49]) add(`sleeper-${z}`, 'box', 'timber', [-.15, .15, z], [.55, .045, .07]);
+  }
+  return parts.slice(0, IMPROVEMENT_PART_BUDGETS[detail]);
+}
+
+function mineOverviewParts(view: ImprovementView, detail: 'far' | 'mid'): VisualPart[] {
+  const parts: VisualPart[] = [];
+  const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale']): void => { parts.push({ id: `${view.id}:${id}`, shape, material, position, scale, rotation: 0 }); };
+  add('worked-ground', 'cylinder', 'soil', [0, .03, 0], [1.28, .06, 1.08]);
+  add('cut-bank', 'box', 'rock', [-.16, .13, -.35], [.94, .16, .18]);
+  add('identity', 'box', 'identity', [-.65, .07, 0], [.055, .08, .74]);
+  if (view.status === 'building') {
+    for (const x of [-.46, .2]) add(`survey-frame-${x}`, 'box', 'timber', [x, .22, -.25], [.07, .36, .08]);
+    if (detail === 'mid') add('survey-beam', 'box', 'timber', [-.13, .36, -.25], [.73, .07, .08]);
+  } else {
+    add('opening', 'box', 'soil', [-.16, .075, .03], [.64, .09, .62]);
+    add('spoil', 'cone', 'stone', [.4, .18, .24], [.48, .3, .44]);
+    add('cut-timber', 'box', 'timber', [-.16, .18, -.25], [.66, .08, .08]);
+    if (detail === 'mid') {
+      for (const x of [-.46, .14]) add(`cut-support-${x}`, 'box', 'timber', [x, .13, -.25], [.07, .18, .08]);
+      for (const x of [-.29, -.03]) add(`track-${x}`, 'box', 'metal', [x, .13, .2], [.035, .035, .48]);
     }
-    if (detail === 'close') for (const z of [.05, .27, .49]) add(`sleeper-${z}`, 'box', 'timber', [-.15, .15, z], [.55, .045, .07]);
   }
   return parts.slice(0, IMPROVEMENT_PART_BUDGETS[detail]);
 }
@@ -90,6 +110,7 @@ function pastureParts(view: ImprovementView, detail: DetailLevel): VisualPart[] 
 export const LUMBER_MARK_PATH = 'M3 19L9 5L15 19ZM7 13H11M9 19V23M14 16L18 12L22 16V22H14ZM16 18H20';
 
 function lumberParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
+  if (detail !== 'close') return lumberOverviewParts(view, detail);
   const parts: VisualPart[] = [];
   const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale'], rotation = 0): void => { parts.push({ id: `${view.id}:${id}`, shape, material, position, scale, rotation }); };
   add('lumber-platform', 'box', 'timber', [0, .08, 0], [1.5, .14, 1.15]);
@@ -102,11 +123,33 @@ function lumberParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
     add('lumber-saw', 'box', 'metal', [.45, .42, .35], [.08, .55, .48]);
     add('lumber-bench', 'box', 'timber', [.23, .25, .38], [.8, .3, .35]);
     for (const x of [-.6, .4]) add(`lumber-post-${x}`, 'box', 'timber', [x, .4, -.4], [.1, .65, .1]);
-    if (detail !== 'far') {
-      add('lumber-wall', 'box', 'timber', [-.1, .4, -.55], [1.1, .65, .08]);
-      for (const z of [.25, .5]) add(`lumber-stack-${z}`, 'box', 'timber', [-.55, .24, z], [.5, .18, .13]);
+    add('lumber-wall', 'box', 'timber', [-.1, .4, -.55], [1.1, .65, .08]);
+    for (const z of [.25, .5]) add(`lumber-stack-${z}`, 'box', 'timber', [-.55, .24, z], [.5, .18, .13]);
+    for (const x of [-.4, -.12, .16]) add(`lumber-joist-${x}`, 'box', 'grain', [x, .17, -.1], [.06, .04, 1.1]);
+  }
+  return parts.slice(0, IMPROVEMENT_PART_BUDGETS[detail]);
+}
+
+function lumberOverviewParts(view: ImprovementView, detail: 'far' | 'mid'): VisualPart[] {
+  const parts: VisualPart[] = [];
+  const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale']): void => { parts.push({ id: `${view.id}:${id}`, shape, material, position, scale, rotation: 0 }); };
+  add('lumber-platform', 'box', 'timber', [-.18, .04, -.26], [.8, .08, .62]);
+  add('lumber-identity', 'box', 'identity', [-.65, .07, -.06], [.055, .08, .8]);
+  if (view.status === 'building') {
+    for (const x of [-.48, .12]) add(`lumber-survey-${x}`, 'box', 'timber', [x, .2, -.42], [.07, .32, .07]);
+    add('lumber-survey-beam', 'box', 'grain', [-.18, .36, -.42], [.67, .05, .07]);
+  } else {
+    add('lumber-roof', 'gable', 'timber', [-.18, .4, -.26], [.74, .18, .56]);
+    add('lumber-saw', 'box', 'metal', [.3, .27, .17], [.05, .32, .32]);
+    add('lumber-bench', 'box', 'timber', [.22, .17, .19], [.65, .22, .28]);
+    for (const x of [-.48, .12]) add(`lumber-post-${x}`, 'box', 'timber', [x, .2, -.42], [.07, .32, .07]);
+    for (const z of [.25, .45]) add(`lumber-stack-${z}`, 'box', 'timber', [-.4, .13, z], [.72, .16, .14]);
+    add('lumber-log-ends', 'box', 'grain', [-.765, .13, .35], [.035, .15, .34]);
+    if (detail === 'mid') {
+      add('lumber-stack-upper', 'box', 'timber', [-.4, .26, .35], [.64, .13, .14]);
+      add('lumber-log-ends-upper', 'box', 'grain', [-.725, .26, .35], [.035, .12, .13]);
+      add('lumber-brace', 'box', 'timber', [-.18, .3, -.42], [.67, .06, .07]);
     }
-    if (detail === 'close') for (const x of [-.4, -.12, .16]) add(`lumber-joist-${x}`, 'box', 'grain', [x, .17, -.1], [.06, .04, 1.1]);
   }
   return parts.slice(0, IMPROVEMENT_PART_BUDGETS[detail]);
 }
