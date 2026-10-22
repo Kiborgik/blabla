@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { RESOURCE_IDS } from '../core/content.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
+import type { BuildingOperation, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { localGrowthPrefix } from './fixtures/local-growth-prefix.ts';
 import { coastalPrefixTime, replayCoastalStep } from './fixtures/coastal-prefix.ts';
@@ -15,11 +16,12 @@ await test('legal population20 town operates five paid recipes while its complet
   assert.equal(prefix.state.releaseId, 'settlement-manufacturing-1');
   assert.equal(city.population, 20); assert.equal('housing' in city, false);
   assert.ok(city.buildings.includes('university')); assert.equal(city.construction?.active, null);
-  assert.equal(city.construction?.lastCompleted?.buildingId, 'university');
+  const completed = city.construction?.lastCompleted; assert.ok(completed && !('kind' in completed));
+  assert.equal(completed.buildingId, 'university');
   assert.ok(prefix.state.civilizations[0]?.technologies.includes('education'));
   assert.ok(prefix.state.civilizations[0]!.resources.credits > 20);
   for (const [index, id] of recipes.entries()) {
-    const operation = city.buildingOperations?.[id]; assert.equal(operation?.enabled, true);
+    const operation: BuildingOperation | undefined = city.buildingOperations?.[id]; assert.equal(operation?.enabled, true);
     assert.equal(operation?.lastResult?.status, 'operated');
     assert.equal(operation?.lastResult?.residents?.available, 17 - index * 3);
     assert.equal(operation?.lastResult?.residents?.allocated, 3);
@@ -54,7 +56,8 @@ await test('actual allocator debits opening inputs only and the subsequent canon
 
 await test('detached retained transitions replay canonically without injected population stocks technologies or scheduler state', () => {
   const prefix = localGrowthPrefix();
-  let state: unknown = JSON.parse(JSON.stringify(prefix.initial)); assert.ok(isWorldState(state));
+  const restored: unknown = JSON.parse(JSON.stringify(prefix.initial)); assert.ok(isWorldState(restored));
+  let state: WorldState = restored;
   for (const step of prefix.steps) {
     assert.deepEqual(state, step.before);
     const before = JSON.stringify(state);

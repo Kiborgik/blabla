@@ -3,6 +3,7 @@ import { observe } from '../core/engine.ts';
 import { observeCompactTrade } from '../core/observation.ts';
 import { CHOICE_PAGE_FORMAT, ChoicePageError, createChoicePage, parseChoicePageRequest } from '../protocol/choice-pages.ts';
 import { type D1Database, WorldRepository } from './repository.ts';
+import { parseRecordedChoiceQuery } from './recorded-choices.ts';
 import type { PublicProvenance, PublicWorldRead } from './public-protocol.ts';
 import { boundedInteger, record, RequestFailure } from './validation.ts';
 
@@ -217,7 +218,9 @@ export function createWorker(assetResponder?: AssetResponder, options: WorkerOpt
                 const history = await store.history(Number(url.searchParams.get('after') ?? '0'), Number(url.searchParams.get('limit') ?? '50'));
                 return response({ ...history, entries: history.entries.map((entry) => ({ ...entry, provenance: publicProvenance(entry.provenance) })) });
               }
+              case '/api/recorded-choice': return response(await store.recordedChoiceDetail(parseRecordedChoiceQuery(url.searchParams, 'detail')));
               case '/api/chronicle': {
+                if (url.searchParams.has('format')) return response(await store.boundedChronicle(parseRecordedChoiceQuery(url.searchParams, 'page')));
                 const chronicle = await store.chronicle(Number(url.searchParams.get('after') ?? '0'), Number(url.searchParams.get('limit') ?? '50'));
                 return response({ ...chronicle, entries: chronicle.entries.map((entry) => ({ ...entry, provenance: publicProvenance(entry.provenance) })) });
               }

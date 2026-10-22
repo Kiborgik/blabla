@@ -3,6 +3,7 @@ import { type ActionOutcome, type Command, type DirectorTickCommand, type GameAc
 import { isGameAction, validateAttachedPlan } from '../core/planning.ts';
 import { isDirectorEvent } from '../core/validation.ts';
 import { decisionActionBlock } from '../core/simulation/decisions.ts';
+import { readBoundedChronicle, readRecordedChoiceDetail } from './recorded-choices.ts';
 import { decodeHistorySnapshot, HISTORY_SNAPSHOT_PREFIX } from './snapshot-codec.ts';
 import { HistoryOutputBudget, selectHistoryRows } from './history-budget.ts';
 import { type ActionReceiptRead, readActionReceipt } from './action-receipt.ts';
@@ -359,6 +360,10 @@ export class WorldRepository {
       throw failure;
     }
   }
+
+  boundedChronicle(input: Record<string, unknown>) { return readBoundedChronicle(this.database, this.worldId, input); }
+
+  recordedChoiceDetail(input: Record<string, unknown>) { return readRecordedChoiceDetail(this.database, this.worldId, input); }
 
   private async chroniclePage(after: number, limit: number): Promise<{ rows: unknown[]; hasMore: boolean }> {
     boundedInteger(after, 0, Number.MAX_SAFE_INTEGER, 'after');

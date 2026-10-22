@@ -143,7 +143,7 @@ function measure(ownedTowns: number, timings: boolean) {
   assert.equal(state.eventCounts['construction-started'], 2 * ownedTowns);
   assert.equal(state.eventCounts['building-completed'], 2 * ownedTowns);
   assert.equal(state.cities.filter(city => city.construction?.lastCompleted).length, ownedTowns);
-  assert.ok(state.cities.filter(city => city.civId === 0).every(city => city.construction?.lastCompleted?.buildingId === 'workshop'));
+  assert.ok(state.cities.filter(city => city.civId === 0).every(city => { const completed = city.construction?.lastCompleted; return completed && !('kind' in completed) && completed.buildingId === 'workshop'; }));
   assert.ok(state.events.length <= 96);
   const beforeTiming = hash(state);
   assert.ok(state.independentTurns);

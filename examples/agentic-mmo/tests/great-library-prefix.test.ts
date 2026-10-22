@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { applyCommand, legalActions } from '../core/engine.ts';
+import type { WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { greatLibraryPrefix } from './fixtures/great-library-prefix.ts';
 import { replayCoastalStep } from './fixtures/coastal-prefix.ts';
@@ -33,7 +34,8 @@ await test('two distinct civilizations legally finish Writing and operate their 
 
 await test('every retained transition replays from detached initial JSON with canonical frames and immutable inputs', () => {
   const prefix = greatLibraryPrefix();
-  let state: unknown = JSON.parse(JSON.stringify(prefix.initial)); assert.ok(isWorldState(state));
+  const restored: unknown = JSON.parse(JSON.stringify(prefix.initial)); assert.ok(isWorldState(restored));
+  let state: WorldState = restored;
   for (const step of prefix.steps) {
     assert.deepEqual(state, step.before);
     const before = JSON.stringify(state);
@@ -54,7 +56,7 @@ await test('current release refuses Great library for both prepared cities witho
     const refused = applyCommand(prefix.state, { seat: contender.seat, expectedRevision: prefix.state.revision, timestamp: prefix.timestamp, action });
     assert.equal(refused.ok, false); assert.deepEqual(refused.events, []);
     assert.deepEqual(refused.state, before); assert.deepEqual(prefix.state, before);
-    assert.ok(!prefix.state.cities.some(city => city.buildings.includes('great-library') || city.construction?.active?.buildingId === 'great-library'));
+    assert.ok(!prefix.state.cities.some(city => city.buildings.includes('great-library') || (city.construction?.active && !('kind' in city.construction.active) && city.construction.active.buildingId === 'great-library')));
   }
 });
 
