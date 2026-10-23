@@ -1,4 +1,6 @@
-import { BEHAVIOR_POLICY_VERSION, LEGACY_BEHAVIOR_POLICY_VERSION, BEHAVIOR_PROFILES, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
+import { FOOD_BUDGET_RULES } from './food-security-content.ts';
+import { civilizationFoodUpkeep, forecastCivilizationFoodProduction } from './simulation/food-security.ts';
+import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion, type BehaviorPolicyVersion, LEGACY_BEHAVIOR_POLICY_VERSION, BEHAVIOR_PROFILES, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
 import { deriveReliefPlan, reliefPriority, reliefProtects, reliefReason, reliefWeight, type ReliefPlan } from './behavior-relief.ts';
 import { deriveDiplomacyPlan, diplomacyPriority, diplomacyProtects, diplomacyReason, diplomacyWeight, type DiplomacyPlan } from './behavior-diplomacy.ts';
 import { deriveProgressionPlan, progressionOperationalPriority, progressionTransportPriority, progressionWeight, type ProgressionPlan } from './behavior-progression.ts';
@@ -14,12 +16,12 @@ import { siteProduction } from './simulation/sites.ts';
 import { cityProductivity } from './simulation/world.ts';
 import { DIRECTOR_SEAT, type ActionOption, type City, type Civilization, type Focus, type GameAction, type Resources, type TradeTerms, type WorldState } from './types.ts';
 
-export { BEHAVIOR_POLICY_VERSION };
+export { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion };
 export type { BehaviorPhase, BehaviorProfile };
 
 export interface BehaviorMemory {
   version: 2;
-  policyVersion: typeof BEHAVIOR_POLICY_VERSION;
+  policyVersion: BehaviorPolicyVersion;
   seed: number;
   seat: number;
   profileId: string;
@@ -86,7 +88,7 @@ function validMemoryFields(value: unknown, legacy = false): boolean {
 }
 
 export function isBehaviorMemory(value: unknown): value is BehaviorMemory {
-  return record(value) && value.version === 2 && value.policyVersion === BEHAVIOR_POLICY_VERSION && validMemoryFields(value);
+  return record(value) && value.version === 2 && (value.policyVersion === BEHAVIOR_POLICY_VERSION || value.policyVersion === FOOD_BUDGET_BEHAVIOR_POLICY_VERSION) && validMemoryFields(value);
 }
 
 export function isLegacyBehaviorMemory(value: unknown): value is LegacyBehaviorMemory {
@@ -99,7 +101,7 @@ export function createBehaviorMemory(state: WorldState, seat: number): BehaviorM
   if (!Number.isInteger(seat) || seat < 0 || seat > DIRECTOR_SEAT || (seat !== DIRECTOR_SEAT && !state.civilizations.some(actor => actor.id === seat)))
     throw new RangeError('Behavior memory requires an existing civilization or the Director');
   return {
-    version: 2, policyVersion: BEHAVIOR_POLICY_VERSION, seed: state.seed, seat,
+    version: 2, policyVersion: behaviorPolicyVersion(state), seed: state.seed, seat,
     profileId: seat === DIRECTOR_SEAT ? 'world-director' : civilizationBehaviorProfile(state.seed, seat).id,
     decisionCount: 0, phase: seat === DIRECTOR_SEAT ? 'director' : 'development',
     phaseSinceRound: state.round, lastDecisionRound: state.round, lastRequiredLane: null,
@@ -109,7 +111,7 @@ export function createBehaviorMemory(state: WorldState, seat: number): BehaviorM
 
 function readMemory(state: WorldState, seat: number, previous?: BehaviorMemory): BehaviorMemory {
   const memory = previous ?? createBehaviorMemory(state, seat);
-  if (!isBehaviorMemory(memory) || memory.seed !== state.seed || memory.seat !== seat || memory.lastDecisionRound > state.round)
+  if (!isBehaviorMemory(memory) || memory.policyVersion !== behaviorPolicyVersion(state) || memory.seed !== state.seed || memory.seat !== seat || memory.lastDecisionRound > state.round)
     throw new RangeError('Behavior memory does not match this world, seat or policy version');
   return structuredClone(memory);
 }
@@ -137,10 +139,10 @@ interface Situation {
 
 function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
   const cities = state.cities.filter(city => city.civId === actor.id);
-  const upkeep = cities.reduce((sum, city) => sum + city.population * ECONOMY_RULES.populationFoodUpkeep, 0);
+  const upkeep = civilizationFoodUpkeep(state, actor.id);
   const maxDamage = cities.reduce((maximum, city) => Math.max(maximum, city.damage), 0);
   const government = governmentModifiers(state, actor.id);
-  const foodOutput = cities.reduce((sum, city) => {
+  const foodOutput = hasFeatures(state, [FOOD_BUDGET_RULES.featureId]) ? forecastCivilizationFoodProduction(state, actor.id) : cities.reduce((sum, city) => {
     const site = state.tiles.find(tile => tile.id === city.tileId);
     const buildings = BUILDINGS.filter(building => city.buildings.includes(building.id) && hasFeatures(state, building.requiredFeatures));
     const buildingFood = buildings.reduce((total, building) => total + (!building.operatingInputs && !building.strategicInputs || city.buildingOperations?.[building.id]?.lastResult?.status === 'operated' ? building.production.food ?? 0 : 0), 0);
@@ -396,6 +398,7 @@ function urgent(candidate: Candidate, context: Situation): boolean {
   if (context.foodRisk) {
     if (action.type === 'focus' && action.focus === 'growth') return true;
     if (action.type === 'build' && (BUILDINGS.find(building => building.id === action.project)?.production.food ?? 0) > 0) return true;
+    if (hasFeatures(context.state, [FOOD_BUDGET_RULES.featureId]) && (action.type === 'improve' || action.type === 'set-improvement-operation' && action.enabled) && (IMPROVEMENTS.find(improvement => improvement.id === action.improvementId)?.production.food ?? 0) > 0) return true;
     if (action.type === 'set-building-operation' && action.enabled && (BUILDINGS.find(building => building.id === action.buildingId)?.production.food ?? 0) > 0) return true;
   }
   if (action.type === 'repair-city') return (context.cities.find(city => city.id === action.cityId)?.damage ?? 0) >= 25;
@@ -504,7 +507,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
     reason = `${profile.name} favor ${context.phase === 'trade' ? 'useful exchanges' : context.phase === 'expansion' ? 'careful expansion' : context.phase === 'survival' ? 'food security' : context.phase === 'recovery' ? 'recovery' : 'steady development'}.`;
   }
   if (!pool.length) return noDecision(memory, 'No useful legal action is available; existing commitments remain unchanged.');
-  const choice = weightedChoice(pool, behaviorSeed(`${BEHAVIOR_POLICY_VERSION}:${state.seed}:${seat}:${memory.decisionCount}`));
+  const choice = weightedChoice(pool, behaviorSeed(`${memory.policyVersion}:${state.seed}:${seat}:${memory.decisionCount}`));
   if (reliefCompetition) {
     isUrgent = choice.option.action.type === 'propose-relief';
     if (choice.lane) reason = `Start the next required ${choice.lane.startsWith('construction:') ? 'town construction' : choice.lane} commitment.`;
@@ -530,13 +533,13 @@ export function chooseDirectorBehavior(state: WorldState, previous?: BehaviorMem
       const actor = state.civilizations.find(candidate => candidate.id === action.target);
       const cities = state.cities.filter(city => city.civId === action.target);
       const damage = cities.reduce((maximum, city) => Math.max(maximum, city.damage), 0);
-      const upkeep = cities.reduce((sum, city) => sum + city.population * ECONOMY_RULES.populationFoodUpkeep, 0);
+      const upkeep = civilizationFoodUpkeep(state, action.target);
       weight = action.event === 'calm' ? 24 : action.event === 'drought' ? (actor?.resources.food ?? 0) > upkeep * 5 + 12 ? 2 : 0.1
         : action.event === 'earthquake' ? damage < 25 ? 2 : 0.1 : action.event === 'resource-boom' ? 5 : 1;
     }
     return { option, weight, ...classify(action), lane: null };
   });
-  const choice = weightedChoice(candidates, behaviorSeed(`${BEHAVIOR_POLICY_VERSION}:${state.seed}:${DIRECTOR_SEAT}:${memory.decisionCount}`), true);
+  const choice = weightedChoice(candidates, behaviorSeed(`${memory.policyVersion}:${state.seed}:${DIRECTOR_SEAT}:${memory.decisionCount}`), true);
   const action = choice.option.action;
   const cause = action.type === 'event' && hasFeatures(state, ['historical-pressures']) && isHistoricalEventId(action.event) ? historicalEventQuote(state, action.event, action.target, action.regional)?.cause : undefined;
   return committedDecision(state, memory, choice, 'director', cause ?? (action.type === 'wait' ? 'Let existing events and civilization decisions unfold.' : 'A seeded world event uses only released effects and an admitted target.'));

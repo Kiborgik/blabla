@@ -1,3 +1,4 @@
+import type { FoodSupplyReceipt } from './food-security-content.ts';
 import type { ReliefAction, ReliefResult, ReliefState } from './relief-types.ts';
 import type { HistoricalEventReceipt, HistoricalEventSelection } from './historical-selection.ts';
 import type { observedGovernment } from './simulation/government.ts';
@@ -11,7 +12,7 @@ export const DIRECTOR_SEAT = 5;
 export type Resource = 'food' | 'materials' | 'energy' | 'credits' | 'science' | 'culture';
 export type Resources = Record<Resource, number>;
 export type PlaceNamingVersion = 'cultural-toponyms-v1';
-export interface GeneratedWorldOrigin { namingVersion?: PlaceNamingVersion; kind: 'generated'; generatorVersion: 'coherent-geography-v1'; seed: number; clockEpoch: string; initialReleaseId?: 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' }
+export interface GeneratedWorldOrigin { namingVersion?: PlaceNamingVersion; kind: 'generated'; generatorVersion: 'coherent-geography-v1'; seed: number; clockEpoch: string; initialReleaseId?: 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' }
 export type MarsMissionKind = 'settle' | 'resupply';
 export interface MarsMissionQuote { ruleVersion: 1; civId: number; mission: MarsMissionKind; sourceCityId: string; departureRound: number; arrivalRound: number; settlers: number; launchCost: Partial<Resources>; cargo: Partial<Resources>; totalCost: Partial<Resources>; sourcePopulationBefore: number; sourcePopulationAfter: number }
 export interface MarsMission extends MarsMissionQuote { id: string; eventId: string; paid: Partial<Resources> }
@@ -90,7 +91,7 @@ export interface CoastalFoundingReceipt { ruleVersion: 1; sourceCityId: string; 
 export interface CityHousing { ruleVersion: 1; baseCapacity: number; establishedRound: number; origin: 'legacy-adoption' | 'founded' }
 export interface CityGrowthFacts { cityId: string; ruleVersion: 1; population: number; baseCapacity: number; sources: Array<{ buildingId: string; capacity: number }>; capacity: number; nextGrowthFoodCost: number }
 export interface PopulationGrowthReceipt { ruleVersion: 1; cityId: string; civId: number; round: number; eventId: string; populationBefore: number; populationAfter: number; capacity: number; foodPaid: number }
-export interface City { localPower?: CityLocalPower; buildingHighGround?: Record<string, CampusHighGroundSite>; buildingCatchments?: Record<string, number>; housing?: CityHousing; improvements?: Record<string, CityImprovement>; districtSites?: Record<string, number>; coastalFounding?: CoastalFoundingReceipt; id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
+export interface City { lastFoodSupply?: FoodSupplyReceipt; localPower?: CityLocalPower; buildingHighGround?: Record<string, CampusHighGroundSite>; buildingCatchments?: Record<string, number>; housing?: CityHousing; improvements?: Record<string, CityImprovement>; districtSites?: Record<string, number>; coastalFounding?: CoastalFoundingReceipt; id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
 export interface Civilization { civics?: CivicState; government?: GovernmentState; strategicResources?: StrategicResources; id: number; name: string; color: string; adjective: string; objective: string; era: number; resources: Resources; technologies: string[]; researchTarget: string; researchProgress: number; lastResearchCompletion?: ResearchCompletion; influence: number; legitimacy: number; marsProgress: number; marsPopulation: number; marsSupplyStreak: number; federationStreak: number; score: number }
 export interface Route { id: string; from: string; to: string; owner: number; partner: number; active: boolean; damage: number; volume: number; agreement?: TradeAgreement }
 export interface LandTransportQuote { mode: 'land'; ruleVersion: 1; tileIds: number[]; edges: number }

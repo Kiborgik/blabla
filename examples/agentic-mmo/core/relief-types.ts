@@ -1,3 +1,4 @@
+import type { FOOD_BUDGET_RULES } from './food-security-content.ts';
 import type { LandTransportQuote } from './types.ts';
 
 export type ReliefAction =
@@ -5,7 +6,7 @@ export type ReliefAction =
   | { type: 'respond-relief'; charterId: string; accept: boolean }
   | { type: 'withdraw-relief'; charterId: string };
 
-export interface ReliefProposalFacts {
+export interface LegacyReliefProposalFacts {
   donorPopulation: number;
   recipientPopulation: number;
   donorFood: number;
@@ -15,6 +16,8 @@ export interface ReliefProposalFacts {
   promisedEnergy: number;
   horizonRounds: number;
 }
+
+export type ReliefProposalFacts = LegacyReliefProposalFacts | (LegacyReliefProposalFacts & { kind: 'versioned-food'; foodRule: typeof FOOD_BUDGET_RULES.ruleId });
 
 export interface ReliefTerms {
   ruleVersion: 1;

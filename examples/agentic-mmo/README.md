@@ -62,3 +62,13 @@ The combined source release and browser-local genesis are not shared-host activa
 Consented relief is available only when real recipient need and unpromised donor surplus qualify; healthy civilizations are not forced to donate. The seed 73 natural-content experiment reached paid Mars but produced no relief offers or deliveries. Meaningful food-security pressure and naturally observed aid remain unfinished product work, separate from the implemented exact-target events, preserved-world observation and conserved conditional transfer rules.
 
 Run the retained experiment explicitly with `node --test tests/relief-campaign.experiment.ts`. Its original natural-aid assertions are unchanged and currently fail; it is not part of the default regression glob. Source checks and synthetic consent/restart scenarios do not turn that failed natural-outcome experiment into a pass.
+
+## Household Food budget
+
+This release is enabled only for a distinct browser-local world. The hosted v2 controller refuses Food-policy activation and a hosted release crossing into the new policy before any world, autonomy, history or receipt write. Existing hosted memories and provenance are not migrated or reset; a future hosted rollout requires an explicit compatible lifecycle.
+
+The additive `settlement-food-budget-1` rules separate Earth Food from infrastructure amplification and require 1.25 Food per resident each strategic season. Geography, wellbeing, damage, focus and genuinely staffed facilities determine food production; other resources, paid recipes, growth costs and Mars cargo/upkeep retain their own rules. A town's latest household receipt distinguishes Food made, required meals, actual Food spent and growth payment. Before/after stocks belong to its civilization at that town's resolution, not an invented town pantry or a full-season balance.
+
+The fresh Food world has a separate genesis and checkpoint. Previous living, partnerships, generated and first-local worlds remain read-only under their original rules and names. Versioned controller estimates use the same upkeep and staffed-production authority; historical relief proposal facts retain their original rule, and every accepted charter still transfers its exact agreed quantity or truthfully ends without delivery.
+
+This is a bounded resilience prototype, not a promise of aid in every world. Existing natural-aid failure evidence remains intact. Earned surpluses can still accumulate; no storage cap, spoilage, artificial famine or compulsory gift is added. New natural cooperation, recovery and paid Mars require their own actual campaign evidence.

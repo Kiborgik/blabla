@@ -1,4 +1,5 @@
-import { ECONOMY_RULES } from '../content.ts';
+import { FOOD_BUDGET_RULES } from '../food-security-content.ts';
+import { foodRuleId, foodUpkeepPerResident, householdFoodUpkeep } from './food-security.ts';
 import { RELIEF_RULES } from '../relief-content.ts';
 import type { ReliefAction, ReliefBalances, ReliefCharter, ReliefProposalQuote, ReliefResult, ReliefState, ReliefTerms } from '../relief-types.ts';
 import { isReliefAction } from '../relief-validation.ts';
@@ -107,7 +108,7 @@ export function quoteReliefProposal(state: WorldState, actor: number, action: Ex
   const donorStock = state.civilizations.find(civ => civ.id === actor)!.resources;
   const recipientStock = state.civilizations.find(civ => civ.id === recipientId)!.resources;
   const donorPopulation = totalPopulation(state, actor); const recipientPopulation = totalPopulation(state, recipientId);
-  const food = Math.floor(Math.min(RELIEF_RULES.maximumFood, recipientPopulation * ECONOMY_RULES.populationFoodUpkeep * 2 - recipientStock.food, donorStock.food - committed.food - donorPopulation * ECONOMY_RULES.populationFoodUpkeep * 4));
+  const food = Math.floor(Math.min(RELIEF_RULES.maximumFood, householdFoodUpkeep(state, recipientPopulation) * 2 - recipientStock.food, donorStock.food - committed.food - householdFoodUpkeep(state, donorPopulation) * 4));
   if (food < RELIEF_RULES.minimumFood) return refuse('Initial recipient need and unpromised donor surplus do not support six Food');
   if (donorStock.energy - committed.energy < RELIEF_RULES.energyCost) return refuse('The donor lacks one unpromised Energy');
   const terms: ReliefTerms = {
@@ -115,7 +116,7 @@ export function quoteReliefProposal(state: WorldState, actor: number, action: Ex
     sourceCityId: source.id, recipientCityId: recipient.id, sourceTileId: source.tileId, recipientTileId: recipient.tileId,
     path: { mode: 'land', ruleVersion: 1, tileIds: route.owner === actor ? [...transport.tileIds] : transport.tileIds.toReversed(), edges: transport.edges },
     damageDisableAt: route.agreement.terms.damageDisableAt, food, energy: 1, travelRounds,
-    proposal: { donorPopulation, recipientPopulation, donorFood: donorStock.food, donorEnergy: donorStock.energy, recipientFood: recipientStock.food, promisedFood: committed.food, promisedEnergy: committed.energy, horizonRounds },
+    proposal: { ...(foodRuleId(state) === FOOD_BUDGET_RULES.ruleId ? { kind: 'versioned-food' as const, foodRule: FOOD_BUDGET_RULES.ruleId } : {}), donorPopulation, recipientPopulation, donorFood: donorStock.food, donorEnergy: donorStock.energy, recipientFood: recipientStock.food, promisedFood: committed.food, promisedEnergy: committed.energy, horizonRounds },
   };
   const target = targetFailure(state, terms); return target ? refuse(target) : { ok: true, terms };
 }
@@ -136,7 +137,7 @@ export function reliefActionFailure(state: WorldState, actor: number, action: Ga
 }
 
 function description(terms: ReliefTerms): string {
-  return `${terms.food} Food from ${terms.sourceCityId} to ${terms.recipientCityId}; donor pays ${terms.energy} Energy only at delivery. Initial proposal need was ${terms.proposal.recipientPopulation * ECONOMY_RULES.populationFoodUpkeep * 2 - terms.proposal.recipientFood} Food; current need may change. ${terms.path.edges} land edges, ${terms.travelRounds} rounds after acceptance. No stock reserved and no cargo in transit.`;
+  return `${terms.food} Food from ${terms.sourceCityId} to ${terms.recipientCityId}; donor pays ${terms.energy} Energy only at delivery. Initial proposal need was ${terms.proposal.recipientPopulation * foodUpkeepPerResident('kind' in terms.proposal ? terms.proposal.foodRule : 'legacy-food-1') * 2 - terms.proposal.recipientFood} Food; current need may change. ${terms.path.edges} land edges, ${terms.travelRounds} rounds after acceptance. No stock reserved and no cargo in transit.`;
 }
 
 export function availableReliefActions(state: WorldState, actor: number): ActionOption[] {

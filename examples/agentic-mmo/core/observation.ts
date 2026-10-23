@@ -1,3 +1,4 @@
+import { FOOD_BUDGET_RULES } from './food-security-content.ts';
 import { ECONOMY_RULES, RESOURCE_IDS, SETTLEMENT_SITE_OUTPUTS, TRADE_RECIPES } from './content.ts';
 import { observe } from './engine.ts';
 import { hasFeatures } from './simulation/history.ts';
@@ -21,7 +22,7 @@ export interface TradeRecipeFact { id: string; name: string; description: string
 export interface TradeObservationFacts {
   cities: TradeTownFact[];
   recipes: TradeRecipeFact[];
-  semantics: { distance: string; stockScope: string; proposal: string; construction: string; production: string; terms: string };
+  semantics: { distance: string; stockScope: string; proposal: string; construction: string; production: string; food?: string; terms: string };
 }
 
 export interface CompactTradeObservation extends Observation {
@@ -106,6 +107,7 @@ export function observeCompactTrade(state: WorldState, seat: number, timestamp?:
         proposal: 'No payment or shipment; recipient consent required',
         construction: 'Proposer pays construction once at acceptance',
         production: 'Base outputs precede focus, productivity, buildings and upkeep; not net stock change',
+        ...(hasFeatures(state, [FOOD_BUDGET_RULES.featureId]) ? { food: `Earth households require ${FOOD_BUDGET_RULES.populationFoodUpkeep} Food per recorded opening resident each strategic season. Food productivity excludes infrastructure; paid facilities still require their full inputs and residents. Town lastFoodSupply records actual production, required and paid meals, growth payment and shared civilization stock at that town resolution, not current total or whole-season net change.` } : {}),
         terms: 'Recipe facts describe current proposals; tradeOffers and route agreements retain authoritative snapshotted terms',
       },
     },

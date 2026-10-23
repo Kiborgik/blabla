@@ -1,3 +1,4 @@
+import { BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion } from '../core/behaviors.ts';
 import { isHistoricalEventSelection } from '../core/historical-selection-validation.ts';
 import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
 import { type ActionOutcome, type Command, type DirectorTickCommand, type GameAction, type HistoryAdvanceCommand, type ReleaseApplyCommand, type TransitionResult, type WorldState } from '../core/types.ts';
@@ -134,6 +135,7 @@ export class WorldRepository {
       const { world, runtime: current } = observed;
       if (world.revision !== expectedRevision) throw new RequestFailure(409, 'stale_revision');
       if (world.outcome && input.enabled) throw new RequestFailure(409, 'world_finished');
+      if (behaviorPolicyVersion(world) !== BEHAVIOR_POLICY_VERSION) throw new RequestFailure(409, 'unsupported_hosted_policy_version');
       const revision = (current?.revision ?? 0) + 1;
       if (!Number.isSafeInteger(revision)) throw new RequestFailure(503, 'simulation_counter_exhausted');
       const state = current ? { ...current.state, enabled: input.enabled, lastCommandKey: key } : createAutonomousState(world, timestamp, input.enabled, key);
@@ -302,6 +304,7 @@ export class WorldRepository {
           const command: ReleaseApplyCommand = { expectedRevision, expectedFromReleaseId: text(input.expectedFromReleaseId, 'source_release'), targetReleaseId: text(input.targetReleaseId, 'target_release'), timestamp };
           transition = { kind: 'release-apply', command };
           result = applyRelease(current.state, command);
+          if (result.ok && behaviorPolicyVersion(result.state) !== BEHAVIOR_POLICY_VERSION) throw new RequestFailure(409, 'unsupported_hosted_policy_version');
         } else {
           const at = utc(input.timestamp);
           if (Date.parse(at) > Date.parse(timestamp)) throw new RequestFailure(400, 'future_timestamp');

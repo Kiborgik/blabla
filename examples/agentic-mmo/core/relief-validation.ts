@@ -1,4 +1,5 @@
-import { ECONOMY_RULES } from './content.ts';
+import { FOOD_BUDGET_RULES } from './food-security-content.ts';
+import { foodUpkeepPerResident } from './simulation/food-security.ts';
 import { RELIEF_RULES } from './relief-content.ts';
 import type { ReliefAction, ReliefBalances, ReliefCharter, ReliefProposalFacts, ReliefResult, ReliefState, ReliefTerms } from './relief-types.ts';
 import { CIV_COUNT, type WorldState } from './types.ts';
@@ -32,7 +33,9 @@ export function isReliefAction(value: unknown): value is ReliefAction {
 }
 
 function proposalFacts(value: unknown): value is ReliefProposalFacts {
-  return record(value) && keys(value, ['donorPopulation', 'recipientPopulation', 'donorFood', 'donorEnergy', 'recipientFood', 'promisedFood', 'promisedEnergy', 'horizonRounds'])
+  if (!record(value)) return false;
+  const base = ['donorPopulation', 'recipientPopulation', 'donorFood', 'donorEnergy', 'recipientFood', 'promisedFood', 'promisedEnergy', 'horizonRounds'];
+  return (keys(value, base) || keys(value, [...base, 'kind', 'foodRule']) && value.kind === 'versioned-food' && value.foodRule === FOOD_BUDGET_RULES.ruleId)
     && integer(value.donorPopulation, 1) && integer(value.recipientPopulation, 1)
     && ['donorFood', 'donorEnergy', 'recipientFood', 'promisedFood', 'promisedEnergy'].every(key => finite(value[key]))
     && integer(value.horizonRounds, RELIEF_RULES.pendingLifetime + RELIEF_RULES.minimumTravelRounds, RELIEF_RULES.pendingLifetime + Math.ceil(RELIEF_RULES.maximumEdges / RELIEF_RULES.edgesPerRound));
@@ -51,7 +54,8 @@ function terms(value: unknown): value is ReliefTerms {
     || !integer(value.travelRounds) || value.travelRounds !== Math.max(RELIEF_RULES.minimumTravelRounds, Math.ceil(value.path.edges / RELIEF_RULES.edgesPerRound))
     || !proposalFacts(value.proposal) || value.proposal.horizonRounds !== RELIEF_RULES.pendingLifetime + value.travelRounds) return false;
   const facts = value.proposal;
-  return value.food === Math.floor(Math.min(RELIEF_RULES.maximumFood, facts.recipientPopulation * ECONOMY_RULES.populationFoodUpkeep * 2 - facts.recipientFood, facts.donorFood - facts.promisedFood - facts.donorPopulation * ECONOMY_RULES.populationFoodUpkeep * 4))
+  const upkeep = foodUpkeepPerResident('kind' in facts ? facts.foodRule : 'legacy-food-1');
+  return value.food === Math.floor(Math.min(RELIEF_RULES.maximumFood, facts.recipientPopulation * upkeep * 2 - facts.recipientFood, facts.donorFood - facts.promisedFood - facts.donorPopulation * upkeep * 4))
     && facts.donorEnergy - facts.promisedEnergy >= value.energy;
 }
 
@@ -96,7 +100,8 @@ export function validReliefEvent(value: unknown): boolean {
 }
 
 function historicalCharter(value: ReliefCharter, state: WorldState): boolean {
-  return value.proposedRound <= state.round && (value.status !== 'accepted' || value.acceptedRound <= state.round)
+  return (!('kind' in value.terms.proposal) || state.unlockedFeatures.includes(FOOD_BUDGET_RULES.featureId))
+    && value.proposedRound <= state.round && (value.status !== 'accepted' || value.acceptedRound <= state.round)
     && state.civilizations.some(civ => civ.id === value.terms.donorId) && state.civilizations.some(civ => civ.id === value.terms.recipientId)
     && landTransportTopologyBlock(state, value.terms.path, value.terms.sourceTileId, value.terms.recipientTileId) === null;
 }

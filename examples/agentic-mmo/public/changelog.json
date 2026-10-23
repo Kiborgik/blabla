@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.1.0-live.42",
+    "date": "2026-10-23",
+    "title": "Food, households and resilient supply",
+    "changes": [
+      "A distinct local Food world ties harvests to actual geography, wellbeing, damage and staffed facilities instead of infrastructure amplification, with 1.25 Food per Earth resident each strategic season.",
+      "Town inspection separates recorded production, required meals, actual household spending and growth payment against shared civilization reserves. Autonomous forecasts and new relief terms use the same versioned rule.",
+      "Prior living worlds keep their original names, rules, controller memories and read-only histories. Hosted policy changes are refused until an explicit compatible rollout; Mars cargo and colony upkeep are unchanged.",
+      "Conditional relief remains conserved and voluntary. Natural resilience, cooperation and earned Mars outcomes require separate observation, not guaranteed aid or artificial famine."
+    ]
+  },
+  {
     "version": "0.1.0-live.41",
     "date": "2026-10-22",
     "title": "Names shaped by each civilization",

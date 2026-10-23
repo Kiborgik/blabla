@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { createWorld } from '../core/engine.ts';
 import { isWorldState } from '../core/validation.ts';
-import { advanceLocalSimulation, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, LOCAL_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY } from '../web/local-simulation.ts';
+import { advanceLocalSimulation, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, ACTIVE_LOCAL_RELEASE_ID, LOCAL_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY } from '../web/local-simulation.ts';
 import { createLocalWorldStorage } from '../web/local-world-storage.ts';
-import { createWorldViewSession, parseWorldSource, saveWorldView, worldSourceHref } from '../web/world-view.ts';
+import { createWorldViewSession, parseWorldSource, saveWorldView, worldSourceHref, worldViewKey } from '../web/world-view.ts';
 import { DEFAULT_PREFERENCES } from '../web/viewer-state.ts';
 import { createCueStream } from '../web/world-cues.ts';
 
@@ -47,7 +47,7 @@ void test('new content checkpoint preserves both original save keys byte for byt
   assert.match(storage.priorGenerated().message, /Read-only/);
   assert.ok(storage.previous().run);
   const fresh = await storage.restore(); assert.ok(fresh.run);
-  assert.equal(fresh.run.state.releaseId, 'settlement-regional-targets-1');
+  assert.equal(fresh.run.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.deepEqual(writes, [LOCAL_SIMULATION_STORAGE_KEY]);
   assert.equal(records.get(PRIOR_GENERATED_SIMULATION_STORAGE_KEY), priorBytes);
   assert.equal(records.get(PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY), firstBytes);
@@ -110,12 +110,16 @@ void test('a recorded trade fair reaches the ordinary map stream without fabrica
   assert.deepEqual(stream.observe({ ...initial, mode: 'live', revision: 1, events: [event] }, 3), { events: [], routeResults: [] });
 });
 
-void test('actual Chronicle caller preserves same-world focus but replaces old-world cards and navigation across source or genesis', () => {
+void test('actual Chronicle caller preserves same-world focus but replaces old-world cards and navigation across source genesis or body', () => {
   const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
   const start = main.indexOf('  const stories = state ? spectatorChronicle(state) : [];');
   const end = main.indexOf("  element('#connection-story')", start);
   assert.ok(start >= 0 && end > start);
-  const branch = `{${main.slice(start, end)}}`;
+  const keyStart = main.indexOf('function observedWorldKey(): string {');
+  const keyEnd = main.indexOf('\n}', keyStart) + 2;
+  assert.ok(keyStart >= 0 && keyEnd > keyStart);
+  const keyHelper = main.slice(keyStart, keyEnd).replace('(): string', '()');
+  const branch = `${keyHelper}\n{${main.slice(start, end)}}`;
   let focused = false;
   let renders = 0;
   let visible: string[] = [];
@@ -124,7 +128,7 @@ void test('actual Chronicle caller preserves same-world focus but replaces old-w
   const navigations: string[] = [];
   const context = {
     state: { rows: ['old-city'] } as { rows: string[] } | null,
-    worldSource: 'local', snapshot: { identity: 'genesis-a' } as { identity: string } | null,
+    worldSource: 'local', worldBody: 'earth', worldViewKey, snapshot: { identity: 'genesis-a' } as { identity: string } | null,
     chronicleFingerprint: '', chronicleIdentity: '',
     document: { activeElement: {} },
     element: () => ({ contains: () => focused }),
@@ -136,20 +140,25 @@ void test('actual Chronicle caller preserves same-world focus but replaces old-w
     },
   };
   const render = (): void => { runInNewContext(branch, context); };
-  render(); assert.equal(renders, 1); assert.equal(visibleIdentity, 'local:genesis-a');
+  render(); assert.equal(renders, 1); assert.deepEqual(JSON.parse(visibleIdentity), ['local', 'genesis-a', 'earth']);
   focused = true; context.state = { rows: ['new-city'] };
   const before = JSON.stringify(context.state);
   render(); assert.equal(renders, 1); assert.deepEqual(visible, ['old-city']);
   context.snapshot = { identity: 'genesis-b' };
   render(); assert.equal(renders, 2); assert.deepEqual(visible, ['new-city']);
-  assert.equal(visibleIdentity, 'local:genesis-b'); navigateVisible(); assert.deepEqual(navigations, ['new-city']);
+  assert.deepEqual(JSON.parse(visibleIdentity), ['local', 'genesis-b', 'earth']); navigateVisible(); assert.deepEqual(navigations, ['new-city']);
   assert.equal(JSON.stringify(context.state), before);
   context.worldSource = 'prior';
-  render(); assert.equal(renders, 3); assert.equal(visibleIdentity, 'prior:genesis-b');
+  render(); assert.equal(renders, 3); assert.deepEqual(JSON.parse(visibleIdentity), ['prior', 'genesis-b', 'earth']);
   context.state = { rows: ['later-record'] };
   render(); assert.equal(renders, 3); assert.deepEqual(visible, ['new-city']);
   focused = false; render(); assert.equal(renders, 4); assert.deepEqual(visible, ['later-record']);
-  focused = true; context.state = null; context.snapshot = null; context.worldSource = 'shared';
-  render(); assert.equal(renders, 5); assert.deepEqual(visible, []); navigateVisible();
+  focused = true; context.worldBody = 'mars';
+  render(); assert.equal(renders, 5); assert.deepEqual(visible, ['later-record']);
+  assert.deepEqual(JSON.parse(visibleIdentity), ['prior', 'genesis-b', 'mars']);
+  context.state = { rows: ['new-mars-record'] };
+  render(); assert.equal(renders, 5); assert.deepEqual(visible, ['later-record']);
+  context.state = null; context.snapshot = null; context.worldSource = 'shared';
+  render(); assert.equal(renders, 6); assert.deepEqual(visible, []); navigateVisible();
   assert.deepEqual(navigations, ['new-city']);
 });

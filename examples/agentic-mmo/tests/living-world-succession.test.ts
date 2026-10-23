@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createWorld } from '../core/engine.ts';
-import { createLocalSimulation, LOCAL_SIMULATION_STORAGE_KEY, PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, localSimulationSnapshot, parseLocalSimulation, parseActiveLocalSimulation } from '../web/local-simulation.ts';
+import { createLocalSimulation, LOCAL_SIMULATION_STORAGE_KEY, LIVING_SIMULATION_STORAGE_KEY, PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, localSimulationSnapshot, parseLocalSimulation, parseActiveLocalSimulation } from '../web/local-simulation.ts';
 import { createLocalWorldStorage, type LocalCheckpointResult, type LocalWorldStoragePorts } from '../web/local-world-storage.ts';
 import { createWorldViewSession, saveWorldView, parseWorldSource, worldSourceHref } from '../web/world-view.ts';
 import { DEFAULT_PREFERENCES } from '../web/viewer-state.ts';
@@ -23,9 +23,10 @@ function fixture(initial: Array<[string, string]> = [], overrides: Partial<Local
   return { storage: createLocalWorldStorage(ports), records, writes, entropyCalls: () => entropyCalls };
 }
 
-void test('fresh Living world persists its sampled zero-step final-release genesis before observation can begin', async () => {
+void test('fresh Food-budget world persists its sampled zero-step final-release genesis before observation can begin', async () => {
   const f = fixture();
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:living-world-v1');
+  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:food-budget-v1');
+  assert.equal(LIVING_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:living-world-v1');
   const initialized = await f.storage.restore();
   assert.ok(initialized.run);
   assert.equal(initialized.ephemeral, false);
@@ -33,8 +34,9 @@ void test('fresh Living world persists its sampled zero-step final-release genes
   assert.equal(initialized.run.steps, 0);
   assert.equal(initialized.run.state.round, 0);
   assert.equal(initialized.run.state.revision, 0);
-  assert.equal(initialized.run.state.releaseId, 'settlement-regional-targets-1');
-  assert.equal(initialized.run.state.origin?.initialReleaseId, 'settlement-regional-targets-1');
+  assert.equal(initialized.run.state.releaseId, 'settlement-food-budget-1');
+  assert.equal(initialized.run.state.origin?.initialReleaseId, 'settlement-food-budget-1');
+  assert.ok(initialized.run.state.unlockedFeatures.includes('food-budget'));
   assert.ok(initialized.run.state.unlockedFeatures.includes('consented-relief'));
   assert.deepEqual(JSON.parse(f.records.get(LOCAL_SIMULATION_STORAGE_KEY)!), initialized.run);
   assert.equal(f.writes.length, 1);
@@ -84,12 +86,15 @@ void test('a saved winner appearing during lock wait is restored without entropy
   assert.equal(f.entropyCalls(), 0); assert.equal(f.writes.length, 0);
 });
 
-void test('all three historical storage records remain exact read-only bytes under their explicit sources', async () => {
+void test('all four historical storage records remain exact read-only bytes under their explicit sources', async () => {
+  const living = createLocalSimulation(10, 'settlement-regional-targets-1');
   const partnerships = createLocalSimulation(11, 'settlement-living-partnerships-1');
   const prior = createLocalSimulation(12, 'settlement-interplanetary-1');
   const previous = { ...prior, version: 1, policyVersion: 'weighted-civilizations-v1', seed: 13, state: createWorld(13, prior.timestamp), memories: Array(6).fill(null) };
-  const history: Array<[string, string]> = [[PARTNERSHIPS_SIMULATION_STORAGE_KEY, ` \n${JSON.stringify(partnerships)} `], [PRIOR_GENERATED_SIMULATION_STORAGE_KEY, `\n${JSON.stringify(prior)}`], [PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, `${JSON.stringify(previous)}\n`]];
+  const history: Array<[string, string]> = [[LIVING_SIMULATION_STORAGE_KEY, ` \n${JSON.stringify(living)} `], [PARTNERSHIPS_SIMULATION_STORAGE_KEY, ` \n${JSON.stringify(partnerships)} `], [PRIOR_GENERATED_SIMULATION_STORAGE_KEY, `\n${JSON.stringify(prior)}`], [PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, `${JSON.stringify(previous)}\n`]];
   const f = fixture(history);
+  assert.deepEqual(f.storage.living().run, living);
+  assert.match(f.storage.living().message, /Previous living world.*Read-only/);
   assert.deepEqual(f.storage.partnerships().run, partnerships);
   assert.match(f.storage.partnerships().message, /Read-only/);
   assert.deepEqual(f.storage.priorGenerated().run, prior);
@@ -113,9 +118,9 @@ void test('corrupt current record, including one arriving under lock, is never e
 });
 
 void test('corrupt historical records are preserved and cannot prevent a separate latest genesis', async () => {
-  const history: Array<[string, string]> = [PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY].map(key => [key, '{unreadable']);
+  const history: Array<[string, string]> = [LIVING_SIMULATION_STORAGE_KEY, PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY].map(key => [key, '{unreadable']);
   const f = fixture(history);
-  for (const old of [f.storage.partnerships(), f.storage.priorGenerated(), f.storage.previous()]) { assert.equal(old.run, null); assert.match(old.message, /preserved/); }
+  for (const old of [f.storage.living(), f.storage.partnerships(), f.storage.priorGenerated(), f.storage.previous()]) { assert.equal(old.run, null); assert.match(old.message, /preserved/); }
   assert.ok((await f.storage.restore()).run);
   for (const [key, value] of history) assert.equal(f.records.get(key), value);
   assert.deepEqual(f.writes.map(([key]) => key), [LOCAL_SIMULATION_STORAGE_KEY]);
@@ -161,7 +166,7 @@ void test('entropy accepts both uint32 boundaries but refuses invalid samples wi
 });
 
 void test('generic generated parser retains history while active parser refuses historical genesis even with a newer release', async () => {
-  for (const release of ['settlement-interplanetary-1', 'settlement-living-partnerships-1', 'settlement-relief-charters-1'] as const) {
+  for (const release of ['settlement-interplanetary-1', 'settlement-living-partnerships-1', 'settlement-relief-charters-1', 'settlement-regional-targets-1'] as const) {
     const old = createLocalSimulation(1701, release);
     const raw = JSON.stringify(old);
     assert.deepEqual(parseLocalSimulation(JSON.parse(raw)), old);
@@ -202,7 +207,8 @@ void test('partnerships camera fallback is exact historical identity and body, n
 void test('actual browser initializer awaits the genesis checkpoint and labels latest and historical sources separately', () => {
   const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
   assert.match(main, /const restoredLocal = await localWorldStorage\.restore\(\)/);
-  assert.match(main, /<option value="local">Living world<\/option>/);
+  assert.match(main, /<option value="local">Food-budget world<\/option>/);
+  assert.match(main, /<option value="living">Previous living world · Read-only<\/option>/);
   assert.match(main, /<option value="partnerships">[^<]*Read-only<\/option>/);
   assert.match(main, /mode !== 'local'[^\n]*localSimulation\.state\.outcome/);
   assert.doesNotMatch(main, /Living partnerships · Runs here/);

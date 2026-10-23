@@ -6,6 +6,10 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy } from '../core/engine.ts';
 import { RELEASES } from '../core/release.ts';
+import { createGeneratedWorld } from '../core/generated-world.ts';
+import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, createBehaviorMemory } from '../core/behaviors.ts';
+import { assertAutonomousState, createAutonomousState, planAutonomousWake } from '../server/autonomous-runner.ts';
+import { RequestFailure } from '../server/validation.ts';
 import { createWorker } from '../server/worker.ts';
 import { WorldRepository, type D1Database, type D1Result, type D1Statement, type SqlValue } from '../server/repository.ts';
 
@@ -391,7 +395,7 @@ void test('released exact-town commitments keep their bounded plans and procedur
   const item = fixture();
   try {
     await initialize(item);
-    for (const release of RELEASES.slice(1)) {
+    for (const release of RELEASES.slice(1, RELEASES.findIndex(release => release.id === 'settlement-regional-targets-1') + 1)) {
       const current = await item.repository().read();
       assert.ok(current);
       assert.ok(release.compatibleFrom.includes(current.state.releaseId));
@@ -408,8 +412,70 @@ void test('released exact-town commitments keep their bounded plans and procedur
     const chronicle = await item.repository().chronicle(0, 200);
     const actions = chronicle.entries.filter(entry => entry.provenance.kind === 'procedural-policy');
     assert.equal(actions.length, 72);
+    assert.ok(actions.every(entry => entry.provenance.policy?.version === BEHAVIOR_POLICY_VERSION));
+    assert.equal((await item.repository().simulation()).policyVersion, BEHAVIOR_POLICY_VERSION);
     assert.ok(actions.some(entry => entry.transition.kind === 'action' && entry.transition.command.action.type === 'research'));
     assert.ok(actions.some(entry => entry.transition.kind === 'action' && entry.transition.command.action.type === 'build' && typeof entry.transition.command.action.cityId === 'string'));
     for (const entry of actions) if (entry.transition.kind === 'action') assert.equal(entry.transition.command.plan?.[0]?.reason, entry.provenance.policy?.reason);
   } finally { item.cleanup(); }
+});
+
+void test('hosted controller envelopes require the exact supported world and every memory policy', () => {
+  const legacy = createGeneratedWorld(73, epoch, 'settlement-regional-targets-1');
+  const food = createGeneratedWorld(73, epoch, 'settlement-food-budget-1');
+  const runtime = createAutonomousState(legacy, epoch, true, 'legacy-activation');
+  const original = JSON.stringify({ legacy, food, runtime });
+  assert.doesNotThrow(() => assertAutonomousState(JSON.parse(JSON.stringify(runtime)), legacy));
+  assert.throws(() => createAutonomousState(food, epoch, true, 'unsupported'), (error: unknown) => error instanceof RequestFailure && error.status === 409 && error.code === 'unsupported_hosted_policy_version');
+  assert.throws(() => assertAutonomousState(runtime, food), (error: unknown) => error instanceof RequestFailure && error.code === 'corrupt_or_incompatible_simulation');
+  assert.throws(() => planAutonomousWake(food, runtime, epoch, 'unsupported-wake'), (error: unknown) => error instanceof RequestFailure && error.code === 'corrupt_or_incompatible_simulation');
+  const mixed = structuredClone(runtime);
+  mixed.memories[0] = createBehaviorMemory(food, 0);
+  assert.equal(mixed.memories[0]?.policyVersion, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION);
+  assert.throws(() => assertAutonomousState(mixed, legacy), (error: unknown) => error instanceof RequestFailure && error.code === 'corrupt_or_incompatible_simulation');
+  const mislabeled = { ...runtime, policyVersion: FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, memories: Array.from({ length: 6 }, (_, seat) => createBehaviorMemory(food, seat)) };
+  assert.throws(() => assertAutonomousState(mislabeled, food), (error: unknown) => error instanceof RequestFailure && error.code === 'corrupt_or_incompatible_simulation');
+  assert.equal(JSON.stringify({ legacy, food, runtime }), original);
+});
+
+void test('hosted Food-policy configuration refuses before any runtime or receipt write', async () => {
+  const item = fixture();
+  try {
+    await initialize(item);
+    const world = createGeneratedWorld(73, epoch, 'settlement-food-budget-1');
+    item.database().sqlite.prepare('UPDATE world_state SET initial_json = ?, state_json = ?, revision = ?').run(JSON.stringify(world), JSON.stringify(world), world.revision);
+    const before = snapshot(item);
+    const batches = item.database().batches;
+    for (const enabled of [false, true]) {
+      await assert.rejects(item.repository().configureSimulation({ expectedRevision: world.revision, enabled, commandId: `unsupported-${enabled}` }, actor, epoch), (error: unknown) => error instanceof RequestFailure && error.status === 409 && error.code === 'unsupported_hosted_policy_version');
+      assert.deepEqual(snapshot(item), before);
+      assert.equal(item.database().batches, batches);
+    }
+    assert.equal((await item.repository().simulation()).configured, false);
+  } finally { item.cleanup(); }
+});
+
+void test('hosted release policy changes refuse atomically with or without an active legacy controller', async () => {
+  for (const mode of ['unconfigured', 'paused', 'enabled']) {
+    const item = fixture();
+    try {
+      await initialize(item);
+      const world = createGeneratedWorld(73, epoch, 'settlement-regional-targets-1');
+      item.database().sqlite.prepare('UPDATE world_state SET initial_json = ?, state_json = ?, revision = ?').run(JSON.stringify(world), JSON.stringify(world), world.revision);
+      if (mode !== 'unconfigured') await item.repository().configureSimulation({ expectedRevision: world.revision, enabled: mode === 'enabled', commandId: `legacy-${mode}` }, actor, epoch);
+      const before = snapshot(item);
+      const batches = item.database().batches;
+      const input = { expectedRevision: world.revision, expectedFromReleaseId: world.releaseId, targetReleaseId: 'settlement-food-budget-1', model: 'development-agent-fixture', commandId: 'unsupported-policy-release' };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await assert.rejects(item.repository().mutate('release-apply', input, actor, epoch), (error: unknown) => error instanceof RequestFailure && error.status === 409 && error.code === 'unsupported_hosted_policy_version');
+        assert.deepEqual(snapshot(item), before);
+        assert.equal(item.database().batches, batches);
+      }
+      if (mode === 'enabled') {
+        assert.equal((await item.repository().simulation()).policyVersion, BEHAVIOR_POLICY_VERSION);
+        await wake(item, 'unchanged-legacy-controller');
+        assert.equal((await item.repository().simulation()).policyVersion, BEHAVIOR_POLICY_VERSION);
+      }
+    } finally { item.cleanup(); }
+  }
 });

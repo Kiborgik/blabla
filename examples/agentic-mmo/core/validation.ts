@@ -1,9 +1,12 @@
+import { FOOD_BUDGET_RULES, type FoodSupplyReceipt } from './food-security-content.ts';
 import { isReliefState, validReliefEvent } from './relief-validation.ts';
 import { isHistoricalEventReceipt } from './historical-selection-validation.ts';
 import { historicalEventInstanceId } from './historical-selection.ts';
 import { generatedHistoryRecords, spaceflightRecords, validMarsEvent } from './spaceflight-validation.ts';
 import {
   BUILDINGS,
+  ECONOMY_RULES,
+  LOCAL_GROWTH_RULES,
   COAL_RULES,
   CONSTRUCTION_RULES,
   INDUSTRIAL_RULES,
@@ -320,6 +323,28 @@ function city(value: unknown): value is City {
       BUILDINGS.map((building) => building.id),
     )
   );
+}
+
+function foodSupply(value: unknown, round: number, features: string[]): value is FoodSupplyReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'foodRule', 'round', 'population', 'produced', 'required', 'paid', 'growthPaid', 'supplied', 'foodBefore', 'foodAfter'])
+    || value.ruleVersion !== 1 || value.foodRule !== FOOD_BUDGET_RULES.ruleId || !integer(value.round, 0, round) || !integer(value.population, 1)
+    || !finite(value.produced) || !finite(value.required) || !finite(value.paid) || !finite(value.growthPaid) || !finite(value.foodBefore) || !finite(value.foodAfter)
+    || typeof value.supplied !== 'boolean') return false;
+  if (value.produced !== quantized(value.produced)) return false;
+  const available = quantized(value.foodBefore + value.produced);
+  const required = quantized(value.population * FOOD_BUDGET_RULES.populationFoodUpkeep);
+  if (!finite(available) || value.required !== required || value.paid !== Math.min(available, required) || value.supplied !== (available >= required)) return false;
+  const afterMeals = quantized(available - value.paid);
+  const growthCost = features.includes(LOCAL_GROWTH_RULES.featureId)
+    ? LOCAL_GROWTH_RULES.baseFoodCost + Math.floor(value.population / LOCAL_GROWTH_RULES.populationPerFoodCost)
+    : ECONOMY_RULES.growth.foodCost;
+  if (value.growthPaid !== 0 && (!value.supplied || value.growthPaid !== growthCost || afterMeals < ECONOMY_RULES.growth.foodReserve + growthCost)) return false;
+  return value.foodAfter === quantized(afterMeals - value.growthPaid);
+}
+
+function foodSupplyRecords(cities: City[], round: number, features: string[]): boolean {
+  return cities.every(settlement => !Object.hasOwn(settlement, 'lastFoodSupply')
+    || features.includes(FOOD_BUDGET_RULES.featureId) && foodSupply(settlement.lastFoodSupply, round, features));
 }
 
 function resourceAmounts(value: unknown): value is Partial<Resources> {
@@ -1731,6 +1756,7 @@ export function isWorldState(
     ) ||
     !unique(cities.map((item) => item.tileId)) ||
     !cities.every((item) => buildingOperations(item, round, features)) ||
+    !foodSupplyRecords(cities, round, features) ||
     !powerRecords(cities, value.events, features, round, value.revision) ||
     !growthRecords(cities, value.events, features, round, value.revision) ||
     !recurringRecords(cities, value.civilizations, features, round, value.revision) ||

@@ -1,5 +1,6 @@
+import { civilizationFoodUpkeep } from './simulation/food-security.ts';
 import type { BehaviorProfile } from './behavior-profiles.ts';
-import { BUILDINGS, CIVICS, ECONOMY_RULES, IMPROVEMENTS, RESIDENT_CAPACITY_RULES, RESOURCE_IDS, SPACEFLIGHT_RULES, STRATEGIC_RESOURCE_IDS, STRATEGIC_RESOURCE_RULES, VICTORY_RULES, TECHNOLOGIES, TRADE_RECIPES } from './content.ts';
+import { BUILDINGS, CIVICS, IMPROVEMENTS, RESIDENT_CAPACITY_RULES, RESOURCE_IDS, SPACEFLIGHT_RULES, STRATEGIC_RESOURCE_IDS, STRATEGIC_RESOURCE_RULES, VICTORY_RULES, TECHNOLOGIES, TRADE_RECIPES } from './content.ts';
 import { isCoastalSite } from './simulation/coastal.ts';
 import { cityGrowthFacts } from './simulation/growth.ts';
 import { hasFeatures } from './simulation/history.ts';
@@ -44,7 +45,7 @@ function technologyAncestors(targets: readonly string[], actor: Civilization): S
 }
 
 function economyNeeds(state: WorldState, actor: Civilization, cities: readonly City[]): Resources {
-  const upkeep = cities.reduce((sum, city) => sum + city.population * ECONOMY_RULES.populationFoodUpkeep, 0);
+  const upkeep = civilizationFoodUpkeep(state, actor.id);
   const operations = cities.flatMap(city => city.buildings.flatMap(id => buildingById.get(id) ?? []));
   const demand = (resource: Resource): number => operations.reduce((sum, building) => sum + (building.operatingInputs?.[resource] ?? 0), 0);
   return {

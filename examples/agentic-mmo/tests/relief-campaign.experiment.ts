@@ -3,14 +3,17 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import type { GameEvent } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
-import { ACTIVE_LOCAL_RELEASE_ID, advanceLocalSimulation, createLocalSimulation, parseActiveLocalSimulation } from '../web/local-simulation.ts';
+import { advanceLocalSimulation, createLocalSimulation, parseLocalSimulation } from '../web/local-simulation.ts';
 
-const scratch = '.blabla/scratch/integrate-consented-relief';
+const scratch = '.blabla/scratch/historical-relief-experiment';
+const HISTORICAL_RELEASE_ID = 'settlement-regional-targets-1';
 
 void test('natural seed73 combined living world uses exact local events, consenting relief and paid Mars without intervention', { timeout: 510_000 }, context => {
   mkdirSync(scratch, { recursive: true });
-  let run = createLocalSimulation(73);
-  assert.equal(run.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
+  let run = createLocalSimulation(73, HISTORICAL_RELEASE_ID);
+  assert.equal(run.state.releaseId, HISTORICAL_RELEASE_ID);
+  assert.equal(run.policyVersion, 'weighted-civilizations-v2');
+  assert.equal(Object.hasOwn(run.state.origin!, 'namingVersion'), false);
   assert.equal(run.state.origin?.initialReleaseId, 'settlement-regional-targets-1');
   assert.ok(run.state.unlockedFeatures.includes('consented-relief'));
   assert.ok(run.state.unlockedFeatures.includes('procedural-regional-targets'));
@@ -58,7 +61,7 @@ void test('natural seed73 combined living world uses exact local events, consent
       const checkpoint = run.state.relief?.active.some(charter => charter.status === 'accepted') ? 'accepted-relief'
         : run.state.round >= 60 ? 'ordinary-continuation' : null;
       if (checkpoint && !restarted.has(checkpoint)) {
-        const encoded = JSON.stringify(run); const restored = parseActiveLocalSimulation(JSON.parse(encoded)); assert.ok(restored);
+        const encoded = JSON.stringify(run); const restored = parseLocalSimulation(JSON.parse(encoded)); assert.ok(restored);
         assert.deepEqual(advanceLocalSimulation(restored, 2), advanceLocalSimulation(run, 2));
         assert.equal(JSON.stringify(run), encoded); restarted.add(checkpoint);
         writeFileSync(`${scratch}/combined73-${checkpoint}.json`, encoded);
@@ -80,7 +83,7 @@ void test('natural seed73 combined living world uses exact local events, consent
     const terminal = JSON.stringify(run); assert.deepEqual(advanceLocalSimulation(run, 60), run); assert.equal(JSON.stringify(run), terminal);
   } finally {
     const sorted = windows.toSorted((left, right) => left - right);
-    const summary = { kind: 'natural-production-local-engine', seed: 73, initialReleaseId: ACTIVE_LOCAL_RELEASE_ID,
+    const summary = { kind: 'natural-production-local-engine', seed: 73, initialReleaseId: HISTORICAL_RELEASE_ID,
       round: run.state.round, steps: run.steps, outcome: run.state.outcome, elapsedMs: performance.now() - started,
       counts, decisions, regionalTargets: Object.fromEntries(Object.entries(regionalTargets).map(([kind, towns]) => [kind, [...towns].sort()])),
       restarted: [...restarted], episodeCount: episodes.length,

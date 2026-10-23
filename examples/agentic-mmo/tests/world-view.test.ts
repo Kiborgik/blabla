@@ -95,7 +95,7 @@ void test('actual local identities survive policy and revision changes but disti
 
 void test('the browser startup, source switch and deployment adapter actually use the qualified session', () => {
   const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /observeWorldIdentity\(next, mode === 'partnerships' \? 'partnerships' : mode === 'prior' \? 'prior' : mode === 'previous' \? 'previous' : 'local'\)/);
+  assert.match(main, /observeWorldIdentity\(next, mode === 'living' \? 'living' : mode === 'partnerships' \? 'partnerships' : mode === 'prior' \? 'prior' : mode === 'previous' \? 'previous' : 'local'\)/);
   assert.match(main, /observeWorldIdentity\(read\.snapshot, 'shared'\)/);
   assert.match(main, /preferences: \(\) => worldView\.capture/);
   assert.match(main, /localSimulation !== previous\) observeLocalSimulation\(\)/);

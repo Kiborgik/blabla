@@ -1,7 +1,14 @@
-import type { Focus, Resource } from './types.ts';
+import { FOOD_BUDGET_RULES } from './food-security-content.ts';
+import type { Focus, Resource, WorldState } from './types.ts';
 
 export const LEGACY_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v1';
 export const BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v2';
+export const FOOD_BUDGET_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v3-food-budget';
+export type BehaviorPolicyVersion = typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION;
+
+export function behaviorPolicyVersion(state: Pick<WorldState, 'unlockedFeatures'>): BehaviorPolicyVersion {
+  return state.unlockedFeatures.includes(FOOD_BUDGET_RULES.featureId) ? FOOD_BUDGET_BEHAVIOR_POLICY_VERSION : BEHAVIOR_POLICY_VERSION;
+}
 
 export type BehaviorPhase = 'survival' | 'recovery' | 'development' | 'expansion' | 'trade' | 'consolidation' | 'director';
 export type BehaviorPriority = 'research' | 'construction' | 'civic' | 'expansion' | 'trade' | 'recovery';

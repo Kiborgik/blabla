@@ -1,4 +1,5 @@
 import { BUILDINGS } from '../core/content.ts';
+import type { FoodSupplyReceipt } from '../core/food-security-content.ts';
 import type { City } from '../core/types.ts';
 import { buildingIdentity } from '../visuals/building-visuals.ts';
 import { operationVisual, type OperationVisual } from '../visuals/operation-visuals.ts';
@@ -27,15 +28,44 @@ export function townProductionRows(city: Pick<City, 'buildings' | 'buildingOpera
   });
 }
 
-export function createTownProduction(city: Pick<City, 'buildings' | 'buildingOperations'>, onInspect: (buildingId: string) => void): HTMLElement | null {
+function createFoodSupplyReceipt(receipt: FoodSupplyReceipt): HTMLDetailsElement {
+  const details = document.createElement('details');
+  details.className = 'town-receipt';
+  details.dataset['townDisclosure'] = 'food-supply';
+  const summary = document.createElement('summary');
+  summary.textContent = `Latest Earth household Food · ${receipt.supplied ? 'Supplied' : 'Shortage'} · Round ${exactNumber(receipt.round)}`;
+  summary.prepend(visualIcon('food'));
+  details.append(summary);
+  const facts = [
+    ['Opening population', exactNumber(receipt.population)],
+    ['Produced', `${exactNumber(receipt.produced)} Food`],
+    ['Household meals', `Required ${exactNumber(receipt.required)} Food · Paid ${exactNumber(receipt.paid)} Food`],
+    ['Growth paid', `${exactNumber(receipt.growthPaid)} Food`],
+    ['Civilization shared stock', `Before ${exactNumber(receipt.foodBefore)} Food → After ${exactNumber(receipt.foodAfter)} Food`],
+  ] as const;
+  for (const [label, value] of facts) {
+    const line = document.createElement('p');
+    const name = document.createElement('strong');
+    name.textContent = `${label}: `;
+    line.append(name, document.createTextNode(value));
+    details.append(line);
+  }
+  const meaning = document.createElement('p');
+  meaning.textContent = 'Shared stock at this town’s resolution: before its production, then after its meals and growth payments. Not the current total, a whole-round balance, or a forecast.';
+  details.append(meaning);
+  return details;
+}
+
+export function createTownProduction(city: Pick<City, 'buildings' | 'buildingOperations' | 'lastFoodSupply'>, onInspect: (buildingId: string) => void): HTMLElement | null {
   const rows = townProductionRows(city);
-  if (!rows.length) return null;
+  if (!rows.length && !city.lastFoodSupply) return null;
   const section = document.createElement('section');
   section.className = 'town-production';
   section.setAttribute('aria-label', 'Town production');
   const heading = document.createElement('h4');
   heading.textContent = 'Town production';
   section.append(heading);
+  if (city.lastFoodSupply) section.append(createFoodSupplyReceipt(city.lastFoodSupply));
   const more = document.createElement('details');
   more.className = 'town-production-more';
   more.dataset['townDisclosure'] = 'production';

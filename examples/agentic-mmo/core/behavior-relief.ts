@@ -1,3 +1,4 @@
+import { civilizationFoodUpkeep } from './simulation/food-security.ts';
 import type { BehaviorProfile } from './behavior-profiles.ts';
 import { BUILDINGS, ECONOMY_RULES, IMPROVEMENTS, INDUSTRIAL_RULES, PUBLIC_PROJECT_RECIPES, TRADE_RECIPES, WONDERS } from './content.ts';
 import { RELIEF_RULES } from './relief-content.ts';
@@ -14,7 +15,7 @@ export interface ReliefPlan {
   readonly promised: Readonly<Partial<Resources>>;
 }
 
-const upkeep = (state: WorldState, seat: number): number => state.cities.filter(city => city.civId === seat).reduce((total, city) => total + city.population * ECONOMY_RULES.populationFoodUpkeep, 0);
+const upkeep = civilizationFoodUpkeep;
 const add = (supplies: Supplies, cost: Partial<Resources>, count = 1): void => { supplies.food += (cost.food ?? 0) * count; supplies.energy += (cost.energy ?? 0) * count; };
 const horizon = (state: WorldState, charter: ReliefCharter): number => Math.max(0, charter.status === 'accepted' ? charter.dueRound - state.round : charter.expiresRound - state.round + charter.terms.travelRounds);
 

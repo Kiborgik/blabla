@@ -86,6 +86,7 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'food-budget', name: 'Household food security', description: 'Earth households require 1.25 Food per resident each working season. Food responds to wellbeing, damage, geography and staffed facilities rather than infrastructure amplification; other resources and off-world supplies keep their own rules.' },
   { id: 'consented-relief', name: 'Consented food relief', description: 'A civilization may promise contextual surplus Food over an existing exact consenting corridor. Explicit acceptance precedes one conserved, fully funded due transfer; withdrawal and shortage do not invent cargo or betrayal.' },
   { id: 'partnership-stewardship', name: 'Partnership stewardship', description: 'Civilizations weigh supplied exchanges, expiring consent and promised repair contributions against their current needs. This additive controller rule leaves older release policies unchanged.' },
   { id: 'procedural-regional-targets', name: 'Local historical variety', description: 'Deterministic qualifying local event targets are quoted explicitly and retained with immediate factual consequences.' },

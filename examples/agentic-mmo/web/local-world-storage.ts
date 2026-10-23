@@ -1,4 +1,4 @@
-import { LOCAL_SIMULATION_STORAGE_KEY, PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, parseActiveLocalSimulation, parsePreviousLocalSimulation, type LocalSimulation, type PreviousLocalSimulation } from './local-simulation.ts';
+import { LOCAL_SIMULATION_STORAGE_KEY, LIVING_SIMULATION_STORAGE_KEY, PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, parseActiveLocalSimulation, parsePreviousLocalSimulation, type LocalSimulation, type PreviousLocalSimulation } from './local-simulation.ts';
 
 export interface LocalCheckpointResult {
   run: LocalSimulation | null;
@@ -34,7 +34,7 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
       return result(run);
     }
     blocked = true;
-    message = 'The saved Living world could not be read with its original rules. Its record is preserved. Choose another world in Settings.';
+    message = 'The saved Food-budget world could not be read with its original rules. Its record is preserved. Choose another world in Settings.';
     return result(null);
   };
   const historical = (key: string, label: string): { run: LocalSimulation | null; message: string } => {
@@ -78,6 +78,9 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
       if (raw === null) return { run: null, message: 'No previous local world is saved in this browser.' };
       const run = decode(raw, parsePreviousLocalSimulation);
       return { run, message: run ? `Previous local world · Read-only at round ${run.state.round}. Its original save is unchanged.` : 'The previous local world could not be read. Its original save is preserved.' };
+    },
+    living(): { run: LocalSimulation | null; message: string } {
+      return historical(LIVING_SIMULATION_STORAGE_KEY, 'Previous living world');
     },
     partnerships(): { run: LocalSimulation | null; message: string } {
       return historical(PARTNERSHIPS_SIMULATION_STORAGE_KEY, 'Living partnerships world');

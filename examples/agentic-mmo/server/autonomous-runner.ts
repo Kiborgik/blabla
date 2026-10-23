@@ -1,5 +1,5 @@
 import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
-import { BEHAVIOR_POLICY_VERSION, chooseCivilizationBehavior, chooseDirectorBehavior, createBehaviorMemory, isBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
+import { BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion, chooseCivilizationBehavior, chooseDirectorBehavior, createBehaviorMemory, isBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
 import { TURN_RULES } from '../core/content.ts';
 import { applyCommand, applyHistoryAdvance, catchUpClock, catchUpStrategy } from '../core/engine.ts';
 import { DIRECTOR_SEAT, type Command, type TransitionResult, type WorldState } from '../core/types.ts';
@@ -33,11 +33,12 @@ export interface AutonomousWake {
 
 export function createAutonomousState(world: WorldState, timestamp: string, enabled: boolean, key: string): AutonomousState {
   utc(timestamp);
+  if (behaviorPolicyVersion(world) !== BEHAVIOR_POLICY_VERSION) throw new RequestFailure(409, 'unsupported_hosted_policy_version');
   return { version: 1, policyVersion: BEHAVIOR_POLICY_VERSION, enabled, activatedAt: timestamp, lastWakeAt: null, lastDecisionWindow: -1, wakeCount: 0, lastCommandKey: key, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, (_, seat) => createBehaviorMemory(world, seat)) };
 }
 
 export function assertAutonomousState(value: unknown, world: WorldState): asserts value is AutonomousState {
-  if (!isRecord(value) || Object.keys(value).length !== 9 || value.version !== 1 || value.policyVersion !== BEHAVIOR_POLICY_VERSION || typeof value.enabled !== 'boolean'
+  if (!isRecord(value) || Object.keys(value).length !== 9 || value.version !== 1 || value.policyVersion !== BEHAVIOR_POLICY_VERSION || value.policyVersion !== behaviorPolicyVersion(world) || typeof value.enabled !== 'boolean'
     || typeof value.activatedAt !== 'string' || !Number.isFinite(Date.parse(value.activatedAt))
     || value.lastWakeAt !== null && (typeof value.lastWakeAt !== 'string' || !Number.isFinite(Date.parse(value.lastWakeAt)) || Date.parse(value.lastWakeAt) < Date.parse(value.activatedAt))
     || !safeInteger(value.lastDecisionWindow) || value.lastDecisionWindow < -1 || !safeInteger(value.wakeCount) || value.wakeCount < 0
@@ -45,7 +46,7 @@ export function assertAutonomousState(value: unknown, world: WorldState): assert
     || value.lastDecisionWindow > Math.floor((Date.parse(value.lastWakeAt === null ? value.activatedAt : String(value.lastWakeAt)) - Date.parse(value.activatedAt)) / TURN_RULES.tacticalWindowMs)
     || typeof value.lastCommandKey !== 'string' || value.lastCommandKey.length === 0 || value.lastCommandKey.length > 240
     || !Array.isArray(value.memories) || value.memories.length !== DIRECTOR_SEAT + 1
-    || !value.memories.every((memory: unknown, seat: number) => isBehaviorMemory(memory) && memory.seed === world.seed && memory.seat === seat && memory.lastDecisionRound <= world.round && memory.decisionCount <= Number(value.wakeCount))
+    || !value.memories.every((memory: unknown, seat: number) => isBehaviorMemory(memory) && memory.policyVersion === value.policyVersion && memory.seed === world.seed && memory.seat === seat && memory.lastDecisionRound <= world.round && memory.decisionCount <= Number(value.wakeCount))
     || (value.lastDecisionWindow === -1) !== value.memories.every((memory: BehaviorMemory) => memory.decisionCount === 0)) throw new RequestFailure(503, 'corrupt_or_incompatible_simulation');
   try { utc(value.activatedAt); if (value.lastWakeAt !== null) utc(value.lastWakeAt); } catch { throw new RequestFailure(503, 'corrupt_or_incompatible_simulation'); }
 }

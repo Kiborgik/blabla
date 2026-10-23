@@ -1,5 +1,5 @@
 import { applyCommand, applyHistoryAdvance, catchUpClock, catchUpStrategy } from '../core/engine.ts';
-import { BEHAVIOR_POLICY_VERSION, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, isLegacyBehaviorMemory, type LegacyBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
+import { behaviorPolicyVersion, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, isLegacyBehaviorMemory, type LegacyBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
 import { LEGACY_BEHAVIOR_POLICY_VERSION } from '../core/behavior-profiles.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
@@ -8,9 +8,10 @@ import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:living-world-v1';
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:food-budget-v1';
+export const LIVING_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:living-world-v1';
 export const PARTNERSHIPS_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:partnerships-v1';
-export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-regional-targets-1';
+export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-food-budget-1';
 export const PRIOR_GENERATED_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v2';
 export const PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v1';
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
@@ -35,22 +36,23 @@ export interface PreviousLocalSimulation extends Omit<LocalSimulation, 'version'
   readonly memories: ReadonlyArray<LegacyBehaviorMemory | null>;
 }
 
-export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' = ACTIVE_LOCAL_RELEASE_ID): LocalSimulation {
+export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' = ACTIVE_LOCAL_RELEASE_ID): LocalSimulation {
   const state = createGeneratedWorld(seed, EPOCH, initialReleaseId, initialReleaseId === ACTIVE_LOCAL_RELEASE_ID ? 'cultural-toponyms-v1' : undefined);
-  return { version: 2, source: 'local-procedural', policyVersion: BEHAVIOR_POLICY_VERSION, seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
+  return { version: 2, source: 'local-procedural', policyVersion: behaviorPolicyVersion(state), seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
 }
 
 function parseRun(value: unknown, previous: boolean): LocalSimulation | PreviousLocalSimulation | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const run = value as Record<string, unknown>;
-  if (run.version !== (previous ? 1 : 2) || run.source !== 'local-procedural' || run.policyVersion !== (previous ? LEGACY_BEHAVIOR_POLICY_VERSION : BEHAVIOR_POLICY_VERSION)
+  if (run.version !== (previous ? 1 : 2) || run.source !== 'local-procedural'
     || !Number.isSafeInteger(run.seed) || Number(run.seed) < 0 || Number(run.seed) > 0xffffffff
     || !Number.isSafeInteger(run.steps) || Number(run.steps) < 0
     || typeof run.timestamp !== 'string' || Date.parse(run.timestamp) !== Date.parse(EPOCH) + Number(run.steps) * LOCAL_SIMULATION_STEP_MS
     || !isWorldState(run.state) || run.state.seed !== run.seed || run.state.clockEpoch !== EPOCH
+    || run.policyVersion !== (previous ? LEGACY_BEHAVIOR_POLICY_VERSION : behaviorPolicyVersion(run.state))
     || (previous ? run.state.origin !== undefined || run.state.unlockedFeatures.includes('interplanetary-logistics') : run.state.origin?.generatorVersion !== 'coherent-geography-v1')
     || !Array.isArray(run.memories) || run.memories.length !== DIRECTOR_SEAT + 1
-    || !run.memories.every((memory, seat) => memory === null || (previous ? isLegacyBehaviorMemory(memory) : isBehaviorMemory(memory)) && memory.seat === seat && memory.seed === run.seed && memory.lastDecisionRound <= (run.state as WorldState).round && memory.decisionCount <= Number(run.steps))
+    || !run.memories.every((memory, seat) => memory === null || (previous ? isLegacyBehaviorMemory(memory) : isBehaviorMemory(memory)) && memory.policyVersion === run.policyVersion && memory.seat === seat && memory.seed === run.seed && memory.lastDecisionRound <= (run.state as WorldState).round && memory.decisionCount <= Number(run.steps))
     || !Array.isArray(run.decisions) || run.decisions.length > DIRECTOR_SEAT + 1) return null;
   const seats = new Set<number>();
   for (const value of run.decisions) {

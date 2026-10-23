@@ -12,7 +12,7 @@ import { createLandTransportPlanner } from './simulation/transport.ts';
 import { generatePlaceName } from './place-names.ts';
 import { isCoastalSite } from './simulation/coastal.ts';
 
-export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion): WorldState {
+export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion): WorldState {
   if (namingVersion !== undefined && namingVersion !== 'cultural-toponyms-v1') throw new RangeError('Generated worlds require a supported naming version');
   if (parseUtcTimestamp(clockEpoch) === null) throw new RangeError('Generated worlds require an explicit UTC clock epoch');
   const geography = generateGeography(seed);

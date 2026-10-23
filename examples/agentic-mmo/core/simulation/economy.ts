@@ -1,3 +1,5 @@
+import { FOOD_BUDGET_RULES } from '../food-security-content.ts';
+import { allocatedCityFoodProduction, householdFoodUpkeep } from './food-security.ts';
 import { resolveReliefCharters } from './relief-charters.ts';
 import { resolveSpaceflight } from './spaceflight.ts';
 import { recordLocalPower } from './local-power.ts';
@@ -42,6 +44,20 @@ function produceCity(
   const improvements = hasFeatures(state, [IMPROVEMENT_RULES.featureId]) ? orderedImprovements(city).filter(improvement => improvement.operation.lastResult?.status === 'operated') : [];
   const freeOutputs = [...free.map(building => buildingBaseProduction(state, city, building)), wonderBaseProduction(state, city)];
   for (const resource of RESOURCE_IDS) {
+    if (resource === 'food' && hasFeatures(state, [FOOD_BUDGET_RULES.featureId])) {
+      const output = allocatedCityFoodProduction(state, city);
+      for (const contribution of output.buildings) {
+        const result = city.buildingOperations?.[contribution.buildingId]?.lastResult;
+        if (result?.status === 'operated' && contribution.food > 0) result.produced.food = contribution.food;
+      }
+      for (const contribution of output.improvements) {
+        const result = city.improvements?.[String(contribution.tileId)]?.operation.lastResult;
+        if (result?.status === 'operated' && contribution.food > 0) result.produced.food = contribution.food;
+      }
+      civilization.resources.food = quantize(clamp(civilization.resources.food + output.total, 0));
+      produced.food = output.total;
+      continue;
+    }
     const terrain = siteOutputs[resource] ?? 0;
     let raw = (ECONOMY_RULES.baseProduction[resource] ?? 0) + (government.baseProduction[resource] ?? 0) + (focus[resource] ?? 0)
       + freeOutputs.reduce((total, output) => total + (output[resource] ?? 0), 0) + terrain;
@@ -71,11 +87,16 @@ function produceCity(
   return produced;
 }
 
-function supplyCity(state: WorldState, city: City, events: GameEvent[]): boolean {
+function supplyCity(state: WorldState, city: City, events: GameEvent[], produced: number, foodBefore: number): boolean {
   const civilization = civilizationById(state, city.civId);
   const growth = cityGrowthFacts(state, city);
-  const upkeep = quantize(city.population * ECONOMY_RULES.populationFoodUpkeep);
+  const upkeep = householdFoodUpkeep(state, city.population);
   const supplied = civilization.resources.food >= upkeep;
+  const receipt = hasFeatures(state, [FOOD_BUDGET_RULES.featureId]) ? {
+    ruleVersion: FOOD_BUDGET_RULES.ruleVersion, foodRule: FOOD_BUDGET_RULES.ruleId, round: state.round,
+    population: city.population, produced, required: upkeep, paid: Math.min(civilization.resources.food, upkeep), growthPaid: 0,
+    supplied, foodBefore, foodAfter: 0,
+  } : undefined;
   if (supplied) {
     civilization.resources.food = quantize(civilization.resources.food - upkeep);
     city.wellbeing = clamp(city.wellbeing + ECONOMY_RULES.suppliedWellbeingGain, 0, 100);
@@ -88,6 +109,7 @@ function supplyCity(state: WorldState, city: City, events: GameEvent[]): boolean
       civilization.resources.food = quantize(
         civilization.resources.food - growth.nextGrowthFoodCost,
       );
+      if (receipt) receipt.growthPaid = growth.nextGrowthFoodCost;
       city.population += ECONOMY_RULES.growth.populationGain;
       const event = emitEvent(state, events, {
         type: 'population-growth',
@@ -108,9 +130,11 @@ function supplyCity(state: WorldState, city: City, events: GameEvent[]): boolean
         populationBefore: growth.population, populationAfter: city.population, capacity: growth.capacity, foodPaid: growth.nextGrowthFoodCost,
       };
     }
+    if (receipt) city.lastFoodSupply = { ...receipt, foodAfter: civilization.resources.food };
     return true;
   }
   civilization.resources.food = 0;
+  if (receipt) city.lastFoodSupply = receipt;
   city.wellbeing = clamp(city.wellbeing - ECONOMY_RULES.shortageWellbeingLoss, 0, 100);
   civilization.legitimacy = clamp(
     civilization.legitimacy - ECONOMY_RULES.shortageLegitimacyLoss,
@@ -168,6 +192,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
     let suppliedCities = 0;
     const cities = citiesOf(state, civilization.id);
     for (const city of cities) {
+      const foodBefore = civilization.resources.food;
       const production = produceCity(state, city);
       emitOperations(state, city, events);
       recordLocalPower(state, city, events);
@@ -176,7 +201,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
       culture += production.culture;
       science += production.science;
       food += production.food;
-      if (supplyCity(state, city, events)) suppliedCities += 1;
+      if (supplyCity(state, city, events, production.food, foodBefore)) suppliedCities += 1;
     }
     researchBudgets.set(civilization.id, quantize(science));
     civicBudgets.set(civilization.id, quantize(culture));

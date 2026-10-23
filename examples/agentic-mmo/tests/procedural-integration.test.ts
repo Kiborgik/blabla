@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ACTIVE_LOCAL_RELEASE_ID, LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, advanceLocalSimulation, parseActiveLocalSimulation, parseLocalSimulation, localSimulationSnapshot } from '../web/local-simulation.ts';
+import { ACTIVE_LOCAL_RELEASE_ID, LOCAL_SIMULATION_STORAGE_KEY, LIVING_SIMULATION_STORAGE_KEY, createLocalSimulation, advanceLocalSimulation, parseActiveLocalSimulation, parseLocalSimulation, localSimulationSnapshot } from '../web/local-simulation.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { isPublicProvenance } from '../server/public-protocol.ts';
 import { processLocalSimulationRequest } from '../web/local-simulation-worker.ts';
@@ -66,7 +66,7 @@ await test('procedural provenance stays distinct while historical agent and cloc
 });
 
 await test('Worker refuses historical generated releases without changing their read-only checkpoint bytes', () => {
-  for (const release of ['settlement-interplanetary-1', 'settlement-living-partnerships-1', 'settlement-relief-charters-1'] as const) {
+  for (const release of ['settlement-interplanetary-1', 'settlement-living-partnerships-1', 'settlement-relief-charters-1', 'settlement-regional-targets-1'] as const) {
     const historical = createLocalSimulation(1701, release);
     assert.equal(Object.hasOwn(historical.state.origin!, 'namingVersion'), false);
     const before = JSON.stringify(historical);
@@ -78,11 +78,12 @@ await test('Worker refuses historical generated releases without changing their 
   }
 });
 
-await test('legacy generated checkpoint names identity and replay remain byte-exact without storage-key rotation or load-time opt-in', () => {
+await test('historical generated checkpoint names identity and replay remain byte-exact across Food storage succession without load-time opt-in', () => {
   const epoch = '2000-01-01T00:00:00.000Z';
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:living-world-v1');
-  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-regional-targets-1');
-  for (const release of ['settlement-interplanetary-1', 'settlement-living-partnerships-1', 'settlement-relief-charters-1', ACTIVE_LOCAL_RELEASE_ID] as const) {
+  assert.equal(LIVING_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:living-world-v1');
+  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:food-budget-v1');
+  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-food-budget-1');
+  for (const release of ['settlement-interplanetary-1', 'settlement-living-partnerships-1', 'settlement-relief-charters-1', 'settlement-regional-targets-1', ACTIVE_LOCAL_RELEASE_ID] as const) {
     const state = createGeneratedWorld(1701, epoch, release);
     assert.deepEqual(state.cities.map(city => city.name), ['Dawnwell', 'Willowmere', 'Cinderhold', 'Tidehaven', 'Lumen']);
     state.cities[0]!.name = 'Dawnwe\u0301ll — saved history';
@@ -94,15 +95,16 @@ await test('legacy generated checkpoint names identity and replay remain byte-ex
     assert.equal(Object.hasOwn(restored.state.origin!, 'namingVersion'), false);
     const identity = `local:coherent-geography-v1:1701:${epoch}${release === 'settlement-interplanetary-1' ? '' : `:${release}`}`;
     assert.equal(localSimulationSnapshot(restored).identity, identity);
-    if (release === ACTIVE_LOCAL_RELEASE_ID) {
-      assert.equal(JSON.stringify(parseActiveLocalSimulation(JSON.parse(bytes))), bytes);
+    if (release === 'settlement-regional-targets-1' || release === ACTIVE_LOCAL_RELEASE_ID) {
+      assert.equal(parseActiveLocalSimulation(JSON.parse(bytes)) === null, release !== ACTIVE_LOCAL_RELEASE_ID);
+      if (release === ACTIVE_LOCAL_RELEASE_ID) assert.equal(JSON.stringify(parseActiveLocalSimulation(JSON.parse(bytes))), bytes);
       const continued = advanceLocalSimulation(saved, 2);
       assert.deepEqual(advanceLocalSimulation(restored, 2), continued);
       assert.equal(continued.state.cities.find(city => city.id === 'city-0')?.name, 'Dawnwe\u0301ll — saved history');
       assert.equal(Object.hasOwn(continued.state.origin!, 'namingVersion'), false);
       assert.equal(localSimulationSnapshot(continued).identity, identity);
       const fresh = createLocalSimulation(1701);
-      assert.equal(localSimulationSnapshot(fresh).identity, `${identity}:cultural-toponyms-v1`);
+      assert.equal(localSimulationSnapshot(fresh).identity, `local:coherent-geography-v1:1701:${epoch}:${ACTIVE_LOCAL_RELEASE_ID}:cultural-toponyms-v1`);
       assert.notEqual(localSimulationSnapshot(fresh).identity, identity);
     }
     assert.equal(JSON.stringify(saved), bytes);

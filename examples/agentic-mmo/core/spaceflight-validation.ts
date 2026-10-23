@@ -123,10 +123,11 @@ export function generatedHistoryRecords(world: WorldState): boolean {
     if (!record(origin) || !keys(origin, ['kind', 'generatorVersion', 'seed', 'clockEpoch', ...(Object.hasOwn(origin, 'initialReleaseId') ? ['initialReleaseId'] : []), ...(Object.hasOwn(origin, 'namingVersion') ? ['namingVersion'] : [])])
       || Object.hasOwn(origin, 'namingVersion') && origin.namingVersion !== 'cultural-toponyms-v1'
       || origin.kind !== 'generated' || origin.generatorVersion !== 'coherent-geography-v1' || origin.seed !== world.seed || origin.clockEpoch !== world.clockEpoch
-      || Object.hasOwn(origin, 'initialReleaseId') && (typeof origin.initialReleaseId !== 'string' || !['settlement-living-partnerships-1', 'settlement-relief-charters-1', 'settlement-regional-targets-1'].includes(origin.initialReleaseId)
+      || Object.hasOwn(origin, 'initialReleaseId') && (typeof origin.initialReleaseId !== 'string' || !['settlement-living-partnerships-1', 'settlement-relief-charters-1', 'settlement-regional-targets-1', 'settlement-food-budget-1'].includes(origin.initialReleaseId)
         || !world.unlockedFeatures.includes('partnership-stewardship') || !world.unlockedFeatures.includes('historical-pressures')
         || origin.initialReleaseId !== 'settlement-living-partnerships-1' && !world.unlockedFeatures.includes('consented-relief')
-        || origin.initialReleaseId === 'settlement-regional-targets-1' && !world.unlockedFeatures.includes('procedural-regional-targets'))) return false;
+        || ['settlement-regional-targets-1', 'settlement-food-budget-1'].includes(origin.initialReleaseId) && !world.unlockedFeatures.includes('procedural-regional-targets')
+        || origin.initialReleaseId === 'settlement-food-budget-1' && !world.unlockedFeatures.includes('food-budget'))) return false;
   }
   if (!world.unlockedFeatures.includes('earned-history')) return !Object.hasOwn(world, 'milestoneProofs');
   const proofs: unknown = world.milestoneProofs;

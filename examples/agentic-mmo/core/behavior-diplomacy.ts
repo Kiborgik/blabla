@@ -1,3 +1,4 @@
+import { civilizationFoodUpkeep } from './simulation/food-security.ts';
 import { civilizationBehaviorProfile, type BehaviorProfile } from './behavior-profiles.ts';
 import { BUILDINGS, ECONOMY_RULES, IMPROVEMENTS, INDUSTRIAL_RULES, PUBLIC_PROJECT_RECIPES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TRADE_RECIPES, WONDERS } from './content.ts';
 import { governmentPrice } from './simulation/government.ts';
@@ -19,7 +20,7 @@ const empty = (): Resources => ({ food: 0, materials: 0, energy: 0, credits: 0, 
 const samePair = (route: Route, a: number, b: number): boolean => route.owner === a && route.partner === b || route.owner === b && route.partner === a;
 const add = (target: Resources, source: Partial<Resources>): void => { for (const resource of RESOURCE_IDS) target[resource] += source[resource] ?? 0; };
 const sum = (...vectors: Partial<Resources>[]): Resources => { const result = empty(); vectors.forEach(vector => add(result, vector)); return result; };
-const upkeep = (state: WorldState, seat: number): number => state.cities.filter(city => city.civId === seat).reduce((total, city) => total + city.population * ECONOMY_RULES.populationFoodUpkeep, 0);
+const upkeep = civilizationFoodUpkeep;
 
 function obligations(terms: TradeTerms, proposer: boolean): Budget {
   return { ordinary: sum(proposer ? terms.proposerCargo : terms.recipientCargo, proposer ? terms.proposerUpkeep : terms.recipientUpkeep), strategic: strategicObligations(terms, proposer ? 'proposer' : 'recipient') };
