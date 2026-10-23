@@ -1,4 +1,6 @@
 import { BUILDINGS, CIVICS, GOVERNMENTS, IMPROVEMENTS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
+import { BEHAVIOR_PROFILES } from '../core/behavior-profiles.ts';
+import { STRATEGIC_ARCHETYPES, STRATEGIC_TEMPERAMENT_VERSION } from '../core/strategic-temperaments.ts';
 import type { City, GameAction, GameEvent, WorldState } from '../core/types.ts';
 import type { CapabilityProjection } from '../core/capabilities.ts';
 import { eventLogEntries, recordedPublicProjectResult, type EventLogEntry } from './event-log.ts';
@@ -219,7 +221,7 @@ export function installedTownEvidence(city: Pick<City, 'buildings' | 'improvemen
   ];
 }
 
-export function renderRecordedPolicyChoice(choice: { action: GameAction; reason: string }): HTMLDetailsElement {
+export function renderRecordedPolicyChoice(choice: { action: GameAction; reason: string; profileId?: string; phase?: string }): HTMLDetailsElement {
   const record = document.createElement('details');
   record.className = 'policy-choice town-receipt';
   record.dataset['inspectionSection'] = 'overview';
@@ -229,6 +231,19 @@ export function renderRecordedPolicyChoice(choice: { action: GameAction; reason:
   const label = document.createElement('span'); label.className = 'eyebrow'; label.textContent = 'BUILT-IN POLICY · LAST CHOICE';
   const reason = document.createElement('p'); reason.textContent = choice.reason;
   record.append(summary, label, reason);
+  const parts = choice.profileId?.split('/') ?? [];
+  const archetype = STRATEGIC_ARCHETYPES.find(value => value === parts[1]);
+  const posture = ['compact', 'measured', 'outward'].find(value => value === parts[2]);
+  const strategy = parts.length === 3 && parts[0] === STRATEGIC_TEMPERAMENT_VERSION && archetype && posture
+    ? `${archetype[0]!.toUpperCase()}${archetype.slice(1)} · ${posture[0]!.toUpperCase()}${posture.slice(1)}`
+    : BEHAVIOR_PROFILES.find(profile => profile.id === choice.profileId)?.name;
+  if (strategy) {
+    const identity = document.createElement('p'); identity.textContent = `Recorded strategy: ${strategy}`; record.append(identity);
+    const phase = ['survival', 'recovery', 'development', 'expansion', 'trade', 'consolidation'].find(value => value === choice.phase);
+    if (phase) {
+      const stage = document.createElement('p'); stage.textContent = `Recorded phase: ${phase[0]!.toUpperCase()}${phase.slice(1)}`; record.append(stage);
+    }
+  }
   return record;
 }
 
@@ -245,7 +260,7 @@ export function renderSpectatorChronicle(host: HTMLElement, stories: readonly Sp
     if (row instanceof HTMLButtonElement && destination) {
       row.type = 'button';
       row.addEventListener('click', () => navigate(destination));
-      row.setAttribute('aria-label', `${headline}. Round ${event.round}.${reason ? ` Why: ${reason}.` : ''}${consequence ? ` Result: ${consequence}.` : ''} ${destination.kind === 'civilization' ? 'Inspect civilization' : 'Show on map'}: ${destination.label}`);
+      row.setAttribute('aria-label', `${headline}. Round ${event.round}.${consequence ? ` Result: ${consequence}.` : ''}${reason ? ` Why: ${reason}.` : ''} ${destination.kind === 'civilization' ? 'Inspect civilization' : 'Show on map'}: ${destination.label}`);
     }
     const marker = document.createElement('span'); marker.className = 'chronicle-marker'; marker.append(visualIcon(event.icon));
     const body = document.createElement('span'); body.className = 'chronicle-story-body';
@@ -255,8 +270,8 @@ export function renderSpectatorChronicle(host: HTMLElement, stories: readonly Sp
     location.textContent = destination ? `${destination.kind === 'civilization' ? 'View civilization' : 'On the map'} · ${destination.label}` : 'World event';
     if (destination) location.append(visualIcon('inspect'));
     body.append(meta, title);
-    if (reason) { const cause = document.createElement('span'); cause.className = 'chronicle-cause'; cause.textContent = `Why: ${reason}`; body.append(cause); }
     if (consequence) { const result = document.createElement('span'); result.className = 'chronicle-result'; result.textContent = `Result: ${consequence}`; body.append(result); }
+    if (reason) { const cause = document.createElement('span'); cause.className = 'chronicle-cause'; cause.textContent = `Why: ${reason}`; body.append(cause); }
     body.append(location); row.append(marker, body); item.append(row); host.append(item);
     if (focused === event.id) row.focus({ preventScroll: true });
   }

@@ -1,5 +1,5 @@
 import { civilizationFoodUpkeep } from './simulation/food-security.ts';
-import { civilizationBehaviorProfile, type BehaviorProfile } from './behavior-profiles.ts';
+import { behaviorPolicyVersion, civilizationBehaviorProfile, type BehaviorProfile } from './behavior-profiles.ts';
 import { BUILDINGS, ECONOMY_RULES, IMPROVEMENTS, INDUSTRIAL_RULES, PUBLIC_PROJECT_RECIPES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TRADE_RECIPES, WONDERS } from './content.ts';
 import { governmentPrice } from './simulation/government.ts';
 import { hasFeatures } from './simulation/history.ts';
@@ -92,7 +92,7 @@ function routePlan(state: WorldState, route: Route, actor: Civilization, profile
   const stop = foodDanger && agreement.nextDeliveryRound <= state.round + 2 || unsupplied || uneconomic;
   const critical = (incoming.food ?? 0) > 0 && actor.resources.food < upkeep(state, actor.id) * 3
     || (incoming.energy ?? 0) > 0 && actor.resources.energy < 5;
-  const shared = !!other && utility(state, other, civilizationBehaviorProfile(state.seed, other.id), agreement.terms, !proposer).useful && value.useful && !stop;
+  const shared = !!other && utility(state, other, civilizationBehaviorProfile(state.seed, other.id, behaviorPolicyVersion(state)), agreement.terms, !proposer).useful && value.useful && !stop;
   return { useful: value.useful && !stop, funded, stop, shared,
     urgentRepair: !stop && value.useful && route.damage >= agreement.terms.damageDisableAt && critical && agreement.nextDeliveryRound <= state.round + 2,
     reason: foodDanger ? 'Outgoing food would endanger town meals.' : unsupplied ? `No shipment since round ${agreement.lastDeliveryRound ?? agreement.acceptedRound}; current cargo remains unfunded.` : uneconomic ? 'The mature exchange currently consumes substantially more useful supplies than it returns.' : 'Retain this useful exchange through temporary shortages and modest changes in demand.' };
@@ -139,7 +139,7 @@ function tradeFeasible(state: WorldState, actor: Civilization, partner: Civiliza
     const cost = obligations(terms, side.proposer);
     if (side.proposer) add(cost.ordinary, terms.constructionCost);
     return affordable(state, side.actor, cost, commitments(state, side.actor.id, Infinity))
-      && utility(state, side.actor, civilizationBehaviorProfile(state.seed, side.actor.id), terms, side.proposer).useful;
+      && utility(state, side.actor, civilizationBehaviorProfile(state.seed, side.actor.id, behaviorPolicyVersion(state)), terms, side.proposer).useful;
   });
 }
 

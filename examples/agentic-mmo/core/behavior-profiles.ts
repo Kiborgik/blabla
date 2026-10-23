@@ -1,13 +1,20 @@
+import { applyStrategicPosture, behaviorSeed, strategicTemperament, STRATEGIC_TEMPERAMENT_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION } from './strategic-temperaments.ts';
 import { FOOD_BUDGET_RULES } from './food-security-content.ts';
 import type { Focus, Resource, WorldState } from './types.ts';
 
 export const LEGACY_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v1';
 export const BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v2';
 export const FOOD_BUDGET_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v3-food-budget';
-export type BehaviorPolicyVersion = typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION;
+export { behaviorSeed, TEMPERAMENT_BEHAVIOR_POLICY_VERSION };
+export type BehaviorPolicyVersion = typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION | typeof TEMPERAMENT_BEHAVIOR_POLICY_VERSION;
 
-export function behaviorPolicyVersion(state: Pick<WorldState, 'unlockedFeatures'>): BehaviorPolicyVersion {
-  return state.unlockedFeatures.includes(FOOD_BUDGET_RULES.featureId) ? FOOD_BUDGET_BEHAVIOR_POLICY_VERSION : BEHAVIOR_POLICY_VERSION;
+export function behaviorPolicyVersion(state: Pick<WorldState, 'unlockedFeatures' | 'origin'>): BehaviorPolicyVersion {
+  if (!state.unlockedFeatures.includes(FOOD_BUDGET_RULES.featureId)) return BEHAVIOR_POLICY_VERSION;
+  return state.origin?.temperamentVersion === STRATEGIC_TEMPERAMENT_VERSION ? TEMPERAMENT_BEHAVIOR_POLICY_VERSION : FOOD_BUDGET_BEHAVIOR_POLICY_VERSION;
+}
+
+export function behaviorDrawVersion(policyVersion: BehaviorPolicyVersion): typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION {
+  return policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION ? FOOD_BUDGET_BEHAVIOR_POLICY_VERSION : policyVersion;
 }
 
 export type BehaviorPhase = 'survival' | 'recovery' | 'development' | 'expansion' | 'trade' | 'consolidation' | 'director';
@@ -67,16 +74,20 @@ export const BEHAVIOR_PROFILES: readonly BehaviorProfile[] = [
   },
 ];
 
-export function behaviorSeed(value: string): number {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index++) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
+export function civilizationBehaviorProfile(seed: number, seat: number, policyVersion: BehaviorPolicyVersion = BEHAVIOR_POLICY_VERSION): BehaviorProfile {
+  if (policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION) {
+    const allocation = strategicTemperament(seed, seat);
+    const template = BEHAVIOR_PROFILES[allocation.templateIndex]!;
+    const domain = `${STRATEGIC_TEMPERAMENT_VERSION}/jitter/${seed >>> 0}/${seat}/${allocation.archetypeId}`;
+    const variation = (kind: string, key: string): number => 0.9 + (behaviorSeed(`${domain}/${kind}/${key}`) % 201) / 1000;
+    const resources = { ...template.resources };
+    const priorities = { ...template.priorities };
+    for (const key of Object.keys(resources) as Resource[]) resources[key] *= variation('resource', key);
+    for (const key of Object.keys(priorities) as BehaviorPriority[]) priorities[key] *= variation('priority', key);
+    return applyStrategicPosture({ ...template, id: allocation.profileId, name: `${allocation.archetypeId[0]!.toUpperCase()}${allocation.archetypeId.slice(1)} (${allocation.posture})`, resources, priorities }, allocation.posture);
   }
-  return hash >>> 0;
-}
-
-export function civilizationBehaviorProfile(seed: number, seat: number): BehaviorProfile {
+  if (policyVersion !== BEHAVIOR_POLICY_VERSION && policyVersion !== FOOD_BUDGET_BEHAVIOR_POLICY_VERSION)
+    throw new RangeError('A behavior profile requires a supported policy version');
   const authored = BEHAVIOR_PROFILES[seat];
   if (!Number.isSafeInteger(seed) || !Number.isInteger(seat) || !authored)
     throw new RangeError('A behavior profile requires a valid world seed and civilization seat');

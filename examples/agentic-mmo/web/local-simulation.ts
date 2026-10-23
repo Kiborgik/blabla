@@ -3,7 +3,7 @@ import { behaviorPolicyVersion, chooseCivilizationBehavior, chooseDirectorBehavi
 import { LEGACY_BEHAVIOR_POLICY_VERSION } from '../core/behavior-profiles.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
-import { DIRECTOR_SEAT, type GameAction, type WorldState } from '../core/types.ts';
+import { DIRECTOR_SEAT, type GameAction, type StrategicTemperamentVersion, type WorldState } from '../core/types.ts';
 import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
@@ -36,9 +36,13 @@ export interface PreviousLocalSimulation extends Omit<LocalSimulation, 'version'
   readonly memories: ReadonlyArray<LegacyBehaviorMemory | null>;
 }
 
-export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' = ACTIVE_LOCAL_RELEASE_ID): LocalSimulation {
-  const state = createGeneratedWorld(seed, EPOCH, initialReleaseId, initialReleaseId === ACTIVE_LOCAL_RELEASE_ID ? 'cultural-toponyms-v1' : undefined);
+export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' = ACTIVE_LOCAL_RELEASE_ID, temperamentVersion?: StrategicTemperamentVersion): LocalSimulation {
+  const state = createGeneratedWorld(seed, EPOCH, initialReleaseId, initialReleaseId === ACTIVE_LOCAL_RELEASE_ID ? 'cultural-toponyms-v1' : undefined, temperamentVersion);
   return { version: 2, source: 'local-procedural', policyVersion: behaviorPolicyVersion(state), seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
+}
+
+export function createFreshLocalSimulation(seed = 1701): LocalSimulation {
+  return createLocalSimulation(seed, ACTIVE_LOCAL_RELEASE_ID, 'strategic-temperaments-v1');
 }
 
 function parseRun(value: unknown, previous: boolean): LocalSimulation | PreviousLocalSimulation | null {
@@ -114,5 +118,6 @@ export function advanceLocalSimulation(run: LocalSimulation, steps = 1): LocalSi
 export function localSimulationSnapshot(run: LocalSimulation | PreviousLocalSimulation): LiveSnapshot {
   const genesis = run.state.origin?.initialReleaseId;
   const naming = run.state.origin?.namingVersion;
-  return { identity: `local:${run.state.origin?.generatorVersion ?? 'legacy-foundation-v1'}:${run.seed}:${run.state.clockEpoch}${genesis ? `:${genesis}` : ''}${naming ? `:${naming}` : ''}`, state: run.state };
+  const temperament = run.state.origin?.temperamentVersion;
+  return { identity: `local:${run.state.origin?.generatorVersion ?? 'legacy-foundation-v1'}:${run.seed}:${run.state.clockEpoch}${genesis ? `:${genesis}` : ''}${naming ? `:${naming}` : ''}${temperament ? `:${temperament}` : ''}`, state: run.state };
 }

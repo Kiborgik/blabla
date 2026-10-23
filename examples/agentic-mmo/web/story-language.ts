@@ -1,8 +1,10 @@
-import { BUILDINGS, RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
+import { BUILDINGS, CIVICS, ERAS, FEATURES, GOVERNMENTS, POLICIES, RESOURCE_IDS, TECHNOLOGIES, HISTORICAL_MILESTONES } from '../core/content.ts';
 import type { GameEvent, Resources, WorldState } from '../core/types.ts';
 import { METRIC_LABELS } from '../visuals/visual-language.ts';
 import { recordedPublicProjectResult, type EventLogEntry } from './event-log.ts';
 import { exactNumber } from './number-format.ts';
+import { formatYear } from './live-world.ts';
+import { parseUtcTimestamp } from '../core/simulation/time.ts';
 
 export interface StoryLanguage {
   title: string;
@@ -93,6 +95,120 @@ function recordedReason(state: StoryNames, reason: string): string {
   return reason ? `At that time: ${boundedRecord(state, reason)}` : '';
 }
 
+function exactEffects(event: GameEvent, patterns: readonly RegExp[]): RegExpExecArray[] | null {
+  if (event.effects.length !== patterns.length) return null;
+  const matches = patterns.map((pattern, index) => pattern.exec(event.effects[index]!));
+  return matches.every((match): match is RegExpExecArray => match !== null) ? matches : null;
+}
+
+function recordedAmount(value: string | undefined): number | null {
+  if (value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function governmentPolicies(detail: string, government: (typeof GOVERNMENTS)[number]): string | null {
+  if (detail === 'All policy slots explicitly empty') return 'No policies were selected.';
+  const used = new Set<string>(); const occupied = new Set<string>(); const names: string[] = [];
+  for (const part of detail.split(', ')) {
+    const assignment = /^(military|economic|diplomatic|wildcard):(\d+) ([a-z0-9-]+)$/.exec(part);
+    if (!assignment) return null;
+    const slot = assignment[1] as keyof typeof government.slots;
+    const index = Number(assignment[2]); const policy = POLICIES.find(candidate => candidate.id === assignment[3]);
+    const key = `${slot}:${index}`;
+    if (!policy || !Number.isSafeInteger(index) || index >= government.slots[slot] || used.has(policy.id) || occupied.has(key)
+      || slot !== 'wildcard' && slot !== policy.slotType) return null;
+    used.add(policy.id); occupied.add(key); names.push(policy.name);
+  }
+  return `Policies: ${names.join(', ')}.`;
+}
+
+function historicalStory(state: StoryNames, event: GameEvent): StoryLanguage | null {
+  if (['civic-started', 'civic-completed', 'arrangement-accepted', 'transition-completed', 'research-started', 'research-completed'].includes(event.type)
+    && (event.actor === null || event.actor !== event.target)) return null;
+  const actor = civilization(state, event.actor);
+  if (event.type === 'civic-started' && event.cause === 'The civilization explicitly selected a released cultural commitment') {
+    const facts = exactEffects(event, [/^Civic ([a-z0-9-]+)$/, new RegExp(`^Required Culture (${NUMBER})$`), /^Science research remains independent$/]);
+    const civic = CIVICS.find(candidate => candidate.id === facts?.[0]?.[1]); const required = recordedAmount(facts?.[1]?.[1]);
+    if (civic && required !== null) return { title: `${actor} began developing ${civic.name}`, cause: '',
+      consequence: `${exactNumber(required)} Culture was required. This civic was not complete yet.` };
+  }
+  if (event.type === 'civic-completed') {
+    const facts = exactEffects(event, [/^Completed civic ([a-z0-9-]+)$/, /^One latest-completion reform entitlement; no automatic successor or arrangement$/]);
+    const civic = CIVICS.find(candidate => candidate.id === facts?.[0]?.[1]);
+    const funded = new RegExp(`^Civic ([a-z0-9-]+) received (${NUMBER}) Culture$`).exec(event.cause);
+    const culture = recordedAmount(funded?.[2]);
+    if (civic && funded?.[1] === civic.id && culture !== null) return { title: `${actor} completed ${civic.name}`,
+      cause: `${exactNumber(culture)} Culture from working towns completed the civic.`,
+      consequence: 'One free government or policy change was earned; none happened automatically.' };
+  }
+  if (event.type === 'arrangement-accepted' && event.cause === 'The civilization explicitly chose a complete eligible government arrangement') {
+    const facts = exactEffects(event, [/^Government ([a-z0-9-]+)$/, new RegExp(`^Credits paid (${NUMBER})$`), /^Reform completion (?:none|\d+:\d+)$/, /^(Transition completes after|Policy commitment until) round (\d+)$/]);
+    const government = GOVERNMENTS.find(candidate => candidate.id === facts?.[0]?.[1]); const paid = recordedAmount(facts?.[1]?.[1]);
+    const round = Number(facts?.[3]?.[2]); const policies = government ? governmentPolicies(event.detail, government) : null;
+    if (government && paid !== null && policies !== null && Number.isSafeInteger(round)) {
+      const pending = facts?.[3]?.[1] === 'Transition completes after';
+      return { title: `${actor} chose ${government.name}`, cause: '',
+        consequence: `${pending ? `The change was scheduled after round ${round}; it had not finished yet. ` : ''}${policies} Paid ${exactNumber(paid)} Credits.${pending ? '' : ` Policies were committed until round ${round}.`}` };
+    }
+  }
+  if (event.type === 'transition-completed') {
+    const identity = /^Government ([a-z0-9-]+) applies at the next opening$/.exec(event.detail);
+    const government = GOVERNMENTS.find(candidate => candidate.id === identity?.[1]);
+    const accepted = /^The two-beat transition accepted at round (\d+) completed$/.exec(event.cause);
+    const facts = exactEffects(event, [/^Effective round (\d+)$/, /^Commitment until round (\d+)$/]);
+    if (government && accepted && facts && [accepted[1], facts[0]![1], facts[1]![1]].every(value => Number.isSafeInteger(Number(value)))) {
+      return { title: `${actor} completed the change to ${government.name}`, cause: `The change began in round ${accepted[1]}.`,
+        consequence: `${government.name} was ready for the next season, effective round ${facts[0]![1]}. The government was committed until round ${facts[1]![1]}.` };
+    }
+  }
+  if (event.type === 'research-started') {
+    const facts = exactEffects(event, [/^Research target ([a-z0-9-]+)$/]);
+    const technology = TECHNOLOGIES.find(candidate => candidate.id === facts?.[0]?.[1] && candidate.id === event.detail);
+    const productive = event.cause === 'The civilization committed science produced by its settlements each strategic beat to a released technology';
+    const stored = event.cause === 'The civilization committed its accumulated and future science to a released technology';
+    if (technology && (productive || stored)) return { title: `${actor} began researching ${technology.name}`,
+      cause: productive ? 'The towns’ future Science output was assigned to this research.' : 'Stored and future Science was assigned to this research.',
+      consequence: 'Research began; the discovery was not complete yet.' };
+  }
+  if (event.type === 'research-completed') {
+    const facts = exactEffects(event, [/^Technology ([a-z0-9-]+) unlocked$/, /^Capability stages require released milestones; the world clock is independent$/]);
+    const technology = TECHNOLOGIES.find(candidate => candidate.id === facts?.[0]?.[1]);
+    if (technology) {
+      const science = new RegExp(`^Working settlements supplied (${NUMBER}) science to the research program$`).exec(event.cause);
+      const amount = recordedAmount(science?.[1]);
+      const boosted = new RegExp(`^Recorded research progress (${NUMBER}) and an explicit (${NUMBER}) wonder boost completed this discovery without further science payment$`).exec(event.cause);
+      const progress = recordedAmount(boosted?.[1]); const boost = recordedAmount(boosted?.[2]);
+      const cause = amount !== null ? `Settlements supplied ${exactNumber(amount)} Science for the discovery.`
+        : progress !== null && boost !== null ? `${exactNumber(progress)} recorded research work and a ${exactNumber(boost)} wonder boost completed the discovery. No further Science was paid.`
+          : boundedRecord(state, event.cause);
+      return { title: `${actor} discovered ${technology.name}`, cause, consequence: 'Research completed. Building and production are separate steps.' };
+    }
+  }
+  if (event.type === 'history-milestone') {
+    const facts = exactEffects(event, [/^Capability stage (\d+) attained in year (-?\d+)$/, /^Historical milestone ([a-z0-9-]+) recorded$/]);
+    const milestone = HISTORICAL_MILESTONES.find(candidate => candidate.id === facts?.[1]?.[1]);
+    const stage = Number(facts?.[0]?.[1]); const year = Number(facts?.[0]?.[2]); const era = ERAS[stage];
+    if (milestone && era && stage === milestone.era && Number.isSafeInteger(year)
+      && event.cause === `Released features ${milestone.requiredFeatures.join(', ')} and observed world conditions satisfied ${milestone.id}`) {
+      return { title: milestone.name, cause: '', consequence: `${era.name} was reached in ${formatYear(year)}; the calendar was unchanged.` };
+    }
+  }
+  if (event.type === 'history-advanced') {
+    const reason = /^(milestone|feature) ([a-z0-9-]+) justified an explicit advancement at (\S+)$/.exec(event.cause);
+    const definition = (reason?.[1] === 'milestone' ? HISTORICAL_MILESTONES : FEATURES).find(candidate => candidate.id === reason?.[2]);
+    const facts = exactEffects(event, [/^Calendar (-?\d+) → (-?\d+)$/, /^Reason: ([\s\S]+)$/, /^Authoritative clock accounting and released capabilities remain unchanged$/]);
+    const before = Number(facts?.[0]?.[1]); const after = Number(facts?.[0]?.[2]); const added = after - before;
+    if (reason && definition && parseUtcTimestamp(reason[3]!) !== null && facts?.[1]?.[1] === event.detail
+      && Number.isSafeInteger(before) && Number.isSafeInteger(after) && Number.isSafeInteger(added) && added >= 0) {
+      return { title: before === after ? `The calendar stayed at ${formatYear(after)}` : `The calendar reached ${formatYear(after)}`,
+        cause: reason[1] === 'milestone' ? `${definition.name} was the recorded milestone.` : `${definition.name} was the recorded reason for this calendar change.`,
+        consequence: `${formatYear(before)} → ${formatYear(after)}. ${exactNumber(added)} years added; available capabilities did not change.` };
+    }
+  }
+  return null;
+}
+
 function regionalStory(state: StoryNames, event: GameEvent, fallback: EventLogEntry): StoryLanguage | null {
   const labels: Record<string, string> = {
     'cultivated-harvest': 'Extra harvest', 'forest-fire': 'Forest fire', 'coastal-storm': 'Coastal storm',
@@ -127,6 +243,8 @@ function regionalStory(state: StoryNames, event: GameEvent, fallback: EventLogEn
 }
 
 export function storyLanguage(state: StoryNames, event: GameEvent, fallback: EventLogEntry): StoryLanguage {
+  const historical = historicalStory(state, event);
+  if (historical) return historical;
   const actor = civilization(state, event.actor); const target = civilization(state, event.target);
   const relief = event.reliefResult;
   if (relief?.eventId === event.id && event.type === `relief-${relief.outcome}` && event.detail === relief.charter.id) {
@@ -190,13 +308,6 @@ export function storyLanguage(state: StoryNames, event: GameEvent, fallback: Eve
     const paid = coastal ? amounts(coastal.paid) : '';
     return { title: fallback.title.replace(' is founded', ' was founded'), cause,
       consequence: `${coastal ? `${exactNumber(coastal.population)} residents settled.` : population ? `${population} residents settled.` : DETAILS}${moved ? ` ${exactNumber(Number(moved[3]))} remained in the source town.` : ''}${paid ? ` Paid ${paid}.` : ''}` };
-  }
-  if (event.type === 'research-completed') {
-    const ids = event.effects.flatMap(effect => /^Technology ([a-z0-9-]+) unlocked$/.exec(effect)?.[1] ?? []);
-    const technology = ids.length === 1 ? TECHNOLOGIES.find(item => item.id === ids[0]) : undefined;
-    const science = new RegExp(`^Working settlements supplied (${NUMBER}) science to the research program$`).exec(event.cause);
-    return { title: technology ? `${actor} discovered ${technology.name}` : boundedRecord(state, fallback.title),
-      cause: science ? `Settlements supplied ${exactNumber(Number(science[1]))} Science for the discovery.` : boundedRecord(state, event.cause), consequence: 'Research completed. Building and production are separate steps.' };
   }
   if (event.type === 'building-completed') {
     const effects = recordedEffects(state, event);

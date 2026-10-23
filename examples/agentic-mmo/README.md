@@ -72,3 +72,11 @@ The additive `settlement-food-budget-1` rules separate Earth Food from infrastru
 The fresh Food world has a separate genesis and checkpoint. Previous living, partnerships, generated and first-local worlds remain read-only under their original rules and names. Versioned controller estimates use the same upkeep and staffed-production authority; historical relief proposal facts retain their original rule, and every accepted charter still transfers its exact agreed quantity or truthfully ends without delivery.
 
 This is a bounded resilience prototype, not a promise of aid in every world. Existing natural-aid failure evidence remains intact. Earned surpluses can still accumulate; no storage cap, spoilage, artificial famine or compulsory gift is added. New natural cooperation, recovery and paid Mars require their own actual campaign evidence.
+
+## Seeded strategic temperaments
+
+Newly created local Food worlds can record `strategic-temperaments-v1` and use `weighted-civilizations-v4-temperaments`. A seeded allocation gives each civilization one of five soft strategic archetypes, with a compact, measured or outward posture. Funded opportunities and current household needs determine eligible phases; preferences do not grant resources, override consent or make unavailable actions legal. These choices apply throughout settlement growth, exchange, civic development and recovery, not only to late spaceflight.
+
+Existing Food worlds keep their v3 policy, names, checkpoint and exact history. The browser uses the same Food storage key and never rotates or resets a saved world to expose a new personality. Explicit deterministic helpers retain v3 unless a caller requests the new genesis marker. New v4 choices inherit the accepted Food-v3 random draw family, while recording their distinct policy and profile identity. Hosted activation remains unsupported.
+
+The whole historical journey remains unfinished: early and middle ages need further meaningful autonomous alternatives, rivalries and consequences. Existing farming, towns, trade and industry are implemented systems, not evidence that every era already has rich content; planned mechanics remain planned until delivered.

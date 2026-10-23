@@ -1,4 +1,4 @@
-import { LOCAL_SIMULATION_STORAGE_KEY, LIVING_SIMULATION_STORAGE_KEY, PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, parseActiveLocalSimulation, parsePreviousLocalSimulation, type LocalSimulation, type PreviousLocalSimulation } from './local-simulation.ts';
+import { LOCAL_SIMULATION_STORAGE_KEY, LIVING_SIMULATION_STORAGE_KEY, PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, createFreshLocalSimulation, localSimulationSnapshot, parseLocalSimulation, parseActiveLocalSimulation, parsePreviousLocalSimulation, type LocalSimulation, type PreviousLocalSimulation } from './local-simulation.ts';
 
 export interface LocalCheckpointResult {
   run: LocalSimulation | null;
@@ -49,11 +49,11 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
     async restore(): Promise<LocalCheckpointResult> {
       let raw: string | null;
       try { raw = ports.read(LOCAL_SIMULATION_STORAGE_KEY); }
-      catch { ephemeral = true; message = 'This tab only · Not saved. Browser storage is unavailable.'; return result(createLocalSimulation()); }
+      catch { ephemeral = true; message = 'This tab only · Not saved. Browser storage is unavailable.'; return result(createFreshLocalSimulation()); }
       if (raw !== null) return restoreRecord(raw);
       if (ephemeral || !ports.withLock) {
         message = 'This tab only · Not saved. Browser locking or storage is unavailable.';
-        return result(createLocalSimulation());
+        return result(createFreshLocalSimulation());
       }
       try {
         return await ports.withLock(LOCAL_SIMULATION_STORAGE_KEY, () => {
@@ -63,13 +63,13 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
             if (latest !== null) return restoreRecord(latest);
             const seed = (ports.entropy ?? randomSeed)();
             if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new RangeError('Fresh world seed must be a uint32');
-            run = createLocalSimulation(seed);
+            run = createFreshLocalSimulation(seed);
             ports.write(LOCAL_SIMULATION_STORAGE_KEY, JSON.stringify(run));
             message = `Saved through round ${run.state.round}.`;
           } catch { ephemeral = true; message = 'This tab only · Not saved. A fresh browser checkpoint could not be saved.'; }
-          return result(run ?? createLocalSimulation());
+          return result(run ?? createFreshLocalSimulation());
         });
-      } catch { ephemeral = true; message = 'This tab only · Not saved. Browser locking is unavailable.'; return result(createLocalSimulation()); }
+      } catch { ephemeral = true; message = 'This tab only · Not saved. Browser locking is unavailable.'; return result(createFreshLocalSimulation()); }
     },
     previous(): { run: PreviousLocalSimulation | null; message: string } {
       let raw: string | null;

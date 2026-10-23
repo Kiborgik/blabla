@@ -19,8 +19,9 @@ function releasedWorld(seed = 41): WorldState {
     const applied = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch });
     assert.ok(applied.ok, `${release.id}: ${applied.error}`);
     state = applied.state;
+    if (release.id === 'settlement-interplanetary-1') break;
   }
-  assert.equal(state.releaseId, RELEASES.at(-1)?.id);
+  assert.equal(state.releaseId, 'settlement-interplanetary-1');
   assert.ok(isWorldState(state));
   return state;
 }
@@ -237,7 +238,7 @@ function play(campaign: Campaign, rounds: number): Campaign {
   return { state, memories, commands };
 }
 
-void test('latest released campaign autonomously commits, pays, completes and resumes the same seeded history', context => {
+void test('historical interplanetary campaign autonomously commits, pays, completes and resumes the same seeded history', context => {
   const initial = releasedWorld(41);
   const middle = play({ state: initial, memories: [], commands: [] }, 12);
   const continued = play(middle, 12);

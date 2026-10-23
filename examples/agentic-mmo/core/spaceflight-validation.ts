@@ -120,8 +120,9 @@ export function spaceflightRecords(world: WorldState): boolean {
 export function generatedHistoryRecords(world: WorldState): boolean {
   if (world.origin !== undefined) {
     const origin: unknown = world.origin;
-    if (!record(origin) || !keys(origin, ['kind', 'generatorVersion', 'seed', 'clockEpoch', ...(Object.hasOwn(origin, 'initialReleaseId') ? ['initialReleaseId'] : []), ...(Object.hasOwn(origin, 'namingVersion') ? ['namingVersion'] : [])])
+    if (!record(origin) || !keys(origin, ['kind', 'generatorVersion', 'seed', 'clockEpoch', ...(Object.hasOwn(origin, 'initialReleaseId') ? ['initialReleaseId'] : []), ...(Object.hasOwn(origin, 'namingVersion') ? ['namingVersion'] : []), ...(Object.hasOwn(origin, 'temperamentVersion') ? ['temperamentVersion'] : [])])
       || Object.hasOwn(origin, 'namingVersion') && origin.namingVersion !== 'cultural-toponyms-v1'
+      || Object.hasOwn(origin, 'temperamentVersion') && (origin.temperamentVersion !== 'strategic-temperaments-v1' || origin.initialReleaseId !== 'settlement-food-budget-1' || !world.unlockedFeatures.includes('food-budget'))
       || origin.kind !== 'generated' || origin.generatorVersion !== 'coherent-geography-v1' || origin.seed !== world.seed || origin.clockEpoch !== world.clockEpoch
       || Object.hasOwn(origin, 'initialReleaseId') && (typeof origin.initialReleaseId !== 'string' || !['settlement-living-partnerships-1', 'settlement-relief-charters-1', 'settlement-regional-targets-1', 'settlement-food-budget-1'].includes(origin.initialReleaseId)
         || !world.unlockedFeatures.includes('partnership-stewardship') || !world.unlockedFeatures.includes('historical-pressures')

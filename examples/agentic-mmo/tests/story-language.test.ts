@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { applyRelease, createWorld } from '../core/engine.ts';
 import { BUILDINGS, PUBLIC_PROJECT_RECIPES, TECHNOLOGIES } from '../core/content.ts';
 import { RELEASES } from '../core/release.ts';
+import { selectHistoricalEventTarget } from '../core/historical-selection.ts';
 import { executeAction, applyDirectorEvent } from '../core/simulation/commands.ts';
 import { installBuilding } from '../core/simulation/construction.ts';
 import { completeResearch } from '../core/simulation/research.ts';
@@ -23,7 +24,9 @@ function world(): WorldState {
       if (!release.compatibleFrom.includes(baseline.releaseId)) continue;
       const next = applyRelease(baseline, { expectedRevision: baseline.revision, expectedFromReleaseId: baseline.releaseId, targetReleaseId: release.id, timestamp: epoch });
       assert.ok(next.ok, next.error); baseline = next.state;
+      if (baseline.releaseId === 'settlement-food-budget-1') break;
     }
+    assert.equal(baseline.releaseId, 'settlement-food-budget-1');
   }
   return structuredClone(baseline);
 }
@@ -36,6 +39,10 @@ function language(state: WorldState, event: GameEvent) {
 }
 function record(events: GameEvent[], type: string): GameEvent {
   const event = events.findLast(item => item.type === type); assert.ok(event, type); return event;
+}
+function regional(state: WorldState, type: string, target: number, events: GameEvent[]): void {
+  const selection = selectHistoricalEventTarget(state, type, target); assert.ok(selection);
+  applyDirectorEvent(state, type, target, events, undefined, selection);
 }
 function trade() {
   const state = world(); const events: GameEvent[] = [];
@@ -116,7 +123,7 @@ void test('a real coastal storm and later town repair retain distinct local cons
   const shore = state.tiles.find(tile => hexDistance(site, tile) === 1 && !state.cities.some(town => town.tileId === tile.id)); assert.ok(shore);
   shore.terrain = 'ocean';
   const events: GameEvent[] = [];
-  applyDirectorEvent(state, 'coastal-storm', city.civId, events);
+  regional(state, 'coastal-storm', city.civId, events);
   executeAction(state, city.civId, { type: 'repair-city', cityId: city.id }, events);
   const storm = record(events, 'coastal-storm'); const repair = record(events, 'city-repaired');
   const stormText = language(state, storm); const repairText = language(state, repair);
@@ -138,7 +145,7 @@ void test('a real coastal storm and later town repair retain distinct local cons
 void test('regional gathering and migration keep real shared-stock changes and do not become cargo or population growth', () => {
   const { state, events, route } = trade();
   state.round = route.agreement!.nextDeliveryRound; resolveTrade(state, events);
-  applyDirectorEvent(state, 'trade-fair', 0, events);
+  regional(state, 'trade-fair', 0, events);
   const fair = language(state, record(events, 'trade-fair'));
   assert.match(fair.cause, /earlier delivery/);
   assert.match(fair.consequence, /Food.*Materials.*Credits.*Culture/);
@@ -147,7 +154,7 @@ void test('regional gathering and migration keep real shared-stock changes and d
   const source = state.cities[0]!; source.damage = 40; source.population = 6;
   const site = state.tiles.find(tile => tile.owner === 0 && tile.id !== source.tileId && tile.terrain !== 'ocean' && tile.terrain !== 'mountain'); assert.ok(site);
   state.cities.push({ ...structuredClone(source), id: 'city-destination', name: 'Safe Harbour', tileId: site.id, damage: 0, wellbeing: 70, population: 2, housing: { ruleVersion: 1, baseCapacity: 6, establishedRound: 0, origin: 'founded' } });
-  applyDirectorEvent(state, 'internal-migration', 0, events);
+  regional(state, 'internal-migration', 0, events);
   const move = language(state, record(events, 'internal-migration'));
   assert.match(move.cause, /Safe Harbour/);
   assert.match(move.consequence, /People 6 → 4.*People 2 → 4/);
@@ -214,7 +221,7 @@ void test('regional harvest fire and industrial injury explain committed causes 
       state.civilizations[0]!.era = 2; city.buildings.push('guild-workshop');
       city.buildingOperations = { 'guild-workshop': { enabled: true, lastResult: { round: state.round, status: 'operated', paid: { energy: 1 }, produced: { materials: 2 }, shortages: [] } } };
     }
-    applyDirectorEvent(state, type, 0, events);
+    regional(state, type, 0, events);
     const committed = record(events, type); const display = language(state, committed);
     assert.match(display.title, new RegExp(city.name));
     assert.doesNotMatch(display.cause, /city-|guild-workshop|tile|current round/);

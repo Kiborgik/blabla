@@ -2,7 +2,7 @@ import { applyRelease, createWorld, legalActions } from './engine.ts';
 import { generateGeography, GENERATED_GEOGRAPHY_VERSION } from './generated-geography.ts';
 import { RELEASES } from './release.ts';
 import { COAL_RULES, METAL_RULES, PASTORAL_RULES } from './content.ts';
-import { CIV_COUNT, type PlaceNamingVersion, type WorldState } from './types.ts';
+import { CIV_COUNT, type PlaceNamingVersion, type StrategicTemperamentVersion, type WorldState } from './types.ts';
 import { isWorldState } from './validation.ts';
 import { parseUtcTimestamp } from './simulation/clock.ts';
 import { hexDistance } from './simulation/geography.ts';
@@ -11,9 +11,11 @@ import { createPastoralSites } from './simulation/pastoral.ts';
 import { createLandTransportPlanner } from './simulation/transport.ts';
 import { generatePlaceName } from './place-names.ts';
 import { isCoastalSite } from './simulation/coastal.ts';
+import { civilizationBehaviorProfile, TEMPERAMENT_BEHAVIOR_POLICY_VERSION } from './behavior-profiles.ts';
 
-export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion): WorldState {
+export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion, temperamentVersion?: StrategicTemperamentVersion): WorldState {
   if (namingVersion !== undefined && namingVersion !== 'cultural-toponyms-v1') throw new RangeError('Generated worlds require a supported naming version');
+  if (temperamentVersion !== undefined && (temperamentVersion !== 'strategic-temperaments-v1' || initialReleaseId !== 'settlement-food-budget-1')) throw new RangeError('Strategic temperaments require their supported version and Food-budget genesis');
   if (parseUtcTimestamp(clockEpoch) === null) throw new RangeError('Generated worlds require an explicit UTC clock epoch');
   const geography = generateGeography(seed);
   let state = createWorld(seed, clockEpoch);
@@ -27,7 +29,7 @@ export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialRel
   state.height = geography.height;
   state.tiles = geography.tiles;
   state.rng = geography.rng;
-  state.origin = { kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed: state.seed, clockEpoch, ...(namingVersion ? { namingVersion } : {}), ...(initialReleaseId !== 'settlement-interplanetary-1' ? { initialReleaseId } : {}) };
+  state.origin = { kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed: state.seed, clockEpoch, ...(namingVersion ? { namingVersion } : {}), ...(temperamentVersion ? { temperamentVersion } : {}), ...(initialReleaseId !== 'settlement-interplanetary-1' ? { initialReleaseId } : {}) };
   for (const city of state.cities) {
     const tileId = geography.capitalTileIds[city.civId];
     const center = tileId === undefined ? undefined : state.tiles[tileId];
@@ -45,6 +47,7 @@ export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialRel
       occupied.push(city.name);
     }
   }
+  if (temperamentVersion) for (const city of state.cities) city.focus = civilizationBehaviorProfile(state.seed, city.civId, TEMPERAMENT_BEHAVIOR_POLICY_VERSION).preferredFocus;
   state.strategicDeposits = createStrategicDeposits(state);
   state.pastoralSites = createPastoralSites(state);
   state.coalDeposits = createCoalDeposits(state);
