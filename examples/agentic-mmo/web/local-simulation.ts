@@ -36,7 +36,7 @@ export interface PreviousLocalSimulation extends Omit<LocalSimulation, 'version'
 }
 
 export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' = ACTIVE_LOCAL_RELEASE_ID): LocalSimulation {
-  const state = createGeneratedWorld(seed, EPOCH, initialReleaseId);
+  const state = createGeneratedWorld(seed, EPOCH, initialReleaseId, initialReleaseId === ACTIVE_LOCAL_RELEASE_ID ? 'cultural-toponyms-v1' : undefined);
   return { version: 2, source: 'local-procedural', policyVersion: BEHAVIOR_POLICY_VERSION, seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
 }
 
@@ -111,5 +111,6 @@ export function advanceLocalSimulation(run: LocalSimulation, steps = 1): LocalSi
 
 export function localSimulationSnapshot(run: LocalSimulation | PreviousLocalSimulation): LiveSnapshot {
   const genesis = run.state.origin?.initialReleaseId;
-  return { identity: `local:${run.state.origin?.generatorVersion ?? 'legacy-foundation-v1'}:${run.seed}:${run.state.clockEpoch}${genesis ? `:${genesis}` : ''}`, state: run.state };
+  const naming = run.state.origin?.namingVersion;
+  return { identity: `local:${run.state.origin?.generatorVersion ?? 'legacy-foundation-v1'}:${run.seed}:${run.state.clockEpoch}${genesis ? `:${genesis}` : ''}${naming ? `:${naming}` : ''}`, state: run.state };
 }

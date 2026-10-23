@@ -7,6 +7,7 @@ import { hasFeatures } from './history.ts';
 import { canAfford, citiesOf, civilizationById, transferCost } from './world.ts';
 import { describeSettlementSite } from './sites.ts';
 import { emitEvent } from './events.ts';
+import { generatePlaceName } from '../place-names.ts';
 
 export function isCoastalSite(state: Pick<WorldState, 'tiles'>, tileId: number): boolean {
   const site = state.tiles.find(tile => tile.id === tileId);
@@ -30,12 +31,18 @@ export function foundingSiteEligible(state: WorldState, tile: HexTile): boolean 
 
 export function foundSettlement(state: WorldState, seat: number, tile: HexTile, source: City | undefined, conserved: boolean): City {
   if (conserved && (!source || source.civId !== seat || !foundingSourceEligible(source))) throw new RangeError('Founding requires an owned source with enough people to preserve its minimum population');
-  if (conserved && source) source.population -= ECONOMY_RULES.settle.population;
   const civilization = civilizationById(state, seat);
+  const id = `city-${seat}-${state.revision}`;
+  let name = `${civilization.name} ${citiesOf(state, seat).length + 1}`;
+  if (state.origin?.namingVersion === 'cultural-toponyms-v1') {
+    if (tile.terrain === 'ocean' || tile.terrain === 'mountain') throw new RangeError('Settlement naming requires an inhabited founding site');
+    name = generatePlaceName({ worldSeed: state.seed, civId: seat, cityId: id, locality: { terrain: tile.terrain, coastal: isCoastalSite(state, tile.id) } }, state.cities.map(city => city.name));
+  }
+  if (conserved && source) source.population -= ECONOMY_RULES.settle.population;
   transferCost(civilization.resources, ECONOMY_RULES.settle.cost);
   tile.owner = seat;
   const city: City = {
-    id: `city-${seat}-${state.revision}`, name: `${civilization.name} ${citiesOf(state, seat).length + 1}`,
+    id, name,
     civId: seat, tileId: tile.id, ...ECONOMY_RULES.initialCity,
     population: ECONOMY_RULES.settle.population, focus: source?.focus ?? 'growth', buildings: [],
   };

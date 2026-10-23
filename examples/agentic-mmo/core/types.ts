@@ -10,7 +10,8 @@ export const DIRECTOR_SEAT = 5;
 
 export type Resource = 'food' | 'materials' | 'energy' | 'credits' | 'science' | 'culture';
 export type Resources = Record<Resource, number>;
-export interface GeneratedWorldOrigin { kind: 'generated'; generatorVersion: 'coherent-geography-v1'; seed: number; clockEpoch: string; initialReleaseId?: 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' }
+export type PlaceNamingVersion = 'cultural-toponyms-v1';
+export interface GeneratedWorldOrigin { namingVersion?: PlaceNamingVersion; kind: 'generated'; generatorVersion: 'coherent-geography-v1'; seed: number; clockEpoch: string; initialReleaseId?: 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' }
 export type MarsMissionKind = 'settle' | 'resupply';
 export interface MarsMissionQuote { ruleVersion: 1; civId: number; mission: MarsMissionKind; sourceCityId: string; departureRound: number; arrivalRound: number; settlers: number; launchCost: Partial<Resources>; cargo: Partial<Resources>; totalCost: Partial<Resources>; sourcePopulationBefore: number; sourcePopulationAfter: number }
 export interface MarsMission extends MarsMissionQuote { id: string; eventId: string; paid: Partial<Resources> }
