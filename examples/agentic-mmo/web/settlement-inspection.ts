@@ -129,6 +129,8 @@ export function renderTerritoryInspection(host: HTMLElement, territory: TownTerr
         if (work?.installed?.operation.lastResult) {
           const result = work.installed.operation.lastResult;
           row.append(text('span', `Last recorded season ${result.round} · ${improvementLastLabel(result)}`, 'work-record-round'), vectorLine('Made', result.produced), text('p', `Assigned then: ${result.residents.allocated} resident${result.residents.allocated === 1 ? '' : 's'}.`));
+          if (result.inputs) row.append(vectorLine('Paid that season', result.paid));
+          for (const input of result.inputs ?? []) row.append(text('p', `${METRIC_LABELS[input.resource]} needed ${exactNumber(input.required)} · Available before that attempt ${exactNumber(input.available)}`));
         } else if (work?.status === 'built') row.append(text('p', 'No operating record yet.'));
         const receipt = townDisclosure(`land-record:${record.tileId}`, `Purchase record · ${exactNumber(record.paid.credits)} Credits`);
         receipt.append(text('p', `${territory.cityName ?? 'Recorded town'} acquired Tile ${record.tileId} in round ${record.acquiredRound}. Paid once: ${exactNumber(record.paid.credits)} Credits.`),
@@ -339,6 +341,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     card.append(siteHeading, text('p', `Built · ${site.operation.enabled ? 'On' : 'Paused'} now`, 'building-current'));
     if (definition) card.append(text('p', `Needs ${definition.residentsRequired} local resident each operating season. People stay in this town.`, 'building-summary'),
       amountLine('Base before town productivity', RESOURCE_IDS.flatMap(resource => { const amount = definition.production[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
+    if (definition?.operatingInputs) card.append(vectorLine('Opening supplies needed each operating season', definition.operatingInputs), text('p', 'All opening supplies and local support must be available. Base output is not a delivery or a recorded result.', 'building-summary'));
     const built = townDisclosure(`improvement:${site.tileId}:built`, `Completed · Round ${site.completion.completedRound}`);
     built.append(amountLine('Paid once', RESOURCE_IDS.flatMap(resource => { const amount = site.completion.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
       text('p', `Work ${site.completion.workRequired} · Event ${site.completion.eventId}`, 'settlement-facts'));
@@ -353,6 +356,8 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
         text('p', 'This allocation belongs to that recorded season. Current population and pause choices may have changed.'),
         amountLine('Paid that season', RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
         amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
+      for (const input of last.inputs ?? []) receipt.append(text('p', `${METRIC_LABELS[input.resource]} needed ${exactNumber(input.required)} · Available before that attempt ${exactNumber(input.available)}`, 'operation-input'));
+      for (const shortage of last.shortages ?? []) receipt.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
       if (last.extraction) for (const fact of extractionFacts(last.extraction)) receipt.append(text('p', fact, 'extraction-fact'));
       card.append(receipt);
     } else card.append(text('p', 'No operating result has been recorded yet. Output requires a later season with local support.', 'building-summary'));
@@ -480,7 +485,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
         results.append(amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
           amountLine('Used', [...RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; }), ...strategicResourceAmounts('strategicPaid' in last ? last.strategicPaid : undefined)]));
         preview.append(results);
-        if (last.status === 'blocked' && 'shortages' in last) for (const shortage of last.shortages) preview.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
+        if (last.status === 'blocked' && 'shortages' in last) for (const shortage of last.shortages ?? []) preview.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
         if ('strategicShortages' in last) for (const shortage of last.strategicShortages ?? []) preview.append(text('p', `${strategicResourceLabel(shortage.resource)} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
         if (last.status === 'blocked' && operation) preview.append(text('p', operationVisual(operation).last?.label ?? 'Could not operate', 'work-record-round'));
         if (last.status !== 'operated') preview.append(text('span', last.status === 'paused' ? 'Paused in that season' : 'Could not operate in that season', 'work-record-round'));

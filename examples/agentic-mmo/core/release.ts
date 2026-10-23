@@ -62,9 +62,13 @@ const regionalRelease: CompatibleReleaseDefinition = {
   id: 'settlement-regional-targets-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
   compatibleFrom: [reliefRelease.id], featureIds: [...reliefRelease.featureIds, 'procedural-regional-targets'],
 };
-export const RELEASES: readonly CompatibleReleaseDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, {
+const foodRelease: CompatibleReleaseDefinition = {
   id: 'settlement-food-budget-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
   compatibleFrom: [regionalRelease.id], featureIds: [...regionalRelease.featureIds, 'food-budget'],
+};
+export const RELEASES: readonly CompatibleReleaseDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, {
+  id: 'settlement-shore-fisheries-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  compatibleFrom: [foodRelease.id], featureIds: [...foodRelease.featureIds, 'shore-fisheries'],
 }];
 
 function currentRelease(): CompatibleReleaseDefinition {

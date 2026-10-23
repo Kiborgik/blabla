@@ -962,11 +962,18 @@ element('#world-source').addEventListener('change', (event) => {
   if (source) changeWorldSource(source);
 });
 async function tickLocalObservatory(): Promise<void> {
-  if (mode !== 'local' || document.hidden || localStopped || localAdvancing || !localSimulation || localSimulation.state.outcome) return;
+  if (mode !== 'local' || document.hidden || localStopped || localSaveBlocked || localAdvancing || !localSimulation || localSimulation.state.outcome) return;
   localAdvancing = true;
   const prior = localSimulation;
   try {
-    const next = await advanceLocalSimulationAsync(prior, 2);
+    const prepared = await localWorldStorage.prepareCurrentRelease(() => mode === 'local' && !document.hidden && !localStopped ? localSimulation : null);
+    localSaveMessage = prepared.message; localEphemeral = prepared.ephemeral; localSaveBlocked = prepared.blocked;
+    if (mode !== 'local' || document.hidden || localStopped || localSaveBlocked || localSimulation !== prior || !prepared.run) { renderConnection(); return; }
+    localSimulation = prepared.run;
+    if (localSimulation.state.outcome) { observeLocalSimulation(); return; }
+    const advancing = localSimulation;
+    const next = await advanceLocalSimulationAsync(advancing, 2);
+    if (mode !== 'local' || document.hidden || localStopped || localSaveBlocked || localSimulation !== advancing) return;
     if (localSimulationSnapshot(localSimulation).identity === localSimulationSnapshot(next).identity && next.steps >= localSimulation.steps && next.state.revision >= localSimulation.state.revision) localSimulation = next;
     if (mode === 'local' && !document.hidden) observeLocalSimulation();
     localFrames += 1;

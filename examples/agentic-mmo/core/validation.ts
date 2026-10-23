@@ -56,6 +56,7 @@ import {
   type GovernmentState,
   type ConstructionCompletion,
   type ImprovementConstructionCompletion,
+  type ImprovementDefinition,
   type CoastalFoundingReceipt,
   type Civilization,
   type GameEvent,
@@ -350,6 +351,11 @@ function foodSupplyRecords(cities: City[], round: number, features: string[]): b
 function resourceAmounts(value: unknown): value is Partial<Resources> {
   return record(value) && Object.entries(value).every(([resource, amount]) =>
     RESOURCE_IDS.some((known) => known === resource) && finite(amount));
+}
+
+function exactResourceAmounts(value: unknown, expected: Partial<Resources>): boolean {
+  return resourceAmounts(value) && Object.keys(value).length === Object.keys(expected).length
+    && RESOURCE_IDS.every(resource => value[resource] === expected[resource]);
 }
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -1113,7 +1119,10 @@ function constructionIdentity(value: Record<string, unknown>, settlement: City, 
   if (value.kind === 'improvement') return features.includes(IMPROVEMENT_RULES.featureId) && integer(value.tileId)
     && IMPROVEMENTS.some(definition => definition.id === value.improvementId)
     && (value.improvementId !== 'pasture' || features.includes('water-land'))
-    && (value.improvementId !== 'lumber-mill' || features.includes('forest-production'));
+    && (value.improvementId !== 'lumber-mill' || features.includes('forest-production'))
+    && IMPROVEMENTS.some(definition => definition.id === value.improvementId && (!definition.operatingInputs
+      || definition.requiredFeatures.every(feature => features.includes(feature)) && value.workRequired === definition.requiredWork
+      && exactResourceAmounts(value.paid, definition.cost)));
   return !Object.hasOwn(value, 'kind') && typeof value.buildingId === 'string'
     && BUILDINGS.some(building => building.id === value.buildingId)
     && settlement.buildings.includes(value.buildingId) === completed
@@ -1167,7 +1176,45 @@ function sameImprovementCompletion(left: ImprovementConstructionCompletion, righ
     && RESOURCE_IDS.every(resource => Object.hasOwn(left.paid, resource) === Object.hasOwn(right.paid, resource) && left.paid[resource] === right.paid[resource]);
 }
 
-function improvementResult(value: unknown, completedRound: number, round: number, features: string[]): boolean {
+function paidImprovementResult(value: unknown, definition: ImprovementDefinition, completedRound: number, round: number, features: string[]): boolean {
+  if (!definition.requiredFeatures.every(feature => features.includes(feature)) || !record(value)
+    || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'residents', 'blockedReason', 'inputs', 'shortages'])
+    || !integer(value.round, completedRound + 1, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
+    || !residentAllocation(value.residents) || !Array.isArray(value.inputs) || !Array.isArray(value.shortages)) return false;
+  const residents = value.residents;
+  const produced = value.produced;
+  if (residents.required !== definition.residentsRequired || residents.communityReserve !== RESIDENT_CAPACITY_RULES.communityReserve) return false;
+  const resources = RESOURCE_IDS.filter(resource => (definition.operatingInputs?.[resource] ?? 0) > 0);
+  if (value.inputs.length !== resources.length) return false;
+  const missing: Array<{ resource: string; required: number; available: number }> = [];
+  for (const [index, resource] of resources.entries()) {
+    const input: unknown = value.inputs[index];
+    if (!record(input) || !exactKeys(input, ['resource', 'required', 'available']) || input.resource !== resource
+      || input.required !== definition.operatingInputs?.[resource] || !finite(input.required, Number.MIN_VALUE) || !finite(input.available)) return false;
+    if (input.available < input.required) missing.push({ resource, required: input.required, available: input.available });
+  }
+  const expectedShortages = value.status === 'paused' || value.blockedReason === 'site-ineligible' ? [] : missing;
+  if (value.shortages.length !== expectedShortages.length || !value.shortages.every((shortage: unknown, index: number) => {
+    const expected = expectedShortages[index];
+    return expected && record(shortage) && exactKeys(shortage, ['resource', 'required', 'available'])
+      && shortage.resource === expected.resource && shortage.required === expected.required && shortage.available === expected.available;
+  })) return false;
+  if (value.status === 'operated') return value.blockedReason === null && missing.length === 0
+    && residents.allocated === residents.required && residents.available >= residents.required
+    && exactResourceAmounts(value.paid, definition.operatingInputs ?? {})
+    && RESOURCE_IDS.every(resource => {
+      const amount = produced[resource];
+      return !Object.hasOwn(produced, resource) || (definition.production[resource] ?? 0) > 0 && finite(amount, Number.MIN_VALUE) && quantized(amount) === amount;
+    });
+  if (Object.keys(value.paid).length || Object.keys(value.produced).length || residents.allocated !== 0) return false;
+  return value.status === 'paused' ? value.blockedReason === null : value.status === 'blocked'
+    && (value.blockedReason === 'site-ineligible' || value.blockedReason === 'input-shortage' && missing.length > 0
+      || value.blockedReason === 'resident-shortage' && missing.length === 0 && residents.available < residents.required);
+}
+
+function improvementResult(value: unknown, improvementId: unknown, completedRound: number, round: number, features: string[]): boolean {
+  const definition = IMPROVEMENTS.find(candidate => candidate.id === improvementId);
+  if (definition?.operatingInputs) return paidImprovementResult(value, definition, completedRound, round, features);
   if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'residents', 'blockedReason', ...(Object.hasOwn(value, 'extraction') ? ['extraction'] : [])])
     || !integer(value.round, completedRound + 1, round) || !resourceAmounts(value.paid) || Object.keys(value.paid).length !== 0
     || !resourceAmounts(value.produced) || !residentAllocation(value.residents)) return false;
@@ -1207,7 +1254,7 @@ function improvementRecords(cities: City[], tiles: HexTile[], events: GameEvent[
           || !constructionCompletion(value.completion, settlement, features, round, revision)
           || !('kind' in value.completion) || value.completion.kind !== 'improvement' || value.completion.improvementId !== value.improvementId || value.completion.tileId !== value.tileId
           || !record(value.operation) || !exactKeys(value.operation, ['enabled', 'lastResult']) || typeof value.operation.enabled !== 'boolean'
-          || value.operation.lastResult !== null && !improvementResult(value.operation.lastResult, value.completion.completedRound, round, features)
+          || value.operation.lastResult !== null && !improvementResult(value.operation.lastResult, value.improvementId, value.completion.completedRound, round, features)
           || value.improvementId !== 'mine' && record(value.operation.lastResult) && Object.hasOwn(value.operation.lastResult, 'extraction')) return false;
         const completion = value.completion;
         const event = events.find(item => item.id === completion.eventId);

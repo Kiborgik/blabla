@@ -137,6 +137,7 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
         { label: 'Build once', value: amounts(definition.cost) },
         { label: 'Construction work', value: `${number(definition.requiredWork)} work` },
         { label: 'Local support each season', value: `${definition.residentsRequired} resident assigned; people stay in the town` },
+        ...(definition.operatingInputs ? [{ label: 'Opening supplies each operating season', value: amounts(definition.operatingInputs) }, { label: 'Operating requirement', value: 'All opening supplies and local support must be available. Base output is not a recorded result.' }] : []),
         { label: 'Base production before productivity', value: amounts(definition.production) },
       ] : [
         { label: 'Build once', value: amounts(definition.cost) },
@@ -169,8 +170,10 @@ export function capabilityTreeNodes(input: CapabilityTreeInput): CapabilityTreeN
         facts.push({ label: `Built site ${site.tileId}`, value: site.operation.enabled ? 'On now' : 'Paused now' });
         const last = site.operation.lastResult;
         facts.push({ label: `Site ${site.tileId} last record`, value: last
-          ? `Round ${last.round} · ${improvementLastLabel(last)} · Assigned ${last.residents.allocated} of ${last.residents.required} resident · Available then ${last.residents.available} · Made ${amounts(last.produced)}`
+          ? `Round ${last.round} · ${improvementLastLabel(last)} · Assigned ${last.residents.allocated} of ${last.residents.required} resident · Available then ${last.residents.available}${last.inputs ? ` · Paid ${amounts(last.paid)}` : ''} · Made ${amounts(last.produced)}`
           : 'No operating record yet' });
+        if (last?.inputs?.length) facts.push({ label: `Site ${site.tileId} recorded opening supplies`, value: last.inputs.map(input => `${resourceGuide(input.resource).label} needed ${number(input.required)} · Available before that attempt ${number(input.available)}`).join('; ') });
+        if (last?.shortages?.length) facts.push({ label: `Site ${site.tileId} recorded shortages`, value: last.shortages.map(input => `${resourceGuide(input.resource).label} needed ${number(input.required)} · Available then ${number(input.available)}`).join('; ') });
         if (last?.extraction) facts.push({ label: `Site ${site.tileId} extraction record`, value: extractionFacts(last.extraction).join(' · ') });
       }
     }

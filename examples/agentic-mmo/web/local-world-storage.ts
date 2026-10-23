@@ -1,3 +1,4 @@
+import { SHORE_LOCAL_RELEASE_ID, transitionLocalRelease } from './local-release-transition.ts';
 import { LOCAL_SIMULATION_STORAGE_KEY, LIVING_SIMULATION_STORAGE_KEY, PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, createFreshLocalSimulation, localSimulationSnapshot, parseLocalSimulation, parseActiveLocalSimulation, parsePreviousLocalSimulation, type LocalSimulation, type PreviousLocalSimulation } from './local-simulation.ts';
 
 export interface LocalCheckpointResult {
@@ -27,6 +28,15 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
   let blocked = false;
   let message = '';
   const result = (run: LocalSimulation | null): LocalCheckpointResult => ({ run, ephemeral, blocked, message });
+  const refuse = (reason: string, run: LocalSimulation | null = null): LocalCheckpointResult => {
+    blocked = true; ephemeral = true;
+    message = `Not saved. ${reason} The stored checkpoint is preserved.`;
+    return result(run);
+  };
+  const adopt = (run: LocalSimulation): LocalCheckpointResult => {
+    message = `Saved through round ${run.state.round} · Updated by another tab.`;
+    return result(run);
+  };
   const restoreRecord = (raw: string): LocalCheckpointResult => {
     const run = decode(raw, parseActiveLocalSimulation);
     if (run) {
@@ -88,6 +98,37 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
     priorGenerated(): { run: LocalSimulation | null; message: string } {
       return historical(PRIOR_GENERATED_SIMULATION_STORAGE_KEY, 'previous generated world');
     },
+    async prepareCurrentRelease(current: () => LocalSimulation | null): Promise<LocalCheckpointResult> {
+      try {
+        const initial = current();
+        if (!initial || blocked) return result(null);
+        if (!parseActiveLocalSimulation(initial)) return refuse('The active world is incompatible or corrupt.');
+        if (ephemeral || !ports.withLock || initial.state.releaseId === SHORE_LOCAL_RELEASE_ID || initial.state.outcome) return result(initial);
+        return await ports.withLock(LOCAL_SIMULATION_STORAGE_KEY, () => {
+          const run = current();
+          if (!run || blocked || ephemeral) return result(null);
+          if (!parseActiveLocalSimulation(run)) return refuse('The active world is incompatible or corrupt.');
+          if (run.state.releaseId === SHORE_LOCAL_RELEASE_ID || run.state.outcome) return result(run);
+          try {
+            const raw = ports.read(LOCAL_SIMULATION_STORAGE_KEY);
+            const stored = raw === null ? null : decode(raw, parseActiveLocalSimulation);
+            if (!stored || localSimulationSnapshot(stored).identity !== localSimulationSnapshot(run).identity)
+              return refuse('The saved world is missing, different or unavailable.');
+            if (stored.steps < run.steps || stored.state.revision < run.state.revision
+              || stored.steps === run.steps && stored.state.revision === run.state.revision && JSON.stringify(stored) !== JSON.stringify(run))
+              return refuse('The active world conflicts with its saved checkpoint.');
+            const prepared = transitionLocalRelease(stored, 'active-local');
+            if (prepared.status === 'refused') return refuse('The compatible release could not be prepared.');
+            if (current() !== run) return result(null);
+            if (prepared.status === 'changed') {
+              ports.write(LOCAL_SIMULATION_STORAGE_KEY, JSON.stringify(prepared.run));
+              message = `Saved through round ${prepared.run.state.round}.`;
+            } else message = `Saved through round ${stored.state.round}.`;
+            return result(prepared.run);
+          } catch { return refuse('The compatible release could not be saved.'); }
+        });
+      } catch { return refuse('Browser locking or storage is unavailable.'); }
+    },
     async save(current: () => LocalSimulation | null): Promise<LocalCheckpointResult> {
       if (ephemeral || blocked || !ports.withLock || !current()) return result(current());
       try {
@@ -95,25 +136,30 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
           const run = current();
           if (!run || ephemeral || blocked) return result(run);
           try {
-            if (!parseActiveLocalSimulation(run)) {
-              blocked = true; ephemeral = true; message = 'This tab only · Not saved. Historical or unavailable world rules were preserved.'; return result(run);
-            }
+            if (!parseActiveLocalSimulation(run)) return refuse('Historical or unavailable world rules cannot be saved here.', run);
             const raw = ports.read(LOCAL_SIMULATION_STORAGE_KEY);
-            if (raw !== null) {
-              const stored = decode(raw, parseActiveLocalSimulation);
-              if (!stored || localSimulationSnapshot(stored).identity !== localSimulationSnapshot(run).identity) {
-                blocked = true; ephemeral = true; message = 'This tab only · Not saved. A different or unavailable saved world was preserved.'; return result(run);
-              }
-              if (stored.steps > run.steps || stored.state.revision > run.state.revision) {
-                message = `Saved through round ${stored.state.round} · Updated by another tab.`; return result(stored);
-              }
+            const stored = raw === null ? null : decode(raw, parseActiveLocalSimulation);
+            if (!stored || localSimulationSnapshot(stored).identity !== localSimulationSnapshot(run).identity)
+              return refuse('A missing, different or unavailable saved world cannot be replaced.', run);
+            if (stored.state.releaseId === SHORE_LOCAL_RELEASE_ID && run.state.releaseId !== SHORE_LOCAL_RELEASE_ID) {
+              if (stored.steps >= run.steps && stored.state.revision >= run.state.revision) return adopt(stored);
+              return refuse('An older world release cannot replace its compatible successor.', run);
             }
+            if (stored.state.releaseId !== run.state.releaseId) return refuse('A release must be saved through active preparation.', run);
+            if (stored.steps === run.steps && stored.state.revision === run.state.revision) {
+              if (JSON.stringify(stored) !== JSON.stringify(run)) return refuse('The active world conflicts with its saved checkpoint.', run);
+              message = `Saved through round ${stored.state.round}.`;
+              return result(run);
+            }
+            if (stored.steps >= run.steps && stored.state.revision >= run.state.revision) return adopt(stored);
+            if (stored.state.outcome || stored.steps > run.steps || stored.state.revision > run.state.revision)
+              return refuse('The active world conflicts with a newer or finished checkpoint.', run);
             ports.write(LOCAL_SIMULATION_STORAGE_KEY, JSON.stringify(run));
             message = `Saved through round ${run.state.round}.`;
-          } catch { ephemeral = true; message = 'This tab only · Not saved. Browser storage is unavailable or full.'; }
+          } catch { return refuse('Browser storage is unavailable or full.', run); }
           return result(run);
         });
-      } catch { ephemeral = true; message = 'This tab only · Not saved. Browser locking is unavailable.'; return result(current()); }
+      } catch { return refuse('Browser locking is unavailable.', current()); }
     },
   };
 }

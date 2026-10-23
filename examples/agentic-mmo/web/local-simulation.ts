@@ -2,6 +2,7 @@ import { applyCommand, applyHistoryAdvance, catchUpClock, catchUpStrategy } from
 import { behaviorPolicyVersion, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, isLegacyBehaviorMemory, type LegacyBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
 import { LEGACY_BEHAVIOR_POLICY_VERSION } from '../core/behavior-profiles.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
+import { RELEASES } from '../core/release.ts';
 import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
 import { DIRECTOR_SEAT, type GameAction, type StrategicTemperamentVersion, type WorldState } from '../core/types.ts';
 import { isGameAction } from '../core/planning.ts';
@@ -74,7 +75,13 @@ function parseRun(value: unknown, previous: boolean): LocalSimulation | Previous
 export function parseLocalSimulation(value: unknown): LocalSimulation | null { return parseRun(value, false) as LocalSimulation | null; }
 export function parseActiveLocalSimulation(value: unknown): LocalSimulation | null {
   const run = parseLocalSimulation(value);
-  return run?.state.releaseId === ACTIVE_LOCAL_RELEASE_ID && run.state.origin?.initialReleaseId === ACTIVE_LOCAL_RELEASE_ID ? run : null;
+  if (!run || run.state.origin?.initialReleaseId !== ACTIVE_LOCAL_RELEASE_ID
+    || run.state.releaseId !== ACTIVE_LOCAL_RELEASE_ID && run.state.releaseId !== 'settlement-shore-fisheries-1') return null;
+  const release = RELEASES.find(candidate => candidate.id === run.state.releaseId);
+  return release && release.schemaVersion === run.state.schemaVersion && release.gameVersion === run.state.gameVersion
+    && run.state.unlockedFeatures.length === release.featureIds.length
+    && new Set(run.state.unlockedFeatures).size === run.state.unlockedFeatures.length
+    && release.featureIds.every(feature => run.state.unlockedFeatures.includes(feature)) ? run : null;
 }
 export function parsePreviousLocalSimulation(value: unknown): PreviousLocalSimulation | null { return parseRun(value, true) as PreviousLocalSimulation | null; }
 

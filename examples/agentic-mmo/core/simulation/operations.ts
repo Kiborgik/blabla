@@ -82,7 +82,7 @@ export function allocateOperations(state: WorldState): void {
       }
       operation.lastResult = { ...result, status: 'operated', paid };
     }
-    allocateImprovements(state, city, available);
+    allocateImprovements(state, city, available, budget);
   }
 }
 

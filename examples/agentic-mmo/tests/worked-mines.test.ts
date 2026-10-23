@@ -271,9 +271,9 @@ await test('exact Mine plan preserves its second site without automatic construc
 
 await test('canonical Mine rows expose exact references and Planned support before adoption', () => {
   const prior = workedResourcePrefix();
-  assert.equal(projectCapabilities(prior.state, 0, 'city-0', prior.timestamp).improvements?.[0]?.status, 'planned');
+  assert.equal(projectCapabilities(prior.state, 0, 'city-0', prior.timestamp).improvements?.find(item => item.nodeId === 'improvement:mine')?.status, 'planned');
   const journey = mineJourney(); const options = legalActions(journey.state, 0, journey.time());
-  const row = projectCapabilities(journey.state, 0, 'city-0', journey.time(), { revision: journey.state.revision, seat: 0, observedAt: journey.time(), legalActions: options }).improvements?.[0]; assert.ok(row);
+  const row = projectCapabilities(journey.state, 0, 'city-0', journey.time(), { revision: journey.state.revision, seat: 0, observedAt: journey.time(), legalActions: options }).improvements?.find(item => item.nodeId === 'improvement:mine'); assert.ok(row);
   assert.deepEqual(row.availableSites.map(site => site.tileId), [56, 58]);
   assert.deepEqual(row.choiceRefs.map(index => options[index]?.action), row.availableSites.map(site => ({ type: 'improve', cityId: 'city-0', tileId: site.tileId, improvementId: 'mine' })));
   const state = JSON.stringify(journey.state); const firstSite = row.availableSites[0]; assert.ok(firstSite); firstSite.baseProduction.materials = 999;

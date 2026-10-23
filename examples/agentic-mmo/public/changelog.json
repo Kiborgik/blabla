@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.1.0-live.46",
+    "date": "2026-10-23",
+    "title": "Working the shore",
+    "changes": [
+      "Water management can now open a paid Shore fishery on exact owned coastal land. Completed sites need a remaining local resident and opening Materials to make Food; paused or blocked work pays and produces nothing.",
+      "Active saved local Food worlds receive the compatible capability checkpoint before their next simulation step, preserving seed, names, original policy and controller memory. Finished and historical worlds remain unchanged.",
+      "Original net-frame equipment and fish markers identify actual sites. Work inspection separates one-time construction, required operating supplies, historical staffing and the Food actually made. No boats, free catches or ecological simulation are implied."
+    ]
+  },
+  {
     "version": "0.1.0-live.45",
     "date": "2026-10-23",
     "title": "Distinct choices through history",

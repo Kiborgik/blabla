@@ -1,6 +1,7 @@
 import { RESOURCE_IDS } from '../core/content.ts';
 import { METRIC_LABELS } from './visual-language.ts';
 import { workedLandCompositionV1 } from './worked-land-composition.ts';
+import { shoreFisheryParts } from './shore-fishery-visuals.ts';
 import type { CityImprovement, ImprovementConstructionOrder, ImprovementConstructionCompletion, Resources } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
@@ -30,10 +31,21 @@ export function improvementLabel(view: ImprovementView): string {
   return `${view.name}${view.status === 'building' ? ' · Building' : view.operation?.enabled === false ? ' · Paused' : ''}`;
 }
 
+export function improvementMark(view: Pick<ImprovementView, 'improvementId'>): 'fishery' | 'pasture' | 'lumber' | 'mine' {
+  return view.improvementId === 'shore-fishery' ? 'fishery' : view.improvementId === 'pasture' ? 'pasture' : view.improvementId === 'lumber-mill' ? 'lumber' : 'mine';
+}
+
 export function improvementLastLabel(result: CityImprovement['operation']['lastResult']): string {
   if (!result) return 'No operating record yet';
   if (result.status === 'paused') return 'Paused that season';
-  if (result.status === 'blocked') return result.blockedReason === 'resident-shortage' ? 'Not enough local support' : 'Site could not operate';
+  if (result.status === 'blocked') {
+    if (result.blockedReason === 'resident-shortage') return 'Not enough local support';
+    if (result.blockedReason === 'input-shortage') {
+      const missing = RESOURCE_IDS.filter(resource => result.shortages?.some(shortage => shortage.resource === resource)).map(resource => METRIC_LABELS[resource]);
+      return missing.length ? `Not enough ${missing.join(' and ')}` : 'Not enough operating supplies';
+    }
+    return 'Site could not operate';
+  }
   const made = RESOURCE_IDS.filter(resource => (result.produced[resource] ?? 0) > 0).map(resource => METRIC_LABELS[resource]);
   return made.length ? `${made.join(' and ')} made` : 'Worked with no output';
 }
@@ -43,6 +55,7 @@ export function improvementParts(view: ImprovementView, detail: DetailLevel): Vi
 }
 
 function improvementRecipeParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
+  if (view.improvementId === 'shore-fishery') return shoreFisheryParts(view, detail);
   if (view.improvementId === 'lumber-mill') return lumberParts(view, detail);
   if (view.improvementId === 'pasture') return pastureParts(view, detail);
   if (view.improvementId !== 'mine') return [];

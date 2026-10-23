@@ -25,7 +25,8 @@ import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor, unobscuredInspectionAnchor } from './inspection-camera.ts';
 import type { CameraView, ScreenPoint } from './inspection-camera.ts';
 import { createSettlementMeshes, createDistrictMeshes, createImprovementMeshes, createDepositMeshes, createWonderMeshes } from './settlement-three.ts';
-import { LUMBER_MARK_PATH, improvementLabel } from '../visuals/improvement-visuals.ts';
+import { LUMBER_MARK_PATH, improvementLabel, improvementMark } from '../visuals/improvement-visuals.ts';
+import { SHORE_FISHERY_MARK_PATH } from '../visuals/shore-fishery-visuals.ts';
 import { districtAdjacencySummary, districtMark, districtLabel } from '../visuals/district-visuals.ts';
 import { createWorldCues } from './world-cues.ts';
 import { mapHierarchyAnchors, mapHierarchyObstacles } from './map-labels.ts';
@@ -279,7 +280,7 @@ export function createAtlasRenderer(
   const sites = [
     ...(world.catchments ?? []).map(site => ({ ...site, mark: 'catchment' as const, label: `Aqueduct mountain source${site.status === 'building' ? ' · Building' : ''}` })),
     ...(world.districts ?? []).map(site => ({ ...site, mark: districtMark(site), label: districtLabel(site) })),
-    ...(world.improvements ?? []).map(site => ({ ...site, mark: site.improvementId === 'pasture' ? 'pasture' as const : site.improvementId === 'lumber-mill' ? 'lumber' as const : 'mine' as const, workId: site.status === 'building' ? `active:${site.construction?.id ?? ''}` : String(site.tileId), label: improvementLabel(site) })),
+    ...(world.improvements ?? []).map(site => ({ ...site, mark: improvementMark(site), workId: site.status === 'building' ? `active:${site.construction?.id ?? ''}` : String(site.tileId), label: improvementLabel(site) })),
     ...(world.wonders ?? []).map(site => ({ ...site, mark: 'wonder' as const, label: wonderSiteLabel(site) })),
   ];
   const districtLabels = sites.map(district => {
@@ -299,7 +300,7 @@ export function createAtlasRenderer(
     element.type = 'button'; element.className = 'site-map-mark';
     element.dataset['status'] = site.status; element.style.setProperty('--civ-color', site.color);
     element.setAttribute('aria-label', `Inspect ${site.label} of ${site.townName}, tile ${site.tileId}${'adjacency' in site && site.adjacency ? `. ${districtAdjacencySummary(site.adjacency)}` : ''}`);
-    element.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${site.mark === 'wonder' ? WONDER_MARK_PATH : site.mark === 'pasture' ? PASTORAL_MARK_PATH : site.mark === 'lumber' ? LUMBER_MARK_PATH : site.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[site.mark]}"/></svg>`;
+    element.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${site.mark === 'wonder' ? WONDER_MARK_PATH : site.mark === 'fishery' ? SHORE_FISHERY_MARK_PATH : site.mark === 'pasture' ? PASTORAL_MARK_PATH : site.mark === 'lumber' ? LUMBER_MARK_PATH : site.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[site.mark]}"/></svg>`;
     if ('adjacency' in site && site.adjacency?.source === 'improvement') {
       const bonus = document.createElement('span'); bonus.className = 'site-base-bonus'; bonus.textContent = `+${site.adjacency.bonus} base`; element.append(bonus);
     }
