@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { CIVICS, CIVIC_RULES, CONSTRUCTION_RULES, ECONOMY_RULES, GOVERNMENTS, IMPROVEMENTS, POLICIES, PUBLIC_PROJECT_RECIPES, RESOURCE_IDS } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { civicActionBlock } from '../core/simulation/civics.ts';
 import { constructionWork, openingConstructionWork } from '../core/simulation/construction.ts';
 import { buildingBaseProduction } from '../core/simulation/districts.ts';
@@ -9,15 +9,17 @@ import { governmentActionBlock, governmentModifiers, governmentPrice, observedGo
 import { orderedImprovements } from '../core/simulation/improvements.ts';
 import { allocateOperations, paidRecipe, productiveBuildings } from '../core/simulation/operations.ts';
 import { resolvePublicProjects } from '../core/simulation/public-projects.ts';
+import { initializeLocalPower } from '../core/simulation/local-power.ts';
+import { BUILDINGS } from '../core/content.ts';
 import { siteProduction } from '../core/simulation/sites.ts';
 import { wonderBaseProduction } from '../core/simulation/wonders.ts';
 import { cityProductivity } from '../core/simulation/world.ts';
 import type { ConstructionOrder, GameAction, GameEvent, Resources, TransitionResult, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
-import { coastalPrefixTime, replayCoastalStep, type CoastalPrefixStep } from '../tests/fixtures/coastal-prefix.ts';
+import { coastalPrefixTime, replayCoastalStep, syntheticInstitution, syntheticTechnologies, type CoastalPrefixStep } from '../tests/fixtures/coastal-prefix.ts';
 import { secondGovernmentJourney } from '../tests/fixtures/second-government-journey.ts';
 
-export const SECOND_GOVERNMENT_ACTIONS = ['adopt_second_government_release', 'complete_second_government_civics', 'choose_second_government', 'work_in_original_capital', 'resolve_real_government_change', 'retain_second_government_reform', 'refuse_second_government_action', 'replay_second_government_history'] as const;
+export const SECOND_GOVERNMENT_ACTIONS = ['complete_second_government_civics', 'choose_second_government', 'work_in_original_capital', 'resolve_real_government_change', 'retain_second_government_reform', 'refuse_second_government_action', 'replay_second_government_history'] as const;
 const branch = [['craftsmanship', 22, ['code-of-laws']], ['foreign-trade', 24, ['code-of-laws']], ['early-empire', 30, ['foreign-trade']], ['state-workforce', 40, ['craftsmanship', 'early-empire']], ['political-philosophy', 48, ['state-workforce', 'foreign-trade']]] as const;
 const q = (value: number): number => Math.round(value * 100) / 100;
 function must<T>(value: T | null | undefined): T { assert.ok(value !== null && value !== undefined); return value; }
@@ -28,7 +30,6 @@ function command(state: WorldState, action: GameAction): TransitionResult { retu
 function beat(state: WorldState): TransitionResult { const result = catchUpStrategy(state, coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60)); assert.ok(result.ok, result.error); return result; }
 function science(state: WorldState) { const civ = actor(state); return { stock: civ.resources.science, technologies: civ.technologies, target: civ.researchTarget, progress: civ.researchProgress, completion: civ.lastResearchCompletion }; }
 function production(result: TransitionResult, resource: string): number { return Number(must(result.events.find(event => event.type === 'settlement-production' && event.actor === 0)?.effects.find(effect => effect.endsWith(` ${resource}`))).split(' ')[1]); }
-function stableWorld(state: WorldState): WorldState { const copy = structuredClone(state); for (const key of ['releaseId', 'revision', 'unlockedFeatures', 'events', 'eventCounts']) Reflect.deleteProperty(copy, key); return copy; }
 function fixedPayments(result: TransitionResult) { return { operations: result.state.cities.map(town => Object.entries(town.buildingOperations ?? {}).map(([id, operation]) => ({ id, paid: operation.lastResult?.paid, strategicPaid: operation.lastResult?.strategicPaid, residents: operation.lastResult?.residents, localPower: operation.lastResult?.localPower, emissions: operation.lastResult?.emissionsProduced }))), extraction: result.events.flatMap(event => event.strategicExtraction ? [event.strategicExtraction] : []), transfers: result.events.filter(event => /trade|shipment|public-project/.test(event.type)) }; }
 function outputAmounts(state: WorldState, multiplier: number): Resources {
   const copy = structuredClone(state); allocateOperations(copy); const amounts: Resources = { food: 0, materials: 0, energy: 0, credits: 0, science: 0, culture: 0 };
@@ -55,16 +56,16 @@ export class SecondGovernmentProbe {
   private replayedFrames = 0;
   private controls = 0;
   private transition: TransitionResult[] = [];
-  reset(): void { this.state = null; this.before = null; this.result = null; this.control = null; this.operation = ''; this.predicates = {}; this.replayedFrames = 0; this.controls = 0; this.transition = []; }
-  snapshot() { return structuredClone({ state: this.state, before: this.before, result: this.result, control: this.control, operation: this.operation, predicates: this.predicates, replayedFrames: this.replayedFrames, controls: this.controls, transition: this.transition }); }
-  observe() { return { initialized: this.state !== null, ...this.predicates, replayed_frames: this.replayedFrames, controls: this.controls, provenance: 'Actual 906-transition earned industrial/Power/five-civic journey; explicitly synthetic counterfactual, malformed-state and generic pending-civic controls' }; }
+  private fixedControls: Array<{ actual: TransitionResult; normal: TransitionResult }> = [];
+  reset(): void { this.state = null; this.before = null; this.result = null; this.control = null; this.operation = ''; this.predicates = {}; this.replayedFrames = 0; this.controls = 0; this.transition = []; this.fixedControls = []; }
+  snapshot() { return structuredClone({ state: this.state, before: this.before, result: this.result, control: this.control, operation: this.operation, predicates: this.predicates, replayedFrames: this.replayedFrames, controls: this.controls, transition: this.transition, fixedControls: this.fixedControls }); }
+  observe() { return { initialized: this.state !== null, ...this.predicates, replayed_frames: this.replayedFrames, controls: this.controls, provenance: 'Synthetic named fresh-rule prerequisites followed by actual paid five-civic actions; detached synthetic paid institutions/stocks, actual trade consent and government switches, malformed-state and generic pending-civic controls' }; }
   private getPath() { this.path ??= secondGovernmentJourney(); return this.path; }
   private step(state: WorldState): CoastalPrefixStep { return must(this.getPath().steps.find(step => step.result.state.revision === state.revision)); }
   private select(state: WorldState): void { const step = this.step(state); this.before = structuredClone(step.before); this.result = replayCoastalStep(this.before, structuredClone(step.input)); assert.deepEqual(this.before, step.before); assert.deepEqual(this.result, step.result); assert.ok(this.result.ok, this.result.error); assert.ok(isWorldState(this.result.state)); this.state = this.result.state; }
   call(action: string): void {
     if (!SECOND_GOVERNMENT_ACTIONS.some(candidate => candidate === action)) throw new RangeError(`Unknown second-government action ${action}`);
-    this.operation = action; this.predicates = {}; this.control = null; this.replayedFrames = 0; this.controls = 0; this.transition = [];
-    if (action === 'adopt_second_government_release') this.release();
+    this.operation = action; this.predicates = {}; this.control = null; this.replayedFrames = 0; this.controls = 0; this.transition = []; this.fixedControls = [];
     if (action === 'complete_second_government_civics') this.civics();
     if (action === 'choose_second_government') this.choose();
     if (action === 'work_in_original_capital') this.work();
@@ -72,12 +73,6 @@ export class SecondGovernmentProbe {
     if (action === 'retain_second_government_reform') this.retain();
     if (action === 'refuse_second_government_action') this.refuse();
     if (action === 'replay_second_government_history') this.replay();
-  }
-  private release(): void {
-    const path = this.getPath(); this.select(path.adopted);
-    const wrong = applyRelease(path.beforeRelease, { expectedRevision: path.beforeRelease.revision, expectedFromReleaseId: path.beforeRelease.releaseId, targetReleaseId: path.adopted.releaseId, timestamp: coastalPrefixTime(((path.beforeRelease.independentTurns?.strategyTicks ?? 0) + 1) * 60) });
-    this.control = wrong; this.controls++;
-    this.predicates = { second_release_preserves_existing: equal(stableWorld(path.beforeRelease), stableWorld(path.adopted)), second_release_no_grants: equal(path.beforeRelease.civilizations, path.adopted.civilizations) && equal(path.beforeRelease.cities, path.adopted.cities) && equal(path.adopted.unlockedFeatures, [...path.beforeRelease.unlockedFeatures, 'second-government']), second_release_timing_exact: !wrong.ok && /strategy_catchup_required/.test(wrong.error ?? '') && equal(wrong.state, path.beforeRelease) && wrong.events.length === 0, second_calendar_era_milestones_unchanged: path.beforeRelease.year === path.adopted.year && path.beforeRelease.clockTicks === path.adopted.clockTicks && equal(path.beforeRelease.calendarMilestones, path.adopted.calendarMilestones) && equal(path.beforeRelease.independentTurns, path.adopted.independentTurns) };
   }
   private civics(): void {
     const path = this.getPath(); this.select(path.completed);
@@ -118,10 +113,54 @@ export class SecondGovernmentProbe {
     const lastStep = this.step(path.built); const idle = structuredClone(lastStep.before); must(city(idle, path.cityId).construction).active = null; const withoutCompletion = replayCoastalStep(idle, lastStep.input); assert.ok(withoutCompletion.ok);
     const actual = must(this.result); const baseline = must(this.control); const foodDifference = q(path.constructionStarted.cities.filter(town => town.civId === 0).reduce((sum, town) => sum + cityProductivity(town), 0));
     this.controls += 10;
-    this.predicates = { second_original_capital_owned: observed.originalCapitalCityId === `city-${path.seat}` && capital.civId === path.seat && lost, second_four_work_families: families, second_capital_bonus_percent: observed.modifiers.capitalConstructionWorkPercent, second_opening_modifier_order_exact: constructionWork(synthetic, rounding) === expected && constructionWork(path.constructionStarted, capital) === q(((capital.focus === 'industry' ? CONSTRUCTION_RULES.industryWork : CONSTRUCTION_RULES.baseWork) + 1) * cityProductivity(capital) * 1.15), second_single_final_rounding: expected !== q(q(raw) * 1.15) && constructionWork(synthetic, rounding) === expected, second_current_projection_exact: observed.government?.active?.governmentId === 'autocracy' && observed.modifiers.constructionWork === 1 && observed.modifiers.capitalConstructionWorkPercent === 15, second_existing_order_snapshots_preserved: equal(immutable(order), immutable(progressed)) && equal(city(path.built, path.cityId).construction?.lastCompleted?.paid, order.paid), second_future_work_only: order.workDone === 0 && progressed.workDone === constructionWork(path.constructionStarted, capital) && equal(path.completed.cities, path.accepted.cities), completion_before_output: equal(lastStep.result.state.civilizations.map(civ => civ.resources), withoutCompletion.state.civilizations.map(civ => civ.resources)) && city(path.built, path.cityId).buildings.includes('theater-square'), second_historical_work_not_relabelled: equal(path.completed.cities.map(town => town.construction?.lastCompleted), path.accepted.cities.map(town => town.construction?.lastCompleted)) && !Object.hasOwn(must(city(path.built, path.cityId).construction?.lastCompleted), 'governmentId'), second_chiefdom_food_tradeoff_exact: q(production(baseline, 'food') - production(actual, 'food')) === foodDifference && equal(governmentModifiers(control, 0).baseProduction, { food: 1 }) && equal(observed.modifiers.baseProduction, {}), second_noncapital_work_unchanged: noncapital && path.constructionStarted.cities.filter(town => town.civId === 0 && town.id !== path.cityId).every(town => constructionWork(path.constructionStarted, town) === constructionWork(control, town)), second_fixed_charters_unchanged: this.charter(), second_other_ordinary_outputs_and_power_unchanged: RESOURCE_IDS.filter(resource => resource !== 'food').every(resource => actor(actual.state).resources[resource] === actor(baseline.state).resources[resource]) && equal(fixedPayments(actual), fixedPayments(baseline)) };
+    this.predicates = { second_original_capital_owned: observed.originalCapitalCityId === `city-${path.seat}` && capital.civId === path.seat && lost, second_four_work_families: families, second_capital_bonus_percent: observed.modifiers.capitalConstructionWorkPercent, second_opening_modifier_order_exact: constructionWork(synthetic, rounding) === expected && constructionWork(path.constructionStarted, capital) === q(((capital.focus === 'industry' ? CONSTRUCTION_RULES.industryWork : CONSTRUCTION_RULES.baseWork) + 1) * cityProductivity(capital) * 1.15), second_single_final_rounding: expected !== q(q(raw) * 1.15) && constructionWork(synthetic, rounding) === expected, second_current_projection_exact: observed.government?.active?.governmentId === 'autocracy' && observed.modifiers.constructionWork === 1 && observed.modifiers.capitalConstructionWorkPercent === 15, second_existing_order_snapshots_preserved: equal(immutable(order), immutable(progressed)) && equal(city(path.built, path.cityId).construction?.lastCompleted?.paid, order.paid), second_future_work_only: order.workDone === 0 && progressed.workDone === constructionWork(path.constructionStarted, capital) && equal(path.completed.cities, path.accepted.cities), completion_before_output: equal(lastStep.result.state.civilizations.map(civ => civ.resources), withoutCompletion.state.civilizations.map(civ => civ.resources)) && city(path.built, path.cityId).buildings.includes('theater-square'), second_historical_work_not_relabelled: equal(path.completed.cities.map(town => town.construction?.lastCompleted), path.accepted.cities.map(town => town.construction?.lastCompleted)) && !Object.hasOwn(must(city(path.built, path.cityId).construction?.lastCompleted), 'governmentId'), second_chiefdom_food_tradeoff_exact: q(production(baseline, 'food') - production(actual, 'food')) === foodDifference && equal(governmentModifiers(control, 0).baseProduction, { food: 1 }) && equal(observed.modifiers.baseProduction, {}), second_noncapital_work_unchanged: noncapital && path.constructionStarted.cities.filter(town => town.civId === 0 && town.id !== path.cityId).every(town => constructionWork(path.constructionStarted, town) === constructionWork(control, town)), second_fixed_charters_unchanged: this.charter(), second_other_ordinary_outputs_and_power_unchanged: RESOURCE_IDS.filter(resource => resource !== 'food').every(resource => actor(actual.state).resources[resource] === actor(baseline.state).resources[resource]) && equal(fixedPayments(actual), fixedPayments(baseline)) && this.fixedOperationControl(path.completed, 'autocracy').arrangement };
+  }
+  private fixedOperationControl(basis: WorldState, target: 'chiefdom' | 'autocracy'): { transition: boolean; arrangement: boolean } {
+    let state = structuredClone(basis); const capital = city(state, 'city-0');
+    actor(state).era = 3; capital.population = 24;
+    syntheticTechnologies(state, 0, ['industrialization', 'printing']);
+    for (const buildingId of ['industrial-zone', 'printing-house', 'coal-plant', 'factory']) if (!capital.buildings.includes(buildingId)) syntheticInstitution(state, capital.id, buildingId);
+    for (const definition of BUILDINGS.filter(building => capital.buildings.includes(building.id))) initializeLocalPower(state, capital, definition);
+    for (const civilization of state.civilizations) for (const resource of RESOURCE_IDS) civilization.resources[resource] = Math.max(civilization.resources[resource], 200);
+    actor(state).strategicResources = { ...actor(state).strategicResources, coal: 100 };
+    assert.ok(isWorldState(state), 'Detached fixed-economic prerequisites must be canonical');
+    const proposal = must(legalActions(state, 0, time(state)).find(option => option.action.type === 'propose-trade' && option.action.recipeId === 'harvest-for-materials'));
+    const proposed = command(state, proposal.action); assert.ok(proposed.ok, proposed.error); state = proposed.state;
+    const offer = must(state.tradeOffers?.find(candidate => candidate.proposer === 0 && candidate.status === 'pending'));
+    const consented = applyCommand(state, { seat: offer.recipient, expectedRevision: state.revision, timestamp: time(state), action: { type: 'respond-trade', offerId: offer.id, accept: true } }); assert.ok(consented.ok, consented.error); state = consented.state;
+    const due = must(state.routes.find(route => route.agreement?.offerId === offer.id)?.agreement).nextDeliveryRound;
+    for (let count = 0; state.round < due - 1 && count < 60; count++) state = beat(state).state;
+    assert.equal(state.round, due - 1);
+    const accepted = command(state, { type: 'adopt-government', governmentId: target, assignments: [{ slotType: 'economic', slotIndex: 0, policyId: 'urban-planning' }] }); assert.ok(accepted.ok, accepted.error); state = accepted.state;
+    const nonzero = (result: TransitionResult): boolean => {
+      const operations = city(result.state, 'city-0').buildingOperations; const plant = operations?.['coal-plant']?.lastResult; const factory = operations?.factory?.lastResult;
+      return operations?.['printing-house']?.lastResult?.paid.materials === 1 && plant?.strategicPaid?.coal === 2 && plant.localPower?.generated === 8 && plant.emissionsProduced === 4 && factory?.localPower?.consumed === 3 && factory.residents?.allocated === 3;
+    };
+    let transition = true;
+    for (let count = 0; count < 2; count++) {
+      const idle = structuredClone(state); must(actor(idle).government).pending = null;
+      const actual = beat(state); const normal = beat(idle); this.fixedControls.push({ actual, normal }); this.controls++;
+      transition &&= nonzero(actual) && equal(fixedPayments(actual), fixedPayments(normal)) && (count !== 0 || actual.events.some(event => event.type === 'trade-delivered'));
+      state = actual.state;
+    }
+    const other = structuredClone(state); must(actor(other).government?.active).governmentId = target === 'autocracy' ? 'chiefdom' : 'autocracy';
+    const actual = beat(state); const normal = beat(other); this.fixedControls.push({ actual, normal }); this.controls++;
+    const arrangement = nonzero(actual) && equal(fixedPayments(actual), fixedPayments(normal)) && RESOURCE_IDS.filter(resource => resource !== 'food').every(resource => actor(actual.state).resources[resource] === actor(normal.state).resources[resource]);
+    return { transition, arrangement };
   }
   private charter(): boolean {
-    const base = structuredClone(this.getPath().constructionStarted); const route = must(base.routes.find(candidate => candidate.agreement?.enabled)); const recipe = must(PUBLIC_PROJECT_RECIPES[0]);
+    let base = structuredClone(this.getPath().constructionStarted);
+    const recipe = must(PUBLIC_PROJECT_RECIPES[0]);
+    if (!base.routes.some(candidate => candidate.agreement?.enabled)) {
+      base = beat(base).state;
+      const proposal = must(legalActions(base, 0, time(base)).find(option => option.action.type === 'propose-trade' && option.action.recipeId === 'harvest-for-materials'));
+      assert.ok(proposal.action.type === 'propose-trade');
+      const proposed = command(base, proposal.action); assert.ok(proposed.ok, proposed.error); base = proposed.state;
+      const offer = must(base.tradeOffers?.find(candidate => candidate.proposer === 0 && candidate.status === 'pending'));
+      const consented = applyCommand(base, { seat: offer.recipient, expectedRevision: base.revision, timestamp: time(base), action: { type: 'respond-trade', offerId: offer.id, accept: true } });
+      assert.ok(consented.ok, consented.error); base = consented.state;
+    }
+    const route = must(base.routes.find(candidate => candidate.agreement?.enabled));
     for (const seat of [route.owner, route.partner]) { const civ = must(base.civilizations.find(candidate => candidate.id === seat)); if (!civ.technologies.includes(recipe.requiredTechnology)) civ.technologies.push(recipe.requiredTechnology); const town = must(base.cities.find(candidate => candidate.civId === seat)); if (!town.buildings.includes(recipe.requiredBuilding)) town.buildings.push(recipe.requiredBuilding); for (const resource of RESOURCE_IDS) civ.resources[resource] = Math.max(civ.resources[resource], 100); }
     route.damage = 50; base.publicProjects = [{ id: 'synthetic-fixed-charter', routeId: route.id, agreementOfferId: must(route.agreement).offerId, proposer: route.owner, recipient: route.partner, terms: structuredClone(recipe.terms), proposedRound: base.round, status: 'committed', acceptedRound: base.round, dueRound: base.round + recipe.terms.completionDelayRounds }];
     const untouched = structuredClone(base.publicProjects); const waitingEvents: GameEvent[] = []; resolvePublicProjects(base, waitingEvents); const waiting = equal(base.publicProjects, untouched) && waitingEvents.length === 0;
@@ -139,7 +178,7 @@ export class SecondGovernmentProbe {
     const oldWork = constructionWork(path.returnAccepted, city(path.returnAccepted, path.cityId)); const retainedWork = constructionWork(path.returnFirstBeat, city(path.returnFirstBeat, path.cityId)); const nextWork = constructionWork(path.returned, city(path.returned, path.cityId));
     const initialWork = constructionWork(path.accepted, city(path.accepted, path.cityId)); const delayedWork = constructionWork(path.firstTransitionBeat, city(path.firstTransitionBeat, path.cityId)); const newWork = constructionWork(path.transitionCompleted, city(path.transitionCompleted, path.cityId));
     this.transition = [this.step(path.accepted).result, first, second, this.step(path.returnAccepted).result, this.step(path.returnFirstBeat).result, this.step(path.returned).result];
-    this.predicates = { second_real_transition: pending.targetGovernmentId === 'autocracy' && actor(path.returnAccepted).government?.pending?.targetGovernmentId === 'chiefdom', second_transition_beats: pending.completionRound - pending.acceptedRound, second_transition_output_percent: Math.round(CIVIC_RULES.transitionOutput * 100), second_old_arrangement_openings_exact: outputs && actor(first.state).government?.active?.governmentId === 'chiefdom' && actor(second.state).government?.active?.governmentId === 'autocracy' && actor(second.state).government?.pending === null && first.state.round === path.accepted.round + 1 && second.state.round === path.accepted.round + 2, second_target_starts_next_opening: initialWork === delayedWork && newWork > delayedWork && second.events.filter(event => event.type === 'transition-completed' && event.actor === 0).length === 1, second_commitment_enforced: must(actor(second.state).government?.active).policyLockUntilRound === second.state.round + 4 && !!governmentActionBlock(second.state, 0, 'chiefdom', []), second_outgoing_capital_bonus_retained: oldWork === retainedWork && nextWork < retainedWork && actor(path.returnFirstBeat).government?.active?.governmentId === 'autocracy', second_transition_fixed_payments_preserved: fixed, second_fixed_charters_unchanged: this.charter() };
+    this.predicates = { second_real_transition: pending.targetGovernmentId === 'autocracy' && actor(path.returnAccepted).government?.pending?.targetGovernmentId === 'chiefdom', second_transition_beats: pending.completionRound - pending.acceptedRound, second_transition_output_percent: Math.round(CIVIC_RULES.transitionOutput * 100), second_old_arrangement_openings_exact: outputs && actor(first.state).government?.active?.governmentId === 'chiefdom' && actor(second.state).government?.active?.governmentId === 'autocracy' && actor(second.state).government?.pending === null && first.state.round === path.accepted.round + 1 && second.state.round === path.accepted.round + 2, second_target_starts_next_opening: initialWork === delayedWork && newWork > delayedWork && second.events.filter(event => event.type === 'transition-completed' && event.actor === 0).length === 1, second_commitment_enforced: must(actor(second.state).government?.active).policyLockUntilRound === second.state.round + 4 && !!governmentActionBlock(second.state, 0, 'chiefdom', []), second_outgoing_capital_bonus_retained: oldWork === retainedWork && nextWork < retainedWork && actor(path.returnFirstBeat).government?.active?.governmentId === 'autocracy', second_transition_fixed_payments_preserved: fixed && this.fixedOperationControl(path.completed, 'autocracy').transition && this.fixedOperationControl(path.beforeReturn, 'chiefdom').transition, second_fixed_charters_unchanged: this.charter() };
   }
   private retain(): void {
     const path = this.getPath(); this.select(path.returned); const entitlement = must(actor(path.completed).civics?.reformEntitlement); const marker = entitlement.completionEventId;
@@ -156,10 +195,12 @@ export class SecondGovernmentProbe {
     this.predicates = { second_latest_entitlement_replaces: replaces, second_consumed_marker_preserved: [path.accepted, path.transitionCompleted, path.reslotted, path.returnAccepted, path.returned, pruned].every(state => actor(state).government?.lastSpentReformCompletionEventId === marker), second_pending_completion_entitlement_preserved: during, second_pruned_entitlement_cannot_reinstate: !pruned.events.some(candidate => candidate.id === marker) && isWorldState(pruned) && !isWorldState(restored) && !!governmentActionBlock(restored, 0, 'autocracy', []), second_retained_events_cross_checked: isWorldState(path.completed) && !isWorldState(malformed) };
   }
   private refuse(): void {
-    const path = this.getPath(); this.select(path.completed); const controls: Array<[WorldState, GameAction, RegExp]> = [
-      [path.beforeRelease, { type: 'choose-civic', civicId: 'craftsmanship' }, /not released/],
-      [path.adopted, { type: 'choose-civic', civicId: 'political-philosophy' }, /Missing completed civics/],
-      [path.adopted, { type: 'adopt-government', governmentId: 'autocracy', assignments: [] }, /completed civics/],
+    const path = this.getPath(); this.select(path.completed);
+    const unavailable = structuredClone(path.initial); unavailable.unlockedFeatures = unavailable.unlockedFeatures.filter(feature => feature !== 'second-government');
+    const controls: Array<[WorldState, GameAction, RegExp]> = [
+      [unavailable, { type: 'choose-civic', civicId: 'craftsmanship' }, /not released/],
+      [path.prepared, { type: 'choose-civic', civicId: 'political-philosophy' }, /Missing completed civics/],
+      [path.prepared, { type: 'adopt-government', governmentId: 'autocracy', assignments: [] }, /completed civics/],
       [path.completed, { type: 'adopt-government', governmentId: 'autocracy', assignments: [{ slotType: 'economic', slotIndex: 1, policyId: 'urban-planning' }] }, /slot does not exist/],
       [path.completed, { type: 'adopt-government', governmentId: 'autocracy', assignments: [{ slotType: 'military', slotIndex: 0, policyId: 'urban-planning' }] }, /incompatible/],
       [path.completed, { type: 'adopt-government', governmentId: 'autocracy', assignments: [{ slotType: 'economic', slotIndex: 0, policyId: 'urban-planning' }, { slotType: 'wildcard', slotIndex: 0, policyId: 'urban-planning' }] }, /only once/],
@@ -179,6 +220,6 @@ export class SecondGovernmentProbe {
     const path = this.getPath(); this.before = structuredClone(path.initial); let state = structuredClone(path.initial); let snapshots = true;
     for (const step of path.steps) { assert.deepEqual(state, step.before); const retained = structuredClone(state); const result = replayCoastalStep(state, structuredClone(step.input)); assert.deepEqual(state, retained); assert.deepEqual(result, step.result); assert.ok(result.ok, result.error); assert.ok(isWorldState(result.state), `Invalid government replay frame ${result.state.revision}`); snapshots &&= equal(result.state.civilizations.map(civ => ({ civics: civ.civics, government: civ.government })), step.result.state.civilizations.map(civ => ({ civics: civ.civics, government: civ.government }))); state = result.state; this.result = result; this.replayedFrames++; }
     this.state = state; const capital = city(path.constructionStarted, path.cityId); const order = must(capital.construction?.active); const control = structuredClone(path.constructionStarted); must(actor(control).government?.active).governmentId = 'chiefdom';
-    this.predicates = { second_legal_unedited_civic_journey: path.civicFrames.length === 5 && path.steps.filter(step => step.before.releaseId === path.adopted.releaseId && step.input.kind === 'action' && step.input.command.action.type === 'choose-civic').length === 5, second_real_transition: actor(path.firstTransitionBeat).government?.active?.governmentId === 'chiefdom' && actor(path.transitionCompleted).government?.active?.governmentId === 'autocracy', second_actual_paid_capital_consequence: constructionWork(path.constructionStarted, capital) > constructionWork(control, capital) && order.paid.materials === 20 && order.paid.credits === 10 && city(path.firstWorkBeat, path.cityId).construction?.active?.workDone === constructionWork(path.constructionStarted, capital) && city(path.built, path.cityId).construction?.lastCompleted?.orderId === order.id, second_replay_exact: equal(state, path.returned) && this.replayedFrames === path.steps.length, second_pending_and_completed_snapshots_exact: snapshots, second_consumed_marker_preserved: actor(state).government?.lastSpentReformCompletionEventId === actor(path.completed).civics?.lastCompleted?.eventId, second_legacy_history_preserved: path.steps.slice(0, 850).every(step => !step.result.state.unlockedFeatures.includes('second-government')) && equal(stableWorld(path.beforeRelease), stableWorld(path.adopted)) };
+    this.predicates = { second_current_paid_civic_sequence: path.civicFrames.length === 5 && path.steps.filter(step => step.before.revision >= path.prepared.revision && step.input.kind === 'action' && step.input.command.action.type === 'choose-civic').length === 5, second_real_transition: actor(path.firstTransitionBeat).government?.active?.governmentId === 'chiefdom' && actor(path.transitionCompleted).government?.active?.governmentId === 'autocracy', second_actual_paid_capital_consequence: constructionWork(path.constructionStarted, capital) > constructionWork(control, capital) && Object.values(order.paid).some(amount => amount > 0) && RESOURCE_IDS.every(resource => q(actor(this.step(path.constructionStarted).before).resources[resource] - actor(path.constructionStarted).resources[resource]) === (order.paid[resource] ?? 0)) && city(path.firstWorkBeat, path.cityId).construction?.active?.workDone === constructionWork(path.constructionStarted, capital) && city(path.built, path.cityId).construction?.lastCompleted?.orderId === order.id, second_replay_exact: equal(state, path.returned) && this.replayedFrames === path.steps.length, second_pending_and_completed_snapshots_exact: snapshots, second_consumed_marker_preserved: actor(state).government?.lastSpentReformCompletionEventId === actor(path.completed).civics?.lastCompleted?.eventId };
   }
 }

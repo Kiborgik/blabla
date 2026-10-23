@@ -1,12 +1,8 @@
-state compatible_empty_migration: bool
-state legacy_world_preserved: bool
-state legacy_technology_refused: bool
 state exact_research_dependencies: bool
 state exact_research_costs: bool
 state current_science_only: bool
 state no_era_selection_gate: bool
 state no_automatic_successor: bool
-state stable_hill_coal_layer: bool
 state credited_equals_depleted: bool
 state opening_resident_respected: bool
 state per_resource_capacity: bool
@@ -30,13 +26,11 @@ state two_distinct_operated_towns: bool
 state genuine_steam_receipt: bool
 state durable_evidence: bool
 state no_calendar_change: bool
-state legal_unedited_journey: bool
+state current_paid_industrial_sequence: bool
 state refused: bool
 state no_effects: bool
 state replay_exact: bool
 
-action adopt_industrial_steam()
-action refuse_legacy_industrialization()
 action complete_connected_research()
 action extract_finite_coal()
 action construct_owned_rail()
@@ -48,12 +42,6 @@ action attain_industrial_milestone()
 action replay_industrial_history()
 action refuse_industrial_action()
 
-when adopt_industrial_steam {
-    expect "industrial-migration-adds-empty-capabilities-without-rewriting-history": after.compatible_empty_migration and after.legacy_world_preserved and after.stable_hill_coal_layer and after.old_iron_preserved
-}
-when refuse_legacy_industrialization {
-    expect "legacy-industrialization-is-never-grandfathered-into-new-chain": after.legacy_technology_refused and after.no_effects
-}
 when complete_connected_research {
     expect "accepted-research-is-explicit-productive-and-reachable-before-era-three": after.exact_research_dependencies and after.exact_research_costs and after.current_science_only and after.no_era_selection_gate and after.no_automatic_successor
 }
@@ -71,7 +59,7 @@ when consent_steam_exchange {
 }
 when deliver_funded_steam_exchange {
     expect "due-steam-exchange-pays-complete-cargo-and-one-proposer-coal-once": after.full_atomic_fuel_and_cargo and after.once_only_due_delivery and after.complete_delivery_receipt
-    expect "legal-rail-journey-has-a-real-faster-transport-consumer": after.legal_unedited_journey and after.faster_than_unrailed_baseline
+    expect "paid-rail-sequence-has-a-real-faster-transport-consumer": after.current_paid_industrial_sequence and after.faster_than_unrailed_baseline
 }
 when block_unfunded_steam_exchange {
     expect "blocked-or-duplicate-steam-delivery-consumes-nothing": after.no_payment_on_block and after.once_only_due_delivery

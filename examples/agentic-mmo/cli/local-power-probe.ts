@@ -2,7 +2,7 @@ import { PoweredScienceProbe, POWERED_SCIENCE_ACTIONS } from './powered-science-
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { BUILDINGS, RESOURCE_IDS } from '../core/content.ts';
-import { applyCommand, applyRelease } from '../core/engine.ts';
+import { applyCommand, legalActions } from '../core/engine.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
 import { resolveEconomy } from '../core/simulation/economy.ts';
 import { extractCityMetals } from '../core/simulation/metals.ts';
@@ -10,9 +10,9 @@ import { resolveTrade } from '../core/simulation/trade.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { BuildingOperationResult, GameAction, WorldState } from '../core/types.ts';
 import { localPowerJourney } from '../tests/fixtures/local-power-journey.ts';
-import { coastalPrefixTime, replayCoastalStep } from '../tests/fixtures/coastal-prefix.ts';
+import { coastalPrefixTime, replayCoastalStep, syntheticInstitution, syntheticTechnologies } from '../tests/fixtures/coastal-prefix.ts';
 
-const actions = ['adopt_local_power', 'construct_power_building', 'operate_local_generator', 'operate_powered_consumer', 'expire_local_power', 'change_power_operation', 'retain_local_power_receipt', 'replay_local_power'];
+const actions = ['construct_power_building', 'operate_local_generator', 'operate_powered_consumer', 'expire_local_power', 'change_power_operation', 'retain_local_power_receipt', 'replay_local_power'];
 const q = (value: number): number => Math.round(value * 100) / 100;
 function town(state: WorldState, id: string) { const result = state.cities.find(city => city.id === id); assert.ok(result); return result; }
 function actor(state: WorldState, id: number) { const result = state.civilizations.find(civilization => civilization.id === id); assert.ok(result); return result; }
@@ -32,17 +32,13 @@ export class LocalPowerProbe {
   private getPath() { this.path ??= localPowerJourney(); return this.path; }
   reset(): void { this.successor = null; this.state = null; this.predicates = {}; this.controls = 0; this.replayedFrames = 0; }
   snapshot() { if (this.successor) return this.successor.snapshot(); return structuredClone({ state: this.state, predicates: this.predicates, controls: this.controls, replayedFrames: this.replayedFrames }); }
-  observe() { if (this.successor) return this.successor.observe(); return { initialized: this.state !== null, ...this.predicates, controls: this.controls, replayed_frames: this.replayedFrames, provenance: 'Genuine typed industrial-to-local-Power journey; detached shortage, synthetic contention/output and invalid-state controls are not live play' }; }
+  observe() { if (this.successor) return this.successor.observe(); return { initialized: this.state !== null, ...this.predicates, controls: this.controls, replayed_frames: this.replayedFrames, provenance: 'Synthetic named fresh industrial prerequisites followed by actual paid local-Power actions; detached shortage and contention controls are not live play' }; }
   call(action: string): void {
     if (POWERED_SCIENCE_ACTIONS.some(item => item === action)) { this.successor ??= new PoweredScienceProbe(); this.successor.call(action); return; }
     if (!actions.includes(action)) throw new RangeError(`Unknown local Power action ${action}`);
     this.successor = null; const path = this.getPath(); this.state = structuredClone(path.state); this.predicates = {}; this.controls = 0; this.replayedFrames = 0;
     const positive = town(path.productive, path.cityId).localPower?.lastProductiveBeat; assert.ok(positive);
-    if (action === 'adopt_local_power') {
-      const before = path.beforeRelease; const after = path.adopted;
-      const result = applyRelease(before, { expectedRevision: before.revision, expectedFromReleaseId: before.releaseId, targetReleaseId: after.releaseId, timestamp: time(before) });
-      this.predicates = { compatible_empty_adoption: result.ok && equal(result.state, after) && after.cities.every(city => city.localPower === undefined && !city.buildings.includes('coal-plant') && !city.buildings.includes('factory')), prior_world_preserved: equal(before.civilizations, after.civilizations) && equal(before.cities, after.cities) && equal(before.routes, after.routes) && equal(before.tradeOffers, after.tradeOffers) && equal(before.tiles, after.tiles) && equal(before.coalDeposits, after.coalDeposits) && equal(before.strategicDeposits, after.strategicDeposits) && equal(before.industrialEvidence, after.industrialEvidence) && equal(before.railEdges, after.railEdges) && before.rng === after.rng, no_clock_era_or_milestone_change: before.year === after.year && before.clockTicks === after.clockTicks && equal(before.calendarMilestones, after.calendarMilestones) && before.civilizations.every(civilization => actor(after, civilization.id).era === civilization.era) };
-    } else if (action === 'construct_power_building') {
+    if (action === 'construct_power_building') {
       const starts = path.steps.filter(step => step.input.kind === 'action' && step.input.command.action.type === 'build' && ['coal-plant', 'factory'].includes(step.input.command.action.project));
       let paid = starts.length === 2; let admission = true; let work = true;
       for (const step of starts) {
@@ -75,8 +71,20 @@ export class LocalPowerProbe {
       const factory = positive.operations.find(operation => operation.phase === 'consumer');
       const duplicate = replayCoastalStep(path.unused, { kind: 'strategy', timestamp: coastalPrefixTime((path.unused.independentTurns?.strategyTicks ?? 0) * 60) });
       const stale = applyCommand(path.beforePlant, { seat: path.seat, expectedRevision: path.beforePlant.revision - 1, timestamp: time(path.beforePlant), action: { type: 'build', cityId: path.cityId, project: 'coal-plant' } });
-      this.predicates = { legal_unedited_consumer_journey: path.steps.every(step => step.result.ok) && path.beforeRelease.industrialEvidence?.steamDelivery !== null && actor(path.beforeRelease, path.seat).era === 3 && path.steps.filter(step => step.input.kind === 'action' && step.input.command.action.type === 'build' && ['coal-plant', 'factory'].includes(step.input.command.action.project)).length === 2, same_town_same_beat_power: positive.cityId === path.cityId && positive.operations.every(operation => operation.result.round === positive.round), exact_modified_materials: factory?.result.produced.materials === 23.4 && factory.recipe.baseOutputs.materials === 12, replay_exact: equal(state, path.state), refused_actions_have_no_effects: this.refusals() && !stale.ok && equal(stale.state, path.beforePlant) && equal(duplicate.state, path.unused) && duplicate.events.length === 0, legacy_behavior_preserved: path.steps.filter(step => !step.before.unlockedFeatures.includes('local-power')).every(step => step.before.cities.every(city => !city.localPower)), bounded_self_contained_retention: equal(town(path.unused, path.cityId).localPower?.lastProductiveBeat, positive) && isWorldState(path.productive) && isWorldState(path.unused) }; this.controls += 2;
+      this.predicates = { current_paid_consumer_sequence: path.steps.every(step => step.result.ok) && actor(path.initial, path.seat).era === 3 && path.steps.filter(step => step.input.kind === 'action' && step.input.command.action.type === 'build' && ['coal-plant', 'factory'].includes(step.input.command.action.project)).length === 2, same_town_same_beat_power: positive.cityId === path.cityId && positive.operations.every(operation => operation.result.round === positive.round), exact_modified_materials: factory?.result.produced.materials === this.factoryOutput() && factory.recipe.baseOutputs.materials === 12, replay_exact: equal(state, path.state), refused_actions_have_no_effects: this.refusals() && !stale.ok && equal(stale.state, path.beforePlant) && equal(duplicate.state, path.unused) && duplicate.events.length === 0, bounded_self_contained_retention: equal(town(path.unused, path.cityId).localPower?.lastProductiveBeat, positive) && isWorldState(path.productive) && isWorldState(path.unused) }; this.controls += 2;
     }
+  }
+  private factoryOutput(): number {
+    const path = this.getPath(); const step = path.steps.find(candidate => candidate.result.state.revision === path.productive.revision); assert.ok(step);
+    const without = structuredClone(step.before); const factory = town(without, path.cityId).buildingOperations?.factory; assert.ok(factory); factory.enabled = false;
+    const control = replayCoastalStep(without, step.input); assert.ok(control.ok, control.error); this.controls++;
+    const other = (state: WorldState): number => {
+      const city = town(state, path.cityId);
+      const buildings = Object.entries(city.buildingOperations ?? {}).filter(([id]) => id !== 'factory').map(([, operation]) => operation.lastResult);
+      const improvements = Object.values(city.improvements ?? {}).map(improvement => improvement.operation.lastResult);
+      return q([...buildings, ...improvements].reduce((sum, result) => sum + (result?.produced.materials ?? 0) - (result?.paid.materials ?? 0), 0));
+    };
+    return q(actor(step.result.state, path.seat).resources.materials - actor(control.state, path.seat).resources.materials - other(step.result.state) + other(control.state));
   }
   private refusals(): boolean {
     const path = this.getPath(); let refused = true;
@@ -107,12 +115,17 @@ export class LocalPowerProbe {
     const later = structuredClone(path.factoryCompleted); actor(later, path.seat).strategicResources = { ...actor(later, path.seat).strategicResources, coal: 0 };
     allocateOperations(later); for (const city of later.cities) extractCityMetals(later, city);
     const afterMine = (actor(later, path.seat).strategicResources?.coal ?? 0) > 0 && town(later, path.cityId).buildingOperations?.['coal-plant']?.lastResult?.status === 'blocked';
-    const incoming = structuredClone(path.factoryCompleted); actor(incoming, path.seat).strategicResources = { ...actor(incoming, path.seat).strategicResources, coal: 0 }; allocateOperations(incoming);
-    const route = incoming.routes.find(candidate => candidate.owner === path.seat && candidate.agreement?.terms.transport?.mode === 'steam'); assert.ok(route?.agreement);
+    let incoming = structuredClone(path.factoryCompleted);
+    const proposal = legalActions(incoming, path.seat, time(incoming)).find(option => option.action.type === 'propose-trade'); assert.ok(proposal);
+    const proposed = command(incoming, path.seat, proposal.action); assert.ok(proposed.ok, proposed.error); incoming = proposed.state;
+    const offer = incoming.tradeOffers?.find(candidate => candidate.proposer === path.seat && candidate.status === 'pending'); assert.ok(offer);
+    const consented = command(incoming, offer.recipient, { type: 'respond-trade', offerId: offer.id, accept: true }); assert.ok(consented.ok, consented.error); incoming = consented.state;
+    actor(incoming, path.seat).strategicResources = { ...actor(incoming, path.seat).strategicResources, coal: 0 }; allocateOperations(incoming);
+    const route = incoming.routes.find(candidate => candidate.owner === path.seat && candidate.agreement?.enabled); assert.ok(route?.agreement);
     incoming.routes = [route]; route.agreement.terms.strategicCargo = { proposer: {}, recipient: { coal: 2 } }; delete route.agreement.terms.transport; route.agreement.nextDeliveryRound = incoming.round; route.agreement.lastAttemptRound = null;
     actor(incoming, route.partner).strategicResources = { ...actor(incoming, route.partner).strategicResources, coal: 2 }; resolveTrade(incoming, []);
     const afterTrade = actor(incoming, path.seat).strategicResources?.coal === 2 && town(incoming, path.cityId).buildingOperations?.['coal-plant']?.lastResult?.status === 'blocked';
-    const ordered = structuredClone(path.factoryCompleted); const first = town(ordered, path.cityId); first.population = 9; const academy = first.buildingOperations?.academy; assert.ok(academy); academy.enabled = true; actor(ordered, path.seat).resources.culture = 2; actor(ordered, path.seat).strategicResources = { ...actor(ordered, path.seat).strategicResources, coal: 2 };
+    const ordered = structuredClone(path.factoryCompleted); const first = town(ordered, path.cityId); first.population = 9; const definition = BUILDINGS.find(building => building.id === 'academy'); assert.ok(definition); syntheticTechnologies(ordered, path.seat, definition.requires); syntheticInstitution(ordered, first.id, 'academy'); const academy = first.buildingOperations?.academy; assert.ok(academy); academy.enabled = true; actor(ordered, path.seat).resources.culture = 2; actor(ordered, path.seat).strategicResources = { ...actor(ordered, path.seat).strategicResources, coal: 2 };
     const second = structuredClone(first); second.id = `${first.id}-synthetic-second`; second.improvements = {}; ordered.cities = [second, first]; allocateOperations(ordered);
     const order = first.buildingOperations?.['coal-plant']?.lastResult?.residents?.available === 6 && first.buildingOperations?.academy?.lastResult?.status === 'operated' && first.buildingOperations?.factory?.lastResult?.status === 'blocked' && second.buildingOperations?.['coal-plant']?.lastResult?.status === 'blocked';
     this.controls += 3;
@@ -132,12 +145,12 @@ export class LocalPowerProbe {
     }
     const zero = structuredClone(path.productive); const city = town(zero, path.cityId); city.damage = 100; actor(zero, path.seat).strategicResources = { ...actor(zero, path.seat).strategicResources, coal: 2 }; zero.round++; zero.revision++; resolveEconomy(zero, []);
     const zeroFactory = city.buildingOperations?.factory?.lastResult; const zeroPlant = city.buildingOperations?.['coal-plant']?.lastResult;
-    this.predicates = { complete_atomic_consumer_allocation: factory.result.localPower.consumed === 3 && factory.result.residents.allocated === 3 && equal(factory.result.paid, {}) && equal(factory.result.strategicPaid, {}), same_town_same_beat_power: proof.cityId === path.cityId && proof.operations.every(operation => operation.result.round === proof.round), exact_modified_materials: factory.recipe.baseOutputs.materials === 12 && factory.result.produced.materials === 23.4, blocked_consumer_has_no_effects: blocked, no_energy_substitution: blocked, ordinary_multipliers_exclude_power: zeroFactory?.status === 'operated' && equal(zeroFactory.produced, {}) && zeroFactory.localPower?.consumed === 3 && zeroPlant?.localPower?.generated === 8 && zeroPlant.emissionsProduced === 4 && equal(city.localPower?.lastProductiveBeat, proof) }; this.controls++;
+    this.predicates = { complete_atomic_consumer_allocation: factory.result.localPower.consumed === 3 && factory.result.residents.allocated === 3 && equal(factory.result.paid, {}) && equal(factory.result.strategicPaid, {}), same_town_same_beat_power: proof.cityId === path.cityId && proof.operations.every(operation => operation.result.round === proof.round), exact_modified_materials: factory.recipe.baseOutputs.materials === 12 && factory.result.produced.materials === this.factoryOutput(), blocked_consumer_has_no_effects: blocked, no_energy_substitution: blocked, ordinary_multipliers_exclude_power: zeroFactory?.status === 'operated' && equal(zeroFactory.produced, {}) && zeroFactory.localPower?.consumed === 3 && zeroPlant?.localPower?.generated === 8 && zeroPlant.emissionsProduced === 4 && equal(city.localPower?.lastProductiveBeat, proof) }; this.controls++;
   }
   private retentionControls(): void {
     const path = this.getPath(); const proof = town(path.productive, path.cityId).localPower?.lastProductiveBeat; assert.ok(proof);
     let state = structuredClone(path.unused);
-    for (let count = 0; count < 3 && state.events.some(event => event.id === proof.eventId); count++) { const result = replayCoastalStep(state, { kind: 'strategy', timestamp: coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60) }); assert.ok(result.ok); state = result.state; this.controls++; }
+    for (let count = 0; count < 96 && state.events.some(event => event.id === proof.eventId); count++) { const result = replayCoastalStep(state, { kind: 'strategy', timestamp: coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60) }); assert.ok(result.ok); state = result.state; this.controls++; }
     let rejects = true;
     for (const kind of ['power', 'town', 'round', 'payment', 'event']) {
       const corrupted = structuredClone(path.productive); const ledger = town(corrupted, path.cityId).localPower; assert.ok(ledger?.lastBeat);
@@ -151,6 +164,6 @@ export class LocalPowerProbe {
     }
     const latest = town(path.unused, path.cityId).localPower;
     const identities = proof.operations.every(operation => operation.recipe.ruleVersion === 1 && operation.result.residents.openingPopulation === proof.openingPopulation && operation.result.residents.communityReserve === 3 && path.productive.events.some(event => event.id === operation.result.operationEventId && event.round === proof.round && event.actor === proof.civId));
-    this.predicates = { exact_versioned_operation_snapshots: identities && proof.operations[0]?.recipe.strategicInputs.coal === 2 && proof.operations[1]?.recipe.baseOutputs.materials === 12, historical_identity_and_residents: proof.cityId === path.cityId && proof.civId === path.seat && proof.operations.every(operation => operation.result.residents.allocated === 3), latest_attempt_distinct_from_productive: latest?.lastBeat?.round !== latest?.lastProductiveBeat?.round && equal(latest?.lastProductiveBeat, proof), positive_consumer_required: latest?.lastBeat?.consumed === 0 && latest.lastBeat.generated === 8 && equal(town(state, path.cityId).localPower?.lastProductiveBeat, proof), bounded_self_contained_retention: !state.events.some(event => event.id === proof.eventId) && equal(town(state, path.cityId).localPower?.lastProductiveBeat, proof) && isWorldState(state) && Object.keys(town(state, path.cityId).localPower ?? {}).length === 3, retained_events_cross_checked: isWorldState(path.productive) && rejects, emissions_are_receipt_only: proof.operations[0]?.result.emissionsProduced === 4 && path.productive.climate === path.beforeRelease.climate && !Object.hasOwn(state, 'emissions'), no_clock_era_or_milestone_change: state.year === path.beforeRelease.year && state.clockTicks === path.beforeRelease.clockTicks && equal(state.calendarMilestones, path.beforeRelease.calendarMilestones) };
+    this.predicates = { exact_versioned_operation_snapshots: identities && proof.operations[0]?.recipe.strategicInputs.coal === 2 && proof.operations[1]?.recipe.baseOutputs.materials === 12, historical_identity_and_residents: proof.cityId === path.cityId && proof.civId === path.seat && proof.operations.every(operation => operation.result.residents.allocated === 3), latest_attempt_distinct_from_productive: latest?.lastBeat?.round !== latest?.lastProductiveBeat?.round && equal(latest?.lastProductiveBeat, proof), positive_consumer_required: latest?.lastBeat?.consumed === 0 && latest.lastBeat.generated === 8 && equal(town(state, path.cityId).localPower?.lastProductiveBeat, proof), bounded_self_contained_retention: !state.events.some(event => event.id === proof.eventId) && equal(town(state, path.cityId).localPower?.lastProductiveBeat, proof) && isWorldState(state) && Object.keys(town(state, path.cityId).localPower ?? {}).length === 3, retained_events_cross_checked: isWorldState(path.productive) && rejects, emissions_are_receipt_only: proof.operations[0]?.result.emissionsProduced === 4 && path.productive.climate === path.initial.climate && !Object.hasOwn(state, 'emissions'), no_clock_era_or_milestone_change: state.year === path.initial.year && state.clockTicks === path.initial.clockTicks && equal(state.calendarMilestones, path.initial.calendarMilestones) };
   }
 }

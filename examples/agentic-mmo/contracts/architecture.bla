@@ -39,9 +39,11 @@ module validation "core/validation.ts"
 module host "server/repository.ts"
 module hostValidation "server/validation.ts"
 module liveProjection "web/live-world.ts"
-require "release-upgrades-use-registered-definitions": dependency evolution -> release
+require "fresh-genesis-uses-registered-rules": dependency engine -> release
 require "history-advancement-has-one-engine-operation": symbol evolution::applyHistoryAdvance
-require "compatible-release-has-one-engine-operation": symbol evolution::applyRelease
+require "fresh-genesis-has-one-engine-operation": symbol engine::createWorld
+forbid "no-world-release-upgrader": symbol evolution::applyRelease
+forbid "engine-exposes-no-world-release-upgrader": symbol engine::applyRelease
 require "host-uses-authoritative-transitions": dependency host -> engine
 require "host-reuses-canonical-validation": dependency hostValidation -> validation
 require "live-view-reuses-canonical-validation": dependency liveProjection -> validation

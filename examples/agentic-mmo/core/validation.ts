@@ -1,3 +1,4 @@
+import { isKnowledgeState, validKnowledgeEvent } from './knowledge-validation.ts';
 import { FOOD_BUDGET_RULES, type FoodSupplyReceipt } from './food-security-content.ts';
 import { isReliefState, validReliefEvent } from './relief-validation.ts';
 import { isHistoricalEventReceipt } from './historical-selection-validation.ts';
@@ -1550,7 +1551,7 @@ function growthRecords(cities: City[], events: GameEvent[], features: string[], 
     const housing: unknown = settlement.housing;
     if (!record(housing) || !exactKeys(housing, ['ruleVersion', 'baseCapacity', 'establishedRound', 'origin'])
       || housing.ruleVersion !== 1 || !integer(housing.establishedRound, 0, round)
-      || !(housing.origin === 'founded' && housing.baseCapacity === 8 || housing.origin === 'legacy-adoption' && integer(housing.baseCapacity, 20))) return false;
+      || !(housing.origin === 'founded' && housing.baseCapacity === 8 || housing.origin === 'initial-capital' && housing.baseCapacity === 20 && housing.establishedRound === 0 && settlement.id === `city-${settlement.civId}` || housing.origin === 'legacy-adoption' && integer(housing.baseCapacity, 20))) return false;
   }
   for (const event of events) {
     if (!Object.hasOwn(event, 'populationGrowth')) continue;
@@ -1633,7 +1634,7 @@ function territoryRecords(present: boolean, value: unknown, cities: City[], tile
 
 export function isGameEvent(value: unknown): value is GameEvent {
   return (
-    record(value) && validMarsEvent(value) && validReliefEvent(value) &&
+    record(value) && validMarsEvent(value) && validReliefEvent(value) && validKnowledgeEvent(value) &&
     (!Object.hasOwn(value, 'regionalEvent') || isHistoricalEventReceipt(value.regionalEvent) && value.regionalEvent.eventId === value.id && value.regionalEvent.round === value.round && value.regionalEvent.eventKind === value.type && value.actor === DIRECTOR_SEAT && value.target === value.regionalEvent.civId && value.tileId === value.regionalEvent.selection.local.tileId) &&
     ['id', 'type', 'title', 'cause'].every((field) => text(value[field])) &&
     typeof value.detail === 'string' &&
@@ -1839,6 +1840,9 @@ export function isWorldState(
     (value.outcome !== null && value.outcome.round > round)
   )
     return false;
+  const knowledgeEnabled = features.includes('knowledge-compacts');
+  if (knowledgeEnabled !== Object.hasOwn(value, 'knowledge') || knowledgeEnabled && !isKnowledgeState(value.knowledge, value as unknown as WorldState)
+    || !knowledgeEnabled && value.events.some(event => Object.hasOwn(event, 'knowledgeCompact') || Object.hasOwn(event, 'knowledgeStudy') || Object.hasOwn(event, 'knowledgeResult') || event.type.startsWith('knowledge-'))) return false;
   const reliefEnabled = features.includes('consented-relief');
   if (reliefEnabled !== Object.hasOwn(value, 'relief') || (reliefEnabled && !isReliefState(value.relief, value as unknown as WorldState))
     || (!reliefEnabled && value.events.some(event => Object.hasOwn(event, 'reliefResult') || event.type.startsWith('relief-')))) return false;

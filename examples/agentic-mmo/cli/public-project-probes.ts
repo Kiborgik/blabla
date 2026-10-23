@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { RESOURCE_IDS, TURN_RULES } from '../core/content.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { GameAction, PublicProject, Resources, TransitionResult, WorldState } from '../core/types.ts';
@@ -20,10 +20,8 @@ function nextBeat(state: WorldState): string {
 }
 
 function legalFixture() {
-  let state = createWorld(17, EPOCH);
+  let state = createWorld(17, EPOCH, 'settlement-charters-1');
   let timestamp = EPOCH;
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1'])
-    state = accepted(applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp }));
   const act = (seat: number, action: GameAction) => {
     state = accepted(catchUpStrategy(state, timestamp));
     assert.ok(legalActions(state, seat, timestamp).some((option) => isDeepStrictEqual(option.action, action)));

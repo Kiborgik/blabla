@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { GameAction } from '../core/types.ts';
 import { hexDistance } from '../core/simulation/geography.ts';
 import { coastalDeparturePrefix, coastalPrefixTime, replayCoastalStep, type CoastalPrefixInput, type CoastalPrefixStep } from './fixtures/coastal-prefix.ts';
 
-export function workedResourcePrefix() {
-  const prefix = coastalDeparturePrefix();
+export function workedResourcePrefix(rulesId = 'settlement-writing-1') {
+  const prefix = coastalDeparturePrefix(rulesId);
   let state = prefix.state;
   const steps: CoastalPrefixStep[] = [...prefix.steps];
   const time = () => { assert.ok(state.independentTurns); return coastalPrefixTime(state.independentTurns.strategyTicks * 60 + 20); };
@@ -35,13 +35,11 @@ export function workedResourcePrefix() {
     for (let count = 0; count < 32; count++) { if (state.cities[0]?.buildings.includes(project)) break; beat(); }
     assert.ok(state.cities[0]?.buildings.includes(project));
   };
-  for (const targetReleaseId of ['settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1'])
-    commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: time() } });
   research('writing'); construct('campus', 39); construct('library'); beat(); research('kiln-firing');
   return { initial: prefix.initial, beforeWriting: prefix.state, state, steps, timestamp: time() };
 }
 
-await test('wholly legal prior-release prefix reaches owned resource sites through useful Writing and Kiln research', context => {
+await test('fresh Writing rules and legal actions reach owned resource sites through useful Writing and Kiln research', context => {
   const prefix = workedResourcePrefix(); const city = prefix.state.cities[0]; assert.ok(city);
   assert.equal(prefix.state.releaseId, 'settlement-writing-1');
   assert.ok(prefix.state.civilizations[0]?.technologies.includes('kiln-firing'));
@@ -92,10 +90,10 @@ await test('unreleased Mining selection has zero effects on the valid owned-site
   assert.equal(result.ok, false); assert.deepEqual(result.events, []); assert.equal(JSON.stringify(result.state), before); assert.equal(JSON.stringify(state), before);
 });
 
-await test('current compatible releases and due beats are real transitions rather than fixture patches', () => {
+await test('current due beats are real transitions rather than fixture patches', () => {
   const prefix = workedResourcePrefix();
-  for (const step of prefix.steps.filter(candidate => candidate.input.kind === 'release' || candidate.input.kind === 'strategy')) {
-    const result = step.input.kind === 'release' ? applyRelease(step.before, step.input.command) : step.input.kind === 'strategy' ? catchUpStrategy(step.before, step.input.timestamp) : null;
+  for (const step of prefix.steps.filter(candidate => candidate.input.kind === 'strategy')) {
+    const result = step.input.kind === 'strategy' ? catchUpStrategy(step.before, step.input.timestamp) : null;
     assert.deepEqual(result, step.result);
   }
 });

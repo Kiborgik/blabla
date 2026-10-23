@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { cityProductivity } from '../core/simulation/world.ts';
 import { ObservatoryLearningProbe } from '../cli/observatory-learning-probe.ts';
 
 await test('observatory standalone probe is lazy and rejects unknown actions without effects', () => {
@@ -23,7 +24,7 @@ await test('observatory six draft actions derive their predicates from actual tr
     for (const field of fields) assert.equal(Reflect.get(probe.observe(), field), true, `${action}: ${field}`);
     context.diagnostic(`${action}: ${Math.round(performance.now() - start)}ms`);
   }
-  assert.equal(probe.observe().replayed_frames, 716);
+  const replayed = probe.snapshot().state; assert.ok(replayed); assert.equal(probe.observe().replayed_frames, replayed.revision);
 });
 
 await test('observatory probe preserves exact source and distinct completion and operation facts', () => {
@@ -34,7 +35,7 @@ await test('observatory probe preserves exact source and distinct completion and
   assert.equal(completion.state?.cities.find(city => city.id === 'city-0')?.buildingOperations?.observatory?.lastResult, null);
   assert.equal(probe.observe().science_made, false); assert.match(probe.observe().provenance, /synthetic order-removal/);
   probe.call('work_observatory'); const receipt = probe.snapshot().state?.cities.find(city => city.id === 'city-0')?.buildingOperations?.observatory?.lastResult;
-  assert.ok(receipt); assert.equal(receipt.round, 613); assert.deepEqual(receipt.paid, { credits: 2 }); assert.equal(receipt.residents?.allocated, 3); assert.deepEqual(receipt.produced, { science: 13.65 });
+  assert.ok(receipt); assert.equal(receipt.round, probe.snapshot().state?.round); assert.equal(receipt.round, (probe.snapshot().before?.round ?? -1) + 1); assert.deepEqual(receipt.paid, { credits: 2 }); assert.equal(receipt.residents?.allocated, 3); const opening = probe.snapshot().before?.cities.find(city => city.id === 'city-0'); assert.ok(opening); assert.deepEqual(receipt.produced, { science: Math.round(7 * cityProductivity(opening) * 100) / 100 });
 });
 
 await test('observatory synthetic shortages preserve complete opening resources', () => {

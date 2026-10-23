@@ -1,3 +1,4 @@
+import { knowledgeStory } from './knowledge-inspection.ts';
 import { BUILDINGS, CIVICS, ERAS, FEATURES, GOVERNMENTS, POLICIES, RESOURCE_IDS, TECHNOLOGIES, HISTORICAL_MILESTONES } from '../core/content.ts';
 import type { GameEvent, Resources, WorldState } from '../core/types.ts';
 import { METRIC_LABELS } from '../visuals/visual-language.ts';
@@ -243,6 +244,8 @@ function regionalStory(state: StoryNames, event: GameEvent, fallback: EventLogEn
 }
 
 export function storyLanguage(state: StoryNames, event: GameEvent, fallback: EventLogEntry): StoryLanguage {
+  const knowledge = knowledgeStory(event);
+  if (knowledge) return knowledge;
   const historical = historicalStory(state, event);
   if (historical) return historical;
   const actor = civilization(state, event.actor); const target = civilization(state, event.target);

@@ -11,7 +11,7 @@ import { boundedInteger, canonical, isRecord, parseJson, RequestFailure } from '
 
 export const RECORDED_CHOICE_LIMITS = { rows: 200, rowBytes: 512 * 1024, pageBytes: 1024 * 1024, snapshotBytes: 8 * 1024 * 1024 } as const;
 const encoder = new TextEncoder();
-const eventFields = new Set<string>(['id', 'round', 'type', 'title', 'detail', 'actor', 'target', 'tileId', 'cause', 'effects', 'importance', 'publicProjectResult', 'coastalFounding', 'strategicExtraction', 'strategicShipment', 'wonderCompletion', 'wonderLoss', 'researchBoost', 'populationGrowth', 'territoryAcquisition', 'railCompletion', 'industrialFoundry', 'steamDelivery', 'localPower', 'marsDeparture', 'marsArrival', 'marsUpkeep', 'marsHabitat', 'reliefResult', 'regionalEvent']);
+const eventFields = new Set<string>(['id', 'round', 'type', 'title', 'detail', 'actor', 'target', 'tileId', 'cause', 'effects', 'importance', 'publicProjectResult', 'coastalFounding', 'strategicExtraction', 'strategicShipment', 'wonderCompletion', 'wonderLoss', 'researchBoost', 'populationGrowth', 'territoryAcquisition', 'railCompletion', 'industrialFoundry', 'steamDelivery', 'localPower', 'marsDeparture', 'marsArrival', 'marsUpkeep', 'marsHabitat', 'reliefResult', 'regionalEvent', 'knowledgeCompact', 'knowledgeStudy', 'knowledgeResult']);
 
 function corrupt(): never { throw new RequestFailure(503, 'corrupt_history'); }
 function integer(value: unknown, minimum = 0): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum; }
@@ -68,6 +68,39 @@ function regionalReceiptLink(selection: unknown, family: unknown, civilization: 
     || receipt.civId !== civilization || receipt.revision !== revision || canonical(receipt.selection) !== canonical(selection)) return corrupt();
 }
 
+function knowledgeReceiptLink(kind: string, action: GameAction | undefined, seat: unknown, events: GameEvent[]): void {
+  const compactEvents = events.filter(event => event.knowledgeCompact);
+  const receipts = events.flatMap(event => event.knowledgeResult ? [event.knowledgeResult] : []);
+  if (new Set(receipts.map(result => result.compact.id)).size !== receipts.length || compactEvents.length > 1) return corrupt();
+  for (const event of compactEvents) {
+    const compact = event.knowledgeCompact!; const terms = compact.terms;
+    if (kind !== 'action' || !action || event.actor !== seat) return corrupt();
+    if (event.type === 'knowledge-proposed') {
+      if (action.type !== 'propose-knowledge' || terms.teacherId !== seat || action.routeId !== terms.routeId
+        || action.teacherCityId !== terms.teacherCityId || action.learnerCityId !== terms.learnerCityId || action.technologyId !== terms.technologyId
+        || action.teacherInstitutionId !== terms.teacherInstitutionId || action.learnerInstitutionId !== terms.learnerInstitutionId) return corrupt();
+    } else if (action.type !== 'respond-knowledge' || !action.accept || action.compactId !== compact.id || terms.learnerId !== seat) return corrupt();
+  }
+  for (const event of events) if (event.knowledgeStudy) {
+    if (kind !== 'strategy-catchup') return corrupt();
+    const delivery = event.knowledgeStudy.attempt.delivery;
+    if (!events.some(trade => trade.id === delivery.eventId && trade.type === 'trade-delivered' && trade.detail === delivery.routeId && trade.round === delivery.round && trade.actor === delivery.owner && trade.target === delivery.partner)) return corrupt();
+  }
+  for (const result of receipts) {
+    if (result.outcome === 'declined' || result.outcome === 'withdrawn') {
+      if (kind !== 'action' || result.actor !== seat || !action || !('compactId' in action) || action.compactId !== result.compact.id
+        || (result.outcome === 'declined' ? action.type !== 'respond-knowledge' || action.accept : action.type !== 'withdraw-knowledge')) return corrupt();
+    } else if (kind !== 'strategy-catchup') return corrupt();
+    if (result.researchCompletionEventId !== null && !events.some(event => event.id === result.researchCompletionEventId && event.type === 'research-completed'
+      && event.round === result.resolvedRound && event.actor === result.compact.terms.learnerId && event.target === result.compact.terms.learnerId
+      && event.effects.includes(`Technology ${result.compact.terms.technologyId} unlocked`))) return corrupt();
+  }
+  if (kind === 'action') {
+    const knowledgeAction = action && ['propose-knowledge', 'respond-knowledge', 'withdraw-knowledge'].includes(action.type);
+    if (compactEvents.length + receipts.length !== (knowledgeAction ? 1 : 0)) return corrupt();
+  }
+}
+
 function reliefReceiptLink(kind: string, action: GameAction | undefined, seat: unknown, events: GameEvent[]): void {
   const receipts = events.flatMap(event => event.reliefResult ? [event.reliefResult] : []);
   if (new Set(receipts.map(result => result.charter.id)).size !== receipts.length) return corrupt();
@@ -98,6 +131,7 @@ function projectEntry(value: unknown): RecordedChronicleEntry {
     if (!keys(transition, ['kind', 'expectedRevision', 'timestamp']) || transition.expectedRevision !== value.start_revision || !timestamp(transition.timestamp)) return corrupt();
     regionalReceiptLink(undefined, undefined, undefined, value.end_revision, events);
     reliefReceiptLink(kind, undefined, undefined, events);
+    knowledgeReceiptLink(kind, undefined, undefined, events);
     return { ...base, kind, action: null };
   }
   if (!keys(transition, ['kind', 'command']) || !isRecord(transition.command) || transition.command.expectedRevision !== value.start_revision) return corrupt();
@@ -114,6 +148,7 @@ function projectEntry(value: unknown): RecordedChronicleEntry {
     const action = command.action;
     regionalReceiptLink(action.type === 'event' ? action.regional : undefined, action.type === 'event' ? action.event : undefined, action.type === 'event' ? action.target : undefined, value.end_revision, events);
     reliefReceiptLink(kind, action, command.seat, events);
+    knowledgeReceiptLink(kind, action, command.seat, events);
     const recordedReason = provenance.kind === 'procedural-policy' ? provenance.policy?.reason ?? null : head?.reason ?? null;
     return { ...base, kind, action: structuredClone(command.action), recordedReason };
   }
@@ -130,6 +165,7 @@ function projectEntry(value: unknown): RecordedChronicleEntry {
   } else return corrupt();
   if (kind !== 'director-tick') regionalReceiptLink(undefined, undefined, undefined, value.end_revision, events);
   reliefReceiptLink(kind, undefined, undefined, events);
+  knowledgeReceiptLink(kind, undefined, undefined, events);
   return { ...base, kind, action: null };
 }
 

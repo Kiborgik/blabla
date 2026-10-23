@@ -1,18 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { createIndependentTurns } from '../core/simulation/turns.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { Command, GameAction, WorldState } from '../core/types.ts';
-import {
-  completeAttachedPlan,
-  isPersistedActionPlan,
-  isGameAction,
-  observeActionPlan,
-  validateAttachedPlan,
-  type ActionPlan,
-  type ActionPlanItem,
-} from '../core/planning.ts';
+import { completeAttachedPlan, isPersistedActionPlan, isGameAction, observeActionPlan, validateAttachedPlan, type ActionPlan, type ActionPlanItem } from '../core/planning.ts';
 
 const epoch = '2026-10-16T00:00:00.000Z';
 const tenSeconds = '2026-10-16T00:00:10.000Z';
@@ -20,10 +12,7 @@ const head: GameAction = { type: 'focus', focus: 'industry' };
 const followUp: GameAction = { type: 'build', project: 'farm' };
 
 function fixture(): WorldState {
-  const first = createWorld(17, epoch);
-  const second = applyRelease(first, { expectedRevision: 0, expectedFromReleaseId: first.releaseId, targetReleaseId: 'settlement-foundations-2' }).state;
-  const state = applyRelease(second, { expectedRevision: 1, expectedFromReleaseId: second.releaseId, targetReleaseId: 'settlement-independent-1', timestamp: epoch }).state;
-  state.unlockedFeatures.push('bounded-plans');
+  const state = createWorld(17, epoch, 'settlement-plans-1');
   state.independentTurns = createIndependentTurns(epoch);
   const civ = state.civilizations[0];
   assert.ok(civ);
@@ -248,11 +237,8 @@ await test('sparse plan arrays cannot hide unvalidated items before JSON persist
 });
 
 await test('attached operation plans validate exact shapes and revalidate explicit pause successors', () => {
-  const initial = fixture();
-  initial.unlockedFeatures = initial.unlockedFeatures.filter((feature) => feature !== 'bounded-plans');
-  const released = applyRelease(initial, { expectedRevision: initial.revision, expectedFromReleaseId: initial.releaseId, targetReleaseId: 'settlement-production-1', timestamp: epoch });
-  assert.equal(released.ok, true, released.error);
-  const state = released.state;
+  const state = createWorld(17, epoch, 'settlement-production-1');
+  state.civilizations[0]!.technologies.push('agriculture');
   const city = state.cities[0];
   assert.ok(city);
   city.buildings.push('kiln');
@@ -284,13 +270,8 @@ await test('frontier plans preserve historical parsing but require exact explici
     assert.equal(isGameAction({ type: 'settle', tileId: 12, sourceCityId }), false);
   }
   assert.equal(isGameAction({ type: 'settle', tileId: 12, sourceCityId: 'city-0', extra: true }), false);
-  let state = fixture();
-  state.unlockedFeatures = state.unlockedFeatures.filter((feature) => feature !== 'bounded-plans');
-  for (const targetReleaseId of ['settlement-production-1', 'settlement-frontiers-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+  let state = createWorld(17, epoch, 'settlement-frontiers-1');
+  state.civilizations[0]!.technologies.push('agriculture');
   const action = legalActions(state, 0, epoch).find(({ action: option }) => option.type === 'settle')?.action;
   assert.ok(action && action.type === 'settle' && action.sourceCityId);
   const withPlan: ActionPlanItem[] = [{ action: head, reason: 'Prepare supplies' }, { action, reason: 'Move three people from the named source after reviewing reserves' }];
@@ -325,13 +306,8 @@ await test('city-targeted plans preserve exact identity, reject malformed target
     for (const cityId of ['', ' ', undefined, null, 1, 'x'.repeat(129)]) assert.equal(isGameAction({ ...action, cityId }), false);
     assert.equal(isGameAction({ ...action, cityId: 'city-0', extra: true }), false);
   }
-  let state = fixture();
-  state.unlockedFeatures = state.unlockedFeatures.filter((feature) => feature !== 'bounded-plans');
-  for (const targetReleaseId of ['settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+  let state = createWorld(17, epoch, 'settlement-specialization-1');
+  state.civilizations[0]!.technologies.push('agriculture');
   const city = state.cities.find((candidate) => candidate.civId === 0);
   assert.ok(city);
   const focus: GameAction = { type: 'focus', focus: 'industry', cityId: city.id };
@@ -374,13 +350,8 @@ await test('city repair plans bind an exact damaged owned target and recheck res
   assert.equal(isGameAction({ type: 'repair-city', cityId: 'city-0' }), true);
   for (const cityId of ['', ' ', undefined, null, 1, 'x'.repeat(129)]) assert.equal(isGameAction({ type: 'repair-city', cityId }), false);
   assert.equal(isGameAction({ type: 'repair-city', cityId: 'city-0', routeId: 'route-0' }), false);
-  let state = fixture();
-  state.unlockedFeatures = state.unlockedFeatures.filter((feature) => feature !== 'bounded-plans');
-  for (const targetReleaseId of ['settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+  let state = createWorld(17, epoch, 'settlement-recovery-1');
+  state.civilizations[0]!.technologies.push('agriculture');
   const city = state.cities.find((candidate) => candidate.civId === 0);
   assert.ok(city);
   city.damage = 35;

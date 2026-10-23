@@ -8,7 +8,7 @@ import { resolveEconomy } from '../core/simulation/economy.ts';
 import type { WorldState } from '../core/types.ts';
 
 function syntheticTown(population = 12): WorldState {
-  const state = createWorld(41); state.unlockedFeatures.push('building-operations', 'resident-capacity', 'local-power', 'powered-science', 'productive-research');
+  const state = createWorld(41, '2026-10-16T00:00:00.000Z', 'settlement-powered-science-1');
   const city = state.cities[0]; const actor = state.civilizations[0]; assert.ok(city && actor);
   city.population = population; city.buildings = ['coal-plant', 'factory', 'research-lab']; city.improvements = {};
   city.buildingOperations = Object.fromEntries(city.buildings.map(id => [id, { enabled: true, lastResult: null }]));
@@ -16,7 +16,7 @@ function syntheticTown(population = 12): WorldState {
   return state;
 }
 
-void test('powered Science registers exact research, local Campus recipe and additive release', () => {
+void test('powered Science registers exact research, local Campus recipe and registered feature gate', () => {
   const sanitation = TECHNOLOGIES.find(item => item.id === 'sanitation'); const chemistry = TECHNOLOGIES.find(item => item.id === 'chemistry'); const lab = BUILDINGS.find(item => item.id === 'research-lab');
   assert.ok(sanitation, 'The accepted Sanitation branch is missing'); assert.ok(chemistry); assert.ok(lab);
   assert.equal(sanitation.cost, 140); assert.deepEqual(sanitation.requires, ['construction', 'education']);
@@ -26,7 +26,7 @@ void test('powered Science registers exact research, local Campus recipe and add
   assert.deepEqual(lab.requires, ['chemistry']); assert.deepEqual(lab.requiresBuildings, ['campus']); assert.equal(lab.minEra, 3);
   assert.deepEqual(lab.operatingInputs, { credits: 2 }); assert.equal(lab.localPowerInput, 3); assert.deepEqual(lab.production, { science: 12 });
   const release = RELEASES.find(item => item.id === 'settlement-powered-science-1'); assert.ok(release);
-  assert.deepEqual(release.compatibleFrom, ['settlement-second-government-1']); assert.ok(release.featureIds.includes('powered-science'));
+  assert.ok(release.featureIds.includes('powered-science'));
   assert.deepEqual(validateContent(), []);
 });
 
@@ -39,7 +39,7 @@ void test('synthetic existing allocation funds Factory before Laboratory and clo
 });
 
 import { poweredScienceJourney } from './fixtures/powered-science-journey.ts';
-void test('a genuine government continuation earns Laboratory Science and funds explicitly chosen Banking', context => {
+void test('actual Laboratory Science from declared synthetic prerequisites funds explicitly chosen Banking', context => {
   const path = poweredScienceJourney(); const city = path.productive.cities.find(item => item.id === path.cityId); const receipt = city?.localPower?.lastProductiveBeat; assert.ok(receipt);
   const lab = receipt.operations.find(item => item.buildingId === 'research-lab'); assert.ok(lab); assert.ok((lab.result.produced.science ?? 0) > 0);
   assert.deepEqual([receipt.generated, receipt.consumed, receipt.expired], [8, 6, 2]);

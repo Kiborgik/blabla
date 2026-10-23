@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { capabilityCatalogue, projectCapabilities, type CapabilityRow } from '../core/capabilities.ts';
 import { BUILDINGS, TECHNOLOGIES } from '../core/content.ts';
-import { applyCommand, applyRelease, createWorld, catchUpStrategy, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, createWorld, catchUpStrategy, legalActions, observe } from '../core/engine.ts';
 import type { WorldState } from '../core/types.ts';
 
 const epoch = '2026-10-16T00:00:00.000Z';
@@ -29,21 +29,12 @@ function withChoices(state: WorldState, cityId: string | null, timestamp = epoch
 }
 
 function released(): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1']) {
-    const outcome = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.ok(outcome.ok, outcome.error);
-    state = outcome.state;
-  }
-  return state;
+  return createWorld(1701, epoch, 'settlement-operating-exchange-1');
 }
 
 await test('recurring decision tree exposes the same obligation and exact-town construction activity without implying completion', () => {
-  let state = released();
-  let result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-decisions-1', timestamp: epoch });
-  assert.ok(result.ok, result.error);
-  state = result.state;
-  result = applyCommand(state, { seat: 0, expectedRevision: state.revision, action: { type: 'research', technology: 'agriculture' }, timestamp: epoch });
+  let state = createWorld(1701, epoch, 'settlement-decisions-1');
+  let result = applyCommand(state, { seat: 0, expectedRevision: state.revision, action: { type: 'research', technology: 'agriculture' }, timestamp: epoch });
   assert.ok(result.ok, result.error);
   state = result.state;
   for (let seconds = 60; seconds <= 600 && !firstCivilization(state).technologies.includes('agriculture'); seconds += 60) {

@@ -8,7 +8,7 @@ import { isWorldState } from '../core/validation.ts';
 import { ownedTerritoryPastureJourney, ownedTerritoryForestJourney } from '../tests/fixtures/owned-territory-journey.ts';
 import { coastalPrefixTime, replayCoastalStep, type CoastalPrefixStep } from '../tests/fixtures/coastal-prefix.ts';
 
-const actions = ['adopt_territory', 'purchase_exact_land', 'work_purchased_resource', 'work_new_extent_land', 'refuse_territory_action', 'replay_territory_history'];
+const actions = ['purchase_exact_land', 'work_purchased_resource', 'work_new_extent_land', 'refuse_territory_action', 'replay_territory_history'];
 
 export class OwnedTerritoryProbe {
   private pasture: ReturnType<typeof ownedTerritoryPastureJourney> | null = null;
@@ -39,7 +39,7 @@ export class OwnedTerritoryProbe {
     if (!actions.includes(action)) throw new RangeError(`Unknown territory action ${action}`);
     this.operation = action; this.replayExpected = null; this.replayedFrames = 0;
     if (action === 'refuse_territory_action') {
-      this.state ??= structuredClone(this.basis().journey.adopted);
+      this.state ??= structuredClone(this.basis().journey.prepared);
       this.before = structuredClone(this.state);
       this.result = applyCommand(this.state, { seat: 2, expectedRevision: this.state.revision, timestamp: coastalPrefixTime((this.state.independentTurns?.strategyTicks ?? 0) * 60 + 30), action: { type: 'acquire-tile', cityId: 'missing-territory-town', tileId: 164 } });
       assert.deepEqual(this.state, this.before); this.state = this.result.state; return;
@@ -59,7 +59,7 @@ export class OwnedTerritoryProbe {
       const step = basis.journey.steps.find(value => value.result.state.revision === basis.operated.revision); assert.ok(step); this.select(step); return;
     }
     const basis = this.basis();
-    const destination = action === 'adopt_territory' ? basis.journey.adopted : action === 'purchase_exact_land' ? basis.purchased : basis.operated;
+    const destination = action === 'purchase_exact_land' ? basis.purchased : basis.operated;
     const step = basis.journey.steps.find(value => value.result.state.revision === destination.revision); assert.ok(step); this.select(step);
   }
 
@@ -76,20 +76,17 @@ export class OwnedTerritoryProbe {
     const priorReceipts = before?.tileAcquisitions ?? {};
     const existingReceiptsPreserved = !!state && Object.entries(priorReceipts).every(([key, value]) => equal(state.tileAcquisitions?.[key], value));
     const worked = action === 'work_purchased_resource' || action === 'work_new_extent_land';
-    const preservedKeys: Array<keyof WorldState> = ['tiles', 'cities', 'civilizations', 'routes', 'treaties', 'strategicDeposits', 'pastoralSites', 'rng', 'round', 'year', 'clockTicks', 'independentTurns'];
     return {
       initialized: state !== null,
-      provenance: state ? 'Actual immutable legal engine journeys from initialized world; no patched ownership stock research population or era' : 'Uninitialized; no fixture executed',
+      provenance: state ? 'Synthetic named fresh-rule prerequisites followed by actual paid land purchases and productive work' : 'Uninitialized; no fixture executed',
       replayed_frames: this.replayedFrames,
-      adopted: action === 'adopt_territory' && state?.unlockedFeatures.includes('owned-territory') === true && equal(state.tileAcquisitions, {}) && this.result?.ok === true,
-      old_ownership_unchanged: action === 'adopt_territory' && !!state && !!before && preservedKeys.every(key => equal(state[key], before[key])),
       exact_beneficiary: action === 'purchase_exact_land' && !!receipt && !!quote && receipt.cityId === quote.cityId && receipt.civId === quote.civId && receipt.cityTileId === quote.cityTileId && receipt.tileId === quote.tileId && receipt.cityId === basis?.cityId,
       paid_once: paid && !!state && !!receipt && !!quote && equal(receipt.paid, quote.paid) && receipt.priorCivilizationPurchases === quote.priorCivilizationPurchases && existingReceiptsPreserved && Object.keys(state.tileAcquisitions ?? {}).length === Object.keys(priorReceipts).length + 1 && purchaseEvents.length === 1 && equal(purchaseEvents[0]?.territoryAcquisition, receipt),
       connected_path_retained: action === 'purchase_exact_land' && !!receipt && !!quote && equal(receipt.pathTileIds, quote.pathTileIds) && equal(receipt.pathTileIds, [199, 181, 164]) && receipt.distance === quote.distance,
       actual_owner_changed: action === 'purchase_exact_land' && !!state && !!before && !!receipt && state.tiles.every((tile, index) => tile.id === receipt.tileId ? before.tiles[index]?.owner === null && tile.owner === receipt.civId && equal({ ...tile, owner: null }, before.tiles[index]) : equal(tile, before.tiles[index])),
       same_town_worked: worked && !!receipt && !!city && !!improvement && city.civId === receipt.civId && city.tileId === receipt.cityTileId && improvement.completion.cityId === receipt.cityId && improvement.completion.tileId === receipt.tileId && improvement.improvementId === (tileId === 164 ? 'pasture' : 'lumber-mill'),
       later_staffed_output: worked && !!before && !!improvement && operation?.status === 'operated' && operation.round > improvement.completion.completedRound && operation.residents.allocated === 1 && operation.residents.openingPopulation === before.cities.find(town => town.id === city?.id)?.population && (operation.produced[tileId === 164 ? 'food' : 'materials'] ?? 0) > 0 && equal(operation.paid, {}) && operation.extraction === undefined,
-      retained_resource_unchanged: action === 'work_purchased_resource' && !!state && !!basis && equal(state.pastoralSites, basis.journey.adopted.pastoralSites) && state.pastoralSites?.tileIds.includes(164) === true,
+      retained_resource_unchanged: action === 'work_purchased_resource' && !!state && !!basis && equal(state.pastoralSites, basis.journey.prepared.pastoralSites) && state.pastoralSites?.tileIds.includes(164) === true,
       history_retained: action === 'replay_territory_history' && !!this.forest && this.replayedFrames === this.forest.journey.steps.length && equal(state, this.replayExpected) && equal(state?.tileAcquisitions, this.forest.operated.tileAcquisitions),
       refused: this.result?.ok === false,
       no_effects: this.result?.ok === false && equal(this.result.state, before) && this.result.events.length === 0,

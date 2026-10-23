@@ -11,7 +11,7 @@ import { mapExpansionJourney } from '../tests/fixtures/map-expansion-journey.ts'
 import { waterLandTown } from '../tests/fixtures/water-land-journey.ts';
 import { coastalPrefixTime, replayCoastalStep, type CoastalPrefixStep } from '../tests/fixtures/coastal-prefix.ts';
 
-const actions = ['start_lumber_mill', 'complete_lumber_mill', 'work_lumber_mill', 'pause_forest_work', 'refuse_forest_action', 'apply_world_expansion', 'found_new_extent_town', 'operate_new_extent_town', 'refuse_extent_action'];
+const actions = ['start_lumber_mill', 'complete_lumber_mill', 'work_lumber_mill', 'pause_forest_work', 'refuse_forest_action', 'found_new_extent_town', 'operate_new_extent_town', 'refuse_extent_action'];
 const people = (state: WorldState): number => state.cities.reduce((sum, city) => sum + city.population, 0);
 const time = (state: WorldState): string => coastalPrefixTime((state.independentTurns?.strategyTicks ?? 0) * 60 + 30);
 
@@ -66,7 +66,7 @@ export class ForestExtentProbe {
       return;
     }
     this.extent ??= mapExpansionJourney(); const basis = this.extent;
-    const destination = action === 'apply_world_expansion' ? basis.adopted : action === 'found_new_extent_town' ? basis.founded : basis.operated;
+    const destination = action === 'found_new_extent_town' ? basis.founded : basis.operated;
     const step = basis.steps.find(value => value.result.state.revision === destination.revision); assert.ok(step); this.select(step);
     if (action === 'operate_new_extent_town') {
       const detached = structuredClone(step.before);
@@ -90,7 +90,7 @@ export class ForestExtentProbe {
     const exactPayment = (seat: number, paid: Partial<Record<(typeof RESOURCE_IDS)[number], number>>): boolean => !!state && !!before && RESOURCE_IDS.every(resource => Math.abs((before.civilizations[seat]?.resources[resource] ?? 0) - (state.civilizations[seat]?.resources[resource] ?? 0) - (paid[resource] ?? 0)) < 1e-8);
     return {
       initialized: state !== null,
-      provenance: state ? 'Actual immutable legal engine journey; named positive replays its exact retained transition' : 'Uninitialized; no fixture executed',
+      provenance: state ? 'Synthetic named fresh-rule prerequisites followed by actual paid forest work or founding; named positive replays its exact retained transition' : 'Uninitialized; no fixture executed',
       control_provenance: this.control ? `Synthetic detached ${action === 'complete_lumber_mill' ? 'unfinished-order' : 'missing-new-town'} same-beat engine control` : null,
       resource_delta_against_control: delta,
       exact_owned_forest: action === 'start_lumber_mill' && forestTile?.terrain === 'forest' && forestTile.owner === oldCity?.civId && !!order && 'kind' in order && order.kind === 'improvement' && order.tileId === forestTile.id && order.improvementId === 'lumber-mill' && !!before && legalActions(before, 0, time(before)).some(option => option.action.type === 'improve' && option.action.tileId === forestTile.id && option.action.cityId === oldCity?.id && option.action.improvementId === 'lumber-mill'),
@@ -102,11 +102,6 @@ export class ForestExtentProbe {
       shared_numeric_allocation: action === 'work_lumber_mill' && !!allocationCity && !!city && Object.entries(allocationCity.improvements ?? {}).every(([id, item]) => equal(item.operation.lastResult?.residents, city.improvements?.[id]?.operation.lastResult?.residents)) && Object.entries(allocationCity.buildingOperations ?? {}).every(([id, item]) => equal(item.lastResult?.residents, city.buildingOperations?.[id]?.lastResult?.residents)),
       paused_or_ineligible: action === 'pause_forest_work' && mill?.operation.enabled === false && operation?.status === 'paused',
       no_payment_or_output: action === 'pause_forest_work' && operation?.residents.allocated === 0 && equal(operation.paid, {}) && equal(operation.produced, {}),
-      expanded_dimensions: action === 'apply_world_expansion' && before?.width === 18 && before.height === 12 && state?.width === 18 && state.height === 24 && state.tiles.length === 432,
-      old_tiles_unchanged: action === 'apply_world_expansion' && !!state && !!before && equal(state.tiles.slice(0, before.tiles.length), before.tiles),
-      history_unchanged: action === 'apply_world_expansion' && !!state && !!before && equal(state.events, [...before.events, ...(this.result?.events ?? [])].slice(-96)) && ['cities', 'civilizations', 'routes', 'treaties', 'independentTurns', 'round', 'year', 'clockTicks'].every(key => equal(Reflect.get(state, key), Reflect.get(before, key))),
-      retained_deposits_unchanged: action === 'apply_world_expansion' && !!state && !!before && equal(state.strategicDeposits, before.strategicDeposits) && equal(state.pastoralSites, before.pastoralSites),
-      rng_unchanged: action === 'apply_world_expansion' && !!state && state.rng === before?.rng,
       new_site_reachable: action === 'found_new_extent_town' && !!before && !!extent && createLandTransportPlanner(before).quote(extent.previous.frontierTileId, extent.previous.targetTileId) !== null,
       new_town_founded: action === 'found_new_extent_town' && !!newTown && !!before && !before.cities.some(town => town.id === newTown.id) && newTown.civId === extent?.previous.seat,
       population_conserved: action === 'found_new_extent_town' && !!state && !!before && people(state) === people(before),

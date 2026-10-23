@@ -8,7 +8,7 @@ import { GameStore, isRecord } from '../cli/store.ts';
 import { BUILDINGS, TRADE_RECIPES, TRADE_RULES } from '../core/content.ts';
 import { OperationsProbes } from '../cli/operations-probes.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld } from '../core/engine.ts';
 import { isWorldState } from '../core/validation.ts';
 
 function fixture() {
@@ -190,12 +190,7 @@ void test('synthetic operation observations exactly project real component resul
 
 void test('strategy setup and due shipment replay through the actual engine with immutable terms and genuine events', () => {
   const epoch = '2026-10-16T00:00:00.000Z';
-  let expected = createWorld(17, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1']) {
-    const next = applyRelease(expected, { expectedRevision: expected.revision, expectedFromReleaseId: expected.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(next.ok, true);
-    expected = next.state;
-  }
+  let expected = createWorld(17, epoch, 'settlement-independent-1');
   const proposed = applyCommand(expected, { seat: 0, expectedRevision: expected.revision, action: { type: 'propose-trade', partner: 1, recipeId: 'harvest-for-materials' }, timestamp: epoch });
   assert.equal(proposed.ok, true);
   const probes = new OperationsProbes();

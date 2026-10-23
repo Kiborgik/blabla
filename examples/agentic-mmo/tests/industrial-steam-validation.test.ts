@@ -12,18 +12,16 @@ function corrupt(state: WorldState, change: (copy: WorldState) => void, label: s
   const copy = structuredClone(state); change(copy); assert.equal(isWorldState(copy), false, label);
 }
 
-void test('industrial migration requires all three durable fields and preserves old release absence', () => {
+void test('fresh industrial rules require all three durable fields', () => {
   const journey = industrialSteamPrefix();
-  assert.ok(isWorldState(journey.beforeRelease)); assert.ok(isWorldState(journey.adopted));
+  assert.ok(isWorldState(journey.prepared));
   for (const field of ['coalDeposits', 'railEdges', 'industrialEvidence'] as const) {
-    corrupt(journey.adopted, copy => { delete copy[field]; }, `missing ${field}`);
-    corrupt(journey.beforeRelease, copy => { Object.assign(copy, { [field]: journey.adopted[field] }); }, `unreleased ${field}`);
+    corrupt(journey.prepared, copy => { delete copy[field]; }, `missing ${field}`);
   }
-  corrupt(journey.beforeRelease, copy => { required(required(copy.civilizations[0]).strategicResources).coal = 1; }, 'unreleased Coal stock');
 });
 
 void test('Coal validates retained placement identity, finite reserve, exact map, terrain and nonoverlap', () => {
-  const state = industrialSteamPrefix().adopted; const layer = coal(state); assert.ok(layer.tileIds.length > 0);
+  const state = industrialSteamPrefix().prepared; const layer = coal(state); assert.ok(layer.tileIds.length > 0);
   for (const change of [
     (copy: WorldState) => { coal(copy).placementId = 'iron-placement-1'; },
     (copy: WorldState) => { coal(copy).seed++; },

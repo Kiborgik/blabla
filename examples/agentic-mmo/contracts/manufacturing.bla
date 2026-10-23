@@ -1,4 +1,3 @@
-state old_state_preserved: bool
 state released_eligible_choice: bool
 state started: bool
 state exact_owned_site: bool
@@ -16,15 +15,11 @@ state completion_before_output: bool
 state refused: bool
 state zero_effects: bool
 
-action adopt_manufacturing()
 action start_manufacturing_commitment()
 action produce_industrial_materials()
 action operate_guild_workshop()
 action refuse_invalid_commitment()
 
-when adopt_manufacturing {
-    expect "manufacturing-adoption-preserves-existing-world": after.old_state_preserved
-}
 when start_manufacturing_commitment {
     expect "eligible-manufacturing-choice-starts": not before.released_eligible_choice or after.started
     expect "manufacturing-retains-exact-site-and-one-paid-lane": not after.started or (after.exact_owned_site and after.paid_once and after.single_town_lane)

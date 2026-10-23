@@ -1,3 +1,4 @@
+import type { ResolvedTradeDelivery } from '../knowledge-types.ts';
 import { ACTION_FEATURES, INDUSTRIAL_RULES, METAL_RULES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TRADE_RECIPES, TRADE_RULES } from '../content.ts';
 import type {
   ActionOption,
@@ -394,7 +395,8 @@ function shipmentBlock(
   return null;
 }
 
-export function resolveTrade(state: WorldState, events: GameEvent[]): void {
+export function resolveTrade(state: WorldState, events: GameEvent[]): ResolvedTradeDelivery[] {
+  const deliveries: ResolvedTradeDelivery[] = [];
   for (const offer of state.tradeOffers ?? []) {
     if (offer.status !== 'pending' || state.round < offer.expiresRound) continue;
     offer.status = 'expired';
@@ -488,5 +490,14 @@ export function resolveTrade(state: WorldState, events: GameEvent[]): void {
       event.steamDelivery = structuredClone(receipt); agreement.lastSteamDelivery = structuredClone(receipt);
       if (state.industrialEvidence && !state.industrialEvidence.steamDelivery && terms.cadenceRounds < terms.transport.unrailedCadence && terms.transport.railEdges.length > 0) state.industrialEvidence.steamDelivery = structuredClone(receipt);
     }
+    if (hasFeatures(state, ['knowledge-compacts'])) {
+      const from = state.cities.find(city => city.id === route.from)!; const to = state.cities.find(city => city.id === route.to)!;
+      deliveries.push({ ruleVersion: 1, routeId: route.id, agreementOfferId: agreement.offerId, agreementAcceptedRound: agreement.acceptedRound,
+        owner: route.owner, partner: route.partner, fromCityId: from.id, toCityId: to.id, fromTileId: from.tileId, toTileId: to.tileId,
+        round: state.round, revision: state.revision, eventId: event.id, deliveryCount: agreement.deliveryCount, tradeTerms: structuredClone(terms),
+        proposerPaid: obligations(terms.proposerCargo, terms.proposerUpkeep), recipientPaid: obligations(terms.recipientCargo, terms.recipientUpkeep),
+        proposerStrategicPaid: structuredClone(proposerStrategicPaid), recipientStrategicPaid: structuredClone(recipientStrategicPaid) });
+    }
   }
+  return deliveries;
 }

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { isWorldState } from '../../core/validation.ts';
 import { mineJourney } from '../worked-mines.test.ts';
 
-export function metalEconomyPrefix() {
-  const journey = mineJourney();
+export function metalEconomyPrefix(rulesId = 'settlement-metal-learning-1') {
+  const journey = mineJourney(rulesId);
   journey.start(56);
   journey.finish();
   journey.start(58);

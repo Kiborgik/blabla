@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import type { City, GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalDeparturePrefix, coastalPrefixTime, replayCoastalStep, type CoastalPrefixInput } from './fixtures/coastal-prefix.ts';
@@ -18,7 +19,7 @@ function town(state: WorldState): City { const city = state.cities.find(value =>
 function active(state: WorldState) { const order = town(state).construction?.active; assert.ok(order); return order; }
 function completion(state: WorldState) { const result = town(state).construction?.lastCompleted; assert.ok(result); return result; }
 function preparedJourney() {
-  const prefix = coastalDeparturePrefix();
+  const prefix = coastalDeparturePrefix('settlement-writing-1');
   let state = prefix.state;
   let seconds = (Date.parse(prefix.timestamp) - Date.parse(coastalPrefixTime(0))) / 1000;
   const steps: CoastalPrefixInput[] = prefix.steps.map(step => step.input);
@@ -26,8 +27,7 @@ function preparedJourney() {
   const commit = (input: CoastalPrefixInput) => { const result = replayCoastalStep(state, input); assert.ok(result.ok, result.error); state = result.state; steps.push(input); frames.push(state); };
   const action = (value: GameAction) => { assert.ok(legalActions(state, 0, coastalPrefixTime(seconds)).some(option => JSON.stringify(option.action) === JSON.stringify(value))); commit({ kind: 'action', command: { seat: 0, expectedRevision: state.revision, timestamp: coastalPrefixTime(seconds), action: value } }); seconds += 10; };
   const beat = () => { seconds = ((state.independentTurns?.strategyTicks ?? 0) + 1) * 60; commit({ kind: 'strategy', timestamp: coastalPrefixTime(seconds) }); seconds += 10; };
-  for (const targetReleaseId of ['settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1']) commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: coastalPrefixTime(seconds) } });
-  const adopted = state;
+  const prepared = state;
   action({ type: 'research', technology: 'writing' });
   for (let count = 0; count < 40 && !state.civilizations[0]?.technologies.includes('writing'); count++) beat();
   assert.ok(state.civilizations[0]?.technologies.includes('writing'));
@@ -39,11 +39,11 @@ function preparedJourney() {
   for (let count = 0; count < 24 && !town(state).buildings.includes('library'); count++) beat();
   assert.ok(town(state).buildings.includes('library')); const libraryCompleted = state;
   beat();
-  return { old: prefix.state, adopted, before, beforeSeconds, prefixSteps, started, completed, libraryStarted, libraryCompleted, operated: state, frames };
+  return { initial: prefix.initial, prepared, before, beforeSeconds, prefixSteps, started, completed, libraryStarted, libraryCompleted, operated: state, frames };
 }
 const journey = preparedJourney();
 
-await test('every legal old and Writing frame canonically retains exact district and Library records', () => {
+await test('every fresh Writing fixture action frame canonically retains exact district and Library records', () => {
   for (const state of journey.frames) assert.ok(isWorldState(JSON.parse(JSON.stringify(state))), `revision ${state.revision}`);
   assert.equal(active(journey.started).tileId, 39);
   assert.deepEqual(town(journey.completed).districtSites, { campus: 39 });
@@ -92,7 +92,7 @@ await test('active district reservations require exact sites and remain globally
   other.buildings.push('campus'); other.districtSites = { campus: 39 }; assert.equal(isWorldState(duplicate), false);
   const scalar = structuredClone(journey.libraryStarted); active(scalar).tileId = 56; assert.equal(isWorldState(scalar), false);
   const scalarCompleted = structuredClone(journey.libraryCompleted); completion(scalarCompleted).tileId = 56; assert.equal(isWorldState(scalarCompleted), false);
-  const old = structuredClone(journey.old); town(old).districtSites = {}; assert.equal(isWorldState(old), false);
+  const old = structuredClone(journey.initial); town(old).districtSites = { campus: 39 }; assert.equal(isWorldState(old), false);
 });
 
 await test('Library active completed and installed records require their own completed Campus', () => {
@@ -105,9 +105,9 @@ await test('Library active completed and installed records require their own com
   }
 });
 
-await test('old no-site frames and historical payment work and trimmed events remain compatible', () => {
-  assert.ok(isWorldState(journey.old)); assert.ok(isWorldState(journey.adopted));
-  assert.equal(Object.hasOwn(town(journey.adopted), 'districtSites'), false);
+await test('fresh no-site prerequisites and recorded payment work and trimmed events remain valid', () => {
+  assert.ok(isWorldState(journey.initial)); assert.ok(isWorldState(journey.prepared));
+  assert.equal(Object.hasOwn(town(journey.prepared), 'districtSites'), false);
   const started = structuredClone(journey.started); active(started).paid = { energy: 0.25 }; active(started).workRequired = 123; town(started).population = 1;
   assert.ok(isWorldState(started));
   const completed = structuredClone(journey.completed); completed.events = []; completion(completed).paid = { culture: 7 }; completion(completed).workRequired = 123; town(completed).population = 1;
@@ -145,11 +145,10 @@ class Fixture {
   get store() { return new WorldRepository(this.database); }
   async state() { const result = await this.store.read(); assert.ok(result); return result.state; }
   async prefix() {
-    await this.store.initialize({ seed: 1701, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0));
+    seedHostedWorld(this.database.sql, journey.initial);
     for (const [index, step] of journey.prefixSteps.entries()) {
       const meta = { commandId: `prefix-${index}`, model };
-      if (step.kind === 'release') await this.store.mutate('release-apply', { ...step.command, ...meta }, actor, step.command.timestamp ?? coastalPrefixTime(0));
-      else if (step.kind === 'action') await this.store.mutate('action', { ...step.command, ...meta }, actor, step.command.timestamp ?? coastalPrefixTime(0));
+      if (step.kind === 'action') await this.store.mutate('action', { ...step.command, ...meta }, actor, step.command.timestamp ?? coastalPrefixTime(0));
       else await this.store.mutate('strategy-catchup', { expectedRevision: (await this.state()).revision, timestamp: step.timestamp, ...meta }, actor, step.timestamp);
     }
     assert.deepEqual(await this.state(), journey.before);
@@ -167,7 +166,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 3);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state; count++;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return count; }
@@ -198,7 +197,7 @@ await test('real repository Campus and Library preserve exact sites across dupli
     assert.equal(result?.status, 'operated'); assert.deepEqual(result.paid, { credits: 1 }); assert.equal(result.residents?.allocated, 3); assert.ok((result.produced.science ?? 0) > 0);
     const finalRows = item.database.records(); item.reopen(); assert.deepEqual(await item.state(), operated);
     assert.equal((await item.send(libraryInput, seconds + 3600)).duplicate, true); assert.deepEqual(item.database.records(), finalRows);
-    context.diagnostic(JSON.stringify({ fixture: 'real legal prefix and every repository release/action/beat; no injected stocks or sites', revision: operated.revision, round: operated.round, replayFrames: await replay(item), campusSite: town(operated).districtSites?.campus, libraryResult: result }));
+    context.diagnostic(JSON.stringify({ fixture: 'fresh registered-rule prerequisite fixture and every repository action/beat', revision: operated.revision, round: operated.round, replayFrames: await replay(item), campusSite: town(operated).districtSites?.campus, libraryResult: result }));
   } finally { item.close(); }
 });
 

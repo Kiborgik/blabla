@@ -8,7 +8,7 @@ import { foundryPrefix } from './fixtures/foundry-prefix.ts';
 
 const prefix = foundryPrefix();
 
-await test('genuine culture predecessor has an owned funded Industrial zone and researched released prerequisites', () => {
+await test('fresh Foundry scenario declares synthetic prerequisites before actual paid Industrial zone construction', () => {
   const { state, seat, cityId, industrialTileId } = prefix;
   const civ = state.civilizations[seat]; const city = state.cities.find(candidate => candidate.id === cityId);
   assert.ok(civ && city); assert.equal(civ.era, 2); assert.equal(city.civId, seat);
@@ -17,6 +17,10 @@ await test('genuine culture predecessor has an owned funded Industrial zone and 
   for (const technology of ['engineering', 'apprenticeship', 'iron-working', 'machinery', 'construction']) assert.ok(civ.technologies.includes(technology));
   assert.ok(civ.resources.materials >= 36 && civ.resources.credits >= 20 && civ.resources.energy >= 1);
   assert.equal(state.tiles.find(tile => tile.id === industrialTileId)?.owner, seat);
+  assert.equal(prefix.initial.releaseId, 'settlement-foundry-1'); assert.equal(prefix.initial.revision, 0);
+  assert.ok(prefix.initial.civilizations[seat]?.technologies.includes('apprenticeship'));
+  assert.equal(prefix.initial.cities.find(candidate => candidate.id === cityId)?.buildings.includes('industrial-zone'), false);
+  assert.ok(prefix.steps.some(step => step.input.kind === 'action' && step.input.command.action.type === 'build' && step.input.command.action.project === 'industrial-zone' && step.input.command.action.cityId === cityId));
   assert.ok(isWorldState(state));
 });
 
@@ -49,16 +53,19 @@ await test('synthetic no-route equal-beat control isolates complete zero payment
   assert.deepEqual(result.state.strategicDeposits, prefix.state.strategicDeposits);
 });
 
-await test('old culture release refuses future research and Foundry with exact zero mutation', () => {
+await test('fresh Foundry rules allow Military engineering but unmet later discoveries and Foundry refuse without mutation', () => {
   const { state, seat, cityId, timestamp } = prefix; const before = structuredClone(state);
-  for (const action of [{ type: 'research', technology: 'military-engineering' }, { type: 'research', technology: 'gunpowder' }, { type: 'research', technology: 'metal-casting' }, { type: 'build', project: 'foundry', cityId }] as const) {
+  assert.ok(legalActions(state, seat, timestamp).some(option => option.action.type === 'research' && option.action.technology === 'military-engineering'));
+  const selected = applyCommand(state, { seat, expectedRevision: state.revision, timestamp, action: { type: 'research', technology: 'military-engineering' } });
+  assert.ok(selected.ok, selected.error); assert.equal(selected.state.civilizations[seat]?.researchTarget, 'military-engineering'); assert.deepEqual(state, before);
+  for (const action of [{ type: 'research', technology: 'gunpowder' }, { type: 'research', technology: 'metal-casting' }, { type: 'build', project: 'foundry', cityId }] as const) {
     assert.equal(legalActions(state, seat, timestamp).some(option => JSON.stringify(option.action) === JSON.stringify(action)), false);
     const result = applyCommand(state, { seat, expectedRevision: state.revision, timestamp, action });
     assert.equal(result.ok, false); assert.deepEqual(result.state, before); assert.deepEqual(result.events, []); assert.deepEqual(state, before);
   }
 });
 
-await test('every retained legal frame replays from the original world without input mutation', () => {
+await test('actual Foundry prerequisite frames replay from declared synthetic inputs without mutation', () => {
   let state = structuredClone(prefix.initial);
   for (const step of prefix.steps) {
     assert.deepEqual(state, step.before); const before = structuredClone(state); const result = replayCoastalStep(state, step.input);

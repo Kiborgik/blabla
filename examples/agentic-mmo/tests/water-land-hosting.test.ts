@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, type CoastalPrefixStep } from './fixtures/coastal-prefix.ts';
@@ -44,7 +45,7 @@ class Fixture {
   constructor() { this.database.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8')); }
   get store() { return new WorldRepository(this.database); }
   async state() { const result = await this.store.read(); assert.ok(result); return result.state; }
-  async initialize() { await this.store.initialize({ seed: 1701, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0)); }
+  async initialize(state: WorldState) { seedHostedWorld(this.database.sql, state); }
   async input(commandId: string, action: GameAction) { return { seat: 0, expectedRevision: (await this.state()).revision, model, commandId, action: { type: 'strategy-action', action } }; }
   send(input: Record<string, unknown>, seconds: number) { return this.store.mutate('action', input, actor, coastalPrefixTime(seconds)); }
   async beat() { const state = await this.state(); const seconds = ((state.independentTurns?.strategyTicks ?? 0) + 1) * 60; return this.store.mutate('strategy-catchup', { expectedRevision: state.revision, commandId: `beat-${state.revision}`, timestamp: coastalPrefixTime(seconds), model }, actor, coastalPrefixTime(seconds)); }
@@ -57,7 +58,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 3);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state; count++;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return count; }
@@ -69,15 +70,14 @@ async function replay(item: Fixture) {
 function stepArguments(step: CoastalPrefixStep, commandId: string): Record<string, unknown> {
   const input = step.input;
   if (input.kind === 'strategy') return { expectedRevision: step.before.revision, timestamp: input.timestamp, model, commandId };
-  if (input.kind === 'release') return { ...input.command, model, commandId };
   return { seat: input.command.seat, expectedRevision: input.command.expectedRevision, action: { type: 'strategy-action', action: input.command.action }, ...(input.command.plan === undefined ? {} : { plan: input.command.plan }), model, commandId };
 }
 function sendStep(item: Fixture, step: CoastalPrefixStep, commandId: string) {
   const input = step.input; const timestamp = input.kind === 'strategy' ? input.timestamp : input.command.timestamp; assert.ok(timestamp);
-  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : input.kind === 'release' ? 'release-apply' : 'action', stepArguments(step, commandId), actor, timestamp);
+  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : 'action', stepArguments(step, commandId), actor, timestamp);
 }
-async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER): Promise<void> {
-  await item.initialize();
+async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER, initial = steps[0]?.before): Promise<void> {
+  assert.ok(initial); await item.initialize(initial);
   for (const [index, step] of steps.entries()) {
     if (step.result.state.revision > through) break;
     await sendStep(item, step, `water-land-step-${index}`); assert.deepEqual(await item.state(), step.result.state); assert.ok(isWorldState(await item.state()));
@@ -87,24 +87,23 @@ async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Numb
 let cachedPrefix: ReturnType<typeof waterLandPrefix> | undefined;
 function prefix() { cachedPrefix ??= waterLandPrefix(); return structuredClone(cachedPrefix); }
 
-await test('water land predecessor retains all217 legal frames and real candidate geography through SQLite reopen and replay', async context => {
+await test('water land fresh synthetic prerequisite fixture and real candidate geography through SQLite reopen and replay', async context => {
   const previous = prefix(); const item = new Fixture();
   try {
-    assert.equal(previous.state.revision, 217); assert.equal(previous.steps.length, 217);
-    await persist(item, previous.steps);
+    assert.equal(previous.initial.revision, 0); assert.equal(previous.state.revision, previous.steps.length);
+    await persist(item, previous.steps, Number.MAX_SAFE_INTEGER, previous.initial);
     const saved = await item.state();
-    assert.equal(Object.hasOwn(saved, 'pastoralSites'), false);
-    assert.equal(previous.pasture.cityId, 'city-1'); assert.equal(previous.pasture.tileId, 47);
-    assert.equal(saved.tiles.find(tile => tile.id === 47)?.terrain, 'grassland');
-    assert.equal(saved.tiles.find(tile => tile.id === 47)?.owner, 1);
-    assert.equal(previous.mill.cityId, 'city-0'); assert.equal(previous.mill.irrigation?.status, 'operated');
+    assert.ok(saved.pastoralSites); assert.equal(saved.revision, 0);
+    assert.equal(previous.pasture.cityId, 'city-1'); assert.ok(saved.pastoralSites.tileIds.includes(previous.pasture.tileId));
+    assert.equal(saved.tiles.find(tile => tile.id === previous.pasture.tileId)?.terrain, 'grassland');
+    assert.equal(saved.tiles.find(tile => tile.id === previous.pasture.tileId)?.owner, 1);
+    assert.equal(previous.mill.cityId, 'city-0'); assert.ok(saved.cities.find(city => city.id === previous.mill.cityId)?.buildings.includes('irrigation'));
     assert.deepEqual(previous.aqueduct.mountainTileIds, [5, 22, 24]);
     for (const tileId of previous.aqueduct.mountainTileIds) assert.equal(saved.tiles.find(tile => tile.id === tileId)?.terrain, 'mountain');
     const before = item.database.records(); item.reopen();
     assert.deepEqual(await item.state(), previous.state); assert.deepEqual(item.database.records(), before);
-    assert.equal(await replay(item), 217);
+    assert.equal(await replay(item), previous.steps.length);
     const actions: GameAction[] = [
-      { type: 'research', technology: 'animal-husbandry' },
       { type: 'improve', cityId: previous.pasture.cityId, tileId: previous.pasture.tileId, improvementId: 'pasture' },
       { type: 'build', cityId: previous.mill.cityId, project: 'water-mill' },
       { type: 'build', cityId: previous.aqueduct.cityId, project: 'aqueduct' },
@@ -115,26 +114,21 @@ await test('water land predecessor retains all217 legal frames and real candidat
       await assert.rejects(item.store.mutate('action', input, actor, previous.timestamp));
       assert.deepEqual(item.database.records(), before);
     }
-    context.diagnostic(JSON.stringify({ basis: previous.provenance, revision: saved.revision, round: saved.round, pastureCandidate: previous.pasture, mill: previous.mill, catchment: previous.aqueduct, replayFrames: 217 }));
+    context.diagnostic(JSON.stringify({ basis: previous.provenance, revision: saved.revision, round: saved.round, pastureCandidate: previous.pasture, mill: previous.mill, catchment: previous.aqueduct, replayFrames: previous.steps.length }));
   } finally { item.close(); }
 });
 
-await test('water land prospective compatible adoption persists a real retained horse-site layer once', async () => {
+await test('fresh water-land prerequisites survive repeated migration refusal without durable effects', async () => {
   const previous = prefix(); const item = new Fixture();
   try {
-    await persist(item, previous.steps); const before = item.database.records();
-    const input = { expectedRevision: previous.state.revision, expectedFromReleaseId: previous.state.releaseId, targetReleaseId: 'settlement-water-land-1', timestamp: previous.timestamp, model, commandId: 'water-land-adopt' };
-    const accepted = await item.store.mutate('release-apply', input, actor, previous.timestamp);
-    assert.equal(accepted.acceptedRevision, 218);
-    const after = await item.state(); assert.ok(Object.hasOwn(after, 'pastoralSites'));
-    assert.deepEqual(after.tiles, previous.state.tiles); assert.equal(after.rng, previous.state.rng);
-    assert.deepEqual(after.strategicDeposits, previous.state.strategicDeposits);
-    assert.deepEqual(after.civilizations, previous.state.civilizations); assert.deepEqual(after.cities, previous.state.cities);
-    const committed = item.database.records(); assert.equal(committed.history.length, before.history.length + 1);
-    item.reopen(); assert.deepEqual(await item.state(), after);
-    const duplicate = await item.store.mutate('release-apply', input, actor, previous.timestamp);
-    assert.equal(duplicate.duplicate, true); assert.equal(duplicate.acceptedRevision, accepted.acceptedRevision);
-    assert.deepEqual(item.database.records(), committed); assert.equal(await replay(item), 218);
+    await persist(item, previous.steps, Number.MAX_SAFE_INTEGER, previous.initial); const before = item.database.records();
+    const input = { expectedRevision: previous.state.revision, expectedFromReleaseId: previous.state.releaseId, targetReleaseId: 'settlement-water-land-1', timestamp: previous.timestamp, model, commandId: 'water-land-refused' };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await assert.rejects(item.store.mutate('release-apply', input, actor, previous.timestamp), /pre_release_migration_disabled/);
+      assert.deepEqual(item.database.records(), before);
+    }
+    item.reopen(); assert.deepEqual(await item.state(), previous.state); assert.deepEqual(item.database.records(), before);
+    assert.equal(await replay(item), previous.steps.length);
   } finally { item.close(); }
 });
 
@@ -143,9 +137,11 @@ function story() { cachedStory ??= waterLandOperationJourney(); return cachedSto
 
 await test('water land real revealed Pasture Mill and exact Aqueduct source persist once across reopen and full replay', async context => {
   const route = story(); const item = new Fixture();
-  const witnessed = new Set([route.journey.adopted.revision, route.pasture.started.revision, route.pasture.completed.revision, route.millStarted.revision, route.millCompleted.revision, route.aqueductStarted.revision, route.aqueductCompleted.revision]);
+  const witnessed = new Set([route.pasture.started.revision, route.pasture.completed.revision, route.millStarted.revision, route.millCompleted.revision, route.aqueductStarted.revision, route.aqueductCompleted.revision]);
   try {
-    await item.initialize();
+    await item.initialize(route.journey.initial);
+    assert.equal(route.journey.prepared.revision, 0); assert.deepEqual(await item.state(), route.journey.prepared);
+    assert.equal(item.database.records().receipts.length, 0);
     for (const [index, step] of route.journey.steps.entries()) {
       const id = `water-land-step-${index}`;
       if (witnessed.has(step.result.state.revision)) {
@@ -185,7 +181,7 @@ await test('water land real revealed Pasture Mill and exact Aqueduct source pers
       assert.deepEqual(page.entries[0]?.events, step.result.events);
     }
     assert.deepEqual(item.database.records(), records);
-    context.diagnostic(JSON.stringify({ basis: 'real legal217-frame predecessor and connected repository after-half', revision: route.grown.revision, round: route.grown.round, pasture: worked, millOrder: mill, aqueductOrder: aqueduct, aqueductCompletion: town.construction?.lastCompleted, replayFrames: await replay(item) }));
+    context.diagnostic(JSON.stringify({ basis: 'fresh explicit prerequisites and paid connected repository action frames', revision: route.grown.revision, round: route.grown.round, pasture: worked, millOrder: mill, aqueductOrder: aqueduct, aqueductCompletion: town.construction?.lastCompleted, replayFrames: await replay(item) }));
   } finally { item.close(); }
 });
 
@@ -193,7 +189,7 @@ for (const milestone of ['pasture-start', 'aqueduct-completion'] as const) for (
   const route = story(); const item = new Fixture();
   const step = milestone === 'aqueduct-completion' ? route.aqueductCompletionStep : route.journey.steps.find(value => value.result.state.revision === route.pasture.started.revision); assert.ok(step);
   try {
-    await persist(item, route.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, route.journey.steps, step.before.revision, route.journey.initial); const before = item.database.records();
     const operation = step.input.kind === 'action' ? 'action' : 'strategy-catchup';
     item.database.sql.exec(`CREATE TRIGGER fail_water_land BEFORE INSERT ON ${table} WHEN NEW.receipt_key = '${operation}:water-land-fault' BEGIN SELECT RAISE(ABORT, 'synthetic water land rollback'); END;`);
     await assert.rejects(sendStep(item, step, 'water-land-fault'), /synthetic water land rollback/); assert.deepEqual(item.database.records(), before);
@@ -208,17 +204,17 @@ for (const milestone of ['pasture-start', 'aqueduct-completion'] as const) for (
 await test('water land exact unavailable sites and own infrastructure refusals leave candidate upkeep uncommitted', async () => {
   const route = story();
   const cases = [
-    { state: route.journey.adopted, seat: 1, action: { type: 'improve', cityId: route.pasture.cityId, tileId: route.pasture.tileId, improvementId: 'pasture' } },
+    { state: route.journey.prepared, seat: 1, action: { type: 'improve', cityId: route.pasture.cityId, tileId: route.pasture.tileId, improvementId: 'pasture' } },
     { state: route.pasture.revealed, seat: 0, action: { type: 'improve', cityId: 'city-0', tileId: route.pasture.tileId, improvementId: 'pasture' } },
     { state: route.pasture.revealed, seat: 1, action: { type: 'improve', cityId: route.pasture.cityId, tileId: 48, improvementId: 'pasture' } },
-    { state: route.millReady, seat: 0, action: { type: 'build', project: 'water-mill', cityId: 'city-0-14' } },
+    { state: route.millReady, seat: 0, action: { type: 'build', project: 'water-mill', cityId: 'synthetic-catchment-town' } },
     { state: route.aqueductReady, seat: 0, action: { type: 'build', project: 'aqueduct', cityId: 'city-0' } },
-    { state: route.aqueductReady, seat: 0, action: { type: 'build', project: 'aqueduct', cityId: 'city-0-14', catchmentTileId: 22 } },
+    { state: route.aqueductReady, seat: 0, action: { type: 'build', project: 'aqueduct', cityId: 'synthetic-catchment-town', catchmentTileId: 22 } },
   ];
   for (const [index, value] of cases.entries()) {
     const item = new Fixture();
     try {
-      await persist(item, route.journey.steps, value.state.revision); const before = item.database.records();
+      await persist(item, route.journey.steps, value.state.revision, route.journey.initial); const before = item.database.records();
       const timestamp = coastalPrefixTime(((value.state.independentTurns?.strategyTicks ?? 0) + 1) * 60 + 1);
       await assert.rejects(item.store.mutate('action', { seat: value.seat, expectedRevision: value.state.revision, model, commandId: `water-land-refusal-${index}`, action: { type: 'strategy-action', action: value.action } }, actor, timestamp));
       assert.deepEqual(item.database.records(), before); item.reopen(); assert.deepEqual(await item.state(), value.state);
@@ -230,7 +226,7 @@ await test('water land synthetic concurrent legal commit prevents a stale exact 
   const route = story(); const item = new Fixture();
   const step = route.journey.steps.find(value => value.result.state.revision === route.pasture.started.revision); assert.ok(step && step.input.kind === 'action' && step.input.command.timestamp);
   try {
-    await persist(item, route.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, route.journey.steps, step.before.revision, route.journey.initial); const before = item.database.records();
     const timestamp = step.input.command.timestamp;
     const option = legalActions(step.before, 2, timestamp).find(value => value.action.type === 'focus'); assert.ok(option);
     const competing = applyCommand(step.before, { seat: 2, expectedRevision: step.before.revision, timestamp, action: option.action }); assert.ok(competing.ok, competing.error); assert.ok(isWorldState(competing.state));
@@ -241,15 +237,24 @@ await test('water land synthetic concurrent legal commit prevents a stale exact 
   } finally { item.close(); }
 });
 
-await test('water land prospective canonical guard refuses new site and source fields before their feature', () => {
-  const previous = prefix().state;
-  const layer = structuredClone(previous);
-  Reflect.set(layer, 'pastoralSites', { ruleVersion: 1, placementId: 'pastoral-sites-1', seed: previous.seed, tileIds: [47], sites: { '47': { tileId: 47, resource: 'horses' } } });
-  assert.equal(isWorldState(layer), false, 'Unreleased horse-site records must not be silently accepted');
+await test('water land current canonical guard requires its retained pastoral layer without repair', async () => {
+  const baseline = prefix().state; assert.ok(isWorldState(baseline)); const item = new Fixture();
+  try {
+    await item.initialize(prefix().initial);
+    for (const replacement of [undefined, null, {}, []]) {
+      const layer = structuredClone(baseline);
+      if (replacement === undefined) Reflect.deleteProperty(layer, 'pastoralSites'); else Reflect.set(layer, 'pastoralSites', replacement);
+      const bytes = JSON.stringify(layer);
+      assert.equal(isWorldState(layer), false, 'Current water-land rules require their explicit retained horse-site layer');
+      assert.equal(JSON.stringify(layer), bytes);
+      item.database.sql.prepare('UPDATE world_state SET state_json = ?').run(bytes); const records = item.database.records();
+      await assert.rejects(item.store.read(), { message: 'corrupt_or_incompatible_world' }); assert.deepEqual(item.database.records(), records);
+    }
+  } finally { item.close(); }
 });
 
 await test('water land prospective canonical guard refuses an uninstalled catchment before its feature', () => {
-  const source = prefix().state; const city = source.cities.find(value => value.id === 'city-0-14'); assert.ok(city);
+  const source = prefix().state; const city = source.cities.find(value => value.id === 'synthetic-catchment-town'); assert.ok(city);
   Reflect.set(city, 'buildingCatchments', { aqueduct: 5 });
   assert.equal(isWorldState(source), false, 'Unreleased uninstalled Aqueduct source must not be silently accepted');
 });
@@ -267,7 +272,7 @@ await test('water land exact Pasture pause retains prior receipt then blocks lat
   const resumed = waterLandTown(journey.state, cityId).improvements?.[String(tileId)]?.operation.lastResult; assert.ok(resumed);
   assert.equal(resumed.status, 'operated'); assert.equal(resumed.residents.allocated, 1); assert.ok((resumed.produced.food ?? 0) > 0);
   const item = new Fixture();
-  try { await persist(item, journey.steps); const before = item.database.records(); item.reopen(); assert.deepEqual(await item.state(), journey.state); assert.deepEqual(item.database.records(), before); assert.equal(await replay(item), journey.state.revision); }
+  try { await persist(item, journey.steps, Number.MAX_SAFE_INTEGER, journey.initial); const before = item.database.records(); item.reopen(); assert.deepEqual(await item.state(), journey.state); assert.deepEqual(item.database.records(), before); assert.equal(await replay(item), journey.state.revision); }
   finally { item.close(); }
 });
 
@@ -280,7 +285,7 @@ await test('water land Aqueduct source survives a later different completed orde
   assert.deepEqual(Reflect.get(town, 'buildingCatchments'), { aqueduct: 5 });
   const item = new Fixture();
   try {
-    await persist(item, journey.steps); const before = item.database.records(); item.reopen(); assert.deepEqual(await item.state(), journey.state);
+    await persist(item, journey.steps, Number.MAX_SAFE_INTEGER, journey.initial); const before = item.database.records(); item.reopen(); assert.deepEqual(await item.state(), journey.state);
     const detail = await item.store.recordedChoiceDetail({ endRevision: route.aqueductCompleted.revision, civilizationId: 0, cityId });
     assert.equal(detail.consequences.status, 'available'); assert.equal(detail.consequences.town.status, 'available');
     assert.deepEqual(detail.consequences.town.construction.completed, waterLandTown(route.aqueductCompleted, cityId).construction?.lastCompleted);
@@ -292,7 +297,7 @@ await test('water land Aqueduct source survives a later different completed orde
 
 
 await test('water land canonical retained placement rejects malformed identity bounds keys and iron overlap', () => {
-  const source = story().journey.adopted; const original = source.pastoralSites; assert.ok(original);
+  const source = story().journey.prepared; const original = source.pastoralSites; assert.ok(original);
   const sparse = [47]; Reflect.deleteProperty(sparse, '0');
   const replacements: unknown[] = [null, {}, { ...original, ruleVersion: 2 }, { ...original, placementId: 'future' }, { ...original, seed: source.seed + 1 },
     { ...original, tileIds: [47, 47] }, { ...original, tileIds: [47.5] }, { ...original, tileIds: [-1] }, { ...original, tileIds: [999999] },
@@ -364,7 +369,7 @@ await test('water land malformed saved renewable site and catchment are explicit
     state => { const site = waterLandTown(state, route.pasture.cityId).improvements?.[String(route.pasture.tileId)]; assert.ok(site?.operation.lastResult); Reflect.set(site.operation.lastResult, 'extraction', { ruleVersion: 1, tileId: route.pasture.tileId, round: state.round, resource: 'iron', quantity: 0, reserveBefore: 0, reserveAfter: 0, stockBefore: 0, stockAfter: 0, capacity: 10, status: 'exhausted' }); },
   ];
   try {
-    await persist(item, route.journey.steps, route.aqueductCompleted.revision); const saved = await item.state();
+    await persist(item, route.journey.steps, route.aqueductCompleted.revision, route.journey.initial); const saved = await item.state();
     for (const corrupt of corruptions) {
       const state = structuredClone(saved); corrupt(state); assert.equal(isWorldState(state), false);
       item.database.sql.prepare('UPDATE world_state SET state_json=? WHERE world_id=?').run(JSON.stringify(state), 'main');

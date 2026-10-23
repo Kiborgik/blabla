@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ACTIVE_LOCAL_RELEASE_ID, LOCAL_SIMULATION_STORAGE_KEY, LIVING_SIMULATION_STORAGE_KEY, createLocalSimulation, advanceLocalSimulation, parseActiveLocalSimulation, parseLocalSimulation, localSimulationSnapshot } from '../web/local-simulation.ts';
+import { ACTIVE_LOCAL_RELEASE_ID, LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, advanceLocalSimulation, parseActiveLocalSimulation, parseLocalSimulation, localSimulationSnapshot } from '../web/local-simulation.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { isPublicProvenance } from '../server/public-protocol.ts';
 import { processLocalSimulationRequest } from '../web/local-simulation-worker.ts';
@@ -78,35 +78,28 @@ await test('Worker refuses historical generated releases without changing their 
   }
 });
 
-await test('historical generated checkpoint names identity and replay remain byte-exact across Food storage succession without load-time opt-in', () => {
+await test('current Knowledge checkpoint names and identity survive same-version JSON restart without load-time opt-in', () => {
   const epoch = '2000-01-01T00:00:00.000Z';
-  assert.equal(LIVING_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:living-world-v1');
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:food-budget-v1');
-  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-food-budget-1');
-  for (const release of ['settlement-interplanetary-1', 'settlement-living-partnerships-1', 'settlement-relief-charters-1', 'settlement-regional-targets-1', ACTIVE_LOCAL_RELEASE_ID] as const) {
-    const state = createGeneratedWorld(1701, epoch, release);
-    assert.deepEqual(state.cities.map(city => city.name), ['Dawnwell', 'Willowmere', 'Cinderhold', 'Tidehaven', 'Lumen']);
-    state.cities[0]!.name = 'Dawnwe\u0301ll — saved history';
-    const saved = { ...createLocalSimulation(1701, release), state };
+  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:knowledge-compacts-v1');
+  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-knowledge-compacts-1');
+  for (const naming of [undefined, 'cultural-toponyms-v1'] as const) {
+    const state = createGeneratedWorld(1701, epoch, ACTIVE_LOCAL_RELEASE_ID, naming);
+    assert.deepEqual(state, createGeneratedWorld(1701, epoch, ACTIVE_LOCAL_RELEASE_ID, naming));
+    state.cities[0]!.name = 'Dawnwe\u0301ll — saved current town';
+    const saved = { ...createLocalSimulation(1701), state };
     const bytes = JSON.stringify(saved);
-    const restored = parseLocalSimulation(JSON.parse(bytes));
+    const restored = parseActiveLocalSimulation(JSON.parse(bytes));
     assert.ok(restored);
     assert.equal(JSON.stringify(restored), bytes);
-    assert.equal(Object.hasOwn(restored.state.origin!, 'namingVersion'), false);
-    const identity = `local:coherent-geography-v1:1701:${epoch}${release === 'settlement-interplanetary-1' ? '' : `:${release}`}`;
+    assert.equal(restored.state.origin?.namingVersion, naming);
+    const identity = `local:coherent-geography-v1:1701:${epoch}:${ACTIVE_LOCAL_RELEASE_ID}${naming ? `:${naming}` : ''}`;
     assert.equal(localSimulationSnapshot(restored).identity, identity);
-    if (release === 'settlement-regional-targets-1' || release === ACTIVE_LOCAL_RELEASE_ID) {
-      assert.equal(parseActiveLocalSimulation(JSON.parse(bytes)) === null, release !== ACTIVE_LOCAL_RELEASE_ID);
-      if (release === ACTIVE_LOCAL_RELEASE_ID) assert.equal(JSON.stringify(parseActiveLocalSimulation(JSON.parse(bytes))), bytes);
-      const continued = advanceLocalSimulation(saved, 2);
-      assert.deepEqual(advanceLocalSimulation(restored, 2), continued);
-      assert.equal(continued.state.cities.find(city => city.id === 'city-0')?.name, 'Dawnwe\u0301ll — saved history');
-      assert.equal(Object.hasOwn(continued.state.origin!, 'namingVersion'), false);
-      assert.equal(localSimulationSnapshot(continued).identity, identity);
-      const fresh = createLocalSimulation(1701);
-      assert.equal(localSimulationSnapshot(fresh).identity, `local:coherent-geography-v1:1701:${epoch}:${ACTIVE_LOCAL_RELEASE_ID}:cultural-toponyms-v1`);
-      assert.notEqual(localSimulationSnapshot(fresh).identity, identity);
-    }
+    const continued = advanceLocalSimulation(saved, 2);
+    assert.deepEqual(advanceLocalSimulation(restored, 2), continued);
+    assert.equal(continued.state.cities.find(city => city.id === 'city-0')?.name, 'Dawnwe\u0301ll — saved current town');
+    assert.equal(continued.state.origin?.namingVersion, naming);
+    assert.equal(localSimulationSnapshot(continued).identity, identity);
     assert.equal(JSON.stringify(saved), bytes);
+    assert.equal(JSON.stringify(restored), bytes);
   }
 });

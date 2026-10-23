@@ -54,7 +54,7 @@ await test('tree shows canonical mountain and own-Irrigation requirements withou
 await test('horse map reveal follows canonical selected civilization, is detached and creates no inventory', async () => {
   const { projectPastoralSites, visiblePastoralSites } = await import('../visuals/pastoral-visuals.ts');
   const state = legal.pasture.revealed; const before = structuredClone(state); const views = projectPastoralSites(state);
-  assert.deepEqual(projectPastoralSites(legal.journey.beforeRelease), []);
+  assert.deepEqual(projectPastoralSites(legal.journey.initial), []);
   assert.deepEqual(visiblePastoralSites(views, legal.pasture.seat).map(site => site.tileId), observedPastoralSites(state, legal.pasture.seat).revealedPastoralSites?.map(site => site.tileId));
   assert.deepEqual(visiblePastoralSites(views, 0), []);
   assert.ok(views.every(site => !('stock' in site) && !('remaining' in site)));
@@ -112,5 +112,6 @@ await test('completed Aqueduct source and later food-funded growth retain separa
   assert.ok(complete.growth?.sources.some(source => source.buildingId === 'aqueduct' && source.capacity === 6));
   assert.equal((grown.growth?.population ?? 0) - (complete.growth?.population ?? 0), 1);
   const event = legal.grown.events.findLast(candidate => candidate.populationGrowth?.cityId === cityId);
-  assert.equal(event?.populationGrowth?.foodPaid, 11); assert.equal(event?.populationGrowth?.round, legal.grown.round);
+  assert.equal(complete.growth?.population, 8); assert.equal(complete.growth?.nextGrowthFoodCost, 8);
+  assert.equal(event?.populationGrowth?.foodPaid, 8); assert.equal(event?.populationGrowth?.round, legal.grown.round);
 });

@@ -91,7 +91,7 @@ export class ObservatoryLearningProbe {
     const paid = !!before && !!this.allocation && allocationConserved(before, this.allocation);
     return {
       initialized: state !== null,
-      provenance: !state ? 'Uninitialized; no journey executed' : action === 'block_observatory' ? 'Explicit synthetic opening Credit/resident controls detached from the actual legal Observatory journey' : action === 'complete_observatory' ? 'Actual completion with explicit synthetic order-removal equal-beat comparison' : 'Actual immutable legal Observatory journey and exact engine transitions',
+      provenance: !state ? 'Uninitialized; no journey executed' : action === 'block_observatory' ? 'Explicit synthetic opening Credit/resident controls detached from the actual legal Observatory journey' : action === 'complete_observatory' ? 'Actual completion with explicit synthetic order-removal equal-beat comparison' : 'Synthetic named fresh-rule prerequisites followed by actual paid Observatory transitions',
       replayed_frames: this.replayedFrames,
       same_town: action === 'start_observatory' && city?.id === path?.journey.cityId && city?.civId === path?.journey.seat && order?.cityId === city?.id && order?.buildingId === 'observatory',
       exact_campus: action === 'start_observatory' && !!before && !!highGround && town(before).buildings.includes('campus') && town(before).districtSites?.campus === highGround.campusTileId && campus?.owner === city?.civId,

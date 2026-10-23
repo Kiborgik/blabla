@@ -1,4 +1,3 @@
-state old_state_preserved: bool
 state eligible_contender: bool
 state contender_started: bool
 state exact_owned_site_and_lane: bool
@@ -19,16 +18,12 @@ state completion_at_most_once: bool
 state refused: bool
 state zero_effects: bool
 
-action adopt_unique_wonders()
 action start_exact_contender()
 action resolve_first_completion()
 action operate_completed_wonder()
 action apply_exact_research_boost()
 action refuse_invalid_wonder_action()
 
-when adopt_unique_wonders {
-    expect "wonder-adoption-preserves-existing-world": after.old_state_preserved
-}
 when start_exact_contender {
     expect "eligible-exact-contender-starts": not before.eligible_contender or after.contender_started
     expect "contender-reserves-one-paid-exact-town-lane": not after.contender_started or (after.exact_owned_site_and_lane and after.paid_once)

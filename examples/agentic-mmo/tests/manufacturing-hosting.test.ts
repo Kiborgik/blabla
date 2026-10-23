@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { BUILDINGS } from '../core/content.ts';
 import { buildingBaseProduction, districtAdjacencyFacts } from '../core/simulation/districts.ts';
-import type { GameAction } from '../core/types.ts';
+import type { GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, type CoastalPrefixStep } from './fixtures/coastal-prefix.ts';
 import { learningCommerceJourney } from './learning-commerce.test.ts';
@@ -46,7 +47,7 @@ class Fixture {
   constructor() { this.database.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8')); }
   get store() { return new WorldRepository(this.database); }
   async state() { const result = await this.store.read(); assert.ok(result); return result.state; }
-  async initialize() { await this.store.initialize({ seed: 1701, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0)); }
+  async initialize(state: WorldState) { seedHostedWorld(this.database.sql, state); }
   async input(commandId: string, action: GameAction) { return { seat: 0, expectedRevision: (await this.state()).revision, model, commandId, action: { type: 'strategy-action', action } }; }
   send(input: Record<string, unknown>, seconds: number) { return this.store.mutate('action', input, actor, coastalPrefixTime(seconds)); }
   async beat() { const state = await this.state(); const seconds = ((state.independentTurns?.strategyTicks ?? 0) + 1) * 60; return this.store.mutate('strategy-catchup', { expectedRevision: state.revision, commandId: `beat-${state.revision}`, timestamp: coastalPrefixTime(seconds), model }, actor, coastalPrefixTime(seconds)); }
@@ -59,7 +60,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 3);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state; count++;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return count; }
@@ -71,15 +72,14 @@ async function replay(item: Fixture) {
 function stepArguments(step: CoastalPrefixStep, commandId: string): Record<string, unknown> {
   const input = step.input;
   if (input.kind === 'strategy') return { expectedRevision: step.before.revision, timestamp: input.timestamp, model, commandId };
-  if (input.kind === 'release') return { ...input.command, model, commandId };
   return { seat: input.command.seat, expectedRevision: input.command.expectedRevision, action: { type: 'strategy-action', action: input.command.action }, ...(input.command.plan === undefined ? {} : { plan: input.command.plan }), model, commandId };
 }
 function sendStep(item: Fixture, step: CoastalPrefixStep, commandId: string) {
   const input = step.input; const timestamp = input.kind === 'strategy' ? input.timestamp : input.command.timestamp; assert.ok(timestamp);
-  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : input.kind === 'release' ? 'release-apply' : 'action', stepArguments(step, commandId), actor, timestamp);
+  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : 'action', stepArguments(step, commandId), actor, timestamp);
 }
-async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER): Promise<void> {
-  await item.initialize();
+async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER, initial = steps[0]?.before): Promise<void> {
+  assert.ok(initial); await item.initialize(initial);
   for (const [index, step] of steps.entries()) {
     if (step.result.state.revision > through) break;
     await sendStep(item, step, `manufacturing-step-${index}`); assert.deepEqual(await item.state(), step.result.state); assert.ok(isWorldState(await item.state()));
@@ -90,17 +90,17 @@ function fullJourney() {
   const step = journey.steps.find(item => item.result.state.revision === result.zoneActive.revision);
   assert.ok(step?.input.kind === 'action' && step.input.command.action.type === 'build' && step.input.command.action.tileId !== undefined && step.input.command.timestamp);
   journey.act({ type: 'set-building-operation', buildingId: 'guild-workshop', cityId: 'city-0', enabled: false }); journey.beat();
-  return { journey, ready: result.researched, timestamp: step.input.command.timestamp, action: step.input.command.action, started: result.zoneActive, zoneCompleted: result.zoneCompleted, workshopCompleted: result.workshopCompleted, operated: result.operated, steps: [...journey.previous.prefix.steps, ...journey.previous.steps, ...journey.steps] };
+  return { journey, initial: journey.previous.prefix.initial, ready: result.researched, timestamp: step.input.command.timestamp, action: step.input.command.action, started: result.zoneActive, zoneCompleted: result.zoneCompleted, workshopCompleted: result.workshopCompleted, operated: result.operated, steps: [...journey.previous.prefix.steps, ...journey.previous.steps, ...journey.steps] };
 }
 let cached: ReturnType<typeof fullJourney> | undefined;
 function story() { cached ??= fullJourney(); return cached; }
 
-await test('manufacturing predecessor preserves the real connected learning world through SQLite reopen and replay', async () => {
+await test('manufacturing predecessor preserves the fresh synthetic prerequisite fixture through SQLite reopen and replay', async () => {
   const previous = learningCommerceJourney().journey; const item = new Fixture();
   try {
-    await persist(item, [...previous.prefix.steps, ...previous.steps]); const records = item.database.records(); item.reopen();
+    await persist(item, [...previous.prefix.steps, ...previous.steps], Number.MAX_SAFE_INTEGER, previous.prefix.initial); const records = item.database.records(); item.reopen();
     assert.deepEqual(await item.state(), previous.state); assert.deepEqual(item.database.records(), records); assert.equal(await replay(item), previous.state.revision);
-    const before = item.database.records(); const request = await item.input('unreleased-manufacturing', { type: 'research', technology: 'iron-working' });
+    const before = item.database.records(); const request = await item.input('missing-manufacturing-prerequisite', { type: 'build', project: 'guild-workshop', cityId: 'city-0' });
     await assert.rejects(item.send(request, (previous.state.independentTurns?.strategyTicks ?? 0) * 60 + 50)); assert.deepEqual(item.database.records(), before);
   } finally { item.close(); }
 });
@@ -108,7 +108,7 @@ await test('manufacturing predecessor preserves the real connected learning worl
 await test('manufacturing legal exact district and staffed workshop survive one-payment duplicates reopen and full replay', async context => {
   const route = story(); const item = new Fixture();
   try {
-    await item.initialize(); let duplicateRevision = 0; let duplicateIndex = -1;
+    await item.initialize(route.initial); let duplicateRevision = 0; let duplicateIndex = -1;
     for (const [index, step] of route.steps.entries()) {
       if (step.result.state.revision === route.started.revision) {
         const replies = await Promise.all([sendStep(item, step, `manufacturing-step-${index}`), sendStep(item, step, `manufacturing-step-${index}`)]);
@@ -133,14 +133,14 @@ await test('manufacturing legal exact district and staffed workshop survive one-
     assert.equal(retry.duplicate, true); assert.equal(retry.acceptedRevision, duplicateRevision); assert.deepEqual(item.database.records(), records);
     const changed = { ...stepArguments(step, `manufacturing-step-${duplicateIndex}`), action: { type: 'strategy-action', action: { ...route.action, tileId: 9999 } } };
     await assert.rejects(item.store.mutate('action', changed, actor, route.journey.time()), { message: 'idempotency_key_reused' }); assert.deepEqual(item.database.records(), records);
-    context.diagnostic(JSON.stringify({ basis: 'entirely legal predecessor and actual SQLite repository; no injected stock, technology, era or site', revision: state.revision, round: state.round, site: route.action.tileId, adjacency, district: zone.construction?.lastCompleted, operated: result, replayFrames: await replay(item) }));
+    context.diagnostic(JSON.stringify({ basis: 'fresh explicit synthetic prerequisite state followed by actual paid research, district and workshop commands', revision: state.revision, round: state.round, site: route.action.tileId, adjacency, district: zone.construction?.lastCompleted, operated: result, replayFrames: await replay(item) }));
   } finally { item.close(); }
 });
 
 for (const table of ['world_transitions', 'world_receipts']) await test(`manufacturing ${table} fault rolls back due production payment and exact site before one reopened retry`, async () => {
   const route = story(); const item = new Fixture();
   try {
-    await persist(item, route.steps, route.ready.revision); const before = item.database.records();
+    await persist(item, route.steps, route.ready.revision, route.initial); const before = item.database.records();
     const seconds = ((route.ready.independentTurns?.strategyTicks ?? 0) + 1) * 60 + 1;
     const input = await item.input('manufacturing-zone-atomic', route.action);
     item.database.sql.exec(`CREATE TRIGGER fail_manufacturing BEFORE INSERT ON ${table} WHEN NEW.receipt_key = 'action:manufacturing-zone-atomic' BEGIN SELECT RAISE(ABORT, 'synthetic manufacturing rollback'); END;`);
@@ -160,7 +160,7 @@ for (const table of ['world_transitions', 'world_receipts']) await test(`manufac
 await test('manufacturing foreign occupied missing sites and a competing CAS retain zero losing effects', async () => {
   const route = story(); const item = new Fixture();
   try {
-    await persist(item, route.steps, route.ready.revision); const before = item.database.records();
+    await persist(item, route.steps, route.ready.revision, route.initial); const before = item.database.records();
     const seconds = ((route.ready.independentTurns?.strategyTicks ?? 0) + 1) * 60 + 1;
     const foreign = route.ready.tiles.find(tile => tile.owner === 1); assert.ok(foreign);
     for (const tileId of [foreign.id, 56, 39, 9999]) {
@@ -192,7 +192,7 @@ await test('manufacturing exact historical site and workshop dependencies reject
   ]) { const bad = structuredClone(old); corrupt(bad); assert.equal(isWorldState(bad), false); }
   const item = new Fixture();
   try {
-    await persist(item, route.steps); const good = await item.state(); const bad = structuredClone(good); const city = bad.cities[0]; assert.ok(city?.districtSites); city.districtSites['industrial-zone'] = 9999;
+    await persist(item, route.steps, Number.MAX_SAFE_INTEGER, route.initial); const good = await item.state(); const bad = structuredClone(good); const city = bad.cities[0]; assert.ok(city?.districtSites); city.districtSites['industrial-zone'] = 9999;
     item.database.sql.prepare('UPDATE world_state SET state_json=? WHERE world_id=?').run(JSON.stringify(bad), 'main'); const current = item.database.records();
     await assert.rejects(item.store.read(), { message: 'corrupt_or_incompatible_world' }); assert.deepEqual(item.database.records(), current);
     item.database.sql.prepare('UPDATE world_state SET state_json=? WHERE world_id=?').run(JSON.stringify(good), 'main');

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { applyCommand, legalActions, observe } from '../core/engine.ts';
 import { hexDistance } from '../core/simulation/geography.ts';
-import type { GameAction } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { replayCoastalStep } from './fixtures/coastal-prefix.ts';
 import { ownedTerritoryPrefix } from './fixtures/owned-territory-prefix.ts';
@@ -25,30 +24,37 @@ await test('territory prefix reaches actual funded researched center-only town a
   context.diagnostic(JSON.stringify({ transitions: value.steps.length, round: state.round, city: value.cityId, population: city.population, credits: owner.resources.credits, materials: owner.resources.materials }));
 });
 
-await test('territory preparation preserves old geography ownership and retained horse layer without acquisition', () => {
+await test('fresh territory preparation retains its expanded geography and empty acquisition ledger', () => {
   const value = ownedTerritoryPrefix();
   assert.deepEqual(value.state.tiles, value.beforeResearch.tiles);
   assert.deepEqual(value.state.pastoralSites, value.beforeResearch.pastoralSites);
   assert.equal(value.state.rng, value.beforeResearch.rng);
   assert.equal(value.state.releaseId, value.beforeResearch.releaseId);
-  assert.ok(!value.state.unlockedFeatures.includes('owned-territory'));
-  assert.ok(!Reflect.has(value.state, 'tileAcquisitions'));
-  assert.equal(value.state.width, 18); assert.equal(value.state.height, 12);
+  assert.equal(value.initial.releaseId, 'settlement-territory-1'); assert.equal(value.initial.revision, 0);
+  assert.ok(value.state.unlockedFeatures.includes('owned-territory'));
+  assert.deepEqual(value.state.tileAcquisitions, {});
+  assert.equal(value.state.width, 18); assert.equal(value.state.height, 24); assert.equal(value.state.tiles.length, 432);
+  assert.deepEqual(value.state.tiles.map(({ owner: _owner, ...tile }) => tile), value.initial.tiles.map(({ owner: _owner, ...tile }) => tile));
 });
 
-await test('old release exact acquisition wire request and unowned Pasture have zero effects', () => {
-  const value = ownedTerritoryPrefix();
-  const rawAcquisition = Object.assign<GameAction, Record<string, unknown>>({ type: 'wait' }, { type: 'acquire-tile', cityId: value.cityId, tileId: 181 });
-  for (const action of [rawAcquisition, { type: 'improve' as const, cityId: value.cityId, tileId: 164, improvementId: 'pasture' }]) {
-    const before = structuredClone(value.state);
+await test('fresh territory pays for the connected first tile while disconnected acquisition and unowned Pasture refuse atomically', () => {
+  const value = ownedTerritoryPrefix(); const before = structuredClone(value.state);
+  for (const action of [{ type: 'acquire-tile', cityId: value.cityId, tileId: 164 }, { type: 'improve', cityId: value.cityId, tileId: 164, improvementId: 'pasture' }] as const) {
     const result = applyCommand(value.state, { seat: 2, expectedRevision: value.state.revision, timestamp: value.timestamp, action });
     assert.equal(result.ok, false); assert.deepEqual(result.state, before); assert.deepEqual(result.events, []); assert.deepEqual(value.state, before);
   }
-  const kinds = new Set<string>(legalActions(value.state, 2, value.timestamp).map(option => option.action.type));
-  assert.ok(!kinds.has('acquire-tile'));
+  const action = { type: 'acquire-tile', cityId: value.cityId, tileId: 181 } as const;
+  assert.ok(legalActions(value.state, 2, value.timestamp).some(option => option.action.type === 'acquire-tile' && option.action.cityId === value.cityId && option.action.tileId === 181));
+  const acquired = applyCommand(value.state, { seat: 2, expectedRevision: value.state.revision, timestamp: value.timestamp, action });
+  assert.ok(acquired.ok, acquired.error); assert.deepEqual(value.state, before);
+  assert.equal(acquired.state.tiles.find(tile => tile.id === 181)?.owner, 2);
+  assert.equal(acquired.state.civilizations[2]?.resources.credits, before.civilizations[2]!.resources.credits - 12);
+  const receipt = acquired.state.tileAcquisitions?.['181']; assert.ok(receipt); assert.equal(receipt.paid.credits, 12);
+  assert.deepEqual(acquired.events.find(event => event.id === receipt.eventId)?.territoryAcquisition, receipt);
+  assert.ok(isWorldState(acquired.state));
 });
 
-await test('entire legal territory predecessor replays canonically and repeated helpers are detached', () => {
+await test('actual territory founding and research replay from declared synthetic prerequisites with detached histories', () => {
   const value = ownedTerritoryPrefix(); let state = structuredClone(value.initial);
   for (const step of value.steps) { assert.deepEqual(state, step.before); const before = structuredClone(state); const result = replayCoastalStep(state, structuredClone(step.input)); assert.deepEqual(state, before); assert.deepEqual(result, step.result); assert.ok(result.ok); assert.ok(isWorldState(result.state)); state = result.state; }
   assert.deepEqual(state, value.state);

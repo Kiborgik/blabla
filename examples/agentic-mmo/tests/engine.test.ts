@@ -1,35 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as engine from '../core/engine.ts';
-import {
-  applyCommand,
-  applyDirectorTick,
-  catchUpClock,
-  createWorld,
-  legalActions,
-  observe,
-} from '../core/engine.ts';
+import { applyCommand, applyDirectorTick, catchUpClock, createWorld, legalActions, observe } from '../core/engine.ts';
 import { chooseAction, simulate } from '../core/policies.ts';
-import {
-  CIV_COUNT,
-  DIRECTOR_SEAT,
-  type Command,
-  type ActionOption,
-  type HistoryAdvanceCommand,
-  type GameAction,
-  type ReleaseApplyCommand,
-  type WorldState,
-  type Resources,
-} from '../core/types.ts';
+import { CIV_COUNT, DIRECTOR_SEAT, type Command, type ActionOption, type HistoryAdvanceCommand, type GameAction, type WorldState, type Resources } from '../core/types.ts';
 import { RELEASES } from '../core/release.ts';
-import {
-  BUILDINGS,
-  ECONOMY_RULES,
-  RESOURCE_IDS,
-  TRADE_RECIPES,
-  TRADE_RULES,
-  TURN_RULES,
-} from '../core/content.ts';
+import { BUILDINGS, ECONOMY_RULES, RESOURCE_IDS, TRADE_RECIPES, TRADE_RULES, TURN_RULES } from '../core/content.ts';
 import { hexDistance } from '../core/simulation/geography.ts';
 import { resolveEconomy } from '../core/simulation/economy.ts';
 import { applyEffects } from '../core/simulation/effects.ts';
@@ -378,84 +354,21 @@ await test('Director shock cooldown counts complete subsequent working rounds', 
   assert.ok(legalActions(state, DIRECTOR_SEAT).some((choice) => choice.action.type === 'event'));
 });
 
-await test('registered compatible release upgrades preserve the actual world and clock', () => {
-  assert.equal(typeof engine.applyRelease, 'function');
-  let state = createWorld(8, '2026-10-16T00:00:00.000Z');
-  state = play(state);
-  state = catchUpClock(state, '2026-10-16T00:06:00.000Z').state;
-  const before = structuredClone(state);
-  const result = engine.applyRelease(state, {
-    expectedRevision: state.revision,
-    expectedFromReleaseId: state.releaseId,
-    targetReleaseId: 'settlement-foundations-2',
-  });
-  assert.equal(result.ok, true, result.error);
-  assert.deepEqual(state, before);
-  assert.equal(result.state.releaseId, 'settlement-foundations-2');
-  assert.deepEqual(
-    result.state.unlockedFeatures,
-    RELEASES.find((release) => release.id === result.state.releaseId)?.featureIds,
-  );
-  assert.equal(result.state.revision, before.revision + 1);
-  assert.deepEqual(
-    {
-      ...result.state,
-      revision: before.revision,
-      releaseId: before.releaseId,
-      unlockedFeatures: before.unlockedFeatures,
-      events: before.events,
-      eventCounts: before.eventCounts,
-    },
-    before,
-  );
-  assert.equal(result.events[0]?.type, 'release-applied');
-  assert.ok(result.events[0]?.cause.includes(before.releaseId));
-  assert.equal(Object.hasOwn(result.state, 'historyAdvances'), false);
-});
-
-await test('unknown, repeated, downgraded and incompatible release commands preserve state identity', () => {
-  assert.equal(typeof engine.applyRelease, 'function');
-  const initial = createWorld(8);
-  const command = {
-    expectedRevision: initial.revision,
-    expectedFromReleaseId: initial.releaseId,
-    targetReleaseId: 'settlement-foundations-2',
-  };
-  const upgraded = engine.applyRelease(initial, command).state;
-  const cases: Array<[WorldState, ReleaseApplyCommand]> = [
-    [initial, { ...command, targetReleaseId: 'unregistered' }],
-    [initial, { ...command, expectedRevision: 99 }],
-    [initial, { ...command, expectedFromReleaseId: 'other-release' }],
-    [initial, { ...command, targetReleaseId: initial.releaseId }],
-    [{ ...initial, schemaVersion: 99 }, command],
-    [{ ...initial, gameVersion: 'incompatible' }, command],
-    [{ ...initial, unlockedFeatures: [...initial.unlockedFeatures, 'trade-routes'] }, command],
-    [
-      upgraded,
-      {
-        ...command,
-        expectedRevision: upgraded.revision,
-        expectedFromReleaseId: upgraded.releaseId,
-      },
-    ],
-    [
-      upgraded,
-      {
-        ...command,
-        expectedRevision: upgraded.revision,
-        expectedFromReleaseId: upgraded.releaseId,
-        targetReleaseId: initial.releaseId,
-      },
-    ],
-  ];
-  for (const [state, input] of cases) {
-    const before = structuredClone(state);
-    const result = engine.applyRelease(state, input);
-    assert.equal(result.ok, false);
-    assert.equal(result.state, state);
-    assert.deepEqual(result.events, []);
-    assert.deepEqual(state, before);
-  }
+await test('fresh registered rules initialize capability state without migration history', () => {
+  const foundation = createWorld(8);
+  const current = createWorld(8, '2026-10-16T00:00:00.000Z', 'settlement-decisions-1');
+  assert.equal(foundation.releaseId, 'settlement-foundations-1');
+  assert.equal(current.releaseId, 'settlement-decisions-1');
+  assert.deepEqual(current.unlockedFeatures, RELEASES.find(rules => rules.id === current.releaseId)?.featureIds);
+  assert.equal(current.revision, 0);
+  assert.equal(current.round, 0);
+  assert.deepEqual(current.events.map(event => event.type), ['world-founded']);
+  assert.deepEqual(current.actionPlans, Array.from({ length: DIRECTOR_SEAT + 1 }, () => null));
+  assert.equal(current.independentTurns?.strategyTicks, 0);
+  assert.ok(isWorldState(current));
+  assert.deepEqual(JSON.parse(JSON.stringify(current)), current);
+  assert.throws(() => createWorld(8, undefined, 'settlement-independent-1'), /epoch/);
+  assert.throws(() => createWorld(8, '2026-10-16T00:00:00.000Z', 'unknown-rules'), /registered/);
 });
 
 function historyCommand(state: WorldState): HistoryAdvanceCommand {
@@ -469,15 +382,7 @@ function historyCommand(state: WorldState): HistoryAdvanceCommand {
 }
 
 function upgradedWorld(): WorldState {
-  assert.equal(typeof engine.applyRelease, 'function');
-  const state = createWorld(8, '2026-10-16T00:00:00.000Z');
-  const result = engine.applyRelease(state, {
-    expectedRevision: state.revision,
-    expectedFromReleaseId: state.releaseId,
-    targetReleaseId: 'settlement-foundations-2',
-  });
-  assert.equal(result.ok, true, result.error);
-  return result.state;
+  return createWorld(8, '2026-10-16T00:00:00.000Z', 'settlement-foundations-2');
 }
 
 await test('intentional history advancement records one causal receipt without consuming the clock', () => {
@@ -569,7 +474,7 @@ await test('invalid history deltas, revisions, reasons and timestamps never muta
     { ...command, deltaYears: NaN },
     { ...command, deltaYears: Infinity },
     { ...command, deltaYears: Number.MAX_SAFE_INTEGER + 1 },
-    { ...command, expectedRevision: 0 },
+    { ...command, expectedRevision: state.revision + 1 },
     { ...command, reason: '' },
     { ...command, reason: '   ' },
     { ...command, timestamp: '2026-02-30T00:00:00.000Z' },
@@ -611,21 +516,10 @@ await test('hybrid evolution remains deterministic, detached, cause-idempotent a
   };
   assert.equal(engine.applyHistoryAdvance(terminal, historyCommand(terminal)).state, terminal);
   assert.equal(engine.applyHistoryAdvance(terminal, historyCommand(terminal)).ok, false);
-  const original = createWorld(8);
-  original.outcome = terminal.outcome;
-  const release = engine.applyRelease(original, {
-    expectedRevision: original.revision,
-    expectedFromReleaseId: original.releaseId,
-    targetReleaseId: state.releaseId,
-  });
-  assert.equal(release.ok, false);
-  assert.equal(release.state, original);
 });
 
 function tradeFixture(): WorldState {
-  const state = createWorld(8);
-  state.unlockedFeatures.push('trade-routes');
-  return state;
+  return createWorld(8, '2026-10-16T00:00:00.000Z', 'settlement-trade-1');
 }
 
 function turn(state: WorldState, action: GameAction): WorldState {
@@ -652,7 +546,7 @@ function waitForRound(state: WorldState, round: number): WorldState {
 }
 
 function proposalFixture(): WorldState {
-  const recipe = TRADE_RECIPES[0];
+  const recipe = TRADE_RECIPES.find(candidate => candidate.id === 'harvest-for-materials');
   assert.ok(recipe);
   return turn(tradeFixture(), { type: 'propose-trade', partner: 1, recipeId: recipe.id });
 }
@@ -921,7 +815,7 @@ await test('a strategic beat delivers at most once and retains last-shipment fac
 
 await test('accepting on a strategic beat schedules only the next strictly later beat', () => {
   const state = waitForRound(tradeFixture(), 4);
-  const recipe = TRADE_RECIPES[0];
+  const recipe = TRADE_RECIPES.find(candidate => candidate.id === 'harvest-for-materials');
   assert.ok(recipe);
   const proposal = turn(state, { type: 'propose-trade', partner: 1, recipeId: recipe.id });
   const offer = proposal.tradeOffers?.[0];
@@ -933,7 +827,7 @@ await test('accepting on a strategic beat schedules only the next strictly later
 });
 
 await test('accepted terms are detached from both the pending offer and later catalogue changes', () => {
-  const recipe = TRADE_RECIPES[0];
+  const recipe = TRADE_RECIPES.find(candidate => candidate.id === 'harvest-for-materials');
   assert.ok(recipe);
   const saved = structuredClone(recipe.terms);
   try {
@@ -1021,15 +915,7 @@ await test('actual round resolution produces a valid blocked agreement when a pa
 const independentEpoch = '2026-10-16T00:00:00.000Z';
 
 function independentFixture(): WorldState {
-  const state = upgradedWorld();
-  const result = engine.applyRelease(state, {
-    expectedRevision: state.revision,
-    expectedFromReleaseId: state.releaseId,
-    targetReleaseId: 'settlement-independent-1',
-    timestamp: independentEpoch,
-  });
-  assert.equal(result.ok, true, result.error);
-  return result.state;
+  return createWorld(8, '2026-10-16T00:00:00.000Z', 'settlement-independent-1');
 }
 
 function independentCommand(
@@ -1087,7 +973,7 @@ await test('refused independent commands preserve budgets and all world effects'
     { seat: 4, expectedRevision: state.revision, action: { type: 'wait' } } as Command,
     independentCommand(state, 4, 'not-a-time'),
     independentCommand(state, 4, '2026-10-15T23:59:59.000Z'),
-    { ...independentCommand(state, 4), expectedRevision: 0 },
+    { ...independentCommand(state, 4), expectedRevision: state.revision + 1 },
     independentCommand(state, 4, independentEpoch, { type: 'build', project: 'missing' }),
   ]) {
     const before = structuredClone(state);
@@ -1143,26 +1029,6 @@ await test('missed strategic beats are bounded and frozen older action times can
   assert.equal(old.state, second.state);
   const current = applyCommand(second.state, independentCommand(second.state, 0, timestamp));
   assert.equal(current.ok, true, current.error);
-});
-
-await test('independent release activation requires an explicit epoch and preserves old replay mode', () => {
-  const state = upgradedWorld();
-  const command = {
-    expectedRevision: state.revision,
-    expectedFromReleaseId: state.releaseId,
-    targetReleaseId: 'settlement-independent-1',
-  };
-  const missing = engine.applyRelease(state, command);
-  assert.equal(missing.ok, false);
-  assert.equal(missing.state, state);
-  assert.equal(applyCommand(state, independentCommand(state, 2)).ok, false);
-  const released = engine.applyRelease(state, { ...command, timestamp: independentEpoch });
-  assert.equal(released.ok, true, released.error);
-  assert.equal(released.state.independentTurns?.epoch, independentEpoch);
-  assert.equal(released.state.independentTurns?.strategyTicks, 0);
-  assert.equal(released.state.round, state.round);
-  assert.equal(released.state.year, state.year);
-  assert.equal(Object.hasOwn(state, 'independentTurns'), false);
 });
 
 await test('independent observations expose actor readiness while unused windows require no manufactured commands', () => {
@@ -1223,7 +1089,7 @@ await test('future action orders cannot retroactively influence unrealized produ
 
 await test('consensual trade ships on slower economy beats even when every actor remains idle', () => {
   const state = independentFixture();
-  const recipe = TRADE_RECIPES[0];
+  const recipe = TRADE_RECIPES.find(candidate => candidate.id === 'harvest-for-materials');
   assert.ok(recipe);
   const offered = applyCommand(
     state,
@@ -1365,14 +1231,7 @@ await test('mixed independent actor and strategic transitions reproduce exact st
 });
 
 function plannedFixture(): WorldState {
-  const state = independentFixture();
-  const result = engine.applyRelease(state, {
-    expectedRevision: state.revision,
-    expectedFromReleaseId: state.releaseId,
-    targetReleaseId: 'settlement-plans-1',
-  });
-  assert.equal(result.ok, true, result.error);
-  return result.state;
+  return createWorld(8, '2026-10-16T00:00:00.000Z', 'settlement-plans-1');
 }
 
 function plannedCommand(state: WorldState, seat = 0): Command {
@@ -1385,27 +1244,6 @@ function plannedCommand(state: WorldState, seat = 0): Command {
     ],
   };
 }
-
-await test('the explicit plans release initializes bounded slots without resetting prior world or timing facts', () => {
-  const state = independentFixture();
-  const original = structuredClone(state);
-  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-plans-1' });
-  assert.equal(result.ok, true, result.error);
-  assert.deepEqual(result.state.actionPlans, Array.from({ length: DIRECTOR_SEAT + 1 }, () => null));
-  assert.deepEqual(result.state.independentTurns, state.independentTurns);
-  assert.deepEqual(result.state.civilizations, state.civilizations);
-  assert.deepEqual(result.state.cities, state.cities);
-  assert.equal(result.state.clockEpoch, state.clockEpoch);
-  assert.equal(result.state.clockTicks, state.clockTicks);
-  assert.equal(result.state.round, state.round);
-  assert.equal(result.state.year, state.year);
-  assert.equal(result.state.revision, state.revision + 1);
-  assert.deepEqual(state, original);
-  assert.equal(Object.hasOwn(state, 'actionPlans'), false);
-  assert.equal(Object.hasOwn(observe(state, 0), 'actionPlan'), false);
-  assert.equal(observe(result.state, 0).actionPlan, null);
-  assert.ok(isWorldState(result.state));
-});
 
 await test('real accepted commands complete the attached head and retain original context without autoexecuting follow-up', () => {
   const state = plannedFixture();
@@ -1533,10 +1371,7 @@ await test('explicit plan replacement and clearing reproduce identical engine st
 });
 
 function productionFixture(): WorldState {
-  const state = independentFixture();
-  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-production-1', timestamp: independentEpoch });
-  assert.equal(result.ok, true, result.error);
-  return result.state;
+  return createWorld(8, '2026-10-16T00:00:00.000Z', 'settlement-production-1');
 }
 
 function equippedProduction(): WorldState {
@@ -1793,10 +1628,7 @@ await test('an earlier blocked multi-input recipe does not reserve scarce inputs
 });
 
 function frontierFixture(): WorldState {
-  const state = productionFixture();
-  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-frontiers-1', timestamp: independentEpoch });
-  assert.equal(result.ok, true, result.error);
-  return result.state;
+  return createWorld(8, '2026-10-16T00:00:00.000Z', 'settlement-frontiers-1');
 }
 
 function frontierAction(state: WorldState, seat = 0, timestamp = independentEpoch): Extract<GameAction, { type: 'settle' }> {
@@ -1891,7 +1723,7 @@ await test('settlers inherit the named source rather than first-city focus and a
 
 function roundFrontierAmount(value: number): number { return Math.round(value * 100) / 100; }
 
-await test('terrain production is additive with deposits and productivity only after the explicit frontier release', () => {
+await test('terrain production is additive with deposits and productivity under fresh terrain-production rules', () => {
   for (const [terrain, resource] of [['grassland', 'food'], ['forest', 'materials']] as const) {
     const old = productionFixture();
     const city = old.cities[0];
@@ -1903,9 +1735,11 @@ await test('terrain production is additive with deposits and productivity only a
     assert.ok(site);
     site.terrain = terrain;
     site.resource = resource;
-    const released = engine.applyRelease(old, { expectedRevision: old.revision, expectedFromReleaseId: old.releaseId, targetReleaseId: 'settlement-frontiers-1', timestamp: independentEpoch });
-    assert.equal(released.ok, true, released.error);
-    const current = released.state;
+    const current = frontierFixture();
+    Object.assign(current.cities[0]!, { wellbeing: city.wellbeing, damage: city.damage, infrastructure: city.infrastructure });
+    const currentSite = current.tiles.find(tile => tile.id === city.tileId);
+    assert.ok(currentSite);
+    Object.assign(currentSite, { terrain, resource });
     const noDeposit = structuredClone(current);
     const plain = noDeposit.tiles.find((tile) => tile.id === city.tileId);
     assert.ok(plain);
@@ -2020,8 +1854,8 @@ await test('compact frontier choices expose actual terrain, deposit and base yie
   assert.equal(Object.hasOwn(observed, 'tiles'), false);
 });
 
-function twoFrontierCities(): WorldState {
-  const state = frontierFixture();
+function twoFrontierCities(rulesId = 'settlement-frontiers-1'): WorldState {
+  const state = createWorld(8, independentEpoch, rulesId);
   const civilization = state.civilizations[0];
   assert.ok(civilization);
   civilization.technologies.push('agriculture', 'water-management', 'kiln-firing');
@@ -2032,10 +1866,7 @@ function twoFrontierCities(): WorldState {
 }
 
 function specializationFixture(): WorldState {
-  const state = twoFrontierCities();
-  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-specialization-1', timestamp: independentEpoch });
-  assert.equal(result.ok, true, result.error);
-  return result.state;
+  return twoFrontierCities('settlement-specialization-1');
 }
 
 await test('specialized focus and construction act on the exact owned city and preserve every other city', () => {
@@ -2146,10 +1977,7 @@ await test('older releases retain untargeted focus and first-eligible constructi
 });
 
 function recoveryFixture(): WorldState {
-  const state = specializationFixture();
-  const result = engine.applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-recovery-1', timestamp: independentEpoch });
-  assert.equal(result.ok, true, result.error);
-  return result.state;
+  return twoFrontierCities('settlement-recovery-1');
 }
 
 await test('released earthquake and exact paid city recovery restore next-beat output without inventing infrastructure', () => {

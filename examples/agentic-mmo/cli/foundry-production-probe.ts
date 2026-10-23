@@ -3,7 +3,7 @@ import { isDeepStrictEqual as equal } from 'node:util';
 import { RESOURCE_IDS } from '../core/content.ts';
 import { applyCommand } from '../core/engine.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
-import { extractCityMetals } from '../core/simulation/metals.ts';
+import { extractCityMetals, strategicCapacity } from '../core/simulation/metals.ts';
 import { cityProductivity } from '../core/simulation/world.ts';
 import type { TransitionResult, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -60,7 +60,7 @@ export class FoundryProductionProbe {
     this.operation = action; this.repeated = null; this.control = null; this.allocation = null; this.scarcity = []; this.deferred = null; this.replayedFrames = 0;
     const path = this.getPath(); const cityId = path.journey.cityId; const seat = path.journey.seat;
     if (action === 'refuse_foundry_action') {
-      this.state ??= structuredClone(path.journey.adopted); this.before = structuredClone(this.state);
+      this.state ??= structuredClone(path.journey.prepared); this.before = structuredClone(this.state);
       this.result = applyCommand(this.state, { seat, expectedRevision: this.state.revision, timestamp: time(this.state), action: { type: 'build', project: 'foundry', cityId: 'missing-foundry-town' } });
       assert.deepEqual(this.state, this.before); this.state = this.result.state; return;
     }
@@ -116,7 +116,7 @@ export class FoundryProductionProbe {
     const d = this.deferred;
     return {
       initialized: state !== null,
-      provenance: state ? action === 'block_foundry' || action === 'defer_arriving_iron' ? 'Explicit synthetic opening-ledger control detached from the actual legal Foundry journey' : 'Actual immutable legal Foundry journey; completion exclusion uses a labeled synthetic order-removal control' : 'Uninitialized; no journey executed',
+      provenance: state ? action === 'block_foundry' || action === 'defer_arriving_iron' ? 'Explicit synthetic opening-ledger control detached from the actual legal Foundry journey' : 'Synthetic named fresh-rule prerequisites followed by actual paid Foundry transitions; completion exclusion uses a labeled detached order-removal control' : 'Uninitialized; no journey executed',
       replayed_frames: this.replayedFrames,
       same_town: action === 'start_foundry' && city?.id === path?.journey.cityId && city?.buildings.includes('industrial-zone') === true && !!order && 'buildingId' in order && order.buildingId === 'foundry' && order.cityId === city.id,
       paid_once: action === 'start_foundry' && exactStartPayment && this.repeated?.ok === false && equal(this.repeated.state, state) && this.repeated.events.length === 0,
@@ -130,7 +130,7 @@ export class FoundryProductionProbe {
       paused: action === 'pause_foundry' && city?.buildingOperations?.foundry?.enabled === false && result?.status === 'paused',
       no_payment_or_output: action === 'pause_foundry' ? !!state && noRecipeEffects(state) : action === 'block_foundry' && this.scarcity.length === 3 && this.scarcity.every(value => noRecipeEffects(value.after) && equal(actor(value.before).resources, actor(value.after).resources) && equal(actor(value.before).strategicResources, actor(value.after).strategicResources)),
       opening_stock_only: action === 'defer_arriving_iron' && !!d && actor(d.before, d.seat).strategicResources?.iron === 0 && receipt(d.opening, d.cityId)?.status === 'blocked' && equal(receipt(d.opening, d.cityId)?.paid, {}) && equal(receipt(d.opening, d.cityId)?.strategicPaid, {}) && actor(d.opening, d.seat).resources.energy === 2 && actor(d.afterExtraction, d.seat).strategicResources?.iron === 2 && equal(receipt(d.opening, d.cityId), receipt(d.afterExtraction, d.cityId)) && receipt(d.nextOpening, d.cityId)?.status === 'operated' && actor(d.nextOpening, d.seat).strategicResources?.iron === 1 && actor(d.nextOpening, d.seat).resources.energy === 0,
-      shipment_resumed: action === 'resume_iron_exchange' && !!route && !!priorRoute && route.deliveryCount === priorRoute.deliveryCount + 1 && route.lastDeliveryRound === state?.round && equal(route.terms, priorRoute.terms) && !!shipment && equal(shipment.proposerSent, { iron: 2 }) && !!state && actor(state).strategicResources?.iron === 39 && path?.completed.civilizations.find(value => value.id === 1)?.strategicResources?.iron === 40,
+      shipment_resumed: action === 'resume_iron_exchange' && !!route && !!priorRoute && route.deliveryCount === priorRoute.deliveryCount + 1 && route.lastDeliveryRound === state?.round && equal(route.terms, priorRoute.terms) && !!shipment && equal(shipment.proposerSent, { iron: 2 }) && !!state && !!before && !!path && actor(state).strategicResources?.iron === (actor(before).strategicResources?.iron ?? 0) - (result?.strategicPaid?.iron ?? 0) + (shipment.proposerSent.iron ?? 0) - (shipment.recipientSent.iron ?? 0) && actor(path.completed).strategicResources?.iron === strategicCapacity(path.completed, 1, 'iron'),
       refused: this.result?.ok === false,
       no_effects: this.result?.ok === false && equal(this.result.state, before) && this.result.events.length === 0,
       replay_exact: action === 'replay_foundry_history' && !!path && this.replayedFrames === path.journey.steps.length && equal(state, path.shipment.result.state),

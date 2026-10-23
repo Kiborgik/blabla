@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BUILDINGS, TECHNOLOGIES } from '../core/content.ts';
-import { applyCommand, legalActions } from '../core/engine.ts';
+import { applyCommand, createWorld, legalActions } from '../core/engine.ts';
 import { projectCapabilities } from '../core/capabilities.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
 import { availableCampusHighGround, selectedCampusHighGround } from '../core/simulation/observatory.ts';
@@ -31,12 +31,12 @@ await test('observatory actual paid start retains deterministic own-Campus high 
   assert.ok(option); assert.deepEqual(option.highGround, order.highGround); refuse(started, { type: 'build', project: 'observatory', cityId: journey.cityId });
 });
 
-await test('observatory connected cards preserve every prerequisite and old-release zero effects', () => {
+await test('observatory connected cards preserve every prerequisite and fresh-rule gating', () => {
+  const unavailable = createWorld(1701, coastalPrefixTime(0), 'settlement-foundry-1');
   const expected: Array<[string, number, string[]]> = [['sailing', 72, ['water-management']], ['celestial-navigation', 132, ['sailing', 'writing']], ['astronomy', 360, ['mathematics', 'celestial-navigation']]];
-  for (const [id, cost, requires] of expected) { const definition = TECHNOLOGIES.find(item => item.id === id); assert.ok(definition); assert.equal(definition.cost, cost); assert.deepEqual(definition.requires.toSorted(), requires.toSorted()); refuse(path().journey.beforeRelease, { type: 'research', technology: id }); }
+  for (const [id, cost, requires] of expected) { const definition = TECHNOLOGIES.find(item => item.id === id); assert.ok(definition); assert.equal(definition.cost, cost); assert.deepEqual(definition.requires.toSorted(), requires.toSorted()); refuse(unavailable, { type: 'research', technology: id }); }
   const definition = BUILDINGS.find(item => item.id === 'observatory'); assert.ok(definition); assert.equal(definition.minEra, 2); assert.deepEqual(definition.requires, ['astronomy']); assert.deepEqual(definition.requiresBuildings, ['campus']); assert.deepEqual(definition.operatingInputs, { credits: 2 }); assert.deepEqual(definition.production, { science: 7 });
-  refuse(path().journey.beforeRelease, { type: 'build', project: 'observatory', cityId: 'city-0' });
-  assert.deepEqual(path().journey.adopted.cities, path().journey.beforeRelease.cities); assert.deepEqual(path().journey.adopted.civilizations, path().journey.beforeRelease.civilizations);
+  refuse(unavailable, { type: 'build', project: 'observatory', cityId: 'city-0' });
 });
 
 await test('observatory completion installs exact source and cannot operate in its completion beat', () => {
@@ -82,7 +82,6 @@ await test('observatory canonical hill alternative and detached projection prese
     const source = row.highGround.retained; assert.ok(source); source.sourceTileId = 999;
     const current = projectCapabilities(frame, 0, 'city-0', time(frame)).buildings.find(item => item.nodeId === 'building:observatory'); assert.equal(current?.highGround?.retained?.sourceTileId, 22);
   }
-  const legacy = projectCapabilities(path().journey.beforeRelease, 0, 'city-0', time(path().journey.beforeRelease)).buildings.find(item => item.nodeId === 'building:observatory'); assert.equal(legacy?.highGround, undefined); assert.equal(legacy?.status, 'planned');
 });
 
 await test('observatory synthetic later terrain loss cannot retarget an already paid source at completion', () => {

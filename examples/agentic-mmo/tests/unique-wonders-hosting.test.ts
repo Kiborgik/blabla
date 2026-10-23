@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import type { CompletedWonderRecord, GameAction, WorldState } from '../core/types.ts';
 import { isGameEvent, isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, type CoastalPrefixStep } from './fixtures/coastal-prefix.ts';
@@ -44,7 +45,7 @@ class Fixture {
   constructor() { this.database.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8')); }
   get store() { return new WorldRepository(this.database); }
   async state() { const result = await this.store.read(); assert.ok(result); return result.state; }
-  async initialize() { await this.store.initialize({ seed: 1701, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0)); }
+  async initialize(state: WorldState) { seedHostedWorld(this.database.sql, state); }
   async input(commandId: string, action: GameAction, seat = 0) { return { seat, expectedRevision: (await this.state()).revision, model, commandId, action: { type: 'strategy-action', action } }; }
   send(input: Record<string, unknown>, seconds: number) { return this.store.mutate('action', input, actor, coastalPrefixTime(seconds)); }
   async beat() { const state = await this.state(); const seconds = ((state.independentTurns?.strategyTicks ?? 0) + 1) * 60; return this.store.mutate('strategy-catchup', { expectedRevision: state.revision, commandId: `beat-${state.revision}`, timestamp: coastalPrefixTime(seconds), model }, actor, coastalPrefixTime(seconds)); }
@@ -57,7 +58,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 3);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state; count++;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return count; }
@@ -69,31 +70,30 @@ async function replay(item: Fixture) {
 function stepArguments(step: CoastalPrefixStep, commandId: string): Record<string, unknown> {
   const input = step.input;
   if (input.kind === 'strategy') return { expectedRevision: step.before.revision, timestamp: input.timestamp, model, commandId };
-  if (input.kind === 'release') return { ...input.command, model, commandId };
   return { seat: input.command.seat, expectedRevision: input.command.expectedRevision, action: { type: 'strategy-action', action: input.command.action }, ...(input.command.plan === undefined ? {} : { plan: input.command.plan }), model, commandId };
 }
 function sendStep(item: Fixture, step: CoastalPrefixStep, commandId: string) {
   const input = step.input; const timestamp = input.kind === 'strategy' ? input.timestamp : input.command.timestamp; assert.ok(timestamp);
-  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : input.kind === 'release' ? 'release-apply' : 'action', stepArguments(step, commandId), actor, timestamp);
+  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : 'action', stepArguments(step, commandId), actor, timestamp);
 }
-async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER): Promise<void> {
-  await item.initialize();
+async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER, initial = steps[0]?.before): Promise<void> {
+  assert.ok(initial); await item.initialize(initial);
   for (const [index, step] of steps.entries()) {
     if (step.result.state.revision > through) break;
     await sendStep(item, step, `wonder-step-${index}`); assert.deepEqual(await item.state(), step.result.state); assert.ok(isWorldState(await item.state()));
   }
 }
 
-await test('unique wonder predecessor keeps all117 real legal frames through SQLite reopen and exact replay', async () => {
+await test('fresh unique wonder prerequisites keep every paid Campus and Library frame through SQLite reopen and exact replay', async () => {
   const prefix = greatLibraryPrefix(); const item = new Fixture();
   try {
-    assert.equal(prefix.state.revision, 117); assert.equal(prefix.steps.length, 117);
-    await persist(item, prefix.steps); const records = item.database.records(); item.reopen();
-    assert.deepEqual(await item.state(), prefix.state); assert.deepEqual(item.database.records(), records); assert.equal(await replay(item), 117);
+    assert.equal(prefix.initial.revision, 0); assert.equal(prefix.state.revision, prefix.steps.length);
+    await persist(item, prefix.steps, Number.MAX_SAFE_INTEGER, prefix.initial); const records = item.database.records(); item.reopen();
+    assert.deepEqual(await item.state(), prefix.state); assert.deepEqual(item.database.records(), records); assert.equal(await replay(item), prefix.steps.length);
     assert.ok(prefix.contenders.every(contender => (prefix.state.civilizations.find(civilization => civilization.id === contender.seat)?.era ?? 0) >= 1));
-    assert.equal(Object.hasOwn(prefix.state, 'wonders'), false);
-    assert.ok(legalActions(prefix.state, 0, prefix.timestamp).every(option => option.action.type !== 'build-wonder'));
-    const request = { seat: 0, expectedRevision: prefix.state.revision, commandId: 'wonder-before-release', model, action: { type: 'strategy-action', action: { type: 'build-wonder', wonderId: 'great-library', cityId: 'city-0', tileId: 74 } } };
+    assert.deepEqual(prefix.state.wonders, {});
+    assert.ok(legalActions(prefix.state, 0, prefix.timestamp).some(option => option.action.type === 'build-wonder'));
+    const request = { seat: 0, expectedRevision: prefix.state.revision, commandId: 'wonder-occupied-campus', model, action: { type: 'strategy-action', action: { type: 'build-wonder', wonderId: 'great-library', cityId: 'city-0', tileId: prefix.contenders[0]?.campusTileId } } };
     await assert.rejects(item.store.mutate('action', request, actor, prefix.timestamp)); assert.deepEqual(item.database.records(), records);
   } finally { item.close(); }
 });
@@ -109,7 +109,7 @@ function completionStory() {
   const resolution = steps.find(step => !step.before.wonders?.['great-library'] && step.result.state.wonders?.['great-library']);
   assert.ok(start?.input.kind === 'action' && start.input.command.action.type === 'build-wonder' && start.input.command.timestamp);
   assert.ok(resolution?.input.kind === 'strategy');
-  return { ...route, start, resolution, operated: structuredClone(route.journey.state), steps };
+  return { ...route, initial: route.journey.previous.initial, start, resolution, operated: structuredClone(route.journey.state), steps };
 }
 let cachedCompletion: ReturnType<typeof completionStory> | undefined;
 function story() { cachedCompletion ??= completionStory(); return cachedCompletion; }
@@ -117,7 +117,7 @@ function story() { cachedCompletion ??= completionStory(); return cachedCompleti
 await test('unique wonder actual contention winner and losing refund survive one-payment SQLite duplicates reopen and full replay', async context => {
   const route = story(); const item = new Fixture();
   try {
-    await item.initialize();
+    await item.initialize(route.initial);
     for (const [index, step] of route.steps.entries()) {
       const key = `wonder-step-${index}`;
       if (step === route.start || step === route.resolution) {
@@ -146,14 +146,14 @@ await test('unique wonder actual contention winner and losing refund survive one
     const start = route.start; assert.ok(start.input.kind === 'action' && start.input.command.action.type === 'build-wonder');
     const changed = { ...stepArguments(start, `wonder-step-${route.steps.indexOf(start)}`), action: { type: 'strategy-action', action: { ...start.input.command.action, tileId: 9999 } } };
     await assert.rejects(item.store.mutate('action', changed, actor, route.journey.time()), { message: 'idempotency_key_reused' }); assert.deepEqual(item.database.records(), records);
-    context.diagnostic(JSON.stringify({ basis: 'entirely legal117-frame predecessor and real SQLite repository', revision: state.revision, round: state.round, completion: completed.completion, loss, replayFrames: await replay(item) }));
+    context.diagnostic(JSON.stringify({ basis: 'fresh explicit prerequisites and actual paid SQLite repository frames', revision: state.revision, round: state.round, completion: completed.completion, loss, replayFrames: await replay(item) }));
   } finally { item.close(); }
 });
 
 for (const table of ['world_transitions', 'world_receipts']) await test(`unique wonder ${table} fault rolls back winner losing refund and due economy before exact reopened retry`, async () => {
   const route = story(); const step = route.resolution; assert.ok(step.input.kind === 'strategy'); const item = new Fixture();
   try {
-    await persist(item, route.steps, step.before.revision); const before = item.database.records();
+    await persist(item, route.steps, step.before.revision, route.initial); const before = item.database.records();
     item.database.sql.exec(`CREATE TRIGGER fail_wonder BEFORE INSERT ON ${table} WHEN NEW.receipt_key = 'strategy-catchup:wonder-resolution-fault' BEGIN SELECT RAISE(ABORT, 'synthetic wonder rollback'); END;`);
     await assert.rejects(sendStep(item, step, 'wonder-resolution-fault'), /synthetic wonder rollback/); assert.deepEqual(item.database.records(), before);
     item.reopen(); assert.deepEqual(item.database.records(), before); assert.equal((await item.state()).wonders?.['great-library'], undefined);
@@ -167,7 +167,7 @@ for (const table of ['world_transitions', 'world_receipts']) await test(`unique 
 await test('unique wonder refused exact actions roll back candidate completion refunds and invalid site work', async () => {
   const route = story(); const start = route.start; assert.ok(start.input.kind === 'action' && start.input.command.action.type === 'build-wonder'); const item = new Fixture();
   try {
-    await persist(item, route.steps, start.before.revision); const before = item.database.records(); const action = start.input.command.action;
+    await persist(item, route.steps, start.before.revision, route.initial); const before = item.database.records(); const action = start.input.command.action;
     const city = start.before.cities.find(value => value.id === action.cityId); const foreign = start.before.cities.find(value => value.civId !== 0); assert.ok(city && foreign);
     for (const [index, invalid] of [
       { ...action, tileId: city.tileId }, { ...action, tileId: 39 }, { ...action, tileId: 9999 }, { ...action, cityId: foreign.id, tileId: foreign.tileId },
@@ -188,7 +188,7 @@ await test('unique wonder refused exact actions roll back candidate completion r
 await test('unique wonder strict CAS leaves no losing completion refund or receipt', async () => {
   const route = story(); const step = route.resolution; const item = new Fixture();
   try {
-    await persist(item, route.steps, step.before.revision); const before = item.database.records();
+    await persist(item, route.steps, step.before.revision, route.initial); const before = item.database.records();
     const at = coastalPrefixTime((step.before.independentTurns?.strategyTicks ?? 0) * 60 + 50);
     const option = legalActions(step.before, 2, at).find(choice => choice.action.type === 'focus'); assert.ok(option);
     const competing = applyCommand(step.before, { seat: 2, expectedRevision: step.before.revision, timestamp: at, action: option.action }); assert.ok(competing.ok, competing.error); assert.ok(isWorldState(competing.state));
@@ -234,7 +234,7 @@ function boostStory() {
   const immediate = route.journey.steps.find(step => step.result.state.revision === route.boosted.revision);
   assert.ok(immediate?.input.kind === 'action' && immediate.input.command.action.type === 'apply-research-boost');
   route.journey.beat();
-  return { ...route, immediate, steps: [...route.journey.previous.steps, ...route.journey.steps] };
+  return { ...route, initial: route.journey.previous.initial, immediate, steps: [...route.journey.previous.steps, ...route.journey.steps] };
 }
 let cachedBoost: ReturnType<typeof boostStory> | undefined;
 function boostedStory() { cachedBoost ??= boostStory(); return cachedBoost; }
@@ -242,7 +242,7 @@ function boostedStory() { cachedBoost ??= boostStory(); return cachedBoost; }
 await test('unique wonder two legal explicit boosts preserve capped immediate completion stock and original receipts through SQLite replay', async context => {
   const route = boostedStory(); const item = new Fixture();
   try {
-    await item.initialize();
+    await item.initialize(route.initial);
     for (const [index, step] of route.steps.entries()) {
       if (step.input.kind === 'action' && step.input.command.action.type === 'apply-research-boost') {
         const replies = await Promise.all([sendStep(item, step, `wonder-step-${index}`), sendStep(item, step, `wonder-step-${index}`)]);
@@ -261,14 +261,14 @@ await test('unique wonder two legal explicit boosts preserve capped immediate co
     const final = await item.state(); const records = item.database.records(); item.reopen(); assert.deepEqual(await item.state(), final);
     const duplicate = await sendStep(item, route.immediate, `wonder-step-${route.steps.indexOf(route.immediate)}`);
     assert.equal(duplicate.duplicate, true); assert.equal(duplicate.acceptedRevision, route.boosted.revision); assert.deepEqual(item.database.records(), records);
-    context.diagnostic(JSON.stringify({ basis: 'legal117-frame predecessor plus actual contest and distinct model-action-shaped boost steps; local SQLite', revision: final.revision, round: final.round, boosts: award.boosts, replayFrames: await replay(item) }));
+    context.diagnostic(JSON.stringify({ basis: 'fresh explicit prerequisites plus actual contest and distinct action-shaped boost steps; local SQLite', revision: final.revision, round: final.round, boosts: award.boosts, replayFrames: await replay(item) }));
   } finally { item.close(); }
 });
 
 for (const table of ['world_transitions', 'world_receipts']) await test(`unique wonder ${table} fault rolls back immediate boost charge progress and completion before reopened exact retry`, async () => {
   const route = boostedStory(); const step = route.immediate; const item = new Fixture();
   try {
-    await persist(item, route.steps, route.beforeCapped.revision); const before = item.database.records();
+    await persist(item, route.steps, route.beforeCapped.revision, route.initial); const before = item.database.records();
     item.database.sql.exec(`CREATE TRIGGER fail_boost BEFORE INSERT ON ${table} WHEN NEW.receipt_key = 'action:wonder-boost-fault' BEGIN SELECT RAISE(ABORT, 'synthetic boost rollback'); END;`);
     await assert.rejects(sendStep(item, step, 'wonder-boost-fault'), /synthetic boost rollback/); assert.deepEqual(item.database.records(), before);
     item.reopen(); assert.deepEqual(item.database.records(), before); assert.equal(completedRecord(await item.state()).boosts.length, 1);
@@ -281,7 +281,7 @@ for (const table of ['world_transitions', 'world_receipts']) await test(`unique 
 await test('unique wonder invalid owner target repeated charge and malformed boost history cannot mutate durable state', async () => {
   const route = boostedStory(); const item = new Fixture();
   try {
-    await persist(item, route.steps, route.beforeCapped.revision); const before = item.database.records(); const seat = completedRecord(route.beforeCapped).completion.civId;
+    await persist(item, route.steps, route.beforeCapped.revision, route.initial); const before = item.database.records(); const seat = completedRecord(route.beforeCapped).completion.civId;
     for (const [index, candidate] of [
       { seat, technology: 'currency', wonderId: 'great-library' },
       { seat, technology: 'spaceflight', wonderId: 'great-library' },

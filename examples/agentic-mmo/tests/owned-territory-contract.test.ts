@@ -9,10 +9,9 @@ await test('territory probe is lazy and unknown actions remain adapter errors', 
   probe.reset(); assert.equal(probe.observe().initialized, false);
 });
 
-await test('real adoption payment beneficiary and later purchased horse output satisfy contract', context => {
+await test('real payment beneficiary and later purchased horse output satisfy contract', context => {
   const probe = new OwnedTerritoryProbe();
   for (const [action, fields] of [
-    ['adopt_territory', ['adopted', 'old_ownership_unchanged']],
     ['purchase_exact_land', ['exact_beneficiary', 'paid_once', 'connected_path_retained', 'actual_owner_changed']],
     ['work_purchased_resource', ['same_town_worked', 'later_staffed_output', 'retained_resource_unchanged']],
   ] as const) {
@@ -21,7 +20,7 @@ await test('real adoption payment beneficiary and later purchased horse output s
     context.diagnostic(`${action}: ${Math.round(performance.now() - started)}ms`);
   }
   const snapshot = probe.snapshot(); assert.ok(snapshot.state);
-  const receipt = snapshot.state.tileAcquisitions?.['164']; assert.ok(receipt); assert.equal(receipt.paid.credits, 18); assert.equal(receipt.cityId, 'city-2-263');
+  const receipt = snapshot.state.tileAcquisitions?.['164']; assert.ok(receipt); assert.equal(receipt.paid.credits, 18); assert.equal(receipt.civId, 2); assert.equal(receipt.cityTileId, 199);
   const city = snapshot.state.cities.find(town => town.id === receipt.cityId); assert.ok(city);
   assert.ok((city.improvements?.['164']?.operation.lastResult?.produced.food ?? 0) > 0);
   probe.call('refuse_territory_action'); assert.equal(probe.observe().refused, true); assert.equal(probe.observe().no_effects, true);

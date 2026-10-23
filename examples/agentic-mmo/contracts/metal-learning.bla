@@ -1,7 +1,3 @@
-state prior_state_preserved: bool
-state migration_recorded_once: bool
-state eligible_owned_hills: bool
-state geography_ownership_rng_preserved: bool
 state release_enabled: bool
 state technology_completed: bool
 state deposit_revealed: bool
@@ -27,16 +23,12 @@ state current_science_only: bool
 state useful_later_output: bool
 state no_automatic_successor: bool
 
-action apply_metal_learning_release()
 action reveal_completed_technology()
 action operate_finite_mine()
 action resolve_mixed_exchange()
 action start_connected_commitment()
 action complete_connected_commitment()
 
-when apply_metal_learning_release {
-    expect "metal-migration-is-explicit-stable-and-compatible": after.prior_state_preserved and after.migration_recorded_once and after.eligible_owned_hills and after.geography_ownership_rng_preserved
-}
 when reveal_completed_technology {
     expect "released-bronze-completion-reveals-retained-deposits": not (before.release_enabled and before.technology_completed) or after.deposit_revealed
 }

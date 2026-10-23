@@ -1,5 +1,3 @@
-state adopted: bool
-state old_ownership_unchanged: bool
 state exact_beneficiary: bool
 state paid_once: bool
 state connected_path_retained: bool
@@ -11,16 +9,12 @@ state history_retained: bool
 state refused: bool
 state no_effects: bool
 
-action adopt_territory()
 action purchase_exact_land()
 action work_purchased_resource()
 action work_new_extent_land()
 action refuse_territory_action()
 action replay_territory_history()
 
-when adopt_territory {
-    expect "adoption-preserves-owned-world": after.adopted and after.old_ownership_unchanged
-}
 when purchase_exact_land {
     expect "one-price-one-bound-town": after.exact_beneficiary and after.paid_once and after.connected_path_retained and after.actual_owner_changed
 }

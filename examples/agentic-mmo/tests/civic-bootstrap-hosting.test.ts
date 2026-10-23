@@ -1,3 +1,4 @@
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -5,8 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { GOVERNMENTS } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
+import { applyCommand, catchUpStrategy, createWorld } from '../core/engine.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { WorldRepository, type D1Database, type D1Result, type D1Statement, type SqlValue } from '../server/repository.ts';
@@ -44,15 +44,7 @@ class Fixture {
   get env() { return { DB: this.database, AGENT_WRITER_USER_IDS: actor }; }
   get worker() { return createWorker(undefined, { now: () => new Date(time(this.seconds)) }); }
   async state(): Promise<WorldState> { const saved = await this.store.read(); assert.ok(saved); return saved.state; }
-  async initialize(target = 'settlement-civic-bootstrap-1') {
-    await this.store.initialize({ seed: 1701, clockEpoch: epoch, commandId: 'initialize' }, actor, epoch);
-    for (const release of RELEASES) {
-      const state = await this.state(); if (!release.compatibleFrom.includes(state.releaseId)) continue;
-      await this.store.mutate('release-apply', { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, commandId: `release-${release.id}`, model }, actor, epoch);
-      if (release.id === target) break;
-    }
-    assert.equal((await this.state()).releaseId, target);
-  }
+  async initialize(target = 'settlement-civic-bootstrap-1') { seedHostedWorld(this.database.sql, createWorld(1701, epoch, target)); }
   async input(commandId: string, action: GameAction) {
     const state = await this.state(); this.seconds = Math.max((state.independentTurns?.strategyTicks ?? 0) * 60 + 20, ((state.independentTurns?.lastActionWindow[4] ?? -1) + 1) * 10);
     return { seat: 4, expectedRevision: state.revision, model, commandId, action: { type: 'strategy-action', action } };
@@ -80,7 +72,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 25);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return; }
@@ -92,10 +84,9 @@ async function replay(item: Fixture) {
 await test('actual civic work, entitlement, first adoption and paid reslot survive SQLite reopen and exact replay', async () => {
   const item = new Fixture();
   try {
-    await item.initialize('settlement-observatory-1'); const previous = await item.state(); item.reopen(); assert.deepEqual(await item.state(), previous);
-    await item.store.mutate('release-apply', { expectedRevision: previous.revision, expectedFromReleaseId: previous.releaseId, targetReleaseId: 'settlement-civic-bootstrap-1', commandId: 'civic-release', model }, actor, epoch);
-    const migrated = await item.state();
-    for (const [index, civilization] of migrated.civilizations.entries()) { assert.deepEqual(civilization.resources, previous.civilizations[index]!.resources); assert.deepEqual(civilization.technologies, previous.civilizations[index]!.technologies); assert.equal(civilization.researchProgress, previous.civilizations[index]!.researchProgress); }
+    await item.initialize(); const previous = await item.state(); item.reopen(); assert.deepEqual(await item.state(), previous);
+    const historical = await item.state();
+    for (const [index, civilization] of historical.civilizations.entries()) { assert.deepEqual(civilization.resources, previous.civilizations[index]!.resources); assert.deepEqual(civilization.technologies, previous.civilizations[index]!.technologies); assert.equal(civilization.researchProgress, previous.civilizations[index]!.researchProgress); }
     const selection = await item.input('choose-code', { type: 'choose-civic', civicId: 'code-of-laws' }); const accepted = await json(await item.api('/api/action', selection));
     await item.beat(); const partial = await item.state(); assert.ok(partial.civilizations[4]!.civics!.active!.progress > 0); item.reopen(); assert.deepEqual(await item.state(), partial);
     await item.complete(); const ready = await item.state(); const entitlement = ready.civilizations[4]!.civics!.reformEntitlement; assert.ok(entitlement); item.reopen(); assert.deepEqual(await item.state(), ready);

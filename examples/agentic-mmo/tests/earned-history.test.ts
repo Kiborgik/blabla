@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyHistoryAdvance, applyRelease, createWorld } from '../core/engine.ts';
+import { applyHistoryAdvance } from '../core/engine.ts';
 import { HISTORICAL_MILESTONES } from '../core/content.ts';
-import { RELEASES } from '../core/release.ts';
 import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
 import { isWorldState } from '../core/validation.ts';
 import { createAutonomousState, planAutonomousWake } from '../server/autonomous-runner.ts';
@@ -65,18 +64,4 @@ await test('unearned or altered authored dates refuse without mutating the actua
   const rejected = applyHistoryAdvance(state, { expectedRevision: state.revision, cause: { kind: 'milestone', id: 'beyond-earth' }, reason: 'No earned launch preparation exists', deltaYears: 12150, timestamp: epoch });
   assert.equal(rejected.ok, false);
   assert.equal(JSON.stringify(state), before);
-});
-
-await test('explicit release adoption initializes empty proof ledgers rather than backfilling old history', () => {
-  let state = createWorld(1701, epoch);
-  for (const release of RELEASES.slice(1, -1)) { const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch }); assert.ok(result.ok, result.error); state = result.state; }
-  const before = structuredClone(state);
-  const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: RELEASES.at(-1)!.id, timestamp: epoch });
-  assert.ok(result.ok, result.error);
-  assert.deepEqual(result.state.milestoneProofs, {});
-  assert.equal(result.state.spaceflight?.civilizations.length, 5);
-  assert.deepEqual(state, before);
-  assert.deepEqual(result.state.tiles, before.tiles);
-  assert.equal(result.state.year, before.year);
-  assert.ok(isWorldState(result.state));
 });

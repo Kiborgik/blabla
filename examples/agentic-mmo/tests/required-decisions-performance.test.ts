@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { projectCapabilities } from '../core/capabilities.ts';
 import { BUILDINGS, RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, observe } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, observe } from '../core/engine.ts';
 import { observeCompactTrade } from '../core/observation.ts';
 import { decisionObligations } from '../core/simulation/decisions.ts';
 import type { GameAction, TransitionResult, WorldState } from '../core/types.ts';
@@ -26,12 +26,7 @@ const sourceFiles = [...files(join(root, 'core')), fileURLToPath(import.meta.url
 
 function fixture(ownedTowns: number): WorldState {
   assert.ok([1, 5, 25].includes(ownedTowns), 'Only finite declared workloads are supported');
-  let state = createWorld(1701, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+  let state = createWorld(1701, epoch, 'settlement-decisions-1');
   const capital = state.cities.find(city => city.civId === 0);
   assert.ok(capital);
   const sites = state.tiles.filter(tile => tile.owner === null && tile.terrain !== 'ocean' && tile.terrain !== 'mountain');

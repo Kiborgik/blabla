@@ -1,3 +1,4 @@
+import { executeKnowledgeAction } from './knowledge-compacts.ts';
 import { executeReliefAction } from './relief-charters.ts';
 import type { HistoricalEventSelection } from '../historical-selection.ts';
 import { launchMarsMission } from './spaceflight.ts';
@@ -59,6 +60,10 @@ export function executeAction(
   action: GameAction,
   events: GameEvent[],
 ): void {
+  if (action.type === 'propose-knowledge' || action.type === 'respond-knowledge' || action.type === 'withdraw-knowledge') {
+    executeKnowledgeAction(state, seat, action, events);
+    return;
+  }
   if (action.type === 'propose-relief' || action.type === 'respond-relief' || action.type === 'withdraw-relief') {
     executeReliefAction(state, seat, action, events);
     return;

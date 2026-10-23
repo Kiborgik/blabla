@@ -1,4 +1,4 @@
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { BUILDINGS, RESOURCE_IDS, TURN_RULES } from '../core/content.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
 import type { GameEvent, Resources, TransitionResult, WorldState } from '../core/types.ts';
@@ -6,15 +6,7 @@ import type { GameEvent, Resources, TransitionResult, WorldState } from '../core
 const EPOCH = '2026-10-16T00:00:00.000Z';
 
 function independentWorld(production: boolean): WorldState {
-  let state = createWorld(17, EPOCH);
-  const releases = ['settlement-foundations-2', 'settlement-independent-1'];
-  if (production) releases.push('settlement-production-1');
-  for (const targetReleaseId of releases) {
-    const next = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: EPOCH });
-    if (!next.ok) throw new Error(`Operation probe release failed: ${next.error}`);
-    state = next.state;
-  }
-  return state;
+  return createWorld(17, EPOCH, production ? 'settlement-production-1' : 'settlement-independent-1');
 }
 
 function irrigationRecipe() {

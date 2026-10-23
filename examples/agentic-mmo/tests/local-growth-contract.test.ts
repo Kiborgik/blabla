@@ -12,10 +12,8 @@ await test('local growth probe is lazy isolated and resets without a legal journ
   assert.deepEqual(first.observe(), initial);
 });
 
-await test('local growth six real actions expose positive adoption completion growth staffing founding and refusal', () => {
+await test('local growth five real actions expose paid completion growth staffing founding and refusal', () => {
   const probe = new LocalGrowthProbe(); const other = new LocalGrowthProbe(); const untouched = other.observe();
-  probe.call('adopt_local_housing');
-  assert.equal(probe.observe().preserved, true); assert.equal(probe.observe().conserved_old_people, true);
   probe.call('complete_granary');
   assert.equal(probe.observe().exact_local_capacity, true); assert.equal(probe.observe().completion_no_population, true);
   assert.equal(probe.observe().eligible_funded_growth, true);
@@ -62,5 +60,5 @@ await test('local growth repeated action order has actual finite transitions and
     if (after.grew) for (const field of ['exact_local_capacity', 'paid_exact_food', 'growth_uses_old_opening_allocation'] as const) assert.equal(after[field], true, field);
   }
   assert.equal(probe.observe().population, 24); assert.equal(probe.observe().grew, false);
-  probe.call('adopt_local_housing'); assert.equal(probe.observe().next_opening_supports_recipe, false);
+  probe.reset(); assert.equal(probe.observe().next_opening_supports_recipe, false);
 });

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { INDUSTRIAL_RULES } from '../core/content.ts';
 import { depositLabel, extractionFacts, strategicResourceAmounts } from '../visuals/strategic-resource-visuals.ts';
 import { renderRouteCard, retainedRoutePathInspection, routeAmounts, routeInspectionIdentity, steamRoutePresentation } from '../web/route-inspection.ts';
 import { railWorkRows, renderStrategicInspection } from '../web/settlement-inspection.ts';
@@ -204,7 +205,14 @@ await test('the legal source journey projects actual finite Coal, paid Rail and 
   const route = projectWorld(journey.state).routes.find(candidate => candidate.agreement?.offerId === journey.offerId); assert.ok(route?.agreement?.terms.transport?.mode === 'steam');
   const view = steamRoutePresentation(route); assert.ok(view?.last);
   assert.equal(route.path?.kind, 'land'); assert.equal(route.path?.currentBlock, null);
-  assert.equal(route.agreement.terms.cadenceRounds, 7); assert.equal(route.agreement.terms.transport.unrailedCadence, 8);
+  const retained = journey.state.routes.find(candidate => candidate.agreement?.offerId === journey.offerId)?.agreement; assert.ok(retained?.terms.transport?.mode === 'steam');
+  assert.deepEqual(route.agreement.terms, retained.terms);
+  const transport = retained.terms.transport;
+  const weighted = transport.edgeWeights.reduce((sum, weight) => sum + weight, 0);
+  assert.equal(transport.weightedDistance, weighted); assert.ok(transport.railEdges.length > 0);
+  assert.equal(route.agreement.terms.cadenceRounds, Math.max(transport.baseCadence, Math.ceil(weighted / INDUSTRIAL_RULES.edgesPerBeat)));
+  assert.equal(transport.unrailedCadence, Math.max(transport.baseCadence, Math.ceil(transport.unrailedEdges / INDUSTRIAL_RULES.edgesPerBeat)));
+  assert.ok(route.agreement.terms.cadenceRounds < transport.unrailedCadence);
   assert.equal(view.last.proposerStrategicPaid.coal, 1); assert.match(view.last.identity, new RegExp(journey.state.industrialEvidence?.steamDelivery?.eventId ?? '^$'));
   assert.equal(new Set(projection.industrialEvidence?.foundryOperations.map(receipt => receipt.cityId)).size, 2);
   assert.equal(projection.industrialEvidence?.steamDelivery, null);

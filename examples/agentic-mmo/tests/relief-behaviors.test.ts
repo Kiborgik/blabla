@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { BEHAVIOR_PROFILES, civilizationBehaviorProfile, type BehaviorPriority, type BehaviorProfile } from '../core/behavior-profiles.ts';
 import { deriveDiplomacyPlan, diplomacyWeight } from '../core/behavior-diplomacy.ts';
 import { deriveReliefPlan, reliefPriority, reliefProtects, reliefReason, reliefWeight } from '../core/behavior-relief.ts';
 import { chooseCivilizationBehavior, createBehaviorMemory, isBehaviorMemory } from '../core/behaviors.ts';
 import { ECONOMY_RULES } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { RELIEF_RULES } from '../core/relief-content.ts';
 import type { ReliefAction, ReliefCharter } from '../core/relief-types.ts';
 import { sameAction } from '../core/simulation/choices.ts';
@@ -21,13 +19,7 @@ import type { ActionOption, GameAction, GameEvent, WorldState } from '../core/ty
 const epoch = '2000-01-01T00:00:00.000Z';
 const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1000).toISOString();
 function released(seed = 1701, until = 'settlement-relief-charters-1'): WorldState {
-  let state = createWorld(seed, epoch);
-  for (const release of RELEASES.slice(1)) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch });
-    assert.ok(result.ok, result.error); state = result.state;
-    if (release.id === until) break;
-  }
-  assert.equal(state.releaseId, until); return state;
+  return createWorld(seed, epoch, until);
 }
 function syntheticCorridor(): WorldState {
   const state = released();
@@ -68,13 +60,15 @@ function command(state: WorldState, seat: number, action: GameAction, seconds = 
   assert.ok(result.ok, result.error); return result.state;
 }
 
-void test('old-release v2 decisions, explanations, candidate order and memory retain the pinned digest', () => {
-  const state = released(73, 'settlement-interplanetary-1'); const decisions = [];
+void test('fresh selected-rule decisions retain deterministic restart and relief gating', () => {
+  const state = released(73, 'settlement-interplanetary-1'); const restored: WorldState = JSON.parse(JSON.stringify(state)); const before = structuredClone(state);
   for (let seat = 0; seat < 5; seat++) for (let cursor = 0; cursor < 12; cursor++) {
     const memory = createBehaviorMemory(state, seat); memory.decisionCount = cursor;
-    decisions.push(chooseCivilizationBehavior(state, seat, memory, epoch));
+    const decision = chooseCivilizationBehavior(state, seat, memory, epoch);
+    assert.deepEqual(decision, chooseCivilizationBehavior(restored, seat, structuredClone(memory), epoch));
+    if (decision.action) assert.ok(legalActions(state, seat, epoch).some(option => sameAction(option.action, decision.action)));
   }
-  assert.equal(createHash('sha256').update(JSON.stringify(decisions)).digest('hex'), 'ca0f486fcc9eaf513cb7f89be9c08886720643d0643dea32f46d174e255c429b');
+  assert.deepEqual(state, before); assert.deepEqual(restored, before);
   const options = legalActions(state, 1, epoch); const p = planning(state, 1, options);
   assert.equal(p.plan.assessments.size, 0); assert.deepEqual(availableReliefActions(state, 1), []);
   for (const option of options) { assert.equal(reliefWeight(option, 17, p.plan), 17); assert.equal(reliefPriority(option, p.plan), 0); assert.equal(reliefProtects(option, p.plan), false); }

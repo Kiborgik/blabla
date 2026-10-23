@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BUILDINGS, CONSTRUCTION_RULES, TECHNOLOGIES } from '../core/content.ts';
-import { applyCommand, observe } from '../core/engine.ts';
-import { cultureProductionOperationJourney } from './fixtures/culture-production-journey.ts';
-import { foundryProductionJourney, foundryProductionOperationJourney } from './fixtures/foundry-production-journey.ts';
+import { applyCommand, createWorld, observe } from '../core/engine.ts';
+import { foundryProductionOperationJourney } from './fixtures/foundry-production-journey.ts';
 import { waterLandTown } from './fixtures/water-land-journey.ts';
 import { coastalPrefixTime, replayCoastalStep } from './fixtures/coastal-prefix.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
@@ -15,11 +14,11 @@ import type { WorldState } from '../core/types.ts';
 function resources(state: WorldState, seat: number) { const actor = state.civilizations.find(item => item.id === seat); assert.ok(actor); return actor.resources; }
 function iron(state: WorldState, seat: number): number { return state.civilizations.find(item => item.id === seat)?.strategicResources?.iron ?? 0; }
 
-await test('foundry prior culture release refuses the future discovery and exact-town building without effects', () => {
-  const { journey } = cultureProductionOperationJourney();
-  for (const action of [{ type: 'research', technology: 'military-engineering' }, { type: 'build', project: 'foundry', cityId: journey.cityId }] as const) {
-    const before = structuredClone(journey.state); const result = applyCommand(journey.state, { seat: 0, expectedRevision: journey.state.revision, timestamp: journey.time(), action });
-    assert.equal(result.ok, false); assert.deepEqual(result.state, before); assert.deepEqual(journey.state, before); assert.deepEqual(result.events, []);
+await test('fresh culture rules refuse unavailable Foundry discovery and construction without effects', () => {
+  const state = createWorld(1701, coastalPrefixTime(0), 'settlement-culture-production-1');
+  for (const action of [{ type: 'research', technology: 'military-engineering' }, { type: 'build', project: 'foundry', cityId: 'city-0' }] as const) {
+    const before = structuredClone(state); const result = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: coastalPrefixTime(20), action });
+    assert.equal(result.ok, false); assert.deepEqual(result.state, before); assert.deepEqual(state, before); assert.deepEqual(result.events, []);
   }
 });
 
@@ -33,12 +32,6 @@ await test('foundry accepted connected cards retain every prerequisite and produ
   assert.equal(definition.minEra, 2); assert.deepEqual(definition.requires, ['metal-casting']); assert.deepEqual(definition.requiresBuildings, ['industrial-zone']);
   assert.deepEqual(definition.cost, { materials: 32, credits: 16 }); assert.deepEqual(definition.operatingInputs, { energy: 2 }); assert.deepEqual(definition.strategicInputs, { iron: 1 }); assert.deepEqual(definition.production, { materials: 8 });
   const work: Readonly<Record<string, number>> = CONSTRUCTION_RULES.requiredWork; assert.equal(work.foundry, 14);
-});
-
-await test('foundry actual compatible adoption preserves both ledgers deposits and every existing commitment', () => {
-  const journey = foundryProductionJourney();
-  assert.deepEqual(journey.adopted.civilizations, journey.beforeRelease.civilizations); assert.deepEqual(journey.adopted.cities, journey.beforeRelease.cities);
-  assert.deepEqual(journey.adopted.strategicDeposits, journey.beforeRelease.strategicDeposits); assert.deepEqual(journey.adopted.routes, journey.beforeRelease.routes); assert.deepEqual(journey.adopted.tiles, journey.beforeRelease.tiles);
 });
 
 await test('foundry actual prerequisites lead to one exact paid order and no completion-beat operation', () => {

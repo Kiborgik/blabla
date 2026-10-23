@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { RESOURCE_IDS, TRADE_RECIPES } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import type { GameAction, Resources, TradeOffer, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { WorldRepository, type D1Database, type D1Result, type D1Statement, type SqlValue } from '../server/repository.ts';
@@ -16,7 +16,6 @@ const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1
 const actor = 'synthetic-operating-exchange-owner';
 const model = 'synthetic-operating-host-fixture';
 const recipeId = 'energy-for-materials';
-const releases = ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1'];
 
 class Statement implements D1Statement {
   private readonly database: ExchangeDatabase;
@@ -109,11 +108,7 @@ function resources(state: WorldState, seat: number): Resources {
 }
 
 async function online(item: Fixture, energy = true): Promise<void> {
-  await item.store.initialize({ seed: 1701, clockEpoch: epoch, commandId: 'synthetic-initialize' }, actor, epoch);
-  for (const targetReleaseId of energy ? releases : releases.slice(0, -1)) {
-    const current = await item.read();
-    await item.store.mutate('release-apply', { expectedRevision: current.state.revision, expectedFromReleaseId: current.state.releaseId, targetReleaseId, commandId: `synthetic-${targetReleaseId}`, model }, actor, epoch);
-  }
+  await item.store.initialize({ seed: 1701, clockEpoch: epoch, registeredRulesId: energy ? 'settlement-operating-exchange-1' : 'settlement-land-transport-1', commandId: 'synthetic-initialize' }, actor, epoch);
 }
 
 async function proposed(item: Fixture): Promise<TradeOffer> {
@@ -151,8 +146,7 @@ async function assertReplay(item: Fixture): Promise<void> {
   for (;;) {
     const page = await item.store.history(after, 3);
     for (const entry of page.entries) {
-      const result = entry.transition.kind === 'release-apply' ? applyRelease(replayed, entry.transition.command)
-        : entry.transition.kind === 'action' ? applyCommand(replayed, entry.transition.command)
+      const result = entry.transition.kind === 'action' ? applyCommand(replayed, entry.transition.command)
           : entry.transition.kind === 'strategy-catchup' ? catchUpStrategy(replayed, entry.transition.timestamp) : null;
       assert.ok(result?.ok);
       assert.deepEqual(result.state, entry.state);
@@ -211,7 +205,7 @@ await test('real hosted energy consent waits until due, settles exact gross vect
     assert.equal((await json(await item.post('/api/strategy-catchup', delivery, due * 60))).duplicate, true);
     assert.deepEqual(item.database.records(), records);
     await assertReplay(item);
-    context.diagnostic(JSON.stringify({ fixture: 'real legal repository initialization, releases, exact proposal/consent, due beats; no stock or map edits', due, edges: terms.terms.transport?.edges, finalRevision: after.state.revision, transitions: records.transitions.length, receipts: records.receipts.length }));
+    context.diagnostic(JSON.stringify({ fixture: 'fresh registered-rule repository initialization, exact proposal/consent, due beats; no stock or map edits', due, edges: terms.terms.transport?.edges, finalRevision: after.state.revision, transitions: records.transitions.length, receipts: records.receipts.length }));
   } finally { control?.close(); item.close(); }
 });
 
@@ -359,7 +353,7 @@ for (const scarce of ['exporter', 'importer'] as const) {
   });
 }
 
-await test('release gate refuses before SQL writes and adoption keeps an old food agreement byte-identical', async () => {
+await test('fresh selected-rule gate and refused migration keep the exact food agreement byte-identical', async () => {
   const item = new Fixture();
   try {
     await online(item, false);
@@ -371,7 +365,9 @@ await test('release gate refuses before SQL writes and adoption keeps an old foo
     const pending = offer((await item.read()).state);
     assert.equal((await item.post('/api/action', await item.input(4, { type: 'respond-trade', offerId: pending.id, accept: true }, 'synthetic-food-consent'))).status, 200);
     const old = await item.read();
-    await item.store.mutate('release-apply', { expectedRevision: old.state.revision, expectedFromReleaseId: old.state.releaseId, targetReleaseId: 'settlement-operating-exchange-1', commandId: 'synthetic-adopt-energy', model }, actor, epoch);
+    const beforeRefusal = item.database.records();
+    await assert.rejects(item.store.mutate('release-apply', { expectedRevision: old.state.revision, expectedFromReleaseId: old.state.releaseId, targetReleaseId: 'settlement-operating-exchange-1', commandId: 'synthetic-refused-energy-migration', model }, actor, epoch), /pre_release_migration_disabled/);
+    assert.deepEqual(item.database.records(), beforeRefusal);
     const after = await item.read();
     assert.deepEqual(after.state.routes, old.state.routes);
     assert.deepEqual(after.state.tradeOffers, old.state.tradeOffers);

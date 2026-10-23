@@ -4,9 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { applyCommand, applyDirectorTick, applyRelease, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, applyDirectorTick, createWorld, legalActions } from '../core/engine.ts';
 import { chooseDirectorBehavior, createBehaviorMemory } from '../core/behaviors.ts';
-import { RELEASES } from '../core/release.ts';
 import { isGameAction } from '../core/planning.ts';
 import { historicalEventCandidates, historicalEventInstanceId } from '../core/historical-selection.ts';
 import { isGameEvent, isWorldState } from '../core/validation.ts';
@@ -21,14 +20,7 @@ const latest = 'settlement-regional-targets-1';
 const prior = 'settlement-living-partnerships-1';
 
 function world(target = latest): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const release of RELEASES) {
-    if (!release.compatibleFrom.includes(state.releaseId)) continue;
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch });
-    assert.equal(result.ok, true, result.error); state = result.state;
-    if (state.releaseId === target) break;
-  }
-  assert.equal(state.releaseId, target); assert.ok(isWorldState(state)); return state;
+  return createWorld(1701, epoch, target);
 }
 
 function selected(state: WorldState) {
@@ -98,12 +90,7 @@ void test('local target payload does not change the legacy family/civilization D
 void test('local CLI persists exact selectors, duplicate identity and deterministic replay', () => {
   const directory = mkdtempSync(join(tmpdir(), 'regional-cli-')); const path = join(directory, 'world.json'); const store = new GameStore(path);
   try {
-    assert.equal(store.initialize(1701, false, epoch).ok, true);
-    for (const release of RELEASES) {
-      const state = store.snapshot().state; if (!release.compatibleFrom.includes(state.releaseId)) continue;
-      const reply = store.authoredTransition({ expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch, model: 'synthetic-release-fixture', commandId: release.id }, 'release-apply');
-      assert.equal(reply.ok, true, reply.error); if (release.id === latest) break;
-    }
+    assert.equal(store.initialize(1701, false, epoch, latest).ok, true);
     const state = store.snapshot().state; const command = { ...tick(state), model: 'synthetic-regional-fixture' };
     const reply = store.directorTick(command); assert.equal(reply.ok, true, reply.error);
     const committed = readFileSync(path, 'utf8'); assert.equal(store.directorTick(command).duplicate, true); assert.equal(readFileSync(path, 'utf8'), committed);
@@ -112,8 +99,7 @@ void test('local CLI persists exact selectors, duplicate identity and determinis
     const replay = store.replay(); let replayed = replay.initial;
     for (const transition of replay.timeline) {
       let result;
-      if (transition.kind === 'release-apply') result = applyRelease(replayed, transition.command);
-      else { assert.equal(transition.kind, 'director-tick'); assert.ok(transition.kind === 'director-tick'); result = applyDirectorTick(replayed, transition.command); }
+      assert.equal(transition.kind, 'director-tick'); assert.ok(transition.kind === 'director-tick'); result = applyDirectorTick(replayed, transition.command);
       assert.equal(result.ok, true, result.error); replayed = result.state;
     }
     assert.deepEqual(replayed, store.snapshot().state);
@@ -142,13 +128,7 @@ class Database implements D1Database {
 async function hostedWorld() {
   const database = new Database(); const store = new WorldRepository(database);
   for (const migration of ['0000_world', '0001_autonomous_policy']) database.sql.exec(readFileSync(new URL(`../server/migrations/${migration}.sql`, import.meta.url), 'utf8'));
-  await store.initialize({ seed: 1701, clockEpoch: epoch, commandId: 'regional-init' }, 'fixture-owner', epoch);
-  for (const release of RELEASES) {
-    const snapshot = await store.read(); assert.ok(snapshot); const state = snapshot.state;
-    if (!release.compatibleFrom.includes(state.releaseId)) continue;
-    await store.mutate('release-apply', { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch, model: 'synthetic-release-fixture', commandId: release.id }, 'fixture-owner', epoch);
-    if (release.id === latest) break;
-  }
+  await store.initialize({ seed: 1701, clockEpoch: epoch, registeredRulesId: latest, commandId: 'regional-init' }, 'fixture-owner', epoch);
   const snapshot = await store.read(); assert.ok(snapshot); const state = snapshot.state;
   return { database, store, state };
 }

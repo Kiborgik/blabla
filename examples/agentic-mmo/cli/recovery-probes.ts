@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
-import { applyCommand, applyRelease, createWorld } from '../core/engine.ts';
+import { applyCommand, createWorld } from '../core/engine.ts';
 import { ECONOMY_RULES, RESOURCE_IDS } from '../core/content.ts';
 import type { Resources, TransitionResult, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -7,12 +7,7 @@ import { isWorldState } from '../core/validation.ts';
 const EPOCH = '2026-10-16T00:00:00.000Z';
 
 function createSyntheticRecoveryFixture(kind: number): { state: WorldState; target: string } {
-  let state = createWorld(17, EPOCH);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: EPOCH });
-    if (!result.ok) throw new Error(`Recovery probe release failed: ${result.error}`);
-    state = result.state;
-  }
+  const state = createWorld(17, EPOCH, 'settlement-recovery-1');
   const own = state.cities.find((city) => city.id === 'city-0');
   const foreign = state.cities.find((city) => city.id === 'city-1');
   const owner = state.civilizations.find((civilization) => civilization.id === 0);

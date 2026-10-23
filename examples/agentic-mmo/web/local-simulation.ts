@@ -9,10 +9,10 @@ import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:food-budget-v1';
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:knowledge-compacts-v1';
 export const LIVING_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:living-world-v1';
 export const PARTNERSHIPS_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:partnerships-v1';
-export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-food-budget-1';
+export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-knowledge-compacts-1';
 export const PRIOR_GENERATED_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v2';
 export const PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v1';
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
@@ -37,7 +37,7 @@ export interface PreviousLocalSimulation extends Omit<LocalSimulation, 'version'
   readonly memories: ReadonlyArray<LegacyBehaviorMemory | null>;
 }
 
-export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' = ACTIVE_LOCAL_RELEASE_ID, temperamentVersion?: StrategicTemperamentVersion): LocalSimulation {
+export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' = ACTIVE_LOCAL_RELEASE_ID, temperamentVersion?: StrategicTemperamentVersion): LocalSimulation {
   const state = createGeneratedWorld(seed, EPOCH, initialReleaseId, initialReleaseId === ACTIVE_LOCAL_RELEASE_ID ? 'cultural-toponyms-v1' : undefined, temperamentVersion);
   return { version: 2, source: 'local-procedural', policyVersion: behaviorPolicyVersion(state), seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
 }
@@ -76,7 +76,7 @@ export function parseLocalSimulation(value: unknown): LocalSimulation | null { r
 export function parseActiveLocalSimulation(value: unknown): LocalSimulation | null {
   const run = parseLocalSimulation(value);
   if (!run || run.state.origin?.initialReleaseId !== ACTIVE_LOCAL_RELEASE_ID
-    || run.state.releaseId !== ACTIVE_LOCAL_RELEASE_ID && run.state.releaseId !== 'settlement-shore-fisheries-1') return null;
+    || run.state.releaseId !== ACTIVE_LOCAL_RELEASE_ID) return null;
   const release = RELEASES.find(candidate => candidate.id === run.state.releaseId);
   return release && release.schemaVersion === run.state.schemaVersion && release.gameVersion === run.state.gameVersion
     && run.state.unlockedFeatures.length === release.featureIds.length

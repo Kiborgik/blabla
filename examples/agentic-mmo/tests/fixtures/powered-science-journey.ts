@@ -3,12 +3,10 @@ import { isDeepStrictEqual } from 'node:util';
 import { legalActions } from '../../core/engine.ts';
 import type { GameAction, WorldState } from '../../core/types.ts';
 import { coastalPrefixTime, replayCoastalStep, type CoastalPrefixInput, type CoastalPrefixStep } from './coastal-prefix.ts';
-import { secondGovernmentJourney } from './second-government-journey.ts';
-
-let previous: ReturnType<typeof secondGovernmentJourney> | undefined;
+import { localPowerJourney } from './local-power-journey.ts';
 
 export function poweredScienceJourney() {
-  previous ??= secondGovernmentJourney();
+  const previous = localPowerJourney('settlement-powered-science-1');
   const initial = previous.initial; const steps: CoastalPrefixStep[] = [...previous.steps]; const seat = previous.seat;
   let state = structuredClone(previous.state);
   const time = (): string => coastalPrefixTime(Math.max((state.independentTurns?.strategyTicks ?? 0) * 60 + 20, ...state.civilizations.map(civilization => ((state.independentTurns?.lastActionWindow[civilization.id] ?? -1) + 1) * 10)));
@@ -24,9 +22,7 @@ export function poweredScienceJourney() {
     commit({ kind: 'action', command: { seat: actor, expectedRevision: state.revision, timestamp: time(), action } });
   };
   const until = (condition: () => boolean, label: string, limit = 160): void => { for (let count = 0; count < limit && !condition(); count++) beat(); assert.ok(condition(), label); };
-  const beforeRelease = structuredClone(state);
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-powered-science-1', timestamp: time() } });
-  const adopted = structuredClone(state);
+  const prepared = structuredClone(state);
   act({ type: 'research', technology: 'sanitation' }); const sanitationSelected = structuredClone(state);
   until(() => !!state.civilizations[seat]?.technologies.includes('sanitation'), 'Actual productive Science completes Sanitation');
   const sanitationCompleted = structuredClone(state);
@@ -34,7 +30,7 @@ export function poweredScienceJourney() {
   until(() => !!state.civilizations[seat]?.technologies.includes('chemistry'), 'Actual productive Science completes Chemistry');
   const chemistryCompleted = structuredClone(state);
   const selected = state.cities.find(city => city.civId === seat && city.buildings.includes('coal-plant') && city.buildings.includes('factory') && city.buildings.includes('campus'));
-  assert.ok(selected, 'The earned prefix must retain a real Campus town with its paid plant and Factory'); const cityId = selected.id;
+  assert.ok(selected, 'The synthetic Campus prerequisite retains its actual paid plant and Factory'); const cityId = selected.id;
   if (!selected.buildingOperations?.factory?.enabled) act({ type: 'set-building-operation', cityId, buildingId: 'factory', enabled: true });
   const beforeLab = structuredClone(state);
   act({ type: 'build', cityId, project: 'research-lab' }); const labStarted = structuredClone(state);
@@ -42,7 +38,7 @@ export function poweredScienceJourney() {
   const labCompleted = structuredClone(state);
   assert.ok(!state.civilizations[seat]?.technologies.includes('banking'), 'Keep the genuinely uncompleted Banking target from the unchanged prefix');
   act({ type: 'research', technology: 'banking' }); const researchSelected = structuredClone(state);
-  until(() => (state.cities.find(city => city.id === cityId)?.buildingOperations?.['research-lab']?.lastResult?.produced.science ?? 0) > 0 && state.cities.find(city => city.id === cityId)?.buildingOperations?.factory?.lastResult?.status === 'operated', 'Earned opening fuel funds both Factory and positive Laboratory Science');
+  until(() => (state.cities.find(city => city.id === cityId)?.buildingOperations?.['research-lab']?.lastResult?.produced.science ?? 0) > 0 && state.cities.find(city => city.id === cityId)?.buildingOperations?.factory?.lastResult?.status === 'operated', 'Actually extracted opening fuel funds both Factory and positive Laboratory Science');
   const productive = structuredClone(state); const researchInvested = structuredClone(state);
   act({ type: 'set-building-operation', cityId, buildingId: 'research-lab', enabled: false });
   act({ type: 'set-building-operation', cityId, buildingId: 'factory', enabled: false });
@@ -52,5 +48,5 @@ export function poweredScienceJourney() {
   act({ type: 'set-building-operation', cityId, buildingId: 'factory', enabled: true });
   until(() => (state.cities.find(city => city.id === cityId)?.buildingOperations?.factory?.lastResult?.produced.materials ?? 0) > 0, 'A later genuine Factory-only productive beat replaces the town snapshot');
   const replacedByFactory = structuredClone(state);
-  return { initial, steps, seat, cityId, beforeRelease, adopted, sanitationSelected, sanitationCompleted, chemistrySelected, chemistryCompleted, beforeLab, labStarted, labCompleted, productive, researchSelected, researchInvested, nonproductive, pruned, replacedByFactory, get state(): WorldState { return state; }, time, act, beat, until, commit };
+  return { initial, steps, seat, cityId, prepared, provenance: previous.provenance, sanitationSelected, sanitationCompleted, chemistrySelected, chemistryCompleted, beforeLab, labStarted, labCompleted, productive, researchSelected, researchInvested, nonproductive, pruned, replacedByFactory, get state(): WorldState { return state; }, time, act, beat, until, commit };
 }

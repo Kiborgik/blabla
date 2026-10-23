@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy } from '../core/engine.ts';
-import type { GameAction } from '../core/types.ts';
+import { applyCommand, catchUpStrategy } from '../core/engine.ts';
+import type { GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, type CoastalPrefixStep } from './fixtures/coastal-prefix.ts';
 import { cultureProductionPrefix, cultureProductionOperationJourney } from './fixtures/culture-production-journey.ts';
@@ -45,7 +46,7 @@ class Fixture {
   constructor() { this.database.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8')); }
   get store() { return new WorldRepository(this.database); }
   async state() { const result = await this.store.read(); assert.ok(result); return result.state; }
-  async initialize() { await this.store.initialize({ seed: 1701, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0)); }
+  async initialize(state: WorldState) { seedHostedWorld(this.database.sql, state); }
   async input(commandId: string, action: GameAction) { return { seat: 0, expectedRevision: (await this.state()).revision, model, commandId, action: { type: 'strategy-action', action } }; }
   send(input: Record<string, unknown>, seconds: number) { return this.store.mutate('action', input, actor, coastalPrefixTime(seconds)); }
   async beat() { const state = await this.state(); const seconds = ((state.independentTurns?.strategyTicks ?? 0) + 1) * 60; return this.store.mutate('strategy-catchup', { expectedRevision: state.revision, commandId: `beat-${state.revision}`, timestamp: coastalPrefixTime(seconds), model }, actor, coastalPrefixTime(seconds)); }
@@ -58,7 +59,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 3);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state; count++;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return count; }
@@ -70,15 +71,14 @@ async function replay(item: Fixture) {
 function stepArguments(step: CoastalPrefixStep, commandId: string): Record<string, unknown> {
   const input = step.input;
   if (input.kind === 'strategy') return { expectedRevision: step.before.revision, timestamp: input.timestamp, model, commandId };
-  if (input.kind === 'release') return { ...input.command, model, commandId };
   return { seat: input.command.seat, expectedRevision: input.command.expectedRevision, action: { type: 'strategy-action', action: input.command.action }, ...(input.command.plan === undefined ? {} : { plan: input.command.plan }), model, commandId };
 }
 function sendStep(item: Fixture, step: CoastalPrefixStep, commandId: string) {
   const input = step.input; const timestamp = input.kind === 'strategy' ? input.timestamp : input.command.timestamp; assert.ok(timestamp);
-  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : input.kind === 'release' ? 'release-apply' : 'action', stepArguments(step, commandId), actor, timestamp);
+  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : 'action', stepArguments(step, commandId), actor, timestamp);
 }
-async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER): Promise<void> {
-  await item.initialize();
+async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER, initial = steps[0]?.before): Promise<void> {
+  assert.ok(initial); await item.initialize(initial);
   for (const [index, step] of steps.entries()) {
     if (step.result.state.revision > through) break;
     await sendStep(item, step, `culture-step-${index}`); assert.deepEqual(await item.state(), step.result.state); assert.ok(isWorldState(await item.state()));
@@ -95,31 +95,29 @@ function theaterStart() {
   return { value, step, action: step.input.command.action, timestamp: step.input.command.timestamp };
 }
 
-await test('culture real326-frame predecessor preserves exact completed wonder and refuses unreleased consumers through SQLite reopen replay', async context => {
+await test('culture fresh synthetic prerequisite fixture preserves exact completed wonder and refuses consumers without researched prerequisites through SQLite reopen replay', async context => {
   const previous = prefix(); const item = new Fixture();
   try {
-    assert.equal(previous.steps.length, 326); assert.equal(previous.state.civilizations[0]?.era, 2);
-    assert.equal(previous.state.wonders?.['great-library']?.completion.tileId, 40); assert.equal(previous.theaterTileId, 58);
-    await persist(item, previous.steps); const before = item.database.records(); item.reopen();
+    assert.equal(previous.initial.revision, 0); assert.equal(previous.state.revision, previous.steps.length); assert.equal(previous.state.civilizations[0]?.era, 2);
+    assert.equal(previous.state.wonders?.['great-library']?.completion.tileId, previous.wonderTileId); assert.notEqual(previous.theaterTileId, previous.wonderTileId);
+    await persist(item, previous.steps, Number.MAX_SAFE_INTEGER, previous.initial); const before = item.database.records(); item.reopen();
     assert.deepEqual(await item.state(), previous.state); assert.equal(await replay(item), previous.steps.length);
     for (const action of [
-      { type: 'research', technology: 'construction' },
       { type: 'build', project: 'theater-square', cityId: previous.cityId, tileId: previous.theaterTileId },
       { type: 'build', project: 'printing-house', cityId: previous.cityId },
     ]) {
       await assert.rejects(item.store.mutate('action', { seat: previous.seat, expectedRevision: previous.state.revision, model, commandId: `unreleased-${JSON.stringify(action)}`, action: { type: 'strategy-action', action } }, actor, previous.time()));
       assert.deepEqual(item.database.records(), before);
     }
-    context.diagnostic(JSON.stringify({ basis: 'Actual legal territorial predecessor, completed world-unique wonder, research and coastal milestone', revision: previous.state.revision, round: previous.state.round, wonder: 40, theaterCandidate: 58, replayFrames: previous.steps.length }));
+    context.diagnostic(JSON.stringify({ basis: 'Fresh synthetic prerequisites followed by actual paid unique-wonder completion', revision: previous.state.revision, round: previous.state.round, wonder: previous.wonderTileId, theaterCandidate: previous.theaterTileId, replayFrames: previous.steps.length }));
   } finally { item.close(); }
 });
 
 await test('culture prospective exact Theater and paid Printing house retain one payment site adjacency and later staffed output after reopen replay', async context => {
   const value = story(); const item = new Fixture();
   const witnesses = new Set([value.theaterActive.revision, value.theaterCompleted.revision, value.printingActive.revision, value.printingCompleted.revision]);
-  for (const key of ['tiles', 'cities', 'civilizations', 'wonders', 'tileAcquisitions', 'strategicDeposits', 'pastoralSites', 'rng', 'clockTicks'] as const) assert.deepEqual(value.adopted[key], value.beforeRelease[key]);
   try {
-    await item.initialize();
+    await item.initialize(value.journey.initial);
     for (const [index, step] of value.journey.steps.entries()) {
       const commandId = `culture-step-${index}`;
       if (step.result.state.revision === value.theaterActive.revision || step.result.state.revision === value.printingActive.revision) {
@@ -130,7 +128,7 @@ await test('culture prospective exact Theater and paid Printing house retain one
       }
       if (step.result.state.revision === value.printingActive.revision) {
         assert.ok(step.before.civilizations[0]?.technologies.includes('printing'));
-        const other = step.before.cities.find(city => city.id === 'city-0-14'); assert.ok(other && !other.buildings.includes('theater-square'));
+        const other = step.before.cities.find(city => city.id === value.journey.alternateCityId); assert.ok(other && other.civId === 0 && !other.buildings.includes('theater-square'));
         const before = item.database.records(); const timestamp = step.input.kind === 'strategy' ? step.input.timestamp : step.input.command.timestamp; assert.ok(timestamp);
         await assert.rejects(item.store.mutate('action', { seat: 0, expectedRevision: step.before.revision, model, commandId: 'printing-needs-own-theater', action: { type: 'strategy-action', action: { type: 'build', project: 'printing-house', cityId: other.id } } }, actor, timestamp));
         assert.deepEqual(item.database.records(), before);
@@ -167,7 +165,7 @@ await test('culture prospective exact Theater and paid Printing house retain one
 for (const table of ['world_transitions', 'world_receipts']) await test(`culture prospective ${table} fault rolls back candidate upkeep payment site reservation and exact request`, async () => {
   const { value, step, action } = theaterStart(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records();
     const seconds = ((step.before.independentTurns?.strategyTicks ?? 0) + 1) * 60 + 1;
     const input = await item.input('culture-theater-fault', action);
     item.database.sql.exec(`CREATE TRIGGER fail_culture BEFORE INSERT ON ${table} WHEN NEW.receipt_key = 'action:culture-theater-fault' BEGIN SELECT RAISE(ABORT, 'synthetic culture rollback'); END;`);
@@ -184,7 +182,7 @@ for (const table of ['world_transitions', 'world_receipts']) await test(`culture
 await test('culture prospective exact competing starts yield one payment reservation and stale loser', async () => {
   const { value, step } = theaterStart(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records();
     const replies = await Promise.allSettled([sendStep(item, step, 'culture-race-a'), sendStep(item, step, 'culture-race-b')]);
     assert.equal(replies.filter(reply => reply.status === 'fulfilled').length, 1);
     const loser = replies.find(reply => reply.status === 'rejected'); assert.ok(loser?.status === 'rejected'); assert.match(String(loser.reason), /stale_revision/);
@@ -196,7 +194,7 @@ await test('culture prospective exact competing starts yield one payment reserva
 await test('culture prospective exact foreign occupied and premature Printing requests have zero durable effects', async () => {
   const { value, step } = theaterStart(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records();
     const timestamp = coastalPrefixTime(((step.before.independentTurns?.strategyTicks ?? 0) + 1) * 60);
     for (const [index, action] of [
       { type: 'build', project: 'theater-square', cityId: 'city-1', tileId: value.journey.theaterTileId },
@@ -217,7 +215,7 @@ await test('culture prospective paid Printing house pause retains historical ope
     const historical = value.operated.cities.find(city => city.id === value.journey.cityId)?.buildingOperations?.['printing-house']?.lastResult; assert.ok(historical);
     value.journey.act({ type: 'set-building-operation', cityId: value.journey.cityId, buildingId: 'printing-house', enabled: false });
     assert.deepEqual(value.journey.state.cities.find(city => city.id === value.journey.cityId)?.buildingOperations?.['printing-house']?.lastResult, historical);
-    value.journey.beat(); await persist(item, value.journey.steps); item.reopen();
+    value.journey.beat(); await persist(item, value.journey.steps, Number.MAX_SAFE_INTEGER, value.journey.initial); item.reopen();
     const state = await item.state(); const paused = state.cities.find(city => city.id === value.journey.cityId)?.buildingOperations?.['printing-house']?.lastResult; assert.ok(paused);
     assert.equal(paused.status, 'paused'); assert.deepEqual(paused.paid, {}); assert.deepEqual(paused.produced, {}); assert.equal(paused.residents?.allocated, 0);
     assert.equal(await replay(item), value.journey.steps.length);

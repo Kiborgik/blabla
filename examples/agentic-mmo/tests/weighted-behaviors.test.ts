@@ -3,8 +3,7 @@ import { test } from 'node:test';
 import { BEHAVIOR_PROFILES, civilizationBehaviorProfile } from '../core/behavior-profiles.ts';
 import { BEHAVIOR_POLICY_VERSION, chooseCivilizationBehavior, chooseDirectorBehavior, createBehaviorMemory, isBehaviorMemory, isLegacyBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
 import { BUILDINGS, CIVICS, TECHNOLOGIES, TURN_RULES } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { sameAction } from '../core/simulation/choices.ts';
 import { decisionObligations } from '../core/simulation/decisions.ts';
 import { DIRECTOR_SEAT, type Command, type WorldState } from '../core/types.ts';
@@ -14,16 +13,7 @@ const epoch = '2026-01-01T00:00:00.000Z';
 const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1000).toISOString();
 
 function releasedWorld(seed = 41): WorldState {
-  let state = createWorld(seed);
-  for (const release of RELEASES.slice(1)) {
-    const applied = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch });
-    assert.ok(applied.ok, `${release.id}: ${applied.error}`);
-    state = applied.state;
-    if (release.id === 'settlement-interplanetary-1') break;
-  }
-  assert.equal(state.releaseId, 'settlement-interplanetary-1');
-  assert.ok(isWorldState(state));
-  return state;
+  return createWorld(seed, epoch, 'settlement-interplanetary-1');
 }
 
 function freeze(value: unknown): void {

@@ -5,7 +5,7 @@ import { arch, platform } from 'node:os';
 import { join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, applyDirectorTick, applyHistoryAdvance, catchUpClock, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { TURN_RULES } from '../core/content.ts';
 import { DIRECTOR_SEAT, GAME_VERSION, SCHEMA_VERSION } from '../core/types.ts';
 import { WorldRepository, type D1Database, type D1Result, type D1Statement, type HostedTransition, type SqlValue } from '../server/repository.ts';
@@ -15,7 +15,7 @@ const epoch = '2026-10-16T00:00:00.000Z';
 const actor = 'synthetic-storage-fixture';
 const model = 'synthetic-storage-driver';
 const actorCount = DIRECTOR_SEAT + 1;
-const releases = ['settlement-foundations-2', 'settlement-independent-1', 'settlement-plans-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1'];
+const registeredRulesId = 'settlement-recovery-1';
 const tables = ['world_state', 'world_transitions', 'world_receipts'] as const;
 type StoredRequest = { operation: HostedTransition['kind']; input: Record<string, unknown>; timestamp: string; acceptedRevision: number };
 
@@ -107,8 +107,8 @@ async function replay(repository: WorldRepository) {
     const page = await repository.history(after, 200);
     for (const entry of page.entries) {
       const transition = entry.transition;
+      if (transition.kind === 'release-apply') throw new Error('Pre-release world migration records are not executable benchmark transitions');
       const result = transition.kind === 'action' ? applyCommand(state, transition.command)
-        : transition.kind === 'release-apply' ? applyRelease(state, transition.command)
           : transition.kind === 'director-tick' ? applyDirectorTick(state, transition.command)
             : transition.kind === 'history-advance' ? applyHistoryAdvance(state, transition.command)
               : transition.kind === 'clock-catchup' ? catchUpClock(state, transition.timestamp) : catchUpStrategy(state, transition.timestamp);
@@ -119,7 +119,7 @@ async function replay(repository: WorldRepository) {
       frames += 1;
       snapshotMapBytes += jsonBytes(entry.state.tiles);
       snapshotRecentEventBytes += jsonBytes(entry.state.events);
-      if (transition.kind === 'release-apply' || frames % 50 === 0) {
+      if (frames % 50 === 0) {
         retainedSnapshots += 1;
         retainedSnapshotBytes += jsonBytes(entry.state);
       }
@@ -191,19 +191,15 @@ export async function measureHostedStorage(counts = [10, 100, 1000]) {
   const operationCounts: Record<string, number> = {};
   let first: StoredRequest | undefined;
   try {
-    await repository.initialize({ seed: 1701, clockEpoch: epoch, commandId: 'storage-initialize' }, actor, epoch);
+    await repository.initialize({ seed: 1701, clockEpoch: epoch, registeredRulesId, commandId: 'storage-initialize' }, actor, epoch);
     for (let number = 1; number <= (counts.at(-1) ?? 0); number += 1) {
       const current = await repository.read();
       assert.ok(current);
       let operation: HostedTransition['kind'] = 'action';
       let timestamp = epoch;
       let input: Record<string, unknown>;
-      const targetReleaseId = releases[number - 1];
-      if (targetReleaseId) {
-        operation = 'release-apply';
-        input = { expectedRevision: current.state.revision, expectedFromReleaseId: current.state.releaseId, targetReleaseId, model, commandId: `storage-${number}` };
-      } else {
-        const step = number - releases.length - 1;
+      {
+        const step = number - 1;
         const seat = step % (actorCount + 1);
         const beat = Math.floor(step / (actorCount + 1));
         timestamp = new Date(Date.parse(epoch) + (beat + (seat === actorCount ? 1 : 0)) * TURN_RULES.strategyIntervalMs).toISOString();
@@ -231,7 +227,7 @@ export async function measureHostedStorage(counts = [10, 100, 1000]) {
     return {
       measuredAt: new Date().toISOString(),
       identity: { gameVersion: GAME_VERSION, worldSchemaVersion: SCHEMA_VERSION, source, environment: { node: process.version, sqlite: String(database.sqlite.prepare('SELECT sqlite_version() AS version').get()?.version), platform: platform(), arch: arch() } },
-      workload: { source: 'synthetic-deterministic-driver', seed: 1701, epoch, releaseChain: releases, operationCounts, maximumTransitions: 1000, actorCount, strategyIntervalMs: TURN_RULES.strategyIntervalMs, actor, model, description: 'Actual hosted repository serialization in isolated SQLite; seven explicit releases, six scripted legal actor commands then one economy beat; research agriculture, build a farm, choose growth, otherwise hold. One explicit no-op strategy receipt per sample. No live world or model-agent decisions.' },
+      workload: { source: 'synthetic-deterministic-driver', seed: 1701, epoch, registeredRulesId, operationCounts, maximumTransitions: 1000, actorCount, strategyIntervalMs: TURN_RULES.strategyIntervalMs, actor, model, description: 'Actual hosted repository serialization in isolated SQLite; fresh registered recovery rules, six scripted legal actor commands then one economy beat; research agriculture, build a farm, choose growth, otherwise hold. One explicit no-op strategy receipt per sample. No live world or model-agent decisions.' },
       samples,
       limits: ['UTF-8 column bytes exclude SQLite record/index overhead; local page allocation is separate.', 'Local SQLite is not managed Sites billing, replication, backup, WAL or quota evidence.', 'Checkpoint figures only omit noncheckpoint snapshot JSON hypothetically; no stored row is removed or rewritten.', 'The finite five-city workload is not a bound on all future worlds or throughput.'],
     };

@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DIRECTOR_EVENTS } from '../core/content.ts';
-import { applyCommand, applyDirectorTick, applyRelease, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, applyDirectorTick, createWorld, legalActions } from '../core/engine.ts';
 import { HISTORICAL_DIRECTOR_EVENTS } from '../core/historical-event-content.ts';
-import { RELEASES } from '../core/release.ts';
 import { cityGrowthFacts } from '../core/simulation/growth.ts';
 import { hexDistance } from '../core/simulation/geography.ts';
 import { applyHistoricalEvent, historicalEventQuote, historicalEventWeight, isHistoricalEventId } from '../core/simulation/historical-events.ts';
@@ -15,17 +14,7 @@ const epoch = '2026-10-16T00:00:00.000Z';
 let baseline: WorldState | undefined;
 
 function world(): WorldState {
-  if (!baseline) {
-    baseline = createWorld(1701, epoch);
-    for (const release of RELEASES) {
-      if (!release.compatibleFrom.includes(baseline.releaseId)) continue;
-      const result = applyRelease(baseline, { expectedRevision: baseline.revision, expectedFromReleaseId: baseline.releaseId, targetReleaseId: release.id, timestamp: epoch });
-      assert.equal(result.ok, true, result.error);
-      baseline = result.state;
-      if (release.id === 'settlement-living-partnerships-1') break;
-    }
-    assert.ok(baseline.unlockedFeatures.includes('historical-pressures'));
-  }
+  baseline ??= createWorld(1701, epoch, 'settlement-living-partnerships-1');
   return structuredClone(baseline);
 }
 

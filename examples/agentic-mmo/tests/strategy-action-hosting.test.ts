@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import type { GameAction } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { WorldRepository, type D1Database, type D1Result, type D1Statement, type SqlValue } from '../server/repository.ts';
@@ -54,11 +54,7 @@ class Fixture {
   constructor() { this.database.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8')); }
   get store() { return new WorldRepository(this.database); }
   async initialize(plans = false) {
-    await this.store.initialize({ seed: 1701, clockEpoch: epoch, commandId: 'initialize' }, actor, epoch);
-    for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', ...(plans ? ['settlement-plans-1'] : [])]) {
-      const state = await this.state();
-      await this.store.mutate('release-apply', { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, model, commandId: targetReleaseId }, actor, epoch);
-    }
+    await this.store.initialize({ seed: 1701, clockEpoch: epoch, registeredRulesId: plans ? 'settlement-plans-1' : 'settlement-independent-1', commandId: 'initialize' }, actor, epoch);
   }
   async state() { const value = await this.store.read(); assert.ok(value); return value.state; }
   async input(action: GameAction = { type: 'focus', focus: 'culture' }, commandId = 'combined') { return { seat: 0, expectedRevision: (await this.state()).revision, model, commandId, action: { type: 'strategy-action', action } }; }
@@ -323,10 +319,10 @@ await test('recorded existing transitions reproduce every persisted composite fr
     await item.initialize();
     assert.equal((await item.send(await item.input())).status, 200);
     const history = await item.store.history(0);
-    let replay = createWorld(1701, epoch);
+    let replay = (await item.store.read())!.initial;
     for (const entry of history.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'release-apply' ? applyRelease(replay, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(replay, transition.timestamp) : transition.kind === 'action' ? applyCommand(replay, transition.command) : null;
+      const result = transition.kind === 'strategy-catchup' ? catchUpStrategy(replay, transition.timestamp) : transition.kind === 'action' ? applyCommand(replay, transition.command) : null;
       assert.ok(result?.ok);
       assert.deepEqual(result.state, entry.state);
       assert.deepEqual(result.events, entry.events);
@@ -386,11 +382,7 @@ await test('candidate-state legality allows a named build after due research and
 await test('a trade proposal preserves exact towns and recipe when due research changes its numeric legal position', async () => {
   const item = new Fixture();
   try {
-    await item.initialize();
-    for (const targetReleaseId of ['settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1']) {
-      const state = await item.state();
-      await item.store.mutate('release-apply', { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, commandId: targetReleaseId, model }, actor, epoch);
-    }
+    await item.store.initialize({ seed: 1701, clockEpoch: epoch, registeredRulesId: 'settlement-operating-exchange-1', commandId: 'initialize' }, actor, epoch);
     const initial = await item.input();
     assert.equal((await item.send({ ...initial, commandId: 'research-before-trade', action: { type: 'research', technology: 'agriculture' } }, 0)).status, 200);
     const before = await item.state();

@@ -1,45 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, legalActions, observe } from '../core/engine.ts';
 import { projectCapabilities } from '../core/capabilities.ts';
-import { createPastoralSites } from '../core/simulation/pastoral.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
 import { availableMountainCatchments } from '../core/simulation/water.ts';
 import { cityGrowthFacts } from '../core/simulation/growth.ts';
 import { BUILDINGS } from '../core/content.ts';
 import { cityProductivity } from '../core/simulation/world.ts';
 import { isWorldState } from '../core/validation.ts';
-import { waterLandPrefix } from './fixtures/water-land-prefix.ts';
-import { waterLandJourney, waterLandOperationJourney, waterLandPastureJourney, waterLandTown } from './fixtures/water-land-journey.ts';
+import { waterLandOperationJourney, waterLandPastureJourney, waterLandTown } from './fixtures/water-land-journey.ts';
 import { coastalPrefixTime, replayCoastalStep } from './fixtures/coastal-prefix.ts';
-
-await test('water land historical legal217 control has real candidate geography but no successor choices', () => {
-  const prefix = waterLandPrefix(); assert.equal(prefix.steps.length, 217); assert.ok(isWorldState(prefix.state));
-  assert.equal(prefix.state.tiles.find(tile => tile.id === 47)?.terrain, 'grassland');
-  assert.equal(prefix.state.tiles.find(tile => tile.id === 47)?.resource, null);
-  assert.equal('pastoralSites' in prefix.state, false);
-  for (const seat of [0, 1]) {
-    const options = legalActions(prefix.state, seat, prefix.timestamp);
-    assert.ok(!options.some(option => option.action.type === 'research' && ['animal-husbandry', 'wheel', 'engineering'].includes(option.action.technology)));
-    assert.ok(!options.some(option => option.action.type === 'improve' && option.action.improvementId === 'pasture'));
-  }
-});
-
-await test('water land real compatible adoption preserves tiles iron residents and existing resources', () => {
-  const journey = waterLandJourney();
-  assert.deepEqual(journey.adopted.tiles, journey.beforeRelease.tiles);
-  assert.deepEqual(journey.adopted.strategicDeposits, journey.beforeRelease.strategicDeposits);
-  assert.deepEqual(journey.beforeRelease.strategicDeposits?.tileIds, [58, 49, 131, 174, 99, 205, 118, 124]);
-  assert.deepEqual(journey.adopted.civilizations, journey.beforeRelease.civilizations);
-  assert.deepEqual(journey.adopted.cities, journey.beforeRelease.cities);
-  assert.ok('pastoralSites' in journey.adopted);
-  assert.equal(journey.adopted.rng, journey.beforeRelease.rng);
-  assert.deepEqual(journey.adopted.pastoralSites?.tileIds, [47, 149, 175, 81, 38, 164, 33, 79, 84, 44]);
-  assert.deepEqual(createPastoralSites(journey.beforeRelease), journey.adopted.pastoralSites);
-  assert.ok(journey.adopted.pastoralSites?.tileIds.every(tileId => !journey.adopted.strategicDeposits?.deposits[String(tileId)]));
-  const overdue = applyRelease(journey.beforeRelease, { expectedRevision: journey.beforeRelease.revision, expectedFromReleaseId: journey.beforeRelease.releaseId, targetReleaseId: journey.adopted.releaseId, timestamp: coastalPrefixTime(((journey.beforeRelease.independentTurns?.strategyTicks ?? 0) + 1) * 60) });
-  assert.equal(overdue.ok, false); assert.deepEqual(overdue.state, journey.beforeRelease);
-});
 
 await test('water land canonical reveal is civilization specific and detached', () => {
   const value = waterLandPastureJourney(); const state = value.revealed;
@@ -121,8 +91,8 @@ await test('water land completed irrigation belongs to the exact mill town', () 
   const value = waterLandOperationJourney(); const state = value.millReady;
   const timestamp = coastalPrefixTime((state.independentTurns?.strategyTicks ?? 0) * 60 + 30);
   assert.ok(legalActions(state, 0, timestamp).some(option => option.action.type === 'build' && option.action.project === 'water-mill' && option.action.cityId === 'city-0'));
-  assert.ok(!waterLandTown(state, 'city-0-14').buildings.includes('irrigation'));
-  for (const cityId of ['city-0-14', 'city-1', 'missing']) {
+  assert.ok(!waterLandTown(state, value.journey.previous.aqueduct.cityId).buildings.includes('irrigation'));
+  for (const cityId of [value.journey.previous.aqueduct.cityId, 'city-1', 'missing']) {
     const result = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp, action: { type: 'build', project: 'water-mill', cityId } });
     assert.equal(result.ok, false); assert.deepEqual(result.state, state); assert.deepEqual(result.events, []);
   }
@@ -146,34 +116,34 @@ await test('water land actual mill and mountain aqueduct share the old construct
   }
   assert.deepEqual(value.millOperated.cities.map(city => city.population), control.state.cities.map(city => city.population));
   context.diagnostic(JSON.stringify({ syntheticMillOnlyRemovalControl: true, openingProductivity: productivity, laterOutputDelta: outputDelta }));
-  const order = waterLandTown(value.aqueductStarted, 'city-0-14').construction?.active; assert.ok(order && !('kind' in order));
+  const order = waterLandTown(value.aqueductStarted, value.journey.previous.aqueduct.cityId).construction?.active; assert.ok(order && !('kind' in order));
   assert.equal(order.workRequired, 12); assert.deepEqual(order.paid, { materials: 22, credits: 8 });
   assert.equal(order.catchmentTileId, 5); assert.equal(order.tileId, undefined);
-  assert.deepEqual(availableMountainCatchments(value.aqueductReady, waterLandTown(value.aqueductReady, 'city-0-14')), [5, 22, 24]);
-  const completion = waterLandTown(value.aqueductCompleted, 'city-0-14').construction?.lastCompleted; assert.ok(completion && !('kind' in completion));
+  assert.deepEqual(availableMountainCatchments(value.aqueductReady, waterLandTown(value.aqueductReady, value.journey.previous.aqueduct.cityId)), [5, 22, 24]);
+  const completion = waterLandTown(value.aqueductCompleted, value.journey.previous.aqueduct.cityId).construction?.lastCompleted; assert.ok(completion && !('kind' in completion));
   assert.equal(completion.catchmentTileId, 5);
-  assert.equal(waterLandTown(value.aqueductCompleted, 'city-0-14').buildingCatchments?.aqueduct, 5);
-  assert.deepEqual(waterLandTown(value.aqueductCompleted, 'city-0-14').districtSites, waterLandTown(value.aqueductReady, 'city-0-14').districtSites);
-  assert.equal(cityGrowthFacts(value.aqueductStarted, waterLandTown(value.aqueductStarted, 'city-0-14')).capacity, 20);
-  assert.equal(cityGrowthFacts(value.aqueductCompleted, waterLandTown(value.aqueductCompleted, 'city-0-14')).capacity, 26);
-  assert.equal(waterLandTown(value.aqueductCompleted, 'city-0-14').population, 20);
-  assert.equal(waterLandTown(value.grown, 'city-0-14').population, 21);
-  assert.ok(value.aqueductCompletionStep.result.events.every(event => !event.populationGrowth || event.populationGrowth.cityId !== 'city-0-14'));
-  context.diagnostic(JSON.stringify({ transitions: value.journey.steps.length, round: value.grown.round, aqueduct: waterLandTown(value.aqueductCompleted, 'city-0-14').construction?.lastCompleted }));
+  assert.equal(waterLandTown(value.aqueductCompleted, value.journey.previous.aqueduct.cityId).buildingCatchments?.aqueduct, 5);
+  assert.deepEqual(waterLandTown(value.aqueductCompleted, value.journey.previous.aqueduct.cityId).districtSites, waterLandTown(value.aqueductReady, value.journey.previous.aqueduct.cityId).districtSites);
+  assert.equal(cityGrowthFacts(value.aqueductStarted, waterLandTown(value.aqueductStarted, value.journey.previous.aqueduct.cityId)).capacity, 8);
+  assert.equal(cityGrowthFacts(value.aqueductCompleted, waterLandTown(value.aqueductCompleted, value.journey.previous.aqueduct.cityId)).capacity, 14);
+  assert.equal(waterLandTown(value.aqueductCompleted, value.journey.previous.aqueduct.cityId).population, 8);
+  assert.equal(waterLandTown(value.grown, value.journey.previous.aqueduct.cityId).population, 9);
+  assert.ok(value.aqueductCompletionStep.result.events.every(event => !event.populationGrowth || event.populationGrowth.cityId !== value.journey.previous.aqueduct.cityId));
+  context.diagnostic(JSON.stringify({ transitions: value.journey.steps.length, round: value.grown.round, aqueduct: waterLandTown(value.aqueductCompleted, value.journey.previous.aqueduct.cityId).construction?.lastCompleted }));
 });
 
 await test('water land wrong town and no mountain starts refuse with identical state and no payment', () => {
   const value = waterLandOperationJourney();
   for (const cityId of ['city-0', 'city-1', 'missing']) {
     const state = value.aqueductReady; const timestamp = coastalPrefixTime((state.independentTurns?.strategyTicks ?? 0) * 60 + 30);
-    assert.ok(legalActions(state, 0, timestamp).some(option => option.action.type === 'build' && option.action.project === 'aqueduct' && option.action.cityId === 'city-0-14'));
+    assert.ok(legalActions(state, 0, timestamp).some(option => option.action.type === 'build' && option.action.project === 'aqueduct' && option.action.cityId === value.journey.previous.aqueduct.cityId));
     const result = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp, action: { type: 'build', project: 'aqueduct', cityId } });
     assert.equal(result.ok, false); assert.deepEqual(result.state, state); assert.deepEqual(result.events, []);
   }
 });
 
 await test('water land legal later construction preserves the installed Aqueduct source', () => {
-  const value = waterLandOperationJourney(); const cityId = 'city-0-14';
+  const value = waterLandOperationJourney(); const cityId = value.journey.previous.aqueduct.cityId;
   assert.equal(waterLandTown(value.journey.state, cityId).buildings.includes('farm'), false);
   value.journey.act({ type: 'build', project: 'farm', cityId });
   value.journey.until(() => waterLandTown(value.journey.state, cityId).buildings.includes('farm'));
@@ -193,7 +163,7 @@ await test('water land completion-beat production equals an explicitly synthetic
   }
 });
 
-await test('water land full real predecessor and connected branch replay exactly with canonical frames', () => {
+await test('water land explicit synthetic root and actual connected branch replay exactly with canonical frames', () => {
   const value = waterLandOperationJourney(); let state = structuredClone(value.journey.initial);
   for (const step of value.journey.steps) {
     assert.deepEqual(state, step.before); const before = structuredClone(state); const result = replayCoastalStep(state, structuredClone(step.input));

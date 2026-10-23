@@ -66,7 +66,7 @@ export function createCampaignAdapter(
     .action('quote_land_exchange', 0, () => { land.quote(); })
     .action('consent_land_exchange', 0, () => { land.consent(); })
     .action('resolve_land_exchange', 0, () => { land.resolve(); })
-    .action('replay_abstract_exchange', 0, () => { land.replayAbstract(); })
+    .action('restart_consented_exchange', 0, () => { land.restartConsented(); })
     .action('project_fixture', 1, (args) => { projects.prepare(args.integer(0)); })
     .action('project_consent', 0, () => { projects.consent(); })
     .action('project_cancel', 0, () => { projects.cancel(); })

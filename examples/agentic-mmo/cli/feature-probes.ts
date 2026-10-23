@@ -1,22 +1,11 @@
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { RESOURCE_IDS, TURN_RULES } from '../core/content.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 
 const EPOCH = '2026-10-16T00:00:00.000Z';
 
 function released(targets: string[]): WorldState {
-  let state = createWorld(17, EPOCH);
-  for (const targetReleaseId of targets) {
-    const result = applyRelease(state, {
-      expectedRevision: state.revision,
-      expectedFromReleaseId: state.releaseId,
-      targetReleaseId,
-      timestamp: EPOCH,
-    });
-    if (!result.ok) throw new Error(`Feature probe release failed: ${result.error}`);
-    state = result.state;
-  }
-  return state;
+  return createWorld(17, EPOCH, targets.at(-1));
 }
 
 export class FeatureProbes {

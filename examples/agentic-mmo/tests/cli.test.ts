@@ -1,3 +1,4 @@
+import { seedLocalWorld } from './fixtures/current-world.ts';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,7 +9,7 @@ import { Adapter, ProtocolError } from '../../../adapters/typescript/blabla_adap
 import { createCampaignAdapter } from '../cli/adapter.ts';
 import { GameProtocol } from '../cli/protocol.ts';
 import { GameStore, isRecord } from '../cli/store.ts';
-import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy } from '../core/engine.ts';
+import { applyCommand, applyDirectorTick, applyHistoryAdvance, createWorld, catchUpClock, catchUpStrategy } from '../core/engine.ts';
 import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import { TRADE_RECIPES, ECONOMY_RULES } from '../core/content.ts';
@@ -22,7 +23,7 @@ function worldWithAgreement(): WorldState {
   try {
     item.store.initialize(1701);
     const state = item.store.snapshot().state;
-    const terms = TRADE_RECIPES[0]?.terms;
+    const terms = TRADE_RECIPES.find(recipe => recipe.id === 'harvest-for-materials')?.terms;
     const proposer = state.cities[0];
     const recipient = state.cities[1];
     assert.ok(terms && proposer && recipient);
@@ -189,13 +190,8 @@ void test('unreleased attached CLI plans are refused without rewriting campaign 
   } finally { item.cleanup(); }
 });
 
-function planningCampaign(store: GameStore): void {
-  store.initialize(1701, false, '2026-10-16T01:00:00.000Z');
-  const releases = ['settlement-foundations-1', 'settlement-foundations-2', 'settlement-independent-1', 'settlement-plans-1'];
-  for (let index = 0; index < 3; index += 1) {
-    const reply = store.authoredTransition({ expectedRevision: index, expectedFromReleaseId: releases[index], targetReleaseId: releases[index + 1], timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: `planning-release-${index}` }, 'release-apply');
-    assert.equal(reply.ok, true, reply.error);
-  }
+function planningCampaign(store: GameStore, rulesId = 'settlement-plans-1'): void {
+  seedLocalWorld(store, createWorld(1701, '2026-10-16T01:00:00.000Z', rulesId));
 }
 
 void test('targeted focus and construction use shared optional historical action shapes', () => {
@@ -207,13 +203,8 @@ void test('targeted focus and construction use shared optional historical action
   }
 });
 
-function frontierCampaign(store: GameStore): void {
-  planningCampaign(store);
-  for (const targetReleaseId of ['settlement-production-1', 'settlement-frontiers-1']) {
-    const state = store.snapshot().state;
-    const reply = store.authoredTransition({ expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, model: 'gpt-6-astra', commandId: `cli-${targetReleaseId}` }, 'release-apply');
-    assert.equal(reply.ok, true, reply.error);
-  }
+function frontierCampaign(store: GameStore, rulesId = 'settlement-frontiers-1'): void {
+  planningCampaign(store, rulesId);
 }
 
 void test('city repair uses one strict shared action shape', () => {
@@ -223,12 +214,7 @@ void test('city repair uses one strict shared action shape', () => {
 });
 
 function recoveryCampaign(store: GameStore): void {
-  frontierCampaign(store);
-  for (const targetReleaseId of ['settlement-specialization-1', 'settlement-recovery-1']) {
-    const state = store.snapshot().state;
-    const reply = store.authoredTransition({ expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: `cli-${targetReleaseId}` }, 'release-apply');
-    assert.equal(reply.ok, true, reply.error);
-  }
+  planningCampaign(store, 'settlement-recovery-1');
 }
 
 void test('city recovery CLI process retries charge once and replay released earthquakes exactly', () => {
@@ -268,8 +254,7 @@ void test('city recovery CLI process retries charge once and replay released ear
     assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
     let reproduced = repaired.initial;
     for (const transition of repaired.timeline) {
-      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+      const result = transition.kind === 'action' ? applyCommand(reproduced, transition.command)
           : transition.kind === 'director-tick' ? applyDirectorTick(reproduced, transition.command) : null;
       assert.ok(result?.ok);
       reproduced = result.state;
@@ -328,10 +313,10 @@ void test('malformed stored city repair actions fail closed without rewriting ca
   } finally { item.cleanup(); }
 });
 
-void test('city-targeted CLI actions preserve historical untargeted behavior and exact process retries', () => {
+void test('city-targeted CLI actions preserve exact current town targets and process retries', () => {
   const item = fixture();
   try {
-    frontierCampaign(item.store);
+    frontierCampaign(item.store, 'settlement-specialization-1');
     const act = (action: Record<string, unknown>, timestamp: string, commandId: string) => {
       const reply = item.store.submit({ seat: 0, expectedRevision: item.store.snapshot().state.revision, action, timestamp, model: 'gpt-6-astra', commandId });
       assert.equal(reply.ok, true, reply.error);
@@ -341,17 +326,16 @@ void test('city-targeted CLI actions preserve historical untargeted behavior and
     act(founding, '2026-10-16T01:00:00.000Z', 'city-target-frontier');
     act({ type: 'research', technology: 'agriculture' }, '2026-10-16T01:00:10.000Z', 'city-target-cultivation');
     assert.equal(item.store.strategyCatchUp({ expectedRevision: item.store.snapshot().state.revision, timestamp: '2026-10-16T01:02:00.000Z', commandId: 'city-target-research-beats' }).ok, true);
-    act({ type: 'focus', focus: 'industry' }, '2026-10-16T01:02:00.000Z', 'legacy-wide-focus');
-    act({ type: 'build', project: 'farm' }, '2026-10-16T01:02:10.000Z', 'legacy-first-building');
+    act({ type: 'focus', focus: 'industry', cityId: 'city-0' }, '2026-10-16T01:02:00.000Z', 'legacy-wide-focus');
+    act({ type: 'build', project: 'farm', cityId: 'city-0' }, '2026-10-16T01:02:10.000Z', 'legacy-first-building');
     const legacy = item.store.snapshot().state;
     const cities = legacy.cities.filter((city) => city.civId === 0);
     const target = cities.find((city) => city.id !== 'city-0');
     assert.ok(target);
     assert.equal(cities.length, 2);
-    assert.equal(cities.every((city) => city.focus === 'industry'), true);
+    assert.equal(cities[0]?.focus, 'industry');
     assert.equal(cities[0]?.buildings.includes('farm'), true);
     assert.equal(target.buildings.includes('farm'), false);
-    assert.equal(item.store.authoredTransition({ expectedRevision: legacy.revision, expectedFromReleaseId: 'settlement-frontiers-1', targetReleaseId: 'settlement-specialization-1', model: 'gpt-6-astra', commandId: 'cli-specialization' }, 'release-apply').ok, true);
     const revision = item.store.snapshot().state.revision;
     const focus = { type: 'focus', focus: 'growth', cityId: target.id };
     const build = { type: 'build', project: 'farm', cityId: target.id };
@@ -378,8 +362,7 @@ void test('city-targeted CLI actions preserve historical untargeted behavior and
     assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
     let reproduced = built.initial;
     for (const transition of built.timeline) {
-      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+      const result = transition.kind === 'action' ? applyCommand(reproduced, transition.command)
           : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
       assert.ok(result?.ok);
       reproduced = result.state;
@@ -433,8 +416,7 @@ void test('CLI frontier founding requires explicit source and survives separate 
     const replay = item.store.replay();
     let reproduced = replay.initial;
     for (const transition of replay.timeline) {
-      const next = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-        : transition.kind === 'action' ? applyCommand(reproduced, transition.command) : null;
+      const next = transition.kind === 'action' ? applyCommand(reproduced, transition.command) : null;
       assert.ok(next?.ok);
       reproduced = next.state;
     }
@@ -507,8 +489,7 @@ void test('unconstructed operation records are rejected without rewriting legacy
 function worldWithOperation(): WorldState {
   const item = fixture();
   try {
-    planningCampaign(item.store);
-    assert.equal(item.store.authoredTransition({ expectedRevision: 3, expectedFromReleaseId: 'settlement-plans-1', targetReleaseId: 'settlement-production-1', model: 'gpt-6-astra', commandId: 'operation-fixture-release' }, 'release-apply').ok, true);
+    planningCampaign(item.store, 'settlement-production-1');
     const state = item.store.snapshot().state;
     const city = state.cities[0];
     const civilization = state.civilizations[0];
@@ -601,8 +582,7 @@ void test('historical operation facts survive toggles and tuning while malformed
 void test('CLI paid operations survive restarted pause and resume commands with exact replay', () => {
   const item = fixture();
   try {
-    planningCampaign(item.store);
-    assert.equal(item.store.authoredTransition({ expectedRevision: 3, expectedFromReleaseId: 'settlement-plans-1', targetReleaseId: 'settlement-production-1', model: 'gpt-6-astra', commandId: 'production-release' }, 'release-apply').ok, true);
+    planningCampaign(item.store, 'settlement-production-1');
     const act = (action: Record<string, unknown>, timestamp: string, commandId: string) => {
       const reply = item.store.submit({ seat: 0, expectedRevision: item.store.snapshot().state.revision, action, timestamp, model: 'gpt-6-astra', commandId });
       assert.equal(reply.ok, true, reply.error);
@@ -642,8 +622,7 @@ void test('CLI paid operations survive restarted pause and resume commands with 
     const replay = item.store.replay();
     let reproduced = replay.initial;
     for (const transition of replay.timeline) {
-      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+      const result = transition.kind === 'action' ? applyCommand(reproduced, transition.command)
           : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
       assert.ok(result?.ok);
       reproduced = result.state;
@@ -657,14 +636,14 @@ void test('attached CLI plans survive process restart, retain original revision 
   try {
     planningCampaign(item.store);
     const plan = [{ action: { type: 'focus', focus: 'industry' }, reason: 'Stock materials' }, { action: { type: 'wait' }, reason: 'Reassess stock before spending' }];
-    const args = ['action', '--seat', '0', '--revision', '3', '--action', JSON.stringify(plan[0]?.action), '--plan', JSON.stringify(plan), '--at', '2026-10-16T01:00:00.000Z', '--model', 'gpt-6-astra', '--id', 'planned-cli'];
+    const args = ['action', '--seat', '0', '--revision', '0', '--action', JSON.stringify(plan[0]?.action), '--plan', JSON.stringify(plan), '--at', '2026-10-16T01:00:00.000Z', '--model', 'gpt-6-astra', '--id', 'planned-cli'];
     const reply = run(item.directory, args);
     assert.equal(reply.ok, true);
     assert.equal(record(reply.actionOutcome).status, 'completed');
-    const stale = item.store.submit({ seat: 1, expectedRevision: 3, observedRevision: 999, action: plan[0]?.action, plan, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: 'second-planned-cli' });
+    const stale = item.store.submit({ seat: 1, expectedRevision: 0, observedRevision: 999, action: plan[0]?.action, plan, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: 'second-planned-cli' });
     assert.equal(stale.ok, true);
-    assert.equal(item.store.snapshot().state.actionPlans?.[1]?.observedRevision, 3);
-    assert.equal(item.store.snapshot().commands[1]?.observedRevision, 3);
+    assert.equal(item.store.snapshot().state.actionPlans?.[1]?.observedRevision, 0);
+    assert.equal(item.store.snapshot().commands[1]?.observedRevision, 0);
     assert.equal(run(item.directory, args).duplicate, true);
     const changedArgs = [...args];
     changedArgs[changedArgs.indexOf('--plan') + 1] = JSON.stringify([{ ...plan[0], reason: 'Changed intent' }]);
@@ -676,22 +655,21 @@ void test('attached CLI plans survive process restart, retain original revision 
     const ready = run(item.directory, ['observe', '--seat', '0', '--at', '2026-10-16T01:00:10.000Z']);
     assert.equal(record(array(record(ready.actionPlan).items)[1]).status, 'ready');
     assert.equal(readFileSync(item.store.path, 'utf8'), beforeFailure);
-    assert.equal(item.store.strategyCatchUp({ expectedRevision: 5, timestamp: '2026-10-16T01:01:00.000Z', commandId: 'planning-beat' }).ok, true);
+    assert.equal(item.store.strategyCatchUp({ expectedRevision: 2, timestamp: '2026-10-16T01:01:00.000Z', commandId: 'planning-beat' }).ok, true);
     const afterBeat = item.store.snapshot();
     assert.equal(afterBeat.commands.length, 2);
     assert.equal(afterBeat.state.actionPlans?.[0]?.items[1]?.status, 'needs-review');
     const failureBytes = readFileSync(item.store.path, 'utf8');
-    const refusal = item.store.submit({ seat: 0, expectedRevision: 6, action: { type: 'wait' }, plan: [{ action: { type: 'wait' }, reason: '' }], timestamp: '2026-10-16T01:01:00.000Z', model: 'gpt-6-astra', commandId: 'invalid-replan' });
+    const refusal = item.store.submit({ seat: 0, expectedRevision: 3, action: { type: 'wait' }, plan: [{ action: { type: 'wait' }, reason: '' }], timestamp: '2026-10-16T01:01:00.000Z', model: 'gpt-6-astra', commandId: 'invalid-replan' });
     assert.equal(refusal.actionOutcome?.status, 'failed');
     assert.equal(readFileSync(item.store.path, 'utf8'), failureBytes);
-    assert.equal(item.store.submit({ seat: 0, expectedRevision: 6, action: { type: 'wait' }, timestamp: '2026-10-16T01:01:00.000Z', model: 'gpt-6-astra', commandId: 'explicit-follow-up' }).ok, true);
+    assert.equal(item.store.submit({ seat: 0, expectedRevision: 3, action: { type: 'wait' }, timestamp: '2026-10-16T01:01:00.000Z', model: 'gpt-6-astra', commandId: 'explicit-follow-up' }).ok, true);
     assert.equal(item.store.snapshot().state.actionPlans?.[0], null);
     assert.notEqual(item.store.snapshot().state.actionPlans?.[1], null);
     const replay = item.store.replay();
     let reproduced = replay.initial;
     for (const transition of replay.timeline) {
-      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+      const result = transition.kind === 'action' ? applyCommand(reproduced, transition.command)
           : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
       assert.ok(result?.ok);
       reproduced = result.state;
@@ -717,6 +695,7 @@ void test('canonical plans reject malformed slots and persisted derived statuses
   const item = fixture();
   try {
     planningCampaign(item.store);
+    for (let revision = 0; revision < 2; revision++) assert.equal(item.store.submit({ seat: 0, expectedRevision: revision, action: { type: 'wait' }, timestamp: `2026-10-16T01:00:${revision}0.000Z`, commandId: `plan-validation-${revision}`, model: 'gpt-6.1-sol' }).ok, true);
     const state = item.store.snapshot().state;
     assert.equal(isWorldState(state), true);
     const plan = { observedRevision: 1, committedRevision: 2, items: [{ action: { type: 'wait' }, reason: 'Hold resources', status: 'completed', result: 'Accepted' }, { action: { type: 'wait' }, reason: 'Reassess later', status: 'needs-review', result: 'Needs model review' }] };
@@ -730,7 +709,7 @@ void test('canonical plans reject malformed slots and persisted derived statuses
     const absent = { ...state };
     delete absent.actionPlans;
     assert.equal(isWorldState(absent), false);
-    const legacy = item.store.snapshot().initial;
+    const legacy = createWorld(1701, '2026-10-16T01:00:00.000Z');
     assert.equal(isWorldState(legacy), true);
     assert.equal(isWorldState({ ...legacy, actionPlans: Array.from({ length: 6 }, () => null) }), false);
   } finally { item.cleanup(); }
@@ -768,24 +747,21 @@ void test('canonical independent admission data rejects corrupt counters and fea
   } finally { item.cleanup(); }
 });
 
-void test('independent CLI release accepts explicit concurrent intents and separate strategy pulses across restart', () => {
+void test('independent CLI fixture accepts explicit concurrent intents and separate strategy pulses across restart', () => {
   const item = fixture();
   try {
-    item.store.initialize(1701, false, '2026-10-16T00:00:00.000Z');
-    for (const [expectedRevision, expectedFromReleaseId, targetReleaseId] of [[0, 'settlement-foundations-1', 'settlement-foundations-2'], [1, 'settlement-foundations-2', 'settlement-independent-1']] as const) {
-      assert.equal(item.store.authoredTransition({ expectedRevision, expectedFromReleaseId, targetReleaseId, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra', commandId: `release-${expectedRevision}` }, 'release-apply').ok, true);
-    }
+    seedLocalWorld(item.store, createWorld(1701, '2026-10-16T01:00:00.000Z', 'settlement-independent-1'));
     assert.equal(item.store.observation(4).activeSeat, null);
-    const input = { expectedRevision: 2, action: { type: 'focus', focus: 'industry' }, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra' };
+    const input = { expectedRevision: 0, action: { type: 'focus', focus: 'industry' }, timestamp: '2026-10-16T01:00:00.000Z', model: 'gpt-6-astra' };
     assert.equal(item.store.submit({ ...input, seat: 4, commandId: 'vesper-independent' }).ok, true);
     assert.equal(item.store.submit({ ...input, seat: 1, commandId: 'verdant-independent' }).ok, true);
     assert.equal(item.store.snapshot().state.round, 0);
     const bytes = readFileSync(item.store.path, 'utf8');
     assert.equal(item.store.submit({ ...input, seat: 4, commandId: 'vesper-too-fast' }).ok, false);
     assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
-    assert.equal(item.store.submit({ ...command(2, 0, 'stale-choice'), timestamp: input.timestamp }).ok, false);
+    assert.equal(item.store.submit({ ...command(0, 0, 'stale-choice'), timestamp: input.timestamp }).ok, false);
     const protocol = new GameProtocol(new GameStore(item.store.path));
-    const pulse = { op: 'strategy-catchup', expectedRevision: 4, timestamp: '2026-10-16T01:02:00.000Z', commandId: 'strategy-two' };
+    const pulse = { op: 'strategy-catchup', expectedRevision: 2, timestamp: '2026-10-16T01:02:00.000Z', commandId: 'strategy-two' };
     assert.equal(record(protocol.handle(pulse)).ok, true);
     assert.equal(record(protocol.handle(pulse)).duplicate, true);
     const state = item.store.snapshot().state;
@@ -806,12 +782,9 @@ void test('independent CLI release accepts explicit concurrent intents and separ
 void test('one-shot independent commands preserve explicit timestamps and strategy catchup across processes', () => {
   const item = fixture();
   try {
-    run(item.directory, ['init', '--seed', '1701']);
-    for (const [revision, from, to] of [['0', 'settlement-foundations-1', 'settlement-foundations-2'], ['1', 'settlement-foundations-2', 'settlement-independent-1']] as const) {
-      assert.equal(run(item.directory, ['release-apply', '--revision', revision, '--from', from, '--to', to, '--at', '2026-10-16T01:00:00.000Z', '--model', 'gpt-6-astra', '--id', `cli-${revision}`]).ok, true);
-    }
-    assert.equal(run(item.directory, ['action', '--seat', '3', '--revision', '2', '--action', '{"type":"wait"}', '--at', '2026-10-16T01:00:10.000Z', '--model', 'gpt-6-astra', '--id', 'cli-independent']).ok, true);
-    assert.equal(run(item.directory, ['strategy-catchup', '--revision', '3', '--at', '2026-10-16T01:01:00.000Z', '--id', 'cli-strategy']).ok, true);
+    seedLocalWorld(item.store, createWorld(1701, '2026-10-16T01:00:00.000Z', 'settlement-independent-1'));
+    assert.equal(run(item.directory, ['action', '--seat', '3', '--revision', '0', '--action', '{"type":"wait"}', '--at', '2026-10-16T01:00:10.000Z', '--model', 'gpt-6-astra', '--id', 'cli-independent']).ok, true);
+    assert.equal(run(item.directory, ['strategy-catchup', '--revision', '1', '--at', '2026-10-16T01:01:00.000Z', '--id', 'cli-strategy']).ok, true);
     const view = run(item.directory, ['observe', '--seat', '0']);
     assert.equal(view.activeSeat, null);
     assert.equal(view.round, 1);
@@ -1264,7 +1237,7 @@ void test('explicit clock catchup persists bounded ticks and mixed replay reprod
             ? applyDirectorTick(reproduced, entry.command)
             : entry.kind === 'clock-catchup' ? catchUpClock(reproduced, entry.timestamp)
               : entry.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, entry.timestamp)
-              : entry.kind === 'history-advance' ? applyHistoryAdvance(reproduced, entry.command) : applyRelease(reproduced, entry.command);
+              : entry.kind === 'history-advance' ? applyHistoryAdvance(reproduced, entry.command) : assert.fail('Only current recorded operations are executable');
       assert.equal(result.ok, true);
       reproduced = result.state;
     }
@@ -1608,7 +1581,7 @@ void test('canonical validation is strict by default and legacy support never mu
   }
 });
 
-void test('pre-clock histories reject system operations until an explicit host migration', () => {
+void test('pre-clock historical records remain readable but cannot execute current system operations', () => {
   const item = fixture();
   try {
     item.store.initialize(31);
@@ -1653,22 +1626,22 @@ function releaseRequest(revision = 0): Record<string, unknown> {
   return { op: 'release-apply', expectedRevision: revision, expectedFromReleaseId: 'settlement-foundations-1', targetReleaseId: 'settlement-foundations-2', model: 'gpt-6.1-sol', commandId: 'release-2' };
 }
 
-function advanceRequest(revision = 1): Record<string, unknown> {
+function advanceRequest(revision = 0): Record<string, unknown> {
   return { op: 'history-advance', expectedRevision: revision, cause: { kind: 'feature', id: 'history-advancement' }, reason: 'Verified explicit history delivery', deltaYears: 75, timestamp: '2026-10-16T00:01:00.000Z', model: 'gpt-6.1-sol', commandId: 'advance-history-delivery' };
 }
 
-void test('explicit compatible release and history advances persist exact targets and retain the normal clock', () => {
+void test('fresh configured genesis supports current history advances and retains exact replay and normal clock', () => {
   const item = fixture();
   try {
-    item.store.initialize(31, false, '2026-10-16T00:00:00.000Z');
+    seedLocalWorld(item.store, createWorld(31, '2026-10-16T00:00:00.000Z', 'settlement-foundations-2'));
     const before = item.store.snapshot();
     const protocol = new GameProtocol(item.store);
-    assert.equal(record(protocol.handle(releaseRequest())).ok, true);
+
     assert.equal(record(protocol.handle(advanceRequest())).ok, true);
     assert.equal(record(protocol.handle(advanceRequest())).duplicate, true);
-    assert.equal(item.store.catchUp({ expectedRevision: 2, timestamp: '2026-10-16T00:06:00.000Z', commandId: 'clock-after-advance' }).ok, true);
+    assert.equal(item.store.catchUp({ expectedRevision: 1, timestamp: '2026-10-16T00:06:00.000Z', commandId: 'clock-after-advance' }).ok, true);
     const reopened = new GameStore(item.store.path).snapshot();
-    assert.equal(reopened.state.revision, 3);
+    assert.equal(reopened.state.revision, 2);
     assert.equal(reopened.state.year, before.state.year + 85);
     assert.equal(reopened.state.clockEpoch, before.state.clockEpoch);
     assert.equal(reopened.state.clockTicks, 1);
@@ -1676,14 +1649,12 @@ void test('explicit compatible release and history advances persist exact target
     assert.equal(reopened.state.round, before.state.round);
     assert.equal(reopened.state.releaseId, 'settlement-foundations-2');
     assert.deepEqual(reopened.initial, before.initial);
-    assert.deepEqual(reopened.timeline.map((entry) => entry.kind), ['release-apply', 'history-advance', 'clock-catchup']);
-    assert.equal(record(record(reopened.timeline[0]).command).targetReleaseId, 'settlement-foundations-2');
-    assert.equal(reopened.provenance[1]?.model, 'gpt-6.1-sol');
+    assert.deepEqual(reopened.timeline.map((entry) => entry.kind), ['history-advance', 'clock-catchup']);
+    assert.equal(reopened.provenance[0]?.model, 'gpt-6.1-sol');
     assert.equal(Object.keys(reopened.state.historyAdvances ?? {}).length, 1);
     let reproduced = reopened.initial;
     for (const transition of reopened.timeline) {
-      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-        : transition.kind === 'history-advance' ? applyHistoryAdvance(reproduced, transition.command)
+      const result = transition.kind === 'history-advance' ? applyHistoryAdvance(reproduced, transition.command)
           : transition.kind === 'clock-catchup' ? catchUpClock(reproduced, transition.timestamp) : null;
       assert.ok(result?.ok);
       reproduced = result.state;
@@ -1692,33 +1663,37 @@ void test('explicit compatible release and history advances persist exact target
   } finally { item.cleanup(); }
 });
 
-void test('release and history requests reject invalid, stale or changed retries without changing the world', () => {
+void test('release requests are always disabled without writes while history rejects invalid and stale retries', () => {
   const item = fixture();
   try {
-    item.store.initialize(31);
+    seedLocalWorld(item.store, createWorld(31, '2026-10-16T00:00:00.000Z', 'settlement-foundations-2'));
     const protocol = new GameProtocol(item.store);
     const initial = item.store.snapshot().state;
-    for (const request of [advanceRequest(0), { ...releaseRequest(), targetReleaseId: 'unknown' }, { ...releaseRequest(), expectedFromReleaseId: 'unknown' }, { ...releaseRequest(), expectedRevision: 99 }, { ...releaseRequest(), model: '' }, { ...releaseRequest(), commandId: '' }]) {
+    const initialBytes = readFileSync(item.store.path, 'utf8');
+    for (const request of [releaseRequest(), { ...releaseRequest(), targetReleaseId: 'unknown' }, { ...releaseRequest(), expectedFromReleaseId: 'unknown' }, { ...releaseRequest(), expectedRevision: 99 }, { ...releaseRequest(), model: '' }, { ...releaseRequest(), commandId: '' }]) {
       assert.equal(record(protocol.handle(request)).ok, false);
       assert.deepEqual(item.store.snapshot().state, initial);
+      assert.equal(readFileSync(item.store.path, 'utf8'), initialBytes);
     }
-    assert.equal(record(protocol.handle(releaseRequest())).ok, true);
+    assert.throws(() => item.store.authoredTransition(releaseRequest(), 'release-apply'), /pre_release_migration_disabled/);
+    assert.equal(readFileSync(item.store.path, 'utf8'), initialBytes);
+
     const released = item.store.snapshot().state;
-    for (const patch of [{ deltaYears: -1 }, { deltaYears: Number.MAX_SAFE_INTEGER + 1 }, { reason: '' }, { cause: { kind: 'event', id: 'missing' } }, { timestamp: 'tomorrow' }, { expectedRevision: 0 }]) {
+    for (const patch of [{ deltaYears: -1 }, { deltaYears: Number.MAX_SAFE_INTEGER + 1 }, { reason: '' }, { cause: { kind: 'event', id: 'missing' } }, { timestamp: 'tomorrow' }, { expectedRevision: 99 }]) {
       assert.equal(record(protocol.handle({ ...advanceRequest(), ...patch })).ok, false);
       assert.deepEqual(item.store.snapshot().state, released);
     }
     assert.equal(record(protocol.handle(advanceRequest())).ok, true);
     assert.equal(record(protocol.handle({ ...advanceRequest(), deltaYears: 76 })).ok, false);
-    assert.equal(record(protocol.handle({ ...advanceRequest(2), commandId: 'same-cause-again' })).ok, false);
-    assert.equal(item.store.snapshot().state.revision, 2);
+    assert.equal(record(protocol.handle({ ...advanceRequest(1), commandId: 'same-cause-again' })).ok, false);
+    assert.equal(item.store.snapshot().state.revision, 1);
   } finally { item.cleanup(); }
 });
 
 void test('optional history ledgers are checked before loading without rewriting corrupt bytes', () => {
   const item = fixture();
   try {
-    item.store.initialize(31);
+    seedLocalWorld(item.store, createWorld(31, '2026-10-16T00:00:00.000Z', 'settlement-foundations-2'));
     const original = item.store.snapshot();
     assert.equal(original.state.historyAdvances, undefined);
     for (const ledger of [null, [], { 'feature:x': { cause: { kind: 'feature', id: 'x' }, reason: 'proof', deltaYears: 'bad' } }, { 'feature:x': { cause: { kind: 'feature', id: 'x' }, reason: 'proof', deltaYears: 1, timestamp: '2026-10-16T00:00:00.000Z', revision: 0, yearBefore: -10000, yearAfter: -9999, evidence: ['x'] } }]) {
@@ -1732,39 +1707,45 @@ void test('optional history ledgers are checked before loading without rewriting
   } finally { item.cleanup(); }
 });
 
-void test('one-shot release and history commands survive separate processes', () => {
+void test('one-shot release command is unavailable without save writes while history remains usable', () => {
   const item = fixture();
   try {
-    run(item.directory, ['init', '--seed', '31']);
-    assert.equal(run(item.directory, ['release-apply', '--revision', '0', '--from', 'settlement-foundations-1', '--to', 'settlement-foundations-2', '--model', 'gpt-6.1-sol', '--id', 'release-2']).ok, true);
-    assert.equal(run(item.directory, ['history-advance', '--revision', '1', '--cause-kind', 'feature', '--cause-id', 'history-advancement', '--reason', 'Verified delivery', '--years', '75', '--at', '2026-10-16T00:01:00.000Z', '--model', 'gpt-6.1-sol', '--id', 'advance']).ok, true);
+    seedLocalWorld(item.store, createWorld(31, '2026-10-16T00:00:00.000Z', 'settlement-foundations-2'));
+    const bytes = readFileSync(item.store.path, 'utf8');
+    const refused = spawnSync(process.execPath, [cli, 'release-apply', '--revision', '0', '--from', 'settlement-foundations-1', '--to', 'settlement-foundations-2', '--model', 'gpt-6.1-sol', '--id', 'release-2'], { cwd: item.directory, encoding: 'utf8' });
+    assert.notEqual(refused.status, 0); assert.match(refused.stderr + refused.stdout, /unknown command|pre_release_migration_disabled/);
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
+
+    assert.equal(run(item.directory, ['history-advance', '--revision', '0', '--cause-kind', 'feature', '--cause-id', 'history-advancement', '--reason', 'Verified delivery', '--years', '75', '--at', '2026-10-16T00:01:00.000Z', '--model', 'gpt-6.1-sol', '--id', 'advance']).ok, true);
     assert.equal(run(item.directory, ['observe']).year, -9925);
   } finally { item.cleanup(); }
 });
 
-void test('authored receipt namespaces permit the same caller id across distinct operations', () => {
+void test('current history and action receipts share caller ids without reenabling historical release requests', () => {
   const item = fixture();
   try {
-    item.store.initialize(31);
+    seedLocalWorld(item.store, createWorld(31, '2026-10-16T00:00:00.000Z', 'settlement-foundations-2'));
     const protocol = new GameProtocol(item.store);
     const release = { ...releaseRequest(), commandId: 'shared-user-id' };
     const advance = { ...advanceRequest(), commandId: 'shared-user-id' };
-    assert.equal(record(protocol.handle(release)).ok, true);
+
     assert.equal(record(protocol.handle(advance)).ok, true);
-    assert.equal(item.store.submit(command(2, 0, 'shared-user-id')).ok, true);
-    assert.equal(record(protocol.handle(release)).duplicate, true);
+    assert.equal(item.store.submit(command(1, 0, 'shared-user-id')).ok, true);
+    const bytes = readFileSync(item.store.path, 'utf8');
+    assert.equal(record(protocol.handle(release)).ok, false);
+    assert.equal(readFileSync(item.store.path, 'utf8'), bytes);
     assert.equal(record(protocol.handle(advance)).duplicate, true);
-    assert.equal(item.store.snapshot().state.revision, 3);
-    assert.equal(item.store.snapshot().provenance.length, 3);
+    assert.equal(item.store.snapshot().state.revision, 2);
+    assert.equal(item.store.snapshot().provenance.length, 2);
   } finally { item.cleanup(); }
 });
 
 void test('valid history receipt numeric, causal and evidence invariants reject persisted corruption', () => {
   const item = fixture();
   try {
-    item.store.initialize(31);
+    seedLocalWorld(item.store, createWorld(31, '2026-10-16T00:00:00.000Z', 'settlement-foundations-2'));
     const protocol = new GameProtocol(item.store);
-    assert.equal(record(protocol.handle(releaseRequest())).ok, true);
+
     assert.equal(record(protocol.handle(advanceRequest())).ok, true);
     const original = item.store.snapshot();
     for (const patch of [{ deltaYears: -1 }, { deltaYears: 0.5 }, { revision: 99 }, { revision: 0 }, { yearBefore: 'bad' }, { yearAfter: -9999 }, { reason: ' ' }, { reason: 'x'.repeat(1001) }, { timestamp: 'invalid' }, { evidence: [] }, { evidence: [''] }, { cause: { kind: 'feature', id: 'unreleased' } }, { cause: { kind: 'event', id: 'history-advancement' } }]) {
@@ -1780,11 +1761,11 @@ void test('valid history receipt numeric, causal and evidence invariants reject 
   } finally { item.cleanup(); }
 });
 
-void test('JSONL accepts release and history requests then continues after malformed authored input', () => {
+void test('JSONL refuses release migration then continues with valid current history requests', () => {
   const item = fixture();
   try {
+    seedLocalWorld(item.store, createWorld(31, '2026-10-16T00:00:00.000Z', 'settlement-foundations-2'));
     const lines = [
-      { id: 'init', op: 'init', seed: 31 },
       { id: 'release', ...releaseRequest() },
       { id: 'bad', ...advanceRequest(), cause: null },
       { id: 'advance', ...advanceRequest() },
@@ -1793,9 +1774,52 @@ void test('JSONL accepts release and history requests then continues after malfo
     const result = spawnSync(process.execPath, [cli], { cwd: item.directory, input: `${lines}\n`, encoding: 'utf8' });
     assert.equal(result.status, 0);
     const replies = result.stdout.trim().split('\n').map(parse);
-    assert.equal(record(replies[1]?.result).ok, true);
-    assert.equal(record(replies[2]?.result).ok, false);
-    assert.equal(record(replies[3]?.result).ok, true);
-    assert.equal(record(replies[4]?.result).year, -9925);
+    assert.equal(record(replies[0]?.result).ok, false);
+    assert.match(String(record(replies[0]?.result).error), /pre_release_migration_disabled|unknown op/);
+    assert.equal(record(replies[1]?.result).ok, false);
+    assert.equal(record(replies[2]?.result).ok, true);
+    assert.equal(record(replies[3]?.result).year, -9925);
   } finally { item.cleanup(); }
+});
+
+void test('fresh registered rules are selected through store protocol and one-shot initialization without migration or overwrite', () => {
+  const direct = fixture(); const protocolItem = fixture(); const oneShot = fixture();
+  const epoch = '2026-10-16T00:00:00.000Z'; const rules = 'settlement-independent-1';
+  try {
+    assert.throws(() => direct.store.initialize(1701, false, epoch, 'unknown-rules'), /registered rules ID/);
+    assert.throws(() => direct.store.initialize(1701, false, undefined, rules), /explicit epoch/);
+    assert.throws(() => readFileSync(direct.store.path), { code: 'ENOENT' });
+    assert.equal(direct.store.initialize(1701, false, epoch, rules).ok, true);
+    assert.deepEqual(direct.store.snapshot().initial, createWorld(1701, epoch, rules));
+    assert.deepEqual(direct.store.snapshot().state, direct.store.snapshot().initial);
+    assert.deepEqual(direct.store.snapshot().timeline, []);
+    const directBytes = readFileSync(direct.store.path, 'utf8');
+    assert.equal(direct.store.initialize(31, false, epoch, 'settlement-foundations-2').ok, false);
+    assert.equal(readFileSync(direct.store.path, 'utf8'), directBytes);
+
+    const protocol = new GameProtocol(protocolItem.store);
+    for (const registeredRulesId of ['unknown-rules', '', 42, null]) {
+      const refused = record(protocol.handle({ op: 'init', seed: 1701, clockEpoch: epoch, registeredRulesId }));
+      assert.equal(refused.ok, false); assert.match(String(refused.error), /registered rules ID/);
+    }
+    const missingEpoch = record(protocol.handle({ op: 'init', seed: 1701, registeredRulesId: rules }));
+    assert.equal(missingEpoch.ok, false); assert.match(String(missingEpoch.error), /explicit epoch/);
+    assert.throws(() => readFileSync(protocolItem.store.path), { code: 'ENOENT' });
+    assert.equal(record(protocol.handle({ op: 'init', seed: 1701, clockEpoch: epoch, registeredRulesId: rules })).ok, true);
+    assert.deepEqual(protocolItem.store.snapshot().state, direct.store.snapshot().initial);
+    const protocolBytes = readFileSync(protocolItem.store.path, 'utf8');
+    assert.equal(record(protocol.handle({ op: 'init', seed: 31, clockEpoch: epoch, registeredRulesId: 'settlement-foundations-2' })).ok, false);
+    assert.equal(readFileSync(protocolItem.store.path, 'utf8'), protocolBytes);
+
+    const unknown = run(oneShot.directory, ['init', '--rules', 'unknown-rules', '--clock-epoch', epoch]);
+    assert.equal(unknown.ok, false); assert.match(String(unknown.error), /registered rules ID/);
+    const absent = run(oneShot.directory, ['init', '--rules', rules]);
+    assert.equal(absent.ok, false); assert.match(String(absent.error), /explicit epoch/);
+    assert.throws(() => readFileSync(oneShot.store.path), { code: 'ENOENT' });
+    assert.equal(run(oneShot.directory, ['init', '--seed', '1701', '--rules', rules, '--clock-epoch', epoch]).ok, true);
+    assert.deepEqual(oneShot.store.snapshot().state, direct.store.snapshot().initial);
+    const oneShotBytes = readFileSync(oneShot.store.path, 'utf8');
+    assert.equal(run(oneShot.directory, ['init', '--rules', 'settlement-foundations-2', '--clock-epoch', epoch]).ok, false);
+    assert.equal(readFileSync(oneShot.store.path, 'utf8'), oneShotBytes);
+  } finally { direct.cleanup(); protocolItem.cleanup(); oneShot.cleanup(); }
 });

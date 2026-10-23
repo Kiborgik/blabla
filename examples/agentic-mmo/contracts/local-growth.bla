@@ -1,4 +1,3 @@
-state preserved: bool
 state eligible_funded_growth: bool
 state grew: bool
 state exact_local_capacity: bool
@@ -12,16 +11,12 @@ state correct_founded_capacity: bool
 state refused: bool
 state no_effects: bool
 
-action adopt_local_housing()
 action complete_granary()
 action grow_with_food()
 action allocate_later_resident()
 action found_housed_town()
 action refuse_invalid_growth()
 
-when adopt_local_housing {
-    expect "local-housing-adoption-preserves-world": after.preserved and after.conserved_old_people
-}
 when complete_granary {
     expect "granary-completion-adds-no-people": after.exact_local_capacity and after.completion_no_population
 }

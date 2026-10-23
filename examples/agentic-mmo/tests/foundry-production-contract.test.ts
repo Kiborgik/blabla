@@ -22,7 +22,7 @@ await test('foundry all nine draft actions expose actual transition-derived pred
     for (const field of fields) assert.equal(Reflect.get(probe.observe(), field), true, `${action}: ${field}`);
     context.diagnostic(`${action}: ${Math.round(performance.now() - start)}ms`);
   }
-  assert.equal(probe.observe().replayed_frames, 686);
+  const replayed = probe.snapshot().state; assert.ok(replayed); assert.equal(probe.observe().replayed_frames, replayed.revision);
 });
 
 await test('foundry probe retains concrete operation and later shipment separately', () => {
@@ -31,9 +31,10 @@ await test('foundry probe retains concrete operation and later shipment separate
   assert.deepEqual(receipt.strategicPaid, { iron: 1 }); assert.deepEqual(receipt.paid, { energy: 2 }); assert.equal(receipt.residents?.allocated, 3); assert.equal(receipt.produced.materials, 13.2);
   assert.equal(probe.observe().shipment_resumed, false);
   probe.call('resume_iron_exchange'); const resumed = probe.snapshot(); assert.ok(resumed.state && resumed.before && resumed.result);
-  const prior = resumed.before.routes.find(route => route.id === 'route-338')?.agreement; const after = resumed.state.routes.find(route => route.id === 'route-338')?.agreement; assert.ok(prior && after);
-  assert.equal(after.deliveryCount, prior.deliveryCount + 1); assert.equal(after.lastDeliveryRound, 589); assert.deepEqual(after.terms, prior.terms);
-  assert.ok(resumed.result.events.some(event => event.strategicShipment?.routeId === 'route-338' && event.strategicShipment.proposerSent.iron === 2));
+  const route = resumed.before.routes.find(candidate => candidate.agreement?.terms.recipeId === 'iron-for-food'); assert.ok(route);
+  const prior = route.agreement; const after = resumed.state.routes.find(candidate => candidate.id === route.id)?.agreement; assert.ok(prior && after);
+  assert.equal(after.deliveryCount, prior.deliveryCount + 1); assert.equal(after.lastDeliveryRound, prior.nextDeliveryRound); assert.equal(after.lastDeliveryRound, resumed.state.round); assert.deepEqual(after.terms, prior.terms);
+  assert.ok(resumed.result.events.some(event => event.strategicShipment?.routeId === route.id && event.strategicShipment.proposerSent.iron === 2));
 });
 
 await test('foundry shortage and deferred extraction controls remain explicit synthetic states', () => {

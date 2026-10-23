@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { BUILDINGS, ECONOMY_RULES } from '../core/content.ts';
+import { buildingBaseProduction } from '../core/simulation/districts.ts';
+import { siteProduction } from '../core/simulation/sites.ts';
 import { createWorld } from '../core/engine.ts';
 import { isWorldState } from '../core/validation.ts';
-import type { LocalPowerBeatReceipt, WorldState } from '../core/types.ts';
+import type { LocalPowerBeatReceipt, Resources, WorldState } from '../core/types.ts';
 import { decodeHistorySnapshot } from '../server/snapshot-codec.ts';
 import { poweredScienceJourney } from './fixtures/powered-science-journey.ts';
 
@@ -33,12 +36,11 @@ void test('old releases reject new powered-Science research targets and completi
 void test('every genuine powered-Science transition and older Power participant subset remains valid', async () => {
   const path = story();
   for (const step of path.steps) assert.ok(isWorldState(step.result.state), `legal frame ${step.result.state.revision}`);
-  for (const state of [path.beforeRelease, path.adopted, path.sanitationSelected, path.sanitationCompleted, path.chemistrySelected, path.chemistryCompleted, path.labStarted, path.labCompleted, path.productive, path.pruned, path.replacedByFactory])
+  for (const state of [path.prepared, path.sanitationSelected, path.sanitationCompleted, path.chemistrySelected, path.chemistryCompleted, path.labStarted, path.labCompleted, path.productive, path.pruned, path.replacedByFactory])
     assert.deepEqual(await decodeHistorySnapshot(JSON.stringify(state)), state);
   assert.equal(town(path.labCompleted).buildingOperations?.['research-lab']?.lastResult, null);
   assert.ok(!required(town(path.labCompleted).localPower).lastBeat?.operations.some(operation => operation.buildingId === 'research-lab'));
-  assert.deepEqual(path.adopted.cities.map(city => city.localPower), path.beforeRelease.cities.map(city => city.localPower));
-  assert.equal(path.state.year, path.beforeRelease.year); assert.equal(path.state.clockTicks, path.beforeRelease.clockTicks);
+  assert.equal(path.state.year, path.initial.year); assert.equal(path.state.clockTicks, path.initial.clockTicks);
 });
 
 void test('new research completion prefixes and active targets reject corrupt or unreleased history after pruning', () => {
@@ -81,10 +83,6 @@ void test('Lab commitment snapshots preserve exact payment, local Campus and act
   delete actor(historical).lastResearchCompletion;
   assert.ok(isWorldState(historical), 'installed historical Lab does not impose current owner research admission');
   corrupt(historical, copy => { copy.unlockedFeatures = copy.unlockedFeatures.filter(id => id !== 'powered-science'); }, 'Lab release refusal independent of research references');
-  const eventOnly = structuredClone(path.beforeRelease);
-  const event = required(eventOnly.events.find(value => value.type === 'building-operation' && !value.industrialFoundry));
-  event.detail = `${path.cityId}/research-lab at strategic round ${event.round}`;
-  assert.equal(isWorldState(eventOnly), false, 'standalone retained Lab operation on old release');
 });
 
 void test('pruned Lab receipts retain exact Science recipe, full atomic payments and historical identity', () => {
@@ -93,7 +91,17 @@ void test('pruned Lab receipts retain exact Science recipe, full atomic payments
   const receipt = proof(state); const operation = lab(receipt);
   assert.equal(receipt.generated, 8); assert.equal(receipt.consumed, 6); assert.equal(receipt.expired, 2);
   assert.deepEqual(operation.recipe.inputs, { credits: 2 }); assert.deepEqual(operation.recipe.baseOutputs, { science: 12 });
-  assert.equal(operation.result.produced.science, 23.4); assert.equal(operation.result.residents.allocated, 3);
+  const path = story(); const step = path.steps.find(candidate => candidate.result.state.revision === path.productive.revision); assert.ok(step?.input.kind === 'strategy');
+  const opening = town(step.before); const tile = step.before.tiles.find(candidate => candidate.id === opening.tileId); const campus = BUILDINGS.find(building => building.id === 'campus'); assert.ok(tile && campus);
+  assert.deepEqual(opening.buildings.toSorted(), ['campus', 'coal-plant', 'factory', 'industrial-zone', 'library', 'research-lab']);
+  assert.equal(opening.buildingOperations?.library?.enabled, false); assert.deepEqual(step.before.wonders, {}); assert.equal(actor(step.before).government?.active, null);
+  const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[opening.focus];
+  const raw = ECONOMY_RULES.baseProduction.science + (focus.science ?? 0) + (siteProduction(step.before, tile).science ?? 0) + (buildingBaseProduction(step.before, opening, campus).science ?? 0);
+  const productivity = (0.5 + opening.wellbeing / 100) * (1 - opening.damage / 100) * (1 + opening.infrastructure / 10);
+  const rounded = (value: number): number => Math.round(value * 100) / 100;
+  const science = rounded(rounded((raw + 12) * productivity) - rounded(raw * productivity));
+  assert.deepEqual(receipt, proof(path.productive)); assert.deepEqual(receipt, step.result.events.find(event => event.id === receipt.eventId)?.localPower);
+  assert.equal(operation.result.produced.science, science); assert.equal(operation.result.residents.allocated, 3);
   const changes: Array<(copy: WorldState) => void> = [
     copy => { lab(proof(copy)).recipe.baseOutputs.science = 13; },
     copy => { lab(proof(copy)).result.paid.credits = 1; },

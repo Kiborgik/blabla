@@ -1,22 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CIVICS, GOVERNMENTS } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
+import { applyCommand, catchUpStrategy, createWorld } from '../core/engine.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 
 const epoch = '2026-10-16T00:00:00.000Z';
 const time = (seconds: number) => new Date(Date.parse(epoch) + seconds * 1000).toISOString();
 function released(target = 'settlement-civic-bootstrap-1'): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const release of RELEASES) {
-    if (!release.compatibleFrom.includes(state.releaseId)) continue;
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch });
-    assert.ok(result.ok, result.error); state = result.state;
-    if (state.releaseId === target) break;
-  }
-  assert.equal(state.releaseId, target); return state;
+  return createWorld(1701, epoch, target);
 }
 function act(state: WorldState, action: GameAction): WorldState {
   const seconds = Math.max((state.independentTurns?.strategyTicks ?? 0) * 60 + 20, ((state.independentTurns?.lastActionWindow[4] ?? -1) + 1) * 10);
@@ -38,7 +30,7 @@ function corrupt(state: WorldState, change: (copy: WorldState) => void, label: s
   const copy = structuredClone(state); change(copy); assert.equal(isWorldState(copy), false, label);
 }
 
-test('civic records are absent on old releases and required together only after migration', () => {
+test('civic records are absent without civic rules and required together in the civic configuration', () => {
   const legacy = released('settlement-observatory-1'); const current = released();
   assert.ok(isWorldState(legacy)); assert.ok(isWorldState(current));
   corrupt(legacy, copy => { copy.civilizations[0]!.civics = structuredClone(current.civilizations[0]!.civics!); }, 'old release cannot gain a civic lane');

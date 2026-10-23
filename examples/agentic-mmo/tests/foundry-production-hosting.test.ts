@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy } from '../core/engine.ts';
-import type { GameAction } from '../core/types.ts';
+import { applyCommand, catchUpStrategy } from '../core/engine.ts';
+import type { GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, type CoastalPrefixStep } from './fixtures/coastal-prefix.ts';
 import { foundryProductionOperationJourney } from './fixtures/foundry-production-journey.ts';
@@ -45,7 +46,7 @@ class Fixture {
   constructor() { this.database.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8')); }
   get store() { return new WorldRepository(this.database); }
   async state() { const result = await this.store.read(); assert.ok(result); return result.state; }
-  async initialize() { await this.store.initialize({ seed: 1701, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0)); }
+  async initialize(state: WorldState) { seedHostedWorld(this.database.sql, state); }
   async input(commandId: string, action: GameAction) { return { seat: 1, expectedRevision: (await this.state()).revision, model, commandId, action: { type: 'strategy-action', action } }; }
   send(input: Record<string, unknown>, seconds: number) { return this.store.mutate('action', input, actor, coastalPrefixTime(seconds)); }
   async beat() { const state = await this.state(); const seconds = ((state.independentTurns?.strategyTicks ?? 0) + 1) * 60; return this.store.mutate('strategy-catchup', { expectedRevision: state.revision, commandId: `beat-${state.revision}`, timestamp: coastalPrefixTime(seconds), model }, actor, coastalPrefixTime(seconds)); }
@@ -58,7 +59,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 25);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state; count++;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return count; }
@@ -70,15 +71,14 @@ async function replay(item: Fixture) {
 function stepArguments(step: CoastalPrefixStep, commandId: string): Record<string, unknown> {
   const input = step.input;
   if (input.kind === 'strategy') return { expectedRevision: step.before.revision, timestamp: input.timestamp, model, commandId };
-  if (input.kind === 'release') return { ...input.command, model, commandId };
   return { seat: input.command.seat, expectedRevision: input.command.expectedRevision, action: { type: 'strategy-action', action: input.command.action }, ...(input.command.plan === undefined ? {} : { plan: input.command.plan }), model, commandId };
 }
 function sendStep(item: Fixture, step: CoastalPrefixStep, commandId: string) {
   const input = step.input; const timestamp = input.kind === 'strategy' ? input.timestamp : input.command.timestamp; assert.ok(timestamp);
-  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : input.kind === 'release' ? 'release-apply' : 'action', stepArguments(step, commandId), actor, timestamp);
+  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : 'action', stepArguments(step, commandId), actor, timestamp);
 }
-async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER): Promise<void> {
-  await item.initialize();
+async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER, initial = steps[0]?.before): Promise<void> {
+  assert.ok(initial); await item.initialize(initial);
   for (const [index, step] of steps.entries()) {
     if (step.result.state.revision > through) break;
     await sendStep(item, step, `foundry-step-${index}`); assert.deepEqual(await item.state(), step.result.state); assert.ok(isWorldState(await item.state()));
@@ -96,28 +96,27 @@ function foundryStart() {
   return { value, step, action: step.input.command.action };
 }
 
-await test('foundry real536-frame predecessor persists capacity-blocked consent and refuses unreleased consumer without writes', async context => {
+await test('foundry fresh synthetic prerequisite fixture persists capacity-blocked consent and refuses consumer without researched prerequisites without writes', async context => {
   const previous = prefix(); const item = new Fixture();
   try {
-    assert.equal(previous.steps.length, 536); assert.equal(previous.state.civilizations[previous.seat]?.era, 2);
+    assert.equal(previous.initial.revision, 0); assert.equal(previous.state.revision, previous.steps.length); assert.equal(previous.state.civilizations[previous.seat]?.era, 2);
     assert.equal(previous.state.civilizations[previous.seat]?.strategicResources?.iron, strategicCapacity(previous.state, previous.seat));
     const route = previous.state.routes.find(candidate => candidate.id === previous.routeId); assert.ok(route?.agreement);
     assert.equal(route.agreement.lastAttemptRound, previous.state.round); assert.match(route.agreement.blockedReason ?? '', /storage full/i);
-    await persist(item, previous.steps); const before = item.database.records(); item.reopen();
+    await persist(item, previous.steps, Number.MAX_SAFE_INTEGER, previous.initial); const before = item.database.records(); item.reopen();
     assert.deepEqual(await item.state(), previous.state); assert.equal(await replay(item), previous.steps.length);
-    for (const action of [{ type: 'research', technology: 'military-engineering' }, { type: 'build', project: 'foundry', cityId: previous.cityId }]) {
+    for (const action of [{ type: 'build', project: 'foundry', cityId: previous.cityId }]) {
       await assert.rejects(item.store.mutate('action', { seat: previous.seat, expectedRevision: previous.state.revision, commandId: `unreleased-${JSON.stringify(action)}`, model, action: { type: 'strategy-action', action } }, actor, previous.timestamp));
       assert.deepEqual(item.database.records(), before);
     }
-    context.diagnostic(JSON.stringify({ basis: 'Unedited legal prefix with actual consent and due storage refusal', frames: previous.steps.length, round: previous.state.round, cityId: previous.cityId, route }));
+    context.diagnostic(JSON.stringify({ basis: 'fresh synthetic prerequisite fixture with actual consent and due storage refusal', frames: previous.steps.length, round: previous.state.round, cityId: previous.cityId, route }));
   } finally { item.close(); }
 });
 
 await test('foundry prospective exact paid order and mixed-ledger first operation survive duplicate reopen replay', async context => {
   const value = story(); const item = new Fixture(); const witnesses = new Set([value.started.revision, value.completed.revision, value.operated.revision]);
-  for (const key of ['tiles', 'cities', 'civilizations', 'wonders', 'tileAcquisitions', 'strategicDeposits', 'pastoralSites', 'routes', 'rng', 'clockTicks'] as const) assert.deepEqual(value.journey.adopted[key], value.journey.beforeRelease[key]);
   try {
-    await item.initialize();
+    await item.initialize(value.journey.initial);
     for (const [index, step] of value.journey.steps.entries()) {
       const commandId = `foundry-step-${index}`;
       if (witnesses.has(step.result.state.revision)) {
@@ -155,7 +154,7 @@ await test('foundry prospective exact paid order and mixed-ledger first operatio
 for (const table of ['world_transitions', 'world_receipts']) await test(`foundry prospective ${table} fault rolls back every mixed-ledger beat and exact action receipt`, async () => {
   const value = story(); const item = new Fixture(); const step = value.operationStep; assert.equal(step.input.kind, 'strategy');
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records();
     item.database.sql.exec(`CREATE TRIGGER fail_foundry BEFORE INSERT ON ${table} WHEN NEW.receipt_key = 'strategy-catchup:foundry-operation-fault' BEGIN SELECT RAISE(ABORT, 'synthetic foundry rollback'); END;`);
     await assert.rejects(sendStep(item, step, 'foundry-operation-fault'), /synthetic foundry rollback/); assert.deepEqual(item.database.records(), before);
     item.reopen(); assert.deepEqual(await item.state(), step.before); item.database.sql.exec('DROP TRIGGER fail_foundry');
@@ -168,7 +167,7 @@ for (const table of ['world_transitions', 'world_receipts']) await test(`foundry
 await test('foundry prospective competing exact starts commit one payment with a stale CAS loser', async () => {
   const { value, step } = foundryStart(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records();
     const replies = await Promise.allSettled([sendStep(item, step, 'foundry-race-a'), sendStep(item, step, 'foundry-race-b')]);
     assert.equal(replies.filter(reply => reply.status === 'fulfilled').length, 1);
     const loser = replies.find(reply => reply.status === 'rejected'); assert.ok(loser?.status === 'rejected'); assert.match(String(loser.reason), /stale_revision/);
@@ -180,7 +179,7 @@ await test('foundry prospective competing exact starts commit one payment with a
 await test('foundry prospective foreign wrong-town and forged resource requests refuse candidate upkeep without writes', async () => {
   const { value, step } = foundryStart(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records(); const timestamp = coastalPrefixTime(((step.before.independentTurns?.strategyTicks ?? 0) + 1) * 60);
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records(); const timestamp = coastalPrefixTime(((step.before.independentTurns?.strategyTicks ?? 0) + 1) * 60);
     for (const [index, action] of [
       { type: 'build', project: 'foundry', cityId: 'city-0' },
       { type: 'build', project: 'foundry', cityId: 'missing-town' },
@@ -200,7 +199,7 @@ await test('foundry prospective legal pause preserves prior receipt then records
   assert.deepEqual(value.journey.state.cities.find(city => city.id === cityId)?.buildingOperations?.foundry?.lastResult, historical);
   value.journey.beat();
   try {
-    await persist(item, value.journey.steps); item.reopen(); const state = await item.state();
+    await persist(item, value.journey.steps, Number.MAX_SAFE_INTEGER, value.journey.initial); item.reopen(); const state = await item.state();
     const result = state.cities.find(city => city.id === cityId)?.buildingOperations?.foundry?.lastResult; assert.ok(result);
     assert.equal(result.status, 'paused'); assert.deepEqual(result.paid, {}); assert.deepEqual(result.produced, {}); assert.equal(result.residents?.allocated, 0);
     assert.ok('strategicPaid' in result && 'strategicShortages' in result); assert.deepEqual(result.strategicPaid, {}); assert.deepEqual(result.strategicShortages, []);
@@ -225,7 +224,7 @@ await test('foundry prospective consumption permits a real later due gross shipm
   assert.deepEqual(event.strategicShipment.proposerSent, { iron: 2 }); assert.deepEqual(event.strategicShipment.recipientSent, {});
   assert.ok((deliveryStep.before.civilizations[journey.seat]?.strategicResources?.iron ?? 0) < strategicCapacity(deliveryStep.before, journey.seat));
   try {
-    await persist(item, journey.steps); const committed = item.database.records(); item.reopen(); assert.deepEqual(await item.state(), journey.state);
+    await persist(item, journey.steps, Number.MAX_SAFE_INTEGER, journey.initial); const committed = item.database.records(); item.reopen(); assert.deepEqual(await item.state(), journey.state);
     const index = journey.steps.indexOf(deliveryStep); const duplicate = await sendStep(item, deliveryStep, `foundry-step-${index}`);
     assert.equal(duplicate.duplicate, true); assert.deepEqual(item.database.records(), committed); assert.equal(await replay(item), journey.steps.length);
     const publicPage = await item.store.boundedChronicle({ format: 'recorded-choices-v1', after: deliveryStep.before.revision, through: deliveryStep.result.state.revision, limit: 20 });
@@ -272,7 +271,7 @@ await test('foundry prospective canonical strategic receipts reject malformed ve
 await test('foundry prospective public strict page and detail preserve corruption failure with zero repair writes', async () => {
   const value = story(); const item = new Fixture(); const step = value.operationStep;
   try {
-    await persist(item, value.journey.steps);
+    await persist(item, value.journey.steps, Number.MAX_SAFE_INTEGER, value.journey.initial);
     const event = step.result.events.find(candidate => candidate.type === 'building-operation' && candidate.detail.startsWith(`${value.journey.cityId}/foundry `)); assert.ok(event);
     const altered = step.result.events.map(candidate => candidate.id === event.id ? { ...candidate, unknownStrategicReceipt: true } : candidate);
     item.database.sql.prepare('UPDATE world_transitions SET events_json=? WHERE end_revision=?').run(JSON.stringify(altered), value.operated.revision); const before = item.database.records();
@@ -290,7 +289,7 @@ await test('foundry operated strategic receipt requires a positive retained debi
     Object.assign(receipt, { strategicPaid: payment });
     assert.equal(isWorldState(state), (payment.iron ?? 0) > 0, JSON.stringify(payment));
   }
-  assert.ok(isWorldState(value.journey.beforeRelease));
+  assert.ok(isWorldState(value.journey.prepared));
 });
 
 await test('foundry prospective historical strategic receipts retain recorded amounts without mutable tuning or current-stock equality', () => {
@@ -302,7 +301,7 @@ await test('foundry prospective historical strategic receipts retain recorded am
   Object.assign(receipt, { status: 'blocked', paid: {}, produced: {}, shortages: [], strategicPaid: {}, strategicShortages: [{ resource: 'iron', required: 9, available: 3 }], residents: { ruleVersion: 1, openingPopulation: 6, communityReserve: 3, required: 3, available: 3, allocated: 0 } });
   assert.ok(isWorldState(blocked));
   const ungated = structuredClone(blocked); ungated.unlockedFeatures = ungated.unlockedFeatures.filter(feature => feature !== 'foundry-production'); assert.equal(isWorldState(ungated), false);
-  assert.ok(isWorldState(value.journey.beforeRelease));
+  assert.ok(isWorldState(value.journey.prepared));
 });
 
 await test('foundry prospective synthetic iron energy and resident scarcity persist no partial debit after SQLite restart', async context => {
@@ -317,7 +316,7 @@ await test('foundry prospective synthetic iron energy and resident scarcity pers
     assert.deepEqual(expected.state.civilizations, withoutFoundry.state.civilizations);
     const item = new Fixture();
     try {
-      await item.initialize(); item.database.sql.prepare('UPDATE world_state SET revision=?, state_json=?').run(state.revision, JSON.stringify(state));
+      await item.initialize(story().journey.initial); item.database.sql.prepare('UPDATE world_state SET revision=?, state_json=?').run(state.revision, JSON.stringify(state));
       const input = { expectedRevision: state.revision, commandId: `synthetic-foundry-${missing}`, timestamp, model };
       const reply = await item.store.mutate('strategy-catchup', input, actor, timestamp); assert.deepEqual(await item.state(), expected.state);
       const result = expected.state.cities.find(candidate => candidate.id === city.id)?.buildingOperations?.foundry?.lastResult; assert.ok(result);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BUILDINGS } from '../core/content.ts';
+import { BUILDINGS, ECONOMY_RULES } from '../core/content.ts';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
 import { districtAdjacencyFacts } from '../core/simulation/districts.ts';
 import { projectWorld } from '../web/live-world.ts';
@@ -9,7 +9,7 @@ import { districtAdjacencySummary, districtMark, districtLabel, districtParts, D
 import { SITE_MARK_PATHS } from '../visuals/strategic-resource-visuals.ts';
 import { operationVisual } from '../visuals/operation-visuals.ts';
 import { cultureProductionOperationJourney } from './fixtures/culture-production-journey.ts';
-import type { WorldState } from '../core/types.ts';
+import type { Resources, WorldState } from '../core/types.ts';
 
 const legal = cultureProductionOperationJourney();
 const town = (state: WorldState) => { const value = state.cities.find(city => city.id === legal.journey.cityId); assert.ok(value); return value; };
@@ -68,9 +68,22 @@ await test('culture has its own shared semantic site mark rather than a Campus f
 });
 await test('legal Printing completion and later work preserve actual inputs, residents and gross Culture', () => {
   const completed = operationVisual(town(legal.printingCompleted).buildingOperations?.['printing-house']); assert.equal(completed.last, null);
+  const step = legal.journey.steps.find(candidate => candidate.result.state.revision === legal.operated.revision); assert.ok(step?.input.kind === 'strategy');
+  const opening = town(step.before); const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[opening.focus];
+  assert.deepEqual(opening.buildings.toSorted(), ['campus', 'library', 'printing-house', 'theater-square']);
+  assert.equal(step.before.unlockedFeatures.includes('civic-bootstrap'), false);
+  const theater = BUILDINGS.find(building => building.id === 'theater-square'); assert.ok(theater);
+  const adjacency = districtAdjacencyFacts(step.before, theater, legal.journey.theaterTileId); assert.ok(adjacency);
+  assert.deepEqual(adjacency.tileIds, [legal.journey.wonderTileId]); assert.equal(adjacency.bonus, 2);
+  const raw = ECONOMY_RULES.baseProduction.culture + (focus.culture ?? 0) + 2 + adjacency.bonus;
+  const productivity = (0.5 + opening.wellbeing / 100) * (1 - opening.damage / 100) * (1 + opening.infrastructure / 10);
+  const rounded = (value: number): number => Math.round(value * 100) / 100;
+  const culture = rounded(rounded((raw + 6) * productivity) - rounded(raw * productivity));
+  const retained = town(legal.operated).buildingOperations?.['printing-house']?.lastResult; assert.ok(retained);
+  assert.equal(retained.produced.culture, culture);
   const result = operationVisual(town(legal.operated).buildingOperations?.['printing-house']);
   assert.deepEqual(result.last?.paid, [{ resource: 'materials', label: 'Materials', amount: 1 }]);
-  assert.deepEqual(result.last?.produced, [{ resource: 'culture', label: 'Culture', amount: 11.7 }]); assert.equal(result.last?.residents?.allocated, 3);
+  assert.deepEqual(result.last?.produced, [{ resource: 'culture', label: 'Culture', amount: culture }]); assert.equal(result.last?.residents?.allocated, 3);
   legal.journey.act({ type: 'set-building-operation', cityId: legal.journey.cityId, buildingId: 'printing-house', enabled: false });
   const paused = operationVisual(town(legal.journey.state).buildingOperations?.['printing-house']); assert.equal(paused.current, 'Paused'); assert.deepEqual(paused.last, result.last);
 });

@@ -26,3 +26,7 @@ Existing authorization denials remain exact held intents; a changed command ID, 
 ## Publication
 
 Publish only game code, tests, contracts, assets and useful project documentation. Keep internal reviews, hourly status, handoffs and raw verification evidence in local BlaBla records or scratch. A source acceptance, deployment and actual civilization outcome are distinct; record their evidence without adding report-only files to Git.
+
+## NO MIGRATIONS BEFORE RELEASE
+
+New game versions may start fresh. Do not add world/save upgrade machinery in the browser, CLI or host, or a hidden state-in/state-out migration helper. Preserve same-version atomic save, deterministic replay and restart. Keep whole-history procedural content ahead of legacy compatibility. Reconsider migrations after release; do not delete external stored data.

@@ -44,7 +44,7 @@ export class LocalGrowthProbe {
 
   private select(state: WorldState, operation: string): void {
     this.state = structuredClone(state); this.before = null; this.result = null; this.control = null;
-    this.operation = operation; this.provenance = 'Legal immutable engine journey from createWorld; no patched population stocks or era';
+    this.operation = operation; this.provenance = 'Synthetic named fresh-rule prerequisites followed by actual paid growth and construction transitions';
   }
 
   snapshot() { return structuredClone({ state: this.state, before: this.before, result: this.result, control: this.control, operation: this.operation, provenance: this.provenance }); }
@@ -64,12 +64,8 @@ export class LocalGrowthProbe {
   }
 
   call(action: string): void {
-    if (!['adopt_local_housing', 'complete_granary', 'grow_with_food', 'allocate_later_resident', 'found_housed_town', 'refuse_invalid_growth'].includes(action)) throw new RangeError(`Unknown local-growth action ${action}`);
+    if (!['complete_granary', 'grow_with_food', 'allocate_later_resident', 'found_housed_town', 'refuse_invalid_growth'].includes(action)) throw new RangeError(`Unknown local-growth action ${action}`);
     const basis = this.legal();
-    if (action === 'adopt_local_housing') {
-      this.select(basis.journey.adopted, action); this.before = structuredClone(basis.journey.beforeRelease);
-      return;
-    }
     if (action === 'complete_granary') {
       this.select(basis.completed, action); this.before = structuredClone(basis.completionStep.before); this.result = structuredClone(basis.completionStep.result);
       return;
@@ -80,7 +76,7 @@ export class LocalGrowthProbe {
       return;
     }
     if (action === 'found_housed_town') {
-      this.select(basis.journey.adopted, action); assert.ok(this.state);
+      this.select(basis.journey.prepared, action); assert.ok(this.state);
       const timestamp = coastalPrefixTime((this.state.independentTurns?.strategyTicks ?? 0) * 60 + 30);
       const option = legalActions(this.state, 0, timestamp).find(candidate => candidate.action.type === 'settle');
       assert.ok(option, 'Actual legal land founding option required');
@@ -128,12 +124,11 @@ export class LocalGrowthProbe {
       initialized: state !== null, provenance: this.provenance,
       control_provenance: this.control ? 'Synthetic detached capacity-only growth suppression; all actual input stocks and other mechanics retained' : null,
       population: city?.population ?? 0, capacity: facts?.capacity ?? 0,
-      preserved: this.operation === 'adopt_local_housing' && !!state && !!before && equal(state.civilizations, before.civilizations) && equal(state.tiles, before.tiles) && equal(state.routes, before.routes) && equal(state.independentTurns, before.independentTurns) && state.round === before.round && state.year === before.year && state.cities.every(current => { const { housing: _housing, ...retained } = current; return equal(retained, before.cities.find(previous => previous.id === current.id)) && current.housing?.baseCapacity === Math.max(20, current.population); }),
       eligible_funded_growth: !!city && !!facts && city.population < facts.capacity && city.wellbeing >= ECONOMY_RULES.growth.wellbeing && city.damage === 0 && funds >= conservativeFood,
       grew: !!growth && !!city && !!oldCity && city.population === oldCity.population + 1,
       exact_local_capacity: exactCapacity && (!growth || growth.capacity === oldFacts?.capacity),
       paid_exact_food: !!growth && !!oldFacts && !!actualResources && !!controlResources && growth.foodPaid === oldFacts.nextGrowthFoodCost && RESOURCE_IDS.every(resource => Math.abs(controlResources[resource] - actualResources[resource] - (resource === 'food' ? growth.foodPaid : 0)) < 1e-8),
-      conserved_old_people: !!state && !!before && people(state) === people(before) && (this.operation !== 'adopt_local_housing' || state.cities.every(current => current.population === before.cities.find(previous => previous.id === current.id)?.population)),
+      conserved_old_people: !!state && !!before && people(state) === people(before),
       completion_no_population: this.operation === 'complete_granary' && !!city && !!oldCity && !oldCity.buildings.includes('granary') && city.buildings.includes('granary') && city.population === oldCity.population && !this.result?.events.some(event => event.type === 'population-growth' && event.tileId === city.tileId),
       growth_uses_old_opening_allocation: !!growth && !!opening && !!operation && equal(operation.residents, town(opening).buildingOperations?.university?.lastResult?.residents) && operation.residents?.openingPopulation === oldCity?.population,
       next_opening_supports_recipe: this.operation === 'allocate_later_resident' && !!oldCity && oldCity.population === 21 && operation?.status === 'operated' && operation.residents?.openingPopulation === 21 && operation.residents.allocated === 3 && (operation.produced.science ?? 0) > 0,

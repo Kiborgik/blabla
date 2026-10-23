@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { RESOURCE_IDS, TRADE_RECIPES, TURN_RULES } from '../core/content.ts';
 import { createLandTransportPlanner, landTransportBlock, landTransportCadence } from '../core/simulation/transport.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -15,14 +15,8 @@ function accepted(result: TransitionResult): WorldState {
   return result.state;
 }
 
-function release(state: WorldState, targetReleaseId: string): WorldState {
-  return accepted(applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: atRound(state.round) }));
-}
-
 function baseWorld(): WorldState {
-  let state = createWorld(1701, EPOCH);
-  for (const id of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1']) state = release(state, id);
-  return state;
+  return createWorld(1701, EPOCH, 'settlement-land-transport-1');
 }
 
 function command(state: WorldState, seat: number, action: GameAction): TransitionResult {
@@ -49,14 +43,14 @@ export class LandTransportProbes {
   private control: TransitionResult | null = null;
   private operation: 'quote' | 'consent' | 'resolve' | null = null;
   private synthetic = '';
-  private legacy: { before: WorldState; adopted: WorldState; accepted: WorldState; replay: WorldState; historical: WorldState } | null = null;
+  private restarted: { before: WorldState; restored: WorldState; accepted: WorldState; replay: WorldState } | null = null;
   private preview: { state: WorldState; control: TransitionResult } | null = null;
 
   reset(): void {
     this.state = null;
     this.clear();
     this.synthetic = '';
-    this.legacy = null;
+    this.restarted = null;
   }
 
   private clear(): void {
@@ -69,7 +63,7 @@ export class LandTransportProbes {
 
   private initial(): WorldState {
     this.baseline ??= baseWorld();
-    return release(structuredClone(this.baseline), 'settlement-land-transport-1');
+    return structuredClone(this.baseline);
   }
 
   prepare(kind: number): void {
@@ -121,7 +115,7 @@ export class LandTransportProbes {
   }
 
   snapshot() {
-    return structuredClone({ state: this.state, before: this.before, result: this.result, control: this.control, synthetic: this.synthetic, legacy: this.legacy });
+    return structuredClone({ state: this.state, before: this.before, result: this.result, control: this.control, synthetic: this.synthetic, restarted: this.restarted });
   }
 
   quote(): void {
@@ -167,19 +161,17 @@ export class LandTransportProbes {
     this.operation = 'resolve';
   }
 
-  replayAbstract(): void {
+  restartConsented(): void {
     this.baseline ??= baseWorld();
     let state = accepted(catchUpStrategy(structuredClone(this.baseline), atRound(2)));
     state = accepted(command(state, 2, proposal()));
     const before = structuredClone(state);
-    const adopted = release(state, 'settlement-land-transport-1');
-    const offer = offerIn(adopted);
+    const restored: unknown = JSON.parse(JSON.stringify(before));
+    assert.ok(isWorldState(restored));
+    const offer = offerIn(before);
     assert.ok(offer);
     const action: GameAction = { type: 'respond-trade', offerId: offer.id, accept: true };
-    const next = accepted(command(adopted, 3, action));
-    const restored: unknown = JSON.parse(JSON.stringify(adopted));
-    assert.ok(isWorldState(restored));
-    this.legacy = { before, adopted, accepted: next, replay: accepted(command(restored, 3, action)), historical: accepted(command(before, 3, action)) };
+    this.restarted = { before, restored, accepted: accepted(command(before, 3, action)), replay: accepted(command(restored, 3, action)) };
   }
 
   observe() {
@@ -214,9 +206,9 @@ export class LandTransportProbes {
         : owner.id === route.partner ? [[terms.recipientCargo, -1], [terms.recipientUpkeep, -1], [terms.proposerCargo, 1], [terms.recipientYield, 1]] : [];
       return RESOURCE_IDS.every(resource => Math.abs(owner.resources[resource] - baseline.resources[resource] - vectors.reduce((sum, [vector, sign]) => sum + sign * (vector[resource] ?? 0), 0)) < 1e-8);
     });
-    const legacy = this.legacy;
-    const oldOffer = legacy ? offerIn(legacy.before) : undefined;
-    const oldAgreement = legacy?.accepted.routes[0]?.agreement;
+    const restarted = this.restarted;
+    const retainedOffer = restarted ? offerIn(restarted.before) : undefined;
+    const retainedAgreement = restarted?.accepted.routes[0]?.agreement;
     return {
       land_initialized: state !== null,
       land_quote_valid: valid,
@@ -231,7 +223,7 @@ export class LandTransportProbes {
       land_cadence_exact: quote?.mode === 'land' && !!recipe && offer?.terms.cadenceRounds === landTransportCadence(recipe.terms.cadenceRounds, quote),
       land_payment_exact: payment,
       land_refusal_unchanged: this.operation === 'resolve' ? !!state && !!control && resourcesEqual(state, control.state) : !!this.result && !this.result.ok && isDeepStrictEqual(this.result.state, this.before) && this.result.events.length === 0,
-      land_legacy_preserved: !!legacy && !!oldOffer && !!oldAgreement && oldOffer.terms.transport === undefined && isDeepStrictEqual(legacy.before.tradeOffers, legacy.adopted.tradeOffers) && isDeepStrictEqual(legacy.before.routes, legacy.adopted.routes) && isDeepStrictEqual(oldAgreement.terms, oldOffer.terms) && isDeepStrictEqual(oldAgreement, legacy.historical.routes[0]?.agreement) && isDeepStrictEqual(legacy.accepted, legacy.replay),
+      land_restart_preserved: !!restarted && !!retainedOffer && !!retainedAgreement && retainedOffer.terms.transport?.mode === 'land' && isDeepStrictEqual(restarted.before, restarted.restored) && isDeepStrictEqual(retainedAgreement.terms, retainedOffer.terms) && retainedAgreement.nextDeliveryRound === retainedAgreement.acceptedRound + retainedOffer.terms.cadenceRounds && isDeepStrictEqual(restarted.accepted, restarted.replay),
     };
   }
 }

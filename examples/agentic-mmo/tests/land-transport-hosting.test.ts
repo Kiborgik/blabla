@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld } from '../core/engine.ts';
 import { RESOURCE_IDS } from '../core/content.ts';
 import type { GameAction, TradeAgreement, TradeOffer, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -14,7 +14,6 @@ import { createWorker } from '../server/worker.ts';
 const epoch = '2026-10-16T00:00:00.000Z';
 const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1000).toISOString();
 const actor = 'synthetic-land-transport-owner';
-const releases = ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1'];
 
 function object(value: unknown): Record<string, unknown> {
   assert.ok(typeof value === 'object' && value !== null && !Array.isArray(value));
@@ -33,21 +32,15 @@ function pair(state: WorldState): { offer: TradeOffer; agreement: TradeAgreement
 }
 
 function quotedFixture(): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const targetReleaseId of releases.slice(0, -1)) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+  let state = createWorld(1701, epoch, 'settlement-land-transport-1');
+  for (const tile of state.tiles) tile.terrain = 'grassland';
   const proposed = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: epoch, action: proposal() });
   assert.equal(proposed.ok, true, proposed.error);
   const offer = proposed.state.tradeOffers?.[0];
   assert.ok(offer);
   const accepted = applyCommand(proposed.state, { seat: 1, expectedRevision: proposed.state.revision, timestamp: epoch, action: { type: 'respond-trade', offerId: offer.id, accept: true } });
   assert.equal(accepted.ok, true, accepted.error);
-  const upgraded = applyRelease(accepted.state, { expectedRevision: accepted.state.revision, expectedFromReleaseId: accepted.state.releaseId, targetReleaseId: 'settlement-land-transport-1', timestamp: epoch });
-  assert.equal(upgraded.ok, true, upgraded.error);
-  state = upgraded.state;
+  state = accepted.state;
   const quote = { mode: 'land' as const, ruleVersion: 1 as const, tileIds: [57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 48], edges: 10 };
   for (const tile of state.tiles) tile.terrain = 'grassland';
   const records = pair(state);
@@ -192,12 +185,7 @@ await test('quoted receipt terms remain valid after catalogue-independent cadenc
 });
 
 async function online(item: ReturnType<typeof fixture>, land = true): Promise<void> {
-  await item.repository.initialize({ seed: 1701, clockEpoch: epoch, commandId: 'synthetic-land-initialize' }, actor, epoch);
-  for (const targetReleaseId of land ? releases : releases.slice(0, -1)) {
-    const current = await item.repository.read();
-    assert.ok(current);
-    await item.repository.mutate('release-apply', { expectedRevision: current.state.revision, expectedFromReleaseId: current.state.releaseId, targetReleaseId, commandId: `synthetic-${targetReleaseId}`, model: 'synthetic-land-host-fixture' }, actor, epoch);
-  }
+  await item.repository.initialize({ seed: 1701, clockEpoch: epoch, registeredRulesId: land ? 'settlement-land-transport-1' : 'settlement-endpoints-1', commandId: 'synthetic-land-initialize' }, actor, epoch);
 }
 
 async function actionInput(item: ReturnType<typeof fixture>, seat: number, action: GameAction, commandId: string) {
@@ -236,8 +224,7 @@ await test('hosted geographic consent snapshots a real path and acceptance-relat
     } finally { restarted.sql.close(); }
     let replayed = current.initial;
     for (const entry of (await item.repository.history()).entries) {
-      const result = entry.transition.kind === 'release-apply' ? applyRelease(replayed, entry.transition.command)
-        : entry.transition.kind === 'action' ? applyCommand(replayed, entry.transition.command)
+      const result = entry.transition.kind === 'action' ? applyCommand(replayed, entry.transition.command)
           : entry.transition.kind === 'strategy-catchup' ? catchUpStrategy(replayed, entry.transition.timestamp) : null;
       assert.ok(result?.ok);
       assert.deepEqual(result.state, entry.state);
@@ -410,7 +397,7 @@ await test('malformed archived quote fails history explicitly while current worl
   } finally { item.close(); }
 });
 
-await test('an abstract agreement accepted before the geographic release keeps its global schedule through replay', async () => {
+await test('a fresh abstract agreement keeps its global schedule when migration is refused and through exact replay', async () => {
   const item = fixture();
   try {
     await online(item, false);
@@ -426,7 +413,9 @@ await test('an abstract agreement accepted before the geographic release keeps i
     const accepted = await item.repository.read();
     assert.ok(accepted);
     assert.equal(pair(accepted.state).agreement.nextDeliveryRound, 4);
-    await item.repository.mutate('release-apply', { expectedRevision: accepted.state.revision, expectedFromReleaseId: accepted.state.releaseId, targetReleaseId: 'settlement-land-transport-1', commandId: 'synthetic-grandfather-upgrade', model: 'synthetic-land-host-fixture' }, actor, at(60));
+    const beforeRefusal = item.database.records();
+    await assert.rejects(item.repository.mutate('release-apply', { expectedRevision: accepted.state.revision, expectedFromReleaseId: accepted.state.releaseId, targetReleaseId: 'settlement-land-transport-1', commandId: 'synthetic-refused-migration', model: 'synthetic-land-host-fixture' }, actor, at(60)), /pre_release_migration_disabled/);
+    assert.deepEqual(item.database.records(), beforeRefusal);
     const upgraded = await item.repository.read();
     assert.ok(upgraded);
     assert.deepEqual(upgraded.state.routes, accepted.state.routes);
@@ -439,8 +428,7 @@ await test('an abstract agreement accepted before the geographic release keeps i
     assert.equal(Object.hasOwn(pair(after.state).agreement.terms, 'transport'), false);
     let replayed = after.initial;
     for (const entry of (await item.repository.history()).entries) {
-      const result = entry.transition.kind === 'release-apply' ? applyRelease(replayed, entry.transition.command)
-        : entry.transition.kind === 'action' ? applyCommand(replayed, entry.transition.command)
+      const result = entry.transition.kind === 'action' ? applyCommand(replayed, entry.transition.command)
           : entry.transition.kind === 'strategy-catchup' ? catchUpStrategy(replayed, entry.transition.timestamp) : null;
       assert.ok(result?.ok);
       assert.deepEqual(result.state, entry.state);

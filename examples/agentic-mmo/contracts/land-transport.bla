@@ -5,7 +5,7 @@ state land_attempt_due: bool
 state land_last_attempt_due: bool
 state land_delivered: bool
 state land_refusal_unchanged: bool
-state land_legacy_preserved: bool
+state land_restart_preserved: bool
 state land_cadence_exact: bool
 state land_payment_exact: bool
 state land_consent_eligible: bool
@@ -18,7 +18,7 @@ action funded_due_land_fixture()
 action quote_land_exchange()
 action consent_land_exchange()
 action resolve_land_exchange()
-action replay_abstract_exchange()
+action restart_consented_exchange()
 when eligible_land_consent_fixture {
     expect "eligible-consent-fixture-is-reachable": after.land_consent_eligible and after.land_quote_valid
 }
@@ -40,6 +40,6 @@ when resolve_land_exchange {
     expect "blocked-geographic-exchange-spends-nothing": after.land_delivered or after.land_refusal_unchanged
     expect "delivered-geographic-exchange-pays-exactly": not after.land_delivered or after.land_payment_exact
 }
-when replay_abstract_exchange {
-    expect "older-abstract-terms-and-schedule-survive": after.land_legacy_preserved
+when restart_consented_exchange {
+    expect "consented-terms-and-schedule-survive-restart": after.land_restart_preserved
 }

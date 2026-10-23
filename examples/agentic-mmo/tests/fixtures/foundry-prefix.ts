@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import { legalActions } from '../../core/engine.ts';
 import { strategicCapacity } from '../../core/simulation/metals.ts';
-import { cultureProductionJourney } from './culture-production-journey.ts';
+import { freshFixtureJourney, syntheticInstitution, syntheticTechnologies } from './coastal-prefix.ts';
 import { waterLandTown } from './water-land-journey.ts';
 
 export function foundryPrefix() {
-  const { journey } = cultureProductionJourney(); const seat = 1; const cityId = 'city-1'; const donorSeat = 0; const donorCityId = 'city-0'; const mineTileId = 58;
+  const seat = 1; const cityId = 'city-1'; const donorSeat = 0; const donorCityId = 'city-0'; const mineTileId = 58;
+  const journey = freshFixtureJourney('settlement-foundry-1', state => {
+    state.calendarMilestones = ['first-harvest', 'roads-between-peoples', 'rise-of-states', 'connected-world'];
+    for (const actorId of [0, 1]) {
+      const actor = state.civilizations[actorId]; const city = state.cities[actorId]; assert.ok(actor && city);
+      actor.era = 2; actor.resources = { food: 120, materials: 100, credits: 100, energy: 60, culture: 0, science: 0 }; city.population = 16;
+      syntheticTechnologies(state, actorId, ['currency', 'bronze-working']);
+      syntheticInstitution(state, city.id, 'campus', actorId === 0 ? 39 : undefined); syntheticInstitution(state, city.id, 'library');
+    }
+    syntheticTechnologies(state, seat, ['apprenticeship', 'construction', 'machinery']);
+  }, 'Synthetic era, stocks, residents, prerequisite learning and Campus/Library sites; Mine extraction, consenting iron exchange and Industrial zone construction are real');
   journey.research('bronze-working');
   journey.act({ type: 'improve', cityId: donorCityId, tileId: mineTileId, improvementId: 'mine' });
   journey.until(() => !!waterLandTown(journey.state, donorCityId).improvements?.[String(mineTileId)]);
@@ -30,5 +40,5 @@ export function foundryPrefix() {
   journey.until(() => (journey.state.routes.find(candidate => candidate.id === routeId)?.agreement?.lastAttemptRound ?? -1) > full.round);
   const blockedExchangeStep = journey.steps.at(-1); assert.ok(blockedExchangeStep);
   assert.match(journey.state.routes.find(candidate => candidate.id === routeId)?.agreement?.blockedReason ?? '', /storage full/i);
-  return { initial: journey.initial, state: structuredClone(journey.state), steps: [...journey.steps], timestamp: journey.time(), seat, cityId, industrialTileId, donorSeat, donorCityId, mineTileId, routeId, proposed, accepted, full, beforeBlockedExchange: structuredClone(blockedExchangeStep.before), blockedExchangeStep };
+  return { initial: journey.initial, state: structuredClone(journey.state), steps: [...journey.steps], timestamp: journey.time(), seat, cityId, industrialTileId, donorSeat, donorCityId, mineTileId, routeId, proposed, accepted, full, beforeBlockedExchange: structuredClone(blockedExchangeStep.before), blockedExchangeStep, provenance: journey.provenance };
 }

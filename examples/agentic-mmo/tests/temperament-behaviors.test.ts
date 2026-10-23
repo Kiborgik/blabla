@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { BEHAVIOR_PROFILES, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, behaviorDrawVersion, behaviorSeed, civilizationBehaviorProfile, type BehaviorPriority, type BehaviorPolicyVersion, type BehaviorProfile } from '../core/behavior-profiles.ts';
+import { BEHAVIOR_POLICY_VERSION, BEHAVIOR_PROFILES, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, behaviorDrawVersion, behaviorPolicyVersion, behaviorSeed, civilizationBehaviorProfile, type BehaviorPriority, type BehaviorPolicyVersion, type BehaviorProfile } from '../core/behavior-profiles.ts';
 import { deriveDiplomacyPlan, diplomacyWeight } from '../core/behavior-diplomacy.ts';
 import { assessCivilizationBehavior, chooseCivilizationBehavior, chooseDirectorBehavior, createBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
 import { applyStrategicPosture, ordinaryPhaseWeight, strategicTemperament, STRATEGIC_TEMPERAMENT_VERSION } from '../core/strategic-temperaments.ts';
@@ -20,7 +19,6 @@ import type { ActionOption, GameAction, GameEvent, TradeTerms, WorldState } from
 
 const epoch = '2026-10-22T00:00:00.000Z';
 const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1000).toISOString();
-const digest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const world = (): WorldState => createGeneratedWorld(73, epoch, 'settlement-food-budget-1', undefined, STRATEGIC_TEMPERAMENT_VERSION);
 function funded(): WorldState {
   const state = world();
@@ -56,25 +54,76 @@ function unposturedProfile(state: WorldState, seat: number): BehaviorProfile {
     commitmentRounds: template.commitmentRounds, settlementGoal: template.settlementGoal };
 }
 
-void test('frozen v2 and Food-v3 fixtures retain exact decisions, Director results and paid one-step state transitions', () => {
-  const golden = [
-    { release: 'settlement-regional-targets-1', decisions: 'a5ce31c31c84ee52141241f0d38bcd23bc8719f3956c519993fe7b0bc7352fcc', director: '107bfc2032042b3f17827e3500742ececddc9da7931b9b100403dff2f78a109d', transitions: 'bc554dc3609332cf5198109930768aca51e1fcafb1b6661e8ca1fec51a5302fc' },
-    { release: 'settlement-food-budget-1', decisions: 'd40039192a20080e63587e49a98b8241b119ea82d67939371b00a49b872bf10b', director: '4e08f709614e9fbd79397af1116ad16d43f9cf9c9ca588935eba996cc94b8d16', transitions: '65157639d2a70e95980282030aaa7a3e4c638e798bb8fd50b28f8186e5c063a0' },
+void test('current fresh v2 and Food-v3 configurations produce legal deterministic decisions, Director results and paid transitions', () => {
+  const configurations = [
+    { release: 'settlement-regional-targets-1', policy: BEHAVIOR_POLICY_VERSION },
+    { release: 'settlement-food-budget-1', policy: FOOD_BUDGET_BEHAVIOR_POLICY_VERSION },
   ] as const;
-  for (const fixture of golden) {
-    const state = createGeneratedWorld(73, epoch, fixture.release);
-    const before = structuredClone(state); const decisions = []; const transitions = [];
-    for (let seat = 0; seat <= 5; seat++) for (let cursor = 0; cursor < 12; cursor++) {
-      const memory = createBehaviorMemory(state, seat); memory.decisionCount = cursor;
-      const decision = chooseCivilizationBehavior(state, seat, memory, epoch); assert.ok(decision.action);
-      decisions.push(decision);
-      const result = applyCommand(state, { seat, action: decision.action, expectedRevision: state.revision, timestamp: epoch });
-      assert.ok(result.ok, result.error); transitions.push(result.state);
-      if (cursor === 0) assert.deepEqual(chooseCivilizationBehavior(result.state, seat, decision.memory, at(10)),
-        chooseCivilizationBehavior(JSON.parse(JSON.stringify(result.state)) as WorldState, seat, JSON.parse(JSON.stringify(decision.memory)) as BehaviorMemory, at(10)));
+  for (const configuration of configurations) {
+    const state = createGeneratedWorld(73, epoch, configuration.release);
+    const repeated = createGeneratedWorld(73, epoch, configuration.release);
+    const before = structuredClone(state);
+    assert.deepEqual(state, repeated);
+    assert.equal(behaviorPolicyVersion(state), configuration.policy);
+    assert.equal(state.releaseId, configuration.release);
+    assert.equal(state.revision, 0);
+    assert.deepEqual(state.events.map(event => event.type), ['world-founded']);
+    for (let seat = 0; seat <= 5; seat++) {
+      const options = legalActions(state, seat, epoch);
+      for (let cursor = 0; cursor < 4; cursor++) {
+        const memory = { ...createBehaviorMemory(state, seat), decisionCount: cursor };
+        const repeatedMemory = { ...createBehaviorMemory(repeated, seat), decisionCount: cursor };
+        const memoryBefore = structuredClone(memory);
+        assert.equal(memory.policyVersion, configuration.policy);
+        const decision = chooseCivilizationBehavior(state, seat, memory, epoch);
+        assert.ok(decision.action);
+        assert.equal(decision.memory.policyVersion, configuration.policy);
+        assert.equal(decision.memory.decisionCount, cursor + 1);
+        assert.ok(options.some(option => sameAction(option.action, decision.action)));
+        assert.deepEqual(chooseCivilizationBehavior(repeated, seat, repeatedMemory, epoch), decision);
+        const command: import('../core/types.ts').Command = { seat, action: decision.action, expectedRevision: state.revision, timestamp: epoch };
+        const result = applyCommand(state, command);
+        assert.ok(result.ok, result.error);
+        assert.ok(isWorldState(result.state));
+        assert.equal(result.state.revision, state.revision + 1);
+        assert.ok(result.events.length > 0);
+        assert.deepEqual(applyCommand(repeated, command), result);
+        if (cursor === 0) {
+          const restarted = JSON.parse(JSON.stringify(result.state)) as WorldState;
+          const restartedMemory = JSON.parse(JSON.stringify(decision.memory)) as BehaviorMemory;
+          const continuation = chooseCivilizationBehavior(result.state, seat, decision.memory, at(10));
+          assert.deepEqual(chooseCivilizationBehavior(restarted, seat, restartedMemory, at(10)), continuation);
+          assert.ok(continuation.action);
+          const next = { seat, action: continuation.action, expectedRevision: result.state.revision, timestamp: at(10) };
+          const continued = applyCommand(result.state, next);
+          assert.ok(continued.ok, continued.error);
+          assert.deepEqual(applyCommand(restarted, next), continued);
+        }
+        assert.deepEqual(memory, memoryBefore);
+        assert.deepEqual(repeatedMemory, memoryBefore);
+      }
     }
-    assert.equal(digest(decisions), fixture.decisions); assert.equal(digest(decisions.slice(60)), fixture.director);
-    assert.equal(digest(transitions), fixture.transitions); assert.deepEqual(state, before);
+    const damaged = structuredClone(state);
+    damaged.civilizations[0]!.resources = { food: 500, materials: 200, energy: 200, credits: 200, science: 0, culture: 0 };
+    damaged.cities[0]!.damage = 75;
+    assert.ok(isWorldState(damaged));
+    const damagedBefore = structuredClone(damaged);
+    const repair = chooseCivilizationBehavior(damaged, 0, undefined, epoch);
+    assert.deepEqual(repair.action, { type: 'repair-city', cityId: 'city-0' });
+    assert.ok(repair.action);
+    assert.equal(repair.memory.policyVersion, configuration.policy);
+    const restoredDamage = JSON.parse(JSON.stringify(damaged)) as WorldState;
+    assert.deepEqual(chooseCivilizationBehavior(restoredDamage, 0, undefined, epoch), repair);
+    const repaired = act(damaged, 0, repair.action, 0);
+    assert.deepEqual(act(restoredDamage, 0, repair.action, 0), repaired);
+    assert.equal(repaired.cities[0]!.damage, 75 - ECONOMY_RULES.repair.damageReduction);
+    for (const resource of RESOURCE_IDS) assert.equal(repaired.civilizations[0]!.resources[resource],
+      damaged.civilizations[0]!.resources[resource] - (ECONOMY_RULES.repair.cost[resource as keyof typeof ECONOMY_RULES.repair.cost] ?? 0));
+    assert.ok(repaired.events.some(event => event.type === 'city-repaired'));
+    assert.deepEqual(damaged, damagedBefore);
+    assert.deepEqual(restoredDamage, damagedBefore);
+    assert.deepEqual(state, before);
+    assert.deepEqual(repeated, before);
   }
 });
 

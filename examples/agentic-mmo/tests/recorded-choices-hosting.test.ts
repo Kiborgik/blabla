@@ -12,6 +12,7 @@ import { WorldRepository, type D1Database, type D1Result, type D1Statement, type
 import { isRecord } from '../server/validation.ts';
 import { createWorker } from '../server/worker.ts';
 import { coastalDeparturePrefix, coastalPrefixTime } from './fixtures/coastal-prefix.ts';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 
 const actor = 'private-recorded-history-owner';
 const model = 'synthetic-recorded-history-fixture';
@@ -69,12 +70,12 @@ class Fixture {
   }
   async seed() {
     const prefix = coastalDeparturePrefix();
-    await this.store.initialize({ seed: prefix.initial.seed, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0));
+    seedHostedWorld(this.database.sql, prefix.initial);
     for (const step of prefix.steps) {
       const input = step.input;
       const timestamp = input.kind === 'strategy' ? input.timestamp : input.command.timestamp; assert.ok(timestamp);
       const argument = input.kind === 'strategy' ? { expectedRevision: step.before.revision, timestamp } : input.command;
-      await this.store.mutate(input.kind === 'release' ? 'release-apply' : input.kind === 'strategy' ? 'strategy-catchup' : 'action', { ...argument, model, commandId: `prefix-${step.before.revision}` }, actor, timestamp);
+      await this.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : 'action', { ...argument, model, commandId: `prefix-${step.before.revision}` }, actor, timestamp);
     }
     assert.deepEqual(await this.state(), prefix.state);
     const started = await this.action({ type: 'build', project: 'irrigation', cityId }, 'Fund the exact town irrigation works.');

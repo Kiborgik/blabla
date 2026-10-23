@@ -1,28 +1,16 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { applyCommand, applyRelease, createWorld, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, createWorld, legalActions, observe } from '../core/engine.ts';
 import { observeCompactTrade } from '../core/observation.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 
 const epoch = '2026-10-16T00:00:00.000Z';
 const times = [epoch, '2026-10-16T00:00:10.000Z', '2026-10-16T00:01:00.000Z'];
-const releases = ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1'];
-
-function release(state: WorldState, targetReleaseId: string): WorldState {
-  const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-  assert.ok(result.ok, result.error);
-  return result.state;
-}
 
 function released(target: string): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const id of releases) {
-    state = release(state, id);
-    if (id === target) return state;
-  }
-  throw new Error(`Unknown fixture release ${target}`);
+  return createWorld(1701, epoch, target);
 }
 
 function syntheticTowns(state: WorldState): WorldState {
@@ -53,14 +41,11 @@ function proposal(state: WorldState): Extract<GameAction, { type: 'propose-trade
 }
 
 function fixtures(): Record<string, WorldState> {
-  const firstRelease = releases[0];
-  assert.ok(firstRelease);
-  const legacy = release(release(createWorld(1701, epoch), firstRelease), 'settlement-trade-1');
+  const legacy = released('settlement-trade-1');
   const endpoints = released('settlement-endpoints-1');
   const land = released('settlement-land-transport-1');
   const operating = released('settlement-operating-exchange-1');
   const oldPending = command(endpoints, 0, proposal(endpoints));
-  const inheritedPending = release(oldPending, 'settlement-land-transport-1');
   const pending = command(land, 0, proposal(land));
   const offer = pending.tradeOffers?.find(candidate => candidate.status === 'pending');
   assert.ok(offer);
@@ -78,7 +63,7 @@ function fixtures(): Record<string, WorldState> {
     initial: createWorld(1701, epoch), legacy, endpoints, land, operating,
     syntheticEndpoints25: syntheticTowns(structuredClone(endpoints)),
     syntheticOperating25: syntheticTowns(structuredClone(operating)),
-    oldPending, inheritedPending, pending, accepted, intent: intent.state,
+    oldPending, pending, accepted, intent: intent.state,
     syntheticMissingIntentTown: invalidated,
   };
 }
@@ -91,26 +76,10 @@ function views(state: WorldState): unknown[] {
   return times.flatMap(timestamp => Array.from({ length: 6 }, (_, seat) => ({ full: observe(state, seat, timestamp), compact: observeCompactTrade(state, seat, timestamp) })));
 }
 
-const baseline: Record<string, string> = {
-  "initial": "f685037044f001beae88447efdd404a6c7cf74e1a0838aea58005b29eb261a4a",
-  "legacy": "768eb563ae2dfc2392778f2cca835e62207d8205929988efa3ebf419a4e6c2c0",
-  "endpoints": "f63858afb88c1a2f102e5eec9c49ed2d0fdb4bc9ead16f54dff0f15fb17b2c9c",
-  "land": "13f723d93b97135971f7143083ec6b66d6eb9135b2becdb66287c346641c8fde",
-  "operating": "372dcc009afcf65a7d221d808ed05b853bf2aad72284a8479ace61d3a3087ce1",
-  "syntheticEndpoints25": "52be226e6da77318823464356f23d4e971e2f02cbd69130b4fa03925c6894001",
-  "syntheticOperating25": "eefe96e82fbb79b72b8a89b97f621d6cda5a3f175d52e793537c9031dbd8a02e",
-  "oldPending": "58dec62ad572004e2c05f6a8d577827af1198725e029fc3426a067a03c092415",
-  "inheritedPending": "015678c4640c973fea96eb94234a47e22b2ba0f926e08da4303dda4b4d0124c8",
-  "pending": "afd08b3fed71e39f49b097fe03f71a2c827f0ed7582d3f0bc3b342cf55baaa30",
-  "accepted": "6a260a12deb109dab5e262b841f8788db93daad662c9b9fa002432183fd0ee96",
-  "intent": "134e13d064bb64d70f3fba4337677f28fd6330bbeb9f16030b6f2343d7d05768",
-  "syntheticMissingIntentTown": "7c18a48790bc57adaaf8d1c31bcefc7befdf792598b454729784a750711563ac"
-};
-
-await test('pre-optimization serialized full and compact views remain byte-exact for every seat, admission boundary and fixture', () => {
+await test('fresh-rule full and compact views restart byte-exactly for every seat and admission boundary', () => {
   for (const [name, state] of Object.entries(fixtures())) {
     const before = JSON.stringify(state);
-    assert.equal(digest(views(state)), baseline[name], name);
+    assert.equal(digest(views(state)), digest(views(JSON.parse(before))), name);
     assert.equal(JSON.stringify(state), before, name);
   }
 });

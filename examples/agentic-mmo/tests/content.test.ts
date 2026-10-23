@@ -7,6 +7,21 @@ import {
 import { CIV_COUNT } from '../core/types.ts';
 import { CURRENT_RELEASE, RELEASES } from '../core/release.ts';
 
+const postObservatoryRules = [
+  'settlement-civic-bootstrap-1',
+  'settlement-industrial-steam-1',
+  'settlement-local-power-1',
+  'settlement-second-government-1',
+  'settlement-powered-science-1',
+  'settlement-interplanetary-1',
+  'settlement-living-partnerships-1',
+  'settlement-relief-charters-1',
+  'settlement-regional-targets-1',
+  'settlement-food-budget-1',
+  'settlement-shore-fisheries-1',
+  'settlement-knowledge-compacts-1',
+] as const;
+
 function required<T>(value: T | undefined): T {
   assert.ok(value !== undefined);
   return value;
@@ -95,6 +110,14 @@ await test('director events use meaningful shared effects with era and cadence g
   assert.ok(calm);
   assert.equal(calm.effects.length, 0);
   assert.ok(DIRECTOR_EVENTS.filter(event => event.id !== 'calm').every(event => event.effects.length > 0));
+  const historical = DIRECTOR_EVENTS.filter(event => event.requiredFeatures.includes('historical-pressures'));
+  assert.deepEqual(historical.map(event => event.id), ['cultivated-harvest', 'forest-fire', 'coastal-storm', 'trade-fair', 'industrial-accident', 'internal-migration']);
+  for (const event of historical) {
+    assert.ok(event.requiredFeatures.includes('director-events'));
+    assert.ok(event.effects.every(effect => effect.kind === 'resource' || effect.kind === 'city'));
+    assert.ok(Number.isInteger(event.minEra) && event.minEra >= 0 && event.minEra < ERAS.length);
+    assert.ok(Number.isInteger(event.cooldown) && event.cooldown > 0);
+  }
   const effectKinds = new Set(DIRECTOR_EVENTS.flatMap(event => event.effects.map(effect => effect.kind)));
   assert.ok(effectKinds.has('resource'));
   assert.ok(effectKinds.has('city'));
@@ -254,8 +277,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.effects, []);
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
-  assert.deepEqual(civic.compatibleFrom, ['settlement-recovery-1']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1', 'settlement-territory-1', 'settlement-culture-production-1', 'settlement-foundry-1', 'settlement-observatory-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1', 'settlement-territory-1', 'settlement-culture-production-1', 'settlement-foundry-1', 'settlement-observatory-1', ...postObservatoryRules]);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -263,9 +285,8 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
 await test('exact trade town selection is an additive explicit capability without changing the default world', () => {
   const charter = required(RELEASES.find(release => release.id === 'settlement-charters-1'));
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
-  assert.deepEqual(endpoints.compatibleFrom, [charter.id]);
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1', 'settlement-territory-1', 'settlement-culture-production-1', 'settlement-foundry-1', 'settlement-observatory-1']);
+  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1', 'settlement-territory-1', 'settlement-culture-production-1', 'settlement-foundry-1', 'settlement-observatory-1', ...postObservatoryRules]);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -286,7 +307,6 @@ await test('public repair promises use validated bounded shared civic terms', ()
   assert.ok(!CURRENT_RELEASE.featureIds.includes('public-projects'));
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
   const charter = required(RELEASES.find(release => release.id === 'settlement-charters-1'));
-  assert.deepEqual(charter.compatibleFrom, [civic.id]);
   assert.deepEqual(charter.featureIds, [...civic.featureIds, 'public-projects']);
   assert.deepEqual(validateContent(), []);
 });
@@ -316,10 +336,9 @@ await test('public project catalogue rejects empty payments, invalid timing and 
   assert.ok(validateContent(invalidLimit).some(error => error.includes('public project rules')));
 });
 
-await test('land transport is versioned shared data behind a compatible explicit release', () => {
+await test('land transport is versioned shared data in explicit registered rules', () => {
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   const land = required(RELEASES.find(release => release.id === 'settlement-land-transport-1'));
-  assert.deepEqual(land.compatibleFrom, [endpoints.id]);
   assert.deepEqual(land.featureIds, [...endpoints.featureIds, 'land-transport']);
   assert.deepEqual(LAND_TRANSPORT_RULES, { ruleVersion: 1, edgesPerBeat: 2, passable: { grassland: true, forest: true, desert: true, tundra: true, mountain: false, ocean: false } });
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
@@ -335,7 +354,7 @@ await test('land transport is versioned shared data behind a compatible explicit
   assert.deepEqual(validateContent(), []);
 });
 
-await test('coastal yards grant only a validated consumed capability behind an explicit compatible release', () => {
+await test('coastal yards grant only a validated consumed capability in explicit registered rules', () => {
   const yard = required(BUILDINGS.find(building => building.id === 'boat-yard'));
   assert.deepEqual(yard.requires, ['water-management']);
   assert.equal(yard.minEra, 0);
@@ -348,7 +367,6 @@ await test('coastal yards grant only a validated consumed capability behind an e
   assert.equal(COASTAL_FOUNDING_RULES.requiredTechnology, 'navigation');
   const release = required(RELEASES.find(candidate => candidate.id === 'settlement-coastal-1'));
   const prior = required(RELEASES.find(candidate => candidate.id === 'settlement-residents-1'));
-  assert.deepEqual(release.compatibleFrom, [prior.id]);
   assert.deepEqual(release.featureIds, [...prior.featureIds, 'navigation', 'coastal-founding']);
   assert.ok(!prior.featureIds.includes('coastal-founding'));
   const connected = required(HISTORICAL_MILESTONES.find(milestone => milestone.id === 'connected-world'));
@@ -439,11 +457,11 @@ await test('connected metal and learning branch has useful compatible declaratio
   assert.deepEqual(Reflect.get(recipe.terms, 'strategicCargo'), { proposer: { iron: 2 }, recipient: {} });
   assert.deepEqual(recipe.terms.recipientCargo, { food: 5 });
   const release = required(RELEASES.find(item => item.id === 'settlement-metal-learning-1'));
-  assert.deepEqual(release.compatibleFrom, ['settlement-mining-1']);
+  assert.ok(release.featureIds.includes('finite-metals')); assert.ok(release.featureIds.includes('learning-commerce'));
   assert.deepEqual(validateContent(), []);
 });
 
-await test('unique wonders declare a compatible paid contest and bounded boost benefit', () => {
+await test('unique wonders declare a gated paid contest and bounded boost benefit', () => {
   const wonder = required(CONTENT.wonders.find(item => item.id === 'great-library'));
   assert.deepEqual(wonder.requires, ['writing']);
   assert.equal(wonder.minEra, 1);
@@ -451,7 +469,6 @@ await test('unique wonders declare a compatible paid contest and bounded boost b
   assert.equal(wonder.requiredWork, 24);
   assert.deepEqual(wonder.production, { science: 4 });
   assert.deepEqual(CONTENT.wonderRules, { ruleVersion: 1, featureId: 'unique-wonders', loserMaterialRefundPercent: 50, boostLimit: 2, boostPercent: 20, boostMaximumEra: 1 });
-  assert.deepEqual(required(RELEASES.find(item => item.id === 'settlement-wonders-1')).compatibleFrom, ['settlement-manufacturing-1']);
   assert.deepEqual(validateContent(), []);
 });
 
@@ -485,7 +502,6 @@ await test('local growth data declares a gated paid housing consequence without 
   assert.equal(ECONOMY_RULES.growth.cityPopulationCap, 20);
   assert.equal(ECONOMY_RULES.growth.foodCost, 6);
   const release = required(RELEASES.find(item => item.id === 'settlement-growth-1'));
-  assert.deepEqual(release.compatibleFrom, ['settlement-wonders-1']);
   assert.ok(release.featureIds.includes('local-growth'));
   for (const housing of [-1, 0, 1.5, Number.NaN]) {
     const broken = structuredClone(CONTENT);
@@ -527,7 +543,6 @@ await test('water and land connect real sites and local infrastructure without a
   assert.equal(CONTENT.pastoralRules.resource, 'horses');
   const predecessor = required(RELEASES.find(item => item.id === 'settlement-growth-1'));
   const release = required(RELEASES.find(item => item.id === 'settlement-water-land-1'));
-  assert.deepEqual(release.compatibleFrom, [predecessor.id]);
   assert.deepEqual(release.featureIds, [...predecessor.featureIds, 'water-land']);
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
@@ -549,7 +564,7 @@ await test('water land catalogue refuses invalid retained placement and ungated 
   }
 });
 
-await test('forest and append-only extent are explicit compatible successors', async () => {
+await test('forest and expanded extent are explicit registered capabilities', async () => {
   const { WORLD_EXPANSION_RULES } = await import('../core/content.ts');
   assert.deepEqual(validateContent(), []);
   assert.equal(TECHNOLOGIES.find(item => item.id === 'archery')?.cost, 72);
@@ -559,16 +574,13 @@ await test('forest and append-only extent are explicit compatible successors', a
   assert.deepEqual(mill?.production, { materials: 4 }); assert.equal(mill?.siteRequirement, 'forest');
   assert.equal(WORLD_EXPANSION_RULES.fromHeight, 12); assert.equal(WORLD_EXPANSION_RULES.height, 24);
   assert.equal(WORLD_EXPANSION_RULES.fromWidth, WORLD_EXPANSION_RULES.width);
-  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-forest-production-1')?.compatibleFrom, ['settlement-water-land-1']);
-  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-world-expansion-1')?.compatibleFrom, ['settlement-forest-production-1']);
 });
 
-await test('owned territory retains an explicit price basis and compatible feature gate', async () => {
+await test('owned territory retains an explicit price basis and registered feature gate', async () => {
   const { TERRITORY_RULES } = await import('../core/content.ts');
   assert.deepEqual(validateContent(), []);
   assert.deepEqual(TERRITORY_RULES, { ruleVersion: 1, featureId: 'owned-territory', range: 3, baseCredits: 12, creditsPerDistance: 4, creditsPerPriorPurchase: 2 });
   assert.deepEqual(ACTION_FEATURES['acquire-tile'], ['owned-territory']);
-  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-territory-1')?.compatibleFrom, ['settlement-world-expansion-1']);
   for (const [key, value] of [['range', 4], ['baseCredits', -1], ['creditsPerDistance', 0.5], ['featureId', 'missing']] as const) {
     const broken = structuredClone(CONTENT); Reflect.set(broken.territoryRules, key, value);
     assert.ok(validateContent(broken).some(error => error.startsWith('territory:')));
@@ -607,7 +619,6 @@ await test('foundry catalogue preserves the connected prerequisite chain and use
   assert.deepEqual(foundry.strategicInputs, { iron: 1 });
   assert.deepEqual(foundry.operatingInputs, { energy: 2 });
   assert.deepEqual(foundry.production, { materials: 8 });
-  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-foundry-1')?.compatibleFrom, ['settlement-culture-production-1']);
 });
 
 await test('foundry catalogue refuses empty unknown fractional or ungated strategic inputs', () => {
@@ -639,7 +650,6 @@ await test('observatory catalogue connects paid local learning to the retained C
   assert.equal(observatory.siteRequirement, 'campus-high-ground');
   assert.deepEqual(observatory.operatingInputs, { credits: 2 });
   assert.deepEqual(observatory.production, { science: 7 });
-  assert.deepEqual(RELEASES.find(item => item.id === 'settlement-observatory-1')?.compatibleFrom, ['settlement-foundry-1']);
   assert.deepEqual(validateContent(), []);
 });
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { RESOURCE_IDS, SPACEFLIGHT_RULES, TECHNOLOGIES } from '../core/content.ts';
-import { applyRelease, createWorld } from '../core/engine.ts';
+import { createWorld } from '../core/engine.ts';
 import { commitEvents } from '../core/simulation/events.ts';
 import { allocateOperations, emitOperations } from '../core/simulation/operations.ts';
 import { recordLocalPower } from '../core/simulation/local-power.ts';
@@ -63,13 +63,8 @@ void test('synthetic source-stock changes after restart cannot change prepaid of
 
 function syntheticValidatedDeparture(): WorldState {
   const epoch = '2026-10-22T00:00:00.000Z';
-  let state = createWorld(1701, epoch);
   const target = RELEASES.find(release => release.featureIds.includes(SPACEFLIGHT_RULES.featureId)); assert.ok(target);
-  for (let count = 0; state.releaseId !== target.id && count < RELEASES.length; count += 1) {
-    const next = RELEASES.find(release => release.compatibleFrom.includes(state.releaseId)); assert.ok(next);
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: next.id, timestamp: epoch });
-    assert.ok(result.ok, result.error); state = result.state;
-  }
+  const state = createWorld(1701, epoch, target.id);
   assert.equal(state.releaseId, target.id);
   const civilization = state.civilizations[0]!; const city = state.cities[0]!;
   civilization.era = 5;

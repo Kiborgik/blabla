@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
 
 import { isWorldState } from '../core/validation.ts';
 import { isGameAction, validateAttachedPlan } from '../core/planning.ts';
@@ -8,18 +8,13 @@ import type { GameAction, PublicProject, TransitionResult, WorldState } from '..
 
 const epoch = '2026-10-16T00:00:00.000Z';
 
-await test('registered civic world admits its explicit public charter successor', () => {
-  let state = createWorld(17, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, `${targetReleaseId}: ${result.error}`);
-    state = result.state;
-  }
+await test('fresh charter rules enable public projects', () => {
+  let state = createWorld(17, epoch, 'settlement-charters-1');
   assert.ok(state.unlockedFeatures.includes('public-projects'));
 });
 
 class Journey {
-  state = createWorld(17, epoch);
+  state = createWorld(17, epoch, 'settlement-charters-1');
   time = Date.parse(epoch);
   accept(run: (state: WorldState) => TransitionResult): TransitionResult {
     const before = structuredClone(this.state);
@@ -80,10 +75,6 @@ class Journey {
 
 function prepared(): Journey {
   const j = new Journey();
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1']) {
-    const command = { expectedRevision: j.state.revision, expectedFromReleaseId: j.state.releaseId, targetReleaseId, timestamp: epoch };
-    j.accept((state) => applyRelease(state, command));
-  }
   for (const seat of [0, 1, 2]) j.act(seat, { type: 'research', technology: 'agriculture' });
   j.until(() => [0, 1, 2].every((seat) => j.state.civilizations[seat]?.technologies.includes('agriculture')));
   for (const seat of [0, 1, 2]) j.build(seat, 'farm');

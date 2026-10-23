@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRelease, createWorld } from '../core/engine.ts';
+import { createWorld } from '../core/engine.ts';
 import { RELEASES } from '../core/release.ts';
 import { RELIEF_RULES } from '../core/relief-content.ts';
 import { isReliefAction, isReliefResult, isReliefState, validReliefEvent } from '../core/relief-validation.ts';
@@ -13,12 +13,8 @@ import type { ReliefState } from '../core/relief-types.ts';
 
 const epoch = '2026-10-22T00:00:00.000Z';
 function syntheticAccepted(): WorldState {
-  let state = createWorld(1701, epoch);
   const target = RELEASES.find(release => release.featureIds.includes(RELIEF_RULES.featureId)); assert.ok(target);
-  for (let count = 0; state.releaseId !== target.id && count < RELEASES.length; count++) {
-    const next = RELEASES.find(release => release.compatibleFrom.includes(state.releaseId)); assert.ok(next);
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: next.id, timestamp: epoch }); assert.ok(result.ok, result.error); state = result.state;
-  }
+  const state = createWorld(1701, epoch, target.id);
   const donor = state.cities.find(city => city.civId === 1)!; const recipient = state.cities.find(city => city.civId === 4)!;
   state.revision++; let events: GameEvent[] = [];
   executeTradeAction(state, 1, { type: 'propose-trade', partner: 4, recipeId: 'harvest-for-materials', sourceCityId: donor.id, recipientCityId: recipient.id }, events); commitEvents(state, events);

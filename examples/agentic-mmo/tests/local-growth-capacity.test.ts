@@ -1,39 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, observe } from '../core/engine.ts';
 import { projectCapabilities } from '../core/capabilities.ts';
 import { cityGrowthFacts } from '../core/simulation/growth.ts';
 import { DIRECTOR_SEAT, type WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
-import { localGrowthPrefix } from './fixtures/local-growth-prefix.ts';
-import { localGrowthFoundingJourney, localGrowthJourney, localGrowthOperationJourney } from './fixtures/local-growth-journey.ts';
+import { localGrowthFoundingJourney, localGrowthOperationJourney } from './fixtures/local-growth-journey.ts';
 import { coastalPrefixTime, replayCoastalStep } from './fixtures/coastal-prefix.ts';
 
 function town(state: WorldState, cityId = 'city-0') { const city = state.cities.find(candidate => candidate.id === cityId); assert.ok(city); return city; }
 function civ(state: WorldState) { const civilization = state.civilizations[0]; assert.ok(civilization); return civilization; }
 function nextBeat(state: WorldState) { const result = catchUpStrategy(state, coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60)); assert.ok(result.ok, result.error); return result; }
-
-await test('local growth old-release control retains capacity20 without housing or future Masonry Granary choices', () => {
-  const prefix = localGrowthPrefix(); const before = structuredClone(prefix.state);
-  assert.equal(town(before).population, 20); assert.equal('housing' in town(before), false);
-  const options = legalActions(before, 0, prefix.timestamp);
-  assert.ok(!options.some(option => option.action.type === 'research' && option.action.technology === 'masonry'));
-  assert.ok(!options.some(option => option.action.type === 'build' && option.action.project === 'granary'));
-  const result = nextBeat(before);
-  assert.equal(town(result.state).population, 20); assert.equal(town(result.state).buildingOperations?.university?.lastResult?.status, 'blocked');
-  assert.deepEqual(before, prefix.state); assert.ok(isWorldState(result.state));
-});
-
-await test('local growth compatible adoption preserves actual stocks population commitments and map while retaining legacy bases', () => {
-  const journey = localGrowthJourney();
-  assert.deepEqual(journey.adopted.tiles, journey.beforeRelease.tiles);
-  assert.deepEqual(journey.adopted.civilizations, journey.beforeRelease.civilizations);
-  for (const previous of journey.beforeRelease.cities) {
-    const city = town(journey.adopted, previous.id);
-    assert.deepEqual(city.housing, { ruleVersion: 1, baseCapacity: Math.max(20, previous.population), establishedRound: journey.beforeRelease.round, origin: 'legacy-adoption' });
-    const { housing: _housing, ...retained } = city; assert.deepEqual(retained, previous);
-  }
-});
 
 await test('local growth legal Masonry Granary path pays once and completes without retroactive residents', context => {
   const value = localGrowthOperationJourney(); const city = town(value.started);
@@ -44,7 +21,7 @@ await test('local growth legal Masonry Granary path pays once and completes with
   assert.equal(town(value.completed).population, 20);
   assert.ok(!value.completionStep.result.events.some(event => event.type === 'population-growth' && event.tileId === city.tileId));
   assert.equal(town(value.completed).buildingOperations?.university?.lastResult?.status, 'blocked');
-  context.diagnostic(JSON.stringify({ basis: 'Entirely legal engine journey, no injected population or stocks', transitions: value.journey.steps.length, completedRound: value.completed.round, growthRound: value.growth.round, operatingRound: value.operated.round, university: town(value.operated).buildingOperations?.university?.lastResult }));
+  context.diagnostic(JSON.stringify({ basis: 'Synthetic capacity prerequisite; actual paid Granary, growth and operation transitions', transitions: value.journey.steps.length, completedRound: value.completed.round, growthRound: value.growth.round, operatingRound: value.operated.round, university: town(value.operated).buildingOperations?.university?.lastResult }));
 });
 
 await test('local growth real food payment creates one resident before the next opening can fund University', () => {
@@ -94,7 +71,7 @@ await test('local growth exact foreign missing duplicate and active-town Granary
   }
 });
 
-await test('local growth complete real prefix adoption paid growth and operation replay exactly without mutating any input', () => {
+await test('local growth fresh scenario paid growth and operation replay exactly without mutating any input', () => {
   const value = localGrowthOperationJourney(); let state = structuredClone(value.journey.initial);
   for (const step of value.journey.steps) {
     assert.deepEqual(state, step.before); const before = structuredClone(state);
@@ -133,17 +110,6 @@ await test('local growth explicitly synthetic low wellbeing shortage and over-ca
   }
 });
 
-await test('local growth adoption requires caught-up economy and synthetic legacy populations above20 retain their actual base', () => {
-  const journey = localGrowthJourney();
-  const command = { expectedRevision: journey.beforeRelease.revision, expectedFromReleaseId: journey.beforeRelease.releaseId, targetReleaseId: journey.adopted.releaseId, timestamp: coastalPrefixTime(((journey.beforeRelease.independentTurns?.strategyTicks ?? 0) + 1) * 60) };
-  const overdue = applyRelease(journey.beforeRelease, command);
-  assert.equal(overdue.ok, false); assert.deepEqual(overdue.state, journey.beforeRelease); assert.deepEqual(overdue.events, []);
-  const synthetic = structuredClone(journey.beforeRelease); town(synthetic).population = 27;
-  const adopted = applyRelease(synthetic, { ...command, timestamp: coastalPrefixTime((synthetic.independentTurns?.strategyTicks ?? 0) * 60 + 20) });
-  assert.ok(adopted.ok, adopted.error); assert.equal(town(adopted.state).population, 27); assert.equal(town(adopted.state).housing?.baseCapacity, 27);
-  assert.deepEqual(adopted.state.civilizations, synthetic.civilizations);
-});
-
 await test('local growth canonical facts distinguish active completion and exact selected town with detached observations', () => {
   const value = localGrowthOperationJourney();
   const timestamp = coastalPrefixTime((value.completed.independentTurns?.strategyTicks ?? 0) * 60 + 30);
@@ -165,6 +131,4 @@ await test('local growth canonical facts distinguish active completion and exact
   observation.growth[0].capacity = 999;
   assert.deepEqual(value.completed, before);
   assert.deepEqual(cityGrowthFacts(value.completed, town(value.completed)), expected);
-  assert.equal('growth' in observe(value.journey.beforeRelease, 0, timestamp), false);
-  assert.equal('growth' in projectCapabilities(value.journey.beforeRelease, 0, 'city-0', timestamp), false);
 });

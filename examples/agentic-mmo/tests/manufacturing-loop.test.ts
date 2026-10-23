@@ -4,7 +4,6 @@ import { BUILDINGS, CONSTRUCTION_RULES, TECHNOLOGIES } from '../core/content.ts'
 import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { projectCapabilities } from '../core/capabilities.ts';
 import { cityProductivity } from '../core/simulation/world.ts';
-import { RELEASES } from '../core/release.ts';
 import { isWorldState } from '../core/validation.ts';
 import { buildingBaseProduction, districtAdjacencyFacts } from '../core/simulation/districts.ts';
 import { hexDistance } from '../core/simulation/geography.ts';
@@ -18,12 +17,10 @@ function stocks(state: WorldState) {
 }
 
 export function manufacturingJourney() {
-  const target = RELEASES.find(release => release.compatibleFrom.includes('settlement-metal-learning-1') && release.featureIds.includes('manufacturing'));
-  assert.ok(target, 'A compatible implemented manufacturing release must exist');
-  const previous = learningCommerceJourney().journey;
+  const previous = learningCommerceJourney('settlement-manufacturing-1').journey;
   previous.research(0, 'bronze-working');
   let state = structuredClone(previous.state);
-  const beforeRelease = structuredClone(state);
+  const prepared = structuredClone(state);
   const steps: CoastalPrefixStep[] = [];
   const time = (): string => coastalPrefixTime(Math.max((state.independentTurns?.strategyTicks ?? 0) * 60 + 20, ((state.independentTurns?.lastActionWindow[0] ?? -1) + 1) * 10));
   const commit = (input: CoastalPrefixInput): void => {
@@ -42,13 +39,12 @@ export function manufacturingJourney() {
     assert.ok(condition());
   };
   const research = (technology: string): void => { act({ type: 'research', technology }); until(() => !!state.civilizations[0]?.technologies.includes(technology)); };
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: target.id, timestamp: time() } });
-  return { previous, beforeRelease, get state() { return state; }, steps, time, act, beat, until, research };
+  return { previous, prepared, get state() { return state; }, steps, time, act, beat, until, research };
 }
 
 export function manufacturingOperationJourney() {
   const journey = manufacturingJourney();
-  const adopted = structuredClone(journey.state);
+  const prepared = structuredClone(journey.state);
   journey.research('iron-working'); journey.research('apprenticeship');
   const researched = structuredClone(journey.state);
   const option = legalActions(journey.state, 0, journey.time()).find(candidate => candidate.action.type === 'build' && candidate.action.project === 'industrial-zone' && candidate.action.cityId === 'city-0'); assert.ok(option);
@@ -62,7 +58,7 @@ export function manufacturingOperationJourney() {
   const workshopCompleted = structuredClone(journey.state);
   journey.beat();
   const operated = structuredClone(journey.state);
-  return { journey, adopted, researched, zoneActive, zoneCompleted, workshopActive, workshopCompleted, operated };
+  return { journey, prepared, researched, zoneActive, zoneCompleted, workshopActive, workshopCompleted, operated };
 }
 
 await test('manufacturing preserves exact accepted discovery and productive institution data', () => {
@@ -90,7 +86,7 @@ await test('manufacturing prior release refuses future choices without payment o
 
 await test('manufacturing actual research opens exact Mine-adjacent sites and pays for one retained district lane', () => {
   const journey = manufacturingJourney();
-  assert.deepEqual(journey.state.tiles, journey.beforeRelease.tiles);
+  assert.deepEqual(journey.state.tiles, journey.prepared.tiles);
   assert.ok(!legalActions(journey.state, 0, journey.time()).some(option => option.action.type === 'research' && option.action.technology === 'apprenticeship'));
   journey.research('iron-working'); journey.research('apprenticeship');
   const zone = BUILDINGS.find(item => item.id === 'industrial-zone'); assert.ok(zone);

@@ -2,11 +2,12 @@ import { BUILDINGS, ECONOMY_RULES, LOCAL_GROWTH_RULES } from '../content.ts';
 import type { City, CityGrowthFacts, CityHousing, WorldState } from '../types.ts';
 import { hasFeatures } from './history.ts';
 
-export function initializeCityHousing(state: WorldState, city: City, origin: CityHousing['origin']): void {
+export function initializeCityHousing(state: WorldState, city: City, origin: Exclude<CityHousing['origin'], 'legacy-adoption'>): void {
+  if (origin !== 'initial-capital' && origin !== 'founded') throw new RangeError('Housing initialization requires a current founding origin');
   if (!hasFeatures(state, [LOCAL_GROWTH_RULES.featureId])) return;
   city.housing = {
     ruleVersion: LOCAL_GROWTH_RULES.ruleVersion,
-    baseCapacity: origin === 'founded' ? LOCAL_GROWTH_RULES.foundedBaseCapacity : Math.max(LOCAL_GROWTH_RULES.legacyBaseCapacity, city.population),
+    baseCapacity: origin === 'founded' ? LOCAL_GROWTH_RULES.foundedBaseCapacity : LOCAL_GROWTH_RULES.initialCapitalBaseCapacity,
     establishedRound: state.round,
     origin,
   };

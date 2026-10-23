@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions, observe } from '../core/engine.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 import { isGameAction } from '../core/planning.ts';
 import { projectCapabilities } from '../core/capabilities.ts';
@@ -19,21 +19,8 @@ await test('prior Writing history retains its Library and has no worked Mine act
   assert.deepEqual(state, before);
 });
 
-await test('the explicit compatible Mine release opens actual Mining research on the unchanged legal world', () => {
-  const { state, timestamp } = workedResourcePrefix();
-  const before = structuredClone(state);
-  const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-mining-1', timestamp });
-  assert.ok(result.ok, result.error);
-  assert.deepEqual(state, before);
-  assert.deepEqual(result.state.tiles, before.tiles);
-  assert.ok(legalActions(result.state, 0, timestamp).some(option => option.action.type === 'research' && option.action.technology === 'mining'));
-  const selected = applyCommand(result.state, { seat: 0, expectedRevision: result.state.revision, timestamp, action: { type: 'research', technology: 'mining' } });
-  assert.ok(selected.ok, selected.error);
-  assert.equal(selected.state.civilizations[0]?.researchTarget, 'mining');
-});
-
-export function mineJourney() {
-  const prefix = workedResourcePrefix();
+export function mineJourney(rulesId = 'settlement-mining-1') {
+  const prefix = workedResourcePrefix(rulesId);
   let state = prefix.state;
   const steps: CoastalPrefixStep[] = [];
   const time = () => {
@@ -52,7 +39,6 @@ export function mineJourney() {
     commit({ kind: 'action', command: { seat: 0, expectedRevision: state.revision, timestamp: time(), action } });
   };
   const beat = (): void => { assert.ok(state.independentTurns); commit({ kind: 'strategy', timestamp: coastalPrefixTime((state.independentTurns.strategyTicks + 1) * 60) }); };
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-mining-1', timestamp: time() } });
   act({ type: 'research', technology: 'mining' });
   for (let count = 0; count < 20 && !state.civilizations[0]?.technologies.includes('mining'); count++) beat();
   assert.ok(state.civilizations[0]?.technologies.includes('mining'));
@@ -127,7 +113,7 @@ await test('completion retains the exact installation and no completion-beat all
   journey.beat(); const result = journey.state.cities[0]?.improvements?.['56']?.operation.lastResult; assert.ok(result);
   assert.equal(result.status, 'operated'); assert.equal(result.residents.allocated, 1); assert.deepEqual(result.paid, {});
   assert.ok((result.produced.materials ?? 0) > 2);
-  context.diagnostic(JSON.stringify({ legalPrefix: 58, successorTransitions: journey.steps.length, revision: journey.state.revision, round: journey.state.round, result }));
+  context.diagnostic(JSON.stringify({ prefixTransitions: journey.prefix.steps.length, currentTransitions: journey.steps.length, revision: journey.state.revision, round: journey.state.round, result }));
 });
 
 await test('legal pause preserves its receipt and equal-beat paused control isolates actual output', () => {
@@ -199,14 +185,6 @@ await test('synthetic later site loss keeps retained installation but allocates 
   assert.equal(mine.operation.lastResult?.residents.allocated, 0);
   assert.deepEqual(mine.operation.lastResult?.produced, {});
   assert.deepEqual(mine.completion, state.cities[0]?.improvements?.['56']?.completion);
-});
-
-await test('worked-land adoption refuses unprocessed strategy without changing the legal old world', () => {
-  const { state } = workedResourcePrefix(); assert.ok(state.independentTurns);
-  const before = JSON.stringify(state);
-  const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-mining-1', timestamp: coastalPrefixTime((state.independentTurns.strategyTicks + 1) * 60) });
-  assert.equal(result.ok, false); assert.match(result.error ?? '', /strategy_catchup_required/);
-  assert.equal(JSON.stringify(result.state), before); assert.equal(JSON.stringify(state), before);
 });
 
 await test('legal conserved founding can leave a retained Mine without opening residents', () => {

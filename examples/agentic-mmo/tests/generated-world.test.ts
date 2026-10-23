@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { generateGeography, GENERATED_GEOGRAPHY_VERSION } from '../core/generated-geography.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { CIV_COUNT, type WorldState } from '../core/types.ts';
 import { ECONOMY_RULES, IMPROVEMENTS, METAL_RULES, COAL_RULES, PASTORAL_RULES, RESOURCE_IDS } from '../core/content.ts';
 import { RELEASES } from '../core/release.ts';
@@ -18,25 +18,19 @@ import { railEdgeId, railSiteBlock } from '../core/simulation/rail.ts';
 const EPOCH = '2000-01-01T00:00:00.000Z';
 const seeds = [0, 1, 73, 1701, 90210, 0xffffffff];
 
-function legacy(seed: number): WorldState {
-  let state = createWorld(seed, EPOCH);
-  for (const release of RELEASES.slice(1)) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: EPOCH });
-    assert.ok(result.ok, result.error);
-    state = result.state;
-  }
-  return state;
+function fixedGeography(seed: number): WorldState {
+  return createWorld(seed, EPOCH, 'settlement-living-partnerships-1');
 }
 
 for (const seed of seeds) void test(`seed ${seed}: fresh current-rules foundation preserves economy without fabricated migration history`, () => {
-  const before = legacy(seed);
+  const before = fixedGeography(seed);
   const frozen = JSON.stringify(before);
   const state = createGeneratedWorld(seed, EPOCH);
   assert.ok(isWorldState(state));
   assert.deepEqual(createGeneratedWorld(seed, EPOCH), state);
   assert.equal(JSON.stringify(before), frozen);
-  assert.equal(state.releaseId, RELEASES.at(-1)!.id);
-  assert.deepEqual(state.unlockedFeatures, RELEASES.at(-1)!.featureIds);
+  assert.equal(state.releaseId, 'settlement-living-partnerships-1');
+  assert.deepEqual(state.unlockedFeatures, RELEASES.find(rules => rules.id === state.releaseId)!.featureIds);
   assert.equal(state.revision, 0);
   assert.equal(state.round, 0);
   assert.equal(state.year, ECONOMY_RULES.initialYear);
@@ -178,7 +172,7 @@ void test('capability-enabled topology fixture has genuinely useful town-local r
   }
 });
 
-void test('legacy maps and real legacy release replay are unchanged by generated factories', () => {
+void test('fresh fixed and generated maps retain distinct deterministic identities', () => {
   const initial = createWorld(1701, EPOCH);
   const bytes = JSON.stringify(initial);
   assert.equal(initial.height, 12);
@@ -186,10 +180,9 @@ void test('legacy maps and real legacy release replay are unchanged by generated
   createGeneratedWorld(1701, EPOCH);
   assert.equal(JSON.stringify(createWorld(1701, EPOCH)), bytes);
   assert.equal(JSON.stringify(initial), bytes);
-  const released = legacy(1701);
-  assert.deepEqual(released.tiles.slice(0, 216), initial.tiles);
+  const released = fixedGeography(1701);
   assert.equal(released.height, 24);
-  assert.deepEqual(legacy(1701), released);
+  assert.deepEqual(fixedGeography(1701), released);
   assert.notDeepEqual(createGeneratedWorld(1701, EPOCH).tiles, released.tiles);
 });
 

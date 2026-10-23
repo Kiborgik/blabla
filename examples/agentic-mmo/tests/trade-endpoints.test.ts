@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyCommand, applyRelease, createWorld, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, createWorld, legalActions, observe } from '../core/engine.ts';
 import { isGameAction, validateAttachedPlan } from '../core/planning.ts';
 import { sameAction } from '../core/simulation/choices.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -11,16 +11,7 @@ const later = '2026-10-16T00:00:10.000Z';
 type EndpointAction = Extract<GameAction, { type: 'propose-trade' }> & { sourceCityId: string; recipientCityId: string };
 
 function released(endpoints: boolean): WorldState {
-  let state = createWorld(17, epoch);
-  const releases = ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1'];
-  if (endpoints) releases.push('settlement-endpoints-1');
-  for (const targetReleaseId of releases) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, `${targetReleaseId}: ${result.error}`);
-    state = result.state;
-  }
-  assert.ok(isWorldState(state));
-  return state;
+  return createWorld(17, epoch, endpoints ? 'settlement-endpoints-1' : 'settlement-charters-1');
 }
 
 function syntheticCities(count: number, endpoints = true): WorldState {
@@ -49,15 +40,6 @@ function actionFor(state: WorldState): EndpointAction {
   assert.ok(source && recipient);
   return { type: 'propose-trade', partner: 1, recipeId: 'harvest-for-materials', sourceCityId: source.id, recipientCityId: recipient.id };
 }
-
-await test('exact endpoint release is explicit and preserves existing assets and old release capability', () => {
-  const state = released(false);
-  assert.equal(state.unlockedFeatures.includes('exact-trade-endpoints'), false);
-  const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-endpoints-1', timestamp: epoch });
-  assert.equal(result.ok, true, result.error);
-  assert.ok(result.state.unlockedFeatures.includes('exact-trade-endpoints'));
-  for (const key of ['cities', 'civilizations', 'tiles', 'routes', 'tradeOffers', 'publicProjects', 'independentTurns'] as const) assert.deepEqual(result.state[key], state[key]);
-});
 
 await test('paired endpoint shape rejects missing, one-sided and extraneous fields while exact plan identity includes both cities', () => {
   const action: EndpointAction = { type: 'propose-trade', partner: 1, recipeId: 'harvest-for-materials', sourceCityId: 'source', recipientCityId: 'recipient' };
@@ -215,7 +197,7 @@ await test('actual conserved founding creates two noncapital towns that can cons
   assert.equal(result.state.routes[0]?.to, recipientCityId);
 });
 
-await test('endpoint release preserves grandfathered accepted routes and pending offer endpoint consent', () => {
+await test('fresh unpaired rules preserve accepted routes and pending offer endpoint consent', () => {
   let state = syntheticCities(10, false);
   for (const [seat, partner] of [[0, 1], [2, 3]] as const) {
     const proposed = applyCommand(state, { seat, action: { type: 'propose-trade', partner, recipeId: 'harvest-for-materials' }, expectedRevision: state.revision, timestamp: epoch });
@@ -230,14 +212,10 @@ await test('endpoint release preserves grandfathered accepted routes and pending
     }
   }
   const before = structuredClone(state);
-  const upgraded = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-endpoints-1', timestamp: epoch });
-  assert.equal(upgraded.ok, true, upgraded.error);
-  assert.deepEqual(upgraded.state.routes, before.routes);
-  assert.deepEqual(upgraded.state.tradeOffers, before.tradeOffers);
-  const pending = upgraded.state.tradeOffers?.find((offer) => offer.status === 'pending');
+  const pending = state.tradeOffers?.find((offer) => offer.status === 'pending');
   assert.ok(pending);
-  upgraded.state.cities.reverse();
-  const result = applyCommand(upgraded.state, { seat: 3, action: { type: 'respond-trade', offerId: pending.id, accept: true }, expectedRevision: upgraded.state.revision, timestamp: later });
+  state.cities.reverse();
+  const result = applyCommand(state, { seat: 3, action: { type: 'respond-trade', offerId: pending.id, accept: true }, expectedRevision: state.revision, timestamp: later });
   assert.equal(result.ok, true, result.error);
   const route = result.state.routes.find((candidate) => candidate.agreement?.offerId === pending.id);
   assert.equal(route?.from, pending.from);

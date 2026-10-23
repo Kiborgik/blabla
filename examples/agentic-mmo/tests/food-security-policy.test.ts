@@ -3,36 +3,16 @@ import { test } from 'node:test';
 import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion, civilizationBehaviorProfile } from '../core/behavior-profiles.ts';
 import { deriveDiplomacyPlan, diplomacyWeight } from '../core/behavior-diplomacy.ts';
 import { deriveProgressionPlan } from '../core/behavior-progression.ts';
-import { deriveReliefPlan, reliefWeight } from '../core/behavior-relief.ts';
 import { chooseCivilizationBehavior, chooseDirectorBehavior, createBehaviorMemory, isBehaviorMemory, isLegacyBehaviorMemory } from '../core/behaviors.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy } from '../core/engine.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
-import { RELEASES } from '../core/release.ts';
 import { FOOD_BUDGET_RULES } from '../core/food-security-content.ts';
 import { civilizationFoodUpkeep, forecastCivilizationFoodProduction } from '../core/simulation/food-security.ts';
-import { commitEvents } from '../core/simulation/events.ts';
-import { executeReliefAction } from '../core/simulation/relief-charters.ts';
-import { executeTradeAction } from '../core/simulation/trade.ts';
-import type { ActionOption, GameEvent, WorldState } from '../core/types.ts';
+import type { ActionOption, WorldState } from '../core/types.ts';
 
 const epoch = '2026-10-22T00:00:00.000Z';
 const at = (round: number): string => new Date(Date.parse(epoch) + round * 60_000).toISOString();
 function world(budget = true): WorldState { return createGeneratedWorld(73, epoch, budget ? 'settlement-food-budget-1' : 'settlement-regional-targets-1'); }
-function legacyCorridor(): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const release of RELEASES.slice(1)) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch }); assert.ok(result.ok, result.error); state = result.state;
-    if (release.id === 'settlement-regional-targets-1') break;
-  }
-  state.revision++; let events: GameEvent[] = []; executeTradeAction(state, 1, { type: 'propose-trade', partner: 4, recipeId: 'energy-for-materials', sourceCityId: 'city-1', recipientCityId: 'city-4' }, events); commitEvents(state, events);
-  state.revision++; events = []; executeTradeAction(state, 4, { type: 'respond-trade', offerId: state.tradeOffers!.at(-1)!.id, accept: true }, events); commitEvents(state, events);
-  state.cities.find(city => city.civId === 1)!.population = 20; state.cities.find(city => city.civId === 4)!.population = 20;
-  state.civilizations[1]!.resources.food = 100; state.civilizations[1]!.resources.energy = 100; state.civilizations[4]!.resources.food = 0;
-  state.revision++; events = []; assert.ok(executeReliefAction(state, 1, { type: 'propose-relief', routeId: state.routes[0]!.id, sourceCityId: 'city-1', recipientCityId: 'city-4' }, events)); commitEvents(state, events);
-  state.revision++; events = []; assert.ok(executeReliefAction(state, 4, { type: 'respond-relief', charterId: state.relief!.active[0]!.id, accept: true }, events)); commitEvents(state, events);
-  return state;
-}
-
 void test('feature-conditioned policy has a distinct identity and seed domain without silently adopting old memory', () => {
   const old = world(false); const budget = world();
   assert.equal(BEHAVIOR_POLICY_VERSION, 'weighted-civilizations-v2'); assert.equal(behaviorPolicyVersion(old), BEHAVIOR_POLICY_VERSION); assert.equal(behaviorPolicyVersion(budget), FOOD_BUDGET_BEHAVIOR_POLICY_VERSION);
@@ -78,19 +58,4 @@ void test('diplomacy protects two current meal beats rather than legacy half-Foo
   const budget = deriveDiplomacyPlan(state, actor, profile, [option]); assert.equal(diplomacyWeight(option, 10, budget), 0);
   const old = structuredClone(state); old.unlockedFeatures = old.unlockedFeatures.filter(id => id !== FOOD_BUDGET_RULES.featureId);
   const legacy = deriveDiplomacyPlan(old, old.civilizations[2]!, profile, [option]); assert.ok(diplomacyWeight(option, 10, legacy) > 0);
-});
-
-void test('retained legacy aid cargo stays fixed while upgraded donor risk and recipient usefulness use actual current meals', () => {
-  const old = legacyCorridor(); const charter = old.relief!.active[0]!; assert.equal(charter.terms.food, 20);
-  const adopted = applyRelease(old, { expectedRevision: old.revision, expectedFromReleaseId: old.releaseId, targetReleaseId: 'settlement-food-budget-1', timestamp: epoch }); assert.ok(adopted.ok, adopted.error);
-  const budget = adopted.state;
-  for (const state of [old, budget]) { state.civilizations[1]!.resources.food = 60; state.civilizations[4]!.resources.food = 60; }
-  const donorOption: ActionOption = { action: { type: 'withdraw-relief', charterId: charter.id }, label: 'Withdraw retained aid', reason: 'Synthetic reserve comparison' };
-  const recipientOption: ActionOption = { ...donorOption };
-  for (const [state, donorRisk, recipientRecovered] of [[old, false, true], [budget, true, false]] as const) {
-    const donorPlan = deriveReliefPlan(state, state.civilizations[1]!, civilizationBehaviorProfile(state.seed, 1), [donorOption]);
-    const recipientPlan = deriveReliefPlan(state, state.civilizations[4]!, civilizationBehaviorProfile(state.seed, 4), [recipientOption]);
-    assert.equal(reliefWeight(donorOption, 10, donorPlan) > 0, donorRisk); assert.equal(reliefWeight(recipientOption, 10, recipientPlan) > 0, recipientRecovered);
-    assert.equal(state.relief!.active[0]!.terms.food, 20); assert.equal('kind' in state.relief!.active[0]!.terms.proposal, false);
-  }
 });

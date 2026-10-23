@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
+import { applyCommand, applyDirectorTick, applyHistoryAdvance, catchUpClock, catchUpStrategy } from '../core/engine.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, createBehaviorMemory } from '../core/behaviors.ts';
 import { assertAutonomousState, createAutonomousState, planAutonomousWake } from '../server/autonomous-runner.ts';
@@ -80,12 +80,8 @@ function fixture() {
   };
 }
 
-async function initialize(item: ReturnType<typeof fixture>, independent = false) {
-  await item.repository().initialize({ seed: 1701, clockEpoch: epoch, commandId: 'initial' }, actor, epoch);
-  if (independent) {
-    await item.repository().mutate('release-apply', { expectedRevision: 0, expectedFromReleaseId: 'settlement-foundations-1', targetReleaseId: 'settlement-foundations-2', model: 'historical-development-agent', commandId: 'release-1' }, actor, epoch);
-    await item.repository().mutate('release-apply', { expectedRevision: 1, expectedFromReleaseId: 'settlement-foundations-2', targetReleaseId: 'settlement-independent-1', model: 'historical-development-agent', commandId: 'release-2' }, actor, epoch);
-  }
+async function initialize(item: ReturnType<typeof fixture>, independent = false, registeredRulesId = independent ? 'settlement-independent-1' : 'settlement-foundations-1') {
+  await item.repository().initialize({ seed: 1701, clockEpoch: epoch, registeredRulesId, commandId: 'initial' }, actor, epoch);
 }
 
 async function activate(item: ReturnType<typeof fixture>) {
@@ -130,12 +126,12 @@ void test('activation is explicit, idempotent and does not alter existing world 
     await activate(item);
     assert.deepEqual(await item.repository().read(), before);
     assert.deepEqual(await item.repository().history(), history);
-    const duplicate = await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 2, enabled: true, commandId: 'activate' }), item.env());
+    const duplicate = await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 0, enabled: true, commandId: 'activate' }), item.env());
     assert.equal((await json(duplicate)).duplicate, true);
     assert.equal((await item.repository().simulation()).runtimeRevision, 1);
-    assert.equal((await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 2, enabled: false, commandId: 'activate' }), item.env())).status, 409);
+    assert.equal((await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 0, enabled: false, commandId: 'activate' }), item.env())).status, 409);
     assert.equal((await item.repository().simulation()).enabled, true);
-    assert.ok(history.entries.every(entry => entry.provenance.kind === 'development-agent'));
+    assert.equal(history.entries.length, 0);
   } finally { item.cleanup(); }
 });
 
@@ -165,9 +161,9 @@ void test('one wake records all six exact legal procedural commands and atomic d
     let reproduced = current.initial;
     for (const entry of history.entries) {
       const transition = entry.transition;
+      if (transition.kind === 'release-apply') assert.fail('Fresh histories cannot contain release migration.');
       const result = transition.kind === 'action' ? applyCommand(reproduced, transition.command)
-        : transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-          : transition.kind === 'director-tick' ? applyDirectorTick(reproduced, transition.command)
+        : transition.kind === 'director-tick' ? applyDirectorTick(reproduced, transition.command)
             : transition.kind === 'history-advance' ? applyHistoryAdvance(reproduced, transition.command)
               : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : catchUpClock(reproduced, transition.timestamp);
       assert.equal(result.ok, true, result.error);
@@ -215,14 +211,14 @@ void test('world and policy reads remain coherent when another wake commits acro
       if (operation === 'wake') assert.equal(object((await wake(item, 'outer-read-boundary')).simulation).decisions, 0);
       else if (operation === 'status') assert.equal((await item.repository().simulation()).wakeCount, 0);
       else {
-        const response = await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 2, enabled: false, commandId: 'stale-configure' }), item.env());
+        const response = await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 0, enabled: false, commandId: 'stale-configure' }), item.env());
         assert.equal(response.status, 409);
         assert.equal((await json(response)).error, 'stale_simulation_revision');
       }
       assert.equal(competingWakes, 1);
       const current = await item.repository().read();
       assert.equal(current?.state.round, 1);
-      assert.equal(current?.state.revision, 9);
+      assert.equal(current?.state.revision, 7);
       const status = await item.repository().simulation();
       assert.equal(status.enabled, true);
       assert.equal(status.wakeCount, operation === 'wake' ? 2 : 1);
@@ -273,7 +269,7 @@ void test('a competing committed world update is reobserved after a zero-effect 
     await initialize(item, true);
     await activate(item);
     item.database().beforeBatch = async () => {
-      await item.repository().mutate('action', { expectedRevision: 2, seat: 0, action: { type: 'wait' }, model: 'historical-development-agent', commandId: 'concurrent-human-owned-action' }, actor, epoch);
+      await item.repository().mutate('action', { expectedRevision: 0, seat: 0, action: { type: 'wait' }, model: 'historical-development-agent', commandId: 'concurrent-human-owned-action' }, actor, epoch);
     };
     const value = await wake(item);
     assert.equal(object(value.simulation).decisions, 5);
@@ -339,7 +335,7 @@ void test('unsupported inputs and corrupt policy state fail closed with no world
     const corrupt = snapshot(item);
     assert.equal((await item.worker.fetch(post('/api/simulation/run', { commandId: 'corrupt' }), item.env())).status, 503);
     assert.equal((await item.worker.fetch(new Request('https://world.test/api/simulation'), item.env())).status, 503);
-    assert.equal((await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 2, enabled: false, commandId: 'corrupt-pause' }), item.env())).status, 503);
+    assert.equal((await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 0, enabled: false, commandId: 'corrupt-pause' }), item.env())).status, 503);
     assert.deepEqual(snapshot(item), corrupt);
     assert.equal((await item.worker.fetch(new Request('https://world.test/api/world'), item.env())).status, 200);
   } finally { item.cleanup(); }
@@ -368,7 +364,7 @@ void test('coherent simulation reads preserve fail-closed validation of the orig
     item.database().sqlite.prepare("UPDATE world_state SET initial_json = '{}'").run();
     const before = snapshot(item);
     assert.equal((await item.worker.fetch(new Request('https://world.test/api/simulation'), item.env())).status, 503);
-    assert.equal((await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 2, enabled: false, commandId: 'invalid-initial-pause' }), item.env())).status, 503);
+    assert.equal((await item.worker.fetch(post('/api/simulation/activate', { expectedRevision: 0, enabled: false, commandId: 'invalid-initial-pause' }), item.env())).status, 503);
     assert.equal((await item.worker.fetch(post('/api/simulation/run', { commandId: 'invalid-initial-wake' }), item.env())).status, 503);
     assert.deepEqual(snapshot(item), before);
   } finally { item.cleanup(); }
@@ -394,13 +390,7 @@ void test('identical persisted seeds and wake times produce the same world acros
 void test('released exact-town commitments keep their bounded plans and procedural reasons', async () => {
   const item = fixture();
   try {
-    await initialize(item);
-    for (const release of RELEASES.slice(1, RELEASES.findIndex(release => release.id === 'settlement-regional-targets-1') + 1)) {
-      const current = await item.repository().read();
-      assert.ok(current);
-      assert.ok(release.compatibleFrom.includes(current.state.releaseId));
-      await item.repository().mutate('release-apply', { expectedRevision: current.state.revision, expectedFromReleaseId: current.state.releaseId, targetReleaseId: release.id, model: 'historical-development-agent', commandId: `release-${release.id}` }, actor, epoch);
-    }
+    await initialize(item, true, 'settlement-regional-targets-1');
     await activate(item);
     for (let index = 0; index < 12; index += 1) {
       item.setTime(new Date(Date.parse(epoch) + index * 10_000).toISOString());
@@ -441,9 +431,8 @@ void test('hosted controller envelopes require the exact supported world and eve
 void test('hosted Food-policy configuration refuses before any runtime or receipt write', async () => {
   const item = fixture();
   try {
-    await initialize(item);
     const world = createGeneratedWorld(73, epoch, 'settlement-food-budget-1');
-    item.database().sqlite.prepare('UPDATE world_state SET initial_json = ?, state_json = ?, revision = ?').run(JSON.stringify(world), JSON.stringify(world), world.revision);
+    seedHostedWorld(item.database().sqlite, world);
     const before = snapshot(item);
     const batches = item.database().batches;
     for (const enabled of [false, true]) {
@@ -459,15 +448,14 @@ void test('hosted release policy changes refuse atomically with or without an ac
   for (const mode of ['unconfigured', 'paused', 'enabled']) {
     const item = fixture();
     try {
-      await initialize(item);
       const world = createGeneratedWorld(73, epoch, 'settlement-regional-targets-1');
-      item.database().sqlite.prepare('UPDATE world_state SET initial_json = ?, state_json = ?, revision = ?').run(JSON.stringify(world), JSON.stringify(world), world.revision);
+      seedHostedWorld(item.database().sqlite, world);
       if (mode !== 'unconfigured') await item.repository().configureSimulation({ expectedRevision: world.revision, enabled: mode === 'enabled', commandId: `legacy-${mode}` }, actor, epoch);
       const before = snapshot(item);
       const batches = item.database().batches;
       const input = { expectedRevision: world.revision, expectedFromReleaseId: world.releaseId, targetReleaseId: 'settlement-food-budget-1', model: 'development-agent-fixture', commandId: 'unsupported-policy-release' };
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        await assert.rejects(item.repository().mutate('release-apply', input, actor, epoch), (error: unknown) => error instanceof RequestFailure && error.status === 409 && error.code === 'unsupported_hosted_policy_version');
+        await assert.rejects(item.repository().mutate('release-apply', input, actor, epoch), (error: unknown) => error instanceof RequestFailure && error.status === 409 && error.code === 'pre_release_migration_disabled');
         assert.deepEqual(snapshot(item), before);
         assert.equal(item.database().batches, batches);
       }

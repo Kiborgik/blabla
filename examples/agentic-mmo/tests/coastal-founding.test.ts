@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isDeepStrictEqual } from 'node:util';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { ECONOMY_RULES, RESOURCE_IDS } from '../core/content.ts';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
 import { createCoastalPlanner, coastalTopologyBlock, coastalPathBlock, isCoastalFoundingQuote } from '../core/simulation/coastal.ts';
@@ -12,7 +12,7 @@ import type { GameAction, Resources, WorldState } from '../core/types.ts';
 import { coastalDeparturePrefix, coastalPrefixTime, replayCoastalStep, type CoastalPrefixInput } from './fixtures/coastal-prefix.ts';
 
 function journey() {
-  const prefix = coastalDeparturePrefix();
+  const prefix = coastalDeparturePrefix('settlement-coastal-1');
   let state = prefix.state;
   let seconds = (Date.parse(prefix.timestamp) - Date.parse(coastalPrefixTime(0))) / 1000;
   const steps: Array<{ before: WorldState; input: CoastalPrefixInput; after: WorldState }> = [];
@@ -38,8 +38,7 @@ function journey() {
     commit({ kind: 'strategy', timestamp: coastalPrefixTime(seconds) });
     seconds += 10;
   };
-  for (const targetReleaseId of ['settlement-residents-1', 'settlement-coastal-1']) commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: coastalPrefixTime(seconds) } });
-  const adopted = structuredClone(state);
+  const opening = structuredClone(state);
   for (const technology of ['civic-institutions', 'navigation']) {
     action({ type: 'research', technology });
     for (let count = 0; count < 64; count++) { if (state.civilizations[0]?.technologies.includes(technology)) break; beat(); }
@@ -51,7 +50,7 @@ function journey() {
   assert.ok(state.cities.find(city => city.id === prefix.departureCityId)?.buildings.includes('boat-yard'));
   const completion = state.events.find(event => event.type === 'building-completed' && event.tileId === 23);
   assert.ok(completion?.effects.includes('Completed capability coastal-departure'));
-  return { prefix, adopted, building, state, timestamp: coastalPrefixTime(seconds), steps, action };
+  return { prefix, opening, building, state, timestamp: coastalPrefixTime(seconds), steps, action };
 }
 
 function refused(state: WorldState, action: GameAction, timestamp: string) {
@@ -70,19 +69,16 @@ void test('coastal exact action has strict plan parsing without changing old sou
 });
 
 void test('released Boat yard canonically requires an exact coastal town in choices and tree', () => {
-  const prefix = coastalDeparturePrefix();
+  const prefix = coastalDeparturePrefix('settlement-coastal-1');
   let state = prefix.state;
-  for (const targetReleaseId of ['settlement-residents-1', 'settlement-coastal-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: prefix.timestamp });
-    assert.equal(result.ok, true, result.error); state = result.state;
-  }
+
   const options = legalActions(state, 0, prefix.timestamp);
   assert.ok(options.some(option => option.action.type === 'build' && option.action.project === 'boat-yard' && option.action.cityId === prefix.departureCityId));
   assert.equal(options.some(option => option.action.type === 'build' && option.action.project === 'boat-yard' && option.action.cityId === 'city-0'), false);
   assert.equal(projectCapabilities(state, 0, 'city-0', prefix.timestamp).buildings.find(row => row.nodeId === 'building:boat-yard')?.status, 'locked');
 });
 
-void test('entire legal prefix discovers Navigation, completes timed yard and gains genuinely new conserved coastal reach', context => {
+void test('current-rules legal prefix discovers Navigation, completes timed yard and gains genuinely new conserved coastal reach', context => {
   const run = journey();
   const action: GameAction = { type: 'settle-coast', sourceCityId: run.prefix.departureCityId, tileId: 26 };
   const options = legalActions(run.state, 0, run.timestamp);
@@ -111,10 +107,10 @@ void test('entire legal prefix discovers Navigation, completes timed yard and ga
   context.diagnostic(JSON.stringify({ prefixFrames: run.prefix.steps.length, addedFrames: run.steps.length, round: result.state.round, coastalChoices: options.filter(candidate => candidate.action.type === 'settle-coast').length, optionBytes: Buffer.byteLength(JSON.stringify(options)), receipt: city.coastalFounding }));
 });
 
-void test('coastal release adoption and exact replay preserve the old legal prefix and installed assets', () => {
+void test('current coastal steps and exact JSON restart preserve the legal prefix and installed assets', () => {
   const run = journey();
-  assert.deepEqual(run.adopted.cities, run.prefix.state.cities);
-  assert.deepEqual(run.adopted.tiles, run.prefix.state.tiles);
+  assert.deepEqual(run.opening.cities, run.prefix.state.cities);
+  assert.deepEqual(run.opening.tiles, run.prefix.state.tiles);
   for (const step of run.steps) assert.deepEqual(replayCoastalStep(JSON.parse(JSON.stringify(step.before)), step.input).state, step.after);
   const action: GameAction = { type: 'settle-coast', sourceCityId: run.prefix.departureCityId, tileId: 26 };
   const command = { seat: 0, expectedRevision: run.state.revision, timestamp: run.timestamp, action, plan: [{ action, reason: 'Establish a reachable new shore with existing residents' }] };
@@ -188,10 +184,10 @@ void test('full and compact exact coast choices and quotations are detached with
   context.diagnostic(JSON.stringify({ allOptions: full.length, coastalOptions: coast.length, pureCompactBytes: Buffer.byteLength(JSON.stringify(observeCompactTrade(run.state, 0, run.timestamp))), first20OptionsBytes: Buffer.byteLength(JSON.stringify(full.slice(0, 20))) }));
 });
 
-void test('old land option identities and source history remain exact through additive coastal adoption', () => {
+void test('current land option identities and source history replay exactly alongside coastal choices', () => {
   const run = journey();
   const before = legalActions(run.prefix.state, 0, run.prefix.timestamp).filter(option => option.action.type === 'settle');
-  const after = legalActions(run.adopted, 0, run.prefix.timestamp).filter(option => option.action.type === 'settle');
+  const after = legalActions(run.opening, 0, run.prefix.timestamp).filter(option => option.action.type === 'settle');
   assert.deepEqual(after, before);
   let replay = run.prefix.initial;
   for (const step of run.prefix.steps) { const result = replayCoastalStep(replay, step.input); assert.deepEqual(result, step.result); replay = result.state; }
@@ -200,7 +196,7 @@ void test('old land option identities and source history remain exact through ad
   assert.equal(yard?.siteRequirement, 'coastal');
   assert.deepEqual(yard?.production, {});
   assert.deepEqual(yard?.effects, []);
-  const row = projectCapabilities(run.adopted, 0, 'city-0', run.prefix.timestamp).buildings.find(building => building.nodeId === 'building:boat-yard');
+  const row = projectCapabilities(run.opening, 0, 'city-0', run.prefix.timestamp).buildings.find(building => building.nodeId === 'building:boat-yard');
   assert.ok(row?.blockers.some(blocker => blocker.kind === 'coastal-site'));
 });
 

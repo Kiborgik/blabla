@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CONTENT, IMPROVEMENTS, validateContent } from '../core/content.ts';
 import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
 import { isCoastalSite } from '../core/simulation/coastal.ts';
 import { resolveEconomy } from '../core/simulation/economy.ts';
 import { forecastCityFoodProduction } from '../core/simulation/food-security.ts';
@@ -23,7 +22,7 @@ function nextBeat(state: WorldState): WorldState {
 }
 
 function journey() {
-  const prefix = coastalDeparturePrefix(); let state = prefix.state;
+  const prefix = coastalDeparturePrefix('settlement-shore-fisheries-1'); let state = prefix.state;
   const steps: CoastalPrefixStep[] = [];
   const commit = (input: CoastalPrefixInput): void => {
     const before = structuredClone(state); const result = replayCoastalStep(state, input);
@@ -34,10 +33,6 @@ function journey() {
     assert.ok(legalActions(state, 0, time(state)).some(option => JSON.stringify(option.action) === JSON.stringify(action)), JSON.stringify(action));
     commit({ kind: 'action', command: { seat: 0, expectedRevision: state.revision, timestamp: time(state), action } });
   };
-  for (const release of RELEASES.slice(RELEASES.findIndex(item => item.id === state.releaseId) + 1)) {
-    commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: time(state) } });
-    if (release.id === 'settlement-shore-fisheries-1') break;
-  }
   const cityId = prefix.departureCityId;
   const city = () => { const value = state.cities.find(item => item.id === cityId); assert.ok(value); return value; };
   assert.ok(isCoastalSite(state, city().tileId));

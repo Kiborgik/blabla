@@ -1,5 +1,3 @@
-state compatible_empty_adoption: bool
-state prior_world_preserved: bool
 state no_clock_era_or_milestone_change: bool
 state exact_catalogue_admission: bool
 state exact_start_cost_and_work: bool
@@ -29,12 +27,10 @@ state positive_consumer_required: bool
 state bounded_self_contained_retention: bool
 state retained_events_cross_checked: bool
 state emissions_are_receipt_only: bool
-state legal_unedited_consumer_journey: bool
+state current_paid_consumer_sequence: bool
 state replay_exact: bool
 state refused_actions_have_no_effects: bool
-state legacy_behavior_preserved: bool
 
-action adopt_local_power()
 action construct_power_building()
 action operate_local_generator()
 action operate_powered_consumer()
@@ -43,9 +39,6 @@ action change_power_operation()
 action retain_local_power_receipt()
 action replay_local_power()
 
-when adopt_local_power {
-    expect "local-power-adoption-adds-no-stock-operation-or-historical-credit": after.compatible_empty_adoption and after.prior_world_preserved and after.no_clock_era_or_milestone_change
-}
 when construct_power_building {
     expect "local-power-buildings-use-exact-owned-town-catalogue-commitments": after.exact_catalogue_admission and after.exact_start_cost_and_work and after.one_owned_town_lane
     expect "local-power-installation-pays-once-and-first-operates-on-a-later-beat": after.paid_and_installed_once and after.first_operation_later
@@ -70,14 +63,11 @@ when retain_local_power_receipt {
     expect "local-power-emissions-remain-paid-operation-receipts-without-climate-or-calendar-effects": after.emissions_are_receipt_only and after.no_clock_era_or_milestone_change
 }
 when replay_local_power {
-    expect "a-legal-industrial-continuation-funds-a-real-same-town-factory-consumer": after.legal_unedited_consumer_journey and after.same_town_same_beat_power and after.exact_modified_materials
-    expect "local-power-replays-and-refusals-preserve-once-only-effects-and-legacy-history": after.replay_exact and after.refused_actions_have_no_effects and after.legacy_behavior_preserved and after.bounded_self_contained_retention
+    expect "a-paid-current-sequence-funds-a-real-same-town-factory-consumer": after.current_paid_consumer_sequence and after.same_town_same_beat_power and after.exact_modified_materials
+    expect "local-power-replays-and-refusals-preserve-once-only-effects": after.replay_exact and after.refused_actions_have_no_effects and after.bounded_self_contained_retention
 }
 
-state powered_science_compatible_adoption: bool
-state powered_science_prior_world_preserved: bool
-state powered_science_old_receipts_unchanged: bool
-state powered_science_no_grants_or_calendar_change: bool
+state powered_science_calendar_unchanged: bool
 state sanitation_science_cost: int
 state chemistry_science_cost: int
 state powered_science_exact_prerequisites: bool
@@ -126,13 +116,11 @@ state powered_science_unreleased_references_refused: bool
 state powered_science_corrupt_branch_refused: bool
 state laboratory_invalid_admission_refused: bool
 state powered_science_refusals_zero_effect: bool
-state powered_science_legal_unedited_paid_journey: bool
+state powered_science_current_paid_sequence: bool
 state powered_science_actual_selected_research_witness: bool
 state powered_science_replay_exact: bool
-state powered_science_legacy_behavior_preserved: bool
 state powered_science_deferred_mechanics_absent: bool
 
-action adopt_powered_science()
 action research_powered_science()
 action construct_research_laboratory()
 action operate_research_laboratory()
@@ -141,9 +129,6 @@ action retain_laboratory_history()
 action refuse_powered_science()
 action replay_powered_science()
 
-when adopt_powered_science {
-    expect "powered-science-adoption-preserves-the-world-and-old-power-receipts-without-grants": after.powered_science_compatible_adoption and after.powered_science_prior_world_preserved and after.powered_science_old_receipts_unchanged and after.powered_science_no_grants_or_calendar_change
-}
 when research_powered_science {
     expect "sanitation-and-chemistry-use-exact-released-prerequisites-and-future-science-without-era-gates": after.sanitation_science_cost == 140 and after.chemistry_science_cost == 260 and after.powered_science_exact_prerequisites and after.powered_science_release_required and after.powered_science_eras_are_metadata and after.powered_science_future_output_only and after.powered_science_explicit_target_only
     expect "powered-science-history-checks-new-completion-prefixes-and-active-target-eligibility": after.powered_science_completion_prefix_validated and after.powered_science_active_target_validated
@@ -168,6 +153,6 @@ when refuse_powered_science {
     expect "unreleased-branch-or-laboratory-references-and-corrupt-prerequisites-refuse-without-effects": after.powered_science_unreleased_references_refused and after.powered_science_corrupt_branch_refused and after.laboratory_invalid_admission_refused and after.powered_science_refusals_zero_effect
 }
 when replay_powered_science {
-    expect "a-legal-earned-industrial-continuation-pays-for-laboratory-science-and-an-explicit-research-target": after.powered_science_legal_unedited_paid_journey and after.powered_science_actual_selected_research_witness and after.laboratory_exact_modified_science and after.laboratory_same_beat_productive_research
-    expect "powered-science-replay-preserves-old-behavior-and-adds-no-sewer-knowledge-or-calendar-mechanics": after.powered_science_replay_exact and after.powered_science_legacy_behavior_preserved and after.powered_science_deferred_mechanics_absent and after.powered_science_no_grants_or_calendar_change and after.powered_science_old_receipts_unchanged
+    expect "a-paid-current-sequence-funds-laboratory-science-and-an-explicit-research-target": after.powered_science_current_paid_sequence and after.powered_science_actual_selected_research_witness and after.laboratory_exact_modified_science and after.laboratory_same_beat_productive_research
+    expect "powered-science-replay-preserves-current-receipts-and-calendar": after.powered_science_replay_exact and after.powered_science_deferred_mechanics_absent and after.powered_science_calendar_unchanged
 }

@@ -5,7 +5,7 @@ import { arch, cpus, platform } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, observe } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, observe } from '../core/engine.ts';
 import { CIV_COUNT, DIRECTOR_SEAT, GAME_VERSION, SCHEMA_VERSION, type Command, type TransitionResult, type WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 
@@ -39,10 +39,7 @@ function accepted(result: TransitionResult): WorldState {
   return result.state;
 }
 function fixture(cityCount: number): WorldState {
-  let state = createWorld(17, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1']) {
-    state = accepted(applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch }));
-  }
+  const state = createWorld(17, epoch, 'settlement-production-1');
   const capitals = structuredClone(state.cities);
   const occupied = new Set(state.cities.map((city) => city.tileId));
   const sites = state.tiles.filter((tile) => !occupied.has(tile.id) && tile.owner === null && tile.terrain !== 'ocean' && tile.terrain !== 'mountain');
@@ -181,7 +178,7 @@ export function measureProduction(options: Options = {}) {
     identity: { gameVersion: GAME_VERSION, worldSchemaVersion: SCHEMA_VERSION, releaseId: 'settlement-production-1', actionSource: 'contract-probes', source: sourceIdentity(), environment: { node: process.version, v8: process.versions.v8, platform: platform(), architecture: arch(), cpu: cpus()[0]?.model ?? 'unknown', logicalCpus: cpus().length } },
     methodology: [
       'Finite synthetic canonical fixtures, not a live world or genuine model play; five current-scale cities and twenty-five cities stress five settlements sharing each civilization stockpile',
-      'Fixtures are authored directly after explicit releases; larger settlement reachability through currently released expansion actions is not claimed',
+      'Fixtures start fresh under explicitly selected registered rules with synthetic initial prerequisites; larger settlement reachability through legal expansion actions is not claimed',
       'Each city has farm, irrigation and kiln; opening energy funds one initial kiln beat then passive recovery competes with depletion; first-city kilns pause for beats two and three and resume at four',
       'Measured action and catchup transitions exclude replay/validation from individual timings; total workload includes fixture construction, replay, validation and detached observation checks',
       'Receipt/event/command counts measure externally realized work, not instrumented internal CPU instructions or a complexity proof',

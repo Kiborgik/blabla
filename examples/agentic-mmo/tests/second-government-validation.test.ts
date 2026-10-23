@@ -13,14 +13,12 @@ function corrupt(state: WorldState, change: (copy: WorldState) => void, label: s
   const copy = structuredClone(state); change(copy); assert.equal(isWorldState(copy), false, label);
 }
 
-void test('second-government release, productive civic branch and every real transition frame remain valid', async () => {
+void test('fresh second-government scenario, productive civic branch and every real transition frame remain valid', async () => {
   const path = story();
   for (const step of path.steps) assert.ok(isWorldState(step.result.state), `legal frame ${step.result.state.revision}`);
-  for (const state of [path.beforeRelease, path.adopted, ...path.civicFrames.flatMap(frame => [frame.selected, frame.completed]), path.accepted, path.firstTransitionBeat, path.transitionCompleted, path.constructionStarted, path.firstWorkBeat, path.built, path.reslotted, path.returnAccepted, path.returnFirstBeat, path.returned])
+  for (const state of [path.prepared, ...path.civicFrames.flatMap(frame => [frame.selected, frame.completed]), path.accepted, path.firstTransitionBeat, path.transitionCompleted, path.constructionStarted, path.firstWorkBeat, path.built, path.reslotted, path.returnAccepted, path.returnFirstBeat, path.returned])
     assert.deepEqual(await decodeHistorySnapshot(JSON.stringify(state)), state);
-  assert.deepEqual(actor(path.adopted).civics, actor(path.beforeRelease).civics);
-  assert.deepEqual(actor(path.adopted).government, actor(path.beforeRelease).government);
-  assert.equal(path.returned.year, path.beforeRelease.year); assert.equal(path.returned.clockTicks, path.beforeRelease.clockTicks);
+  assert.equal(path.returned.year, path.initial.year); assert.equal(path.returned.clockTicks, path.initial.clockTicks);
 });
 
 void test('completed civic order requires prerequisites before their dependent completion even after event pruning', () => {
@@ -33,7 +31,6 @@ void test('completed civic order requires prerequisites before their dependent c
 
 void test('new civic progress and real Autocracy slots remain released, exact and caller-independent', () => {
   const path = story(); const selected = required(path.civicFrames.at(-1)).selected;
-  corrupt(path.beforeRelease, copy => { actor(copy).civics = structuredClone(required(actor(selected).civics)); }, 'new civic cannot exist on old release');
   corrupt(selected, copy => { required(required(actor(copy).civics).active).progress = 48; }, 'active progress must remain below snapshotted cost');
   corrupt(selected, copy => { required(required(actor(copy).civics).active).startedRound = copy.round + 1; }, 'future civic selection');
   corrupt(selected, copy => { required(actor(copy).civics).completedCivicIds = required(actor(copy).civics).completedCivicIds.filter(id => id !== 'state-workforce'); }, 'actual prerequisites required');

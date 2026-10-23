@@ -1,7 +1,8 @@
+import { RELEASES } from '../core/release.ts';
 import { BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion } from '../core/behaviors.ts';
 import { isHistoricalEventSelection } from '../core/historical-selection-validation.ts';
-import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
-import { type ActionOutcome, type Command, type DirectorTickCommand, type GameAction, type HistoryAdvanceCommand, type ReleaseApplyCommand, type TransitionResult, type WorldState } from '../core/types.ts';
+import { applyCommand, applyDirectorTick, applyHistoryAdvance, catchUpClock, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
+import { type ActionOutcome, type Command, type DirectorTickCommand, type GameAction, type HistoryAdvanceCommand, type TransitionResult, type WorldState } from '../core/types.ts';
 import { isGameAction, validateAttachedPlan } from '../core/planning.ts';
 import { isDirectorEvent } from '../core/validation.ts';
 import { decisionActionBlock } from '../core/simulation/decisions.ts';
@@ -218,12 +219,14 @@ export class WorldRepository {
   async initialize(input: Record<string, unknown>, actorUserId: string, timestamp: string): Promise<HostedReply> {
     const seed = boundedInteger(input.seed, -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, 'seed');
     const clockEpoch = utc(input.clockEpoch);
+    const registeredRulesId = input.registeredRulesId;
+    if (registeredRulesId !== undefined && (typeof registeredRulesId !== 'string' || !RELEASES.some(rules => rules.id === registeredRulesId))) throw new RequestFailure(400, 'unknown_registered_rules');
     if (Date.parse(clockEpoch) > Date.parse(timestamp)) throw new RequestFailure(400, 'future_epoch');
     const key = `initialize:${text(input.commandId, 'command_id')}`;
     const fingerprint = canonical({ operation: 'initialize', input, actorUserId });
     const prior = await this.receipt(key, fingerprint);
     if (prior) return prior;
-    const state = createWorld(seed, clockEpoch);
+    const state = createWorld(seed, clockEpoch, registeredRulesId);
     const reply: HostedReply = { ok: true, revision: 0, acceptedRevision: 0 };
     try {
       await this.database.batch([
@@ -240,6 +243,7 @@ export class WorldRepository {
   }
 
   async mutate(operation: HostedTransition['kind'], input: Record<string, unknown>, actorUserId: string, timestamp: string): Promise<HostedReply> {
+    if (operation === 'release-apply') throw new RequestFailure(409, 'pre_release_migration_disabled');
     const intent = operation === 'action' ? strategyIntent(input, timestamp) : null;
     if (intent?.kind === 'upkeep') {
       const reply = await this.mutate('strategy-catchup', { ...input, timestamp: intent.timestamp }, actorUserId, timestamp);
@@ -299,12 +303,6 @@ export class WorldRepository {
           }
           transition = { kind: 'action', command };
           result = applyCommand(actionState, command);
-        } else if (operation === 'release-apply') {
-          model = text(input.model, 'model');
-          const command: ReleaseApplyCommand = { expectedRevision, expectedFromReleaseId: text(input.expectedFromReleaseId, 'source_release'), targetReleaseId: text(input.targetReleaseId, 'target_release'), timestamp };
-          transition = { kind: 'release-apply', command };
-          result = applyRelease(current.state, command);
-          if (result.ok && behaviorPolicyVersion(result.state) !== BEHAVIOR_POLICY_VERSION) throw new RequestFailure(409, 'unsupported_hosted_policy_version');
         } else {
           const at = utc(input.timestamp);
           if (Date.parse(at) > Date.parse(timestamp)) throw new RequestFailure(400, 'future_timestamp');

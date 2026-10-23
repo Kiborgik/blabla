@@ -38,7 +38,7 @@ void test('second government catalogue keeps the accepted branch, costs, slots a
   assert.deepEqual(autocracy.baseProduction, {}); assert.equal(Reflect.get(autocracy, 'capitalConstructionWorkPercent'), 15);
   assert.deepEqual(GOVERNMENTS.map(candidate => candidate.id), ['chiefdom', 'autocracy']); assert.deepEqual(validateContent(), []);
   const release = RELEASES.find(candidate => candidate.id === 'settlement-second-government-1'); assert.ok(release);
-  assert.deepEqual(release.compatibleFrom, ['settlement-local-power-1']); assert.ok(release.featureIds.includes('second-government'));
+  assert.ok(release.featureIds.includes('second-government'));
 });
 
 void test('synthetic capital work adds policy work before productivity and rounds only after the fifteen-percent bonus', () => {
@@ -83,10 +83,10 @@ void test('synthetic branch admission adds no era gate and unreleased capital mo
   assert.equal(constructionWork(state, city), q(2 * cityProductivity(city)));
 });
 
-void test('second government release is an additive successor of local Power', () => {
+void test('second government registered rules add their capability to local Power rules', () => {
   const release = RELEASES.find(candidate => candidate.id === 'settlement-second-government-1'); const previous = RELEASES.find(candidate => candidate.id === 'settlement-local-power-1');
-  assert.ok(release && previous, 'The compatible second-government release must exist');
-  assert.deepEqual(release.compatibleFrom, [previous.id]); assert.deepEqual(release.featureIds, [...previous.featureIds, 'second-government']);
+  assert.ok(release && previous, 'The registered second-government rules must exist');
+  assert.deepEqual(release.featureIds, [...previous.featureIds, 'second-government']);
 });
 
 import { secondGovernmentJourney } from './fixtures/second-government-journey.ts';

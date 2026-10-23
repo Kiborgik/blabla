@@ -23,9 +23,9 @@ function fixture(initial: Array<[string, string]> = [], overrides: Partial<Local
   return { storage: createLocalWorldStorage(ports), records, writes, entropyCalls: () => entropyCalls };
 }
 
-void test('fresh Food-budget world persists its sampled zero-step final-release genesis before observation can begin', async () => {
+void test('fresh Knowledge world persists its sampled zero-step current-release genesis before observation can begin', async () => {
   const f = fixture();
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:food-budget-v1');
+  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:knowledge-compacts-v1');
   assert.equal(LIVING_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:living-world-v1');
   const initialized = await f.storage.restore();
   assert.ok(initialized.run);
@@ -34,8 +34,9 @@ void test('fresh Food-budget world persists its sampled zero-step final-release 
   assert.equal(initialized.run.steps, 0);
   assert.equal(initialized.run.state.round, 0);
   assert.equal(initialized.run.state.revision, 0);
-  assert.equal(initialized.run.state.releaseId, 'settlement-food-budget-1');
-  assert.equal(initialized.run.state.origin?.initialReleaseId, 'settlement-food-budget-1');
+  assert.equal(initialized.run.state.releaseId, 'settlement-knowledge-compacts-1');
+  assert.equal(initialized.run.state.origin?.initialReleaseId, 'settlement-knowledge-compacts-1');
+  assert.ok(initialized.run.state.unlockedFeatures.includes('knowledge-compacts'));
   assert.ok(initialized.run.state.unlockedFeatures.includes('food-budget'));
   assert.ok(initialized.run.state.unlockedFeatures.includes('consented-relief'));
   assert.deepEqual(JSON.parse(f.records.get(LOCAL_SIMULATION_STORAGE_KEY)!), initialized.run);

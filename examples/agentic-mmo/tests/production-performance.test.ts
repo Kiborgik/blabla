@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
 
@@ -38,12 +39,13 @@ await test('saved baseline grounds deterministic work and UTF-8 payload envelope
   const { measureProduction } = await import('../benchmarks/production.ts');
   const { default: baseline } = await import('../benchmarks/production-baseline.json', { with: { type: 'json' } });
   const current = measureProduction();
-  assert.deepEqual(current.workloads.map((workload) => workload.deterministic), baseline.workloads.map((workload) => workload.deterministic));
+  assert.equal(baseline.schemaVersion, 2);
+  assert.deepEqual(current.workloads.map(({ deterministic }) => ({ cities: deterministic.cities, deterministicSha256: createHash('sha256').update(JSON.stringify(deterministic)).digest('hex') })), baseline.workloads.map(({ cities, deterministicSha256 }) => ({ cities, deterministicSha256 })), `Current deterministic workloads: ${JSON.stringify(current.workloads.map(({ deterministic }) => deterministic))}`);
   for (const [index, workload] of current.workloads.entries()) {
     const saved = baseline.workloads[index];
     assert.ok(saved);
     for (const kind of ['stateBytes', 'observationBytes', 'resultBytes'] as const) {
-      const measured: number = saved.deterministic[kind].maximum;
+      const measured: number = workload.deterministic[kind].maximum;
       const budget: number = saved.payloadEnvelope[kind];
       assert.equal(budget, Math.ceil(measured * 1.25 / 1024) * 1024);
       assert.ok(workload.deterministic[kind].maximum <= budget, `${kind} exceeded the measured fixture envelope`);

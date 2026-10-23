@@ -8,22 +8,12 @@ import { buildingBaseProduction, districtAdjacencyFacts, districtSiteBlock } fro
 import { cityProductivity } from '../core/simulation/world.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, replayCoastalStep } from './fixtures/coastal-prefix.ts';
-import { cultureProductionJourney, cultureProductionOperationJourney, cultureProductionPrefix } from './fixtures/culture-production-journey.ts';
+import { cultureProductionJourney, cultureProductionOperationJourney } from './fixtures/culture-production-journey.ts';
+import { ownedTerritoryJourney } from './fixtures/owned-territory-journey.ts';
 import { waterLandTown } from './fixtures/water-land-journey.ts';
 import type { WorldState } from '../core/types.ts';
 
 function stocks(state: WorldState) { const civilization = state.civilizations[0]; assert.ok(civilization); return civilization.resources; }
-
-await test('culture actual legacy prefix has completed wonder and era two but refuses unreleased commitments', () => {
-  const journey = cultureProductionPrefix(); const state = journey.state;
-  assert.equal(state.releaseId, 'settlement-territory-1'); assert.equal(state.civilizations[0]?.era, 2);
-  assert.equal(state.wonders?.['great-library']?.completion.tileId, journey.wonderTileId);
-  assert.ok(state.calendarMilestones.includes('connected-world'));
-  for (const action of [{ type: 'research', technology: 'construction' }, { type: 'research', technology: 'printing' }, { type: 'build', project: 'theater-square', cityId: journey.cityId, tileId: journey.theaterTileId }, { type: 'build', project: 'printing-house', cityId: journey.cityId }] as const) {
-    const result = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: journey.time(), action });
-    assert.equal(result.ok, false); assert.deepEqual(result.state, state); assert.deepEqual(result.events, []);
-  }
-});
 
 await test('culture accepted data binds exact prerequisite costs work and useful paid output', () => {
   const construction = TECHNOLOGIES.find(item => item.id === 'construction'); assert.ok(construction, 'Construction must be implemented');
@@ -39,9 +29,9 @@ await test('culture accepted data binds exact prerequisite costs work and useful
   assert.equal(work['theater-square'], 10); assert.equal(work['printing-house'], 14);
 });
 
-await test('culture compatible adoption preserves prior assets and real research opens paid exact sites', () => {
-  const { journey, beforeRelease, adopted } = cultureProductionJourney();
-  assert.deepEqual(adopted.tiles, beforeRelease.tiles); assert.deepEqual(adopted.cities, beforeRelease.cities); assert.deepEqual(adopted.civilizations, beforeRelease.civilizations); assert.deepEqual(adopted.wonders, beforeRelease.wonders);
+await test('culture fresh selected rules and real research open paid exact sites', () => {
+  const { journey, prepared } = cultureProductionJourney();
+  assert.equal(prepared.releaseId, 'settlement-culture-production-1'); assert.ok(prepared.wonders?.['great-library']);
   journey.research('construction'); const before = structuredClone(journey.state);
   journey.act({ type: 'build', project: 'theater-square', cityId: journey.cityId, tileId: journey.theaterTileId });
   const order = waterLandTown(journey.state, journey.cityId).construction?.active; assert.ok(order && !('kind' in order));
@@ -53,7 +43,7 @@ await test('culture compatible adoption preserves prior assets and real research
 await test('culture only actual completed wonder contributes adjacency and later theater production', () => {
   const path = cultureProductionOperationJourney(); const { journey, theaterCompleted, theaterCompletionStep } = path;
   const definition = BUILDINGS.find(item => item.id === 'theater-square'); assert.ok(definition);
-  const active = structuredClone(journey.wonderActive); active.unlockedFeatures = [...path.adopted.unlockedFeatures];
+  const active = structuredClone(journey.wonderActive);
   assert.equal(districtAdjacencyFacts(active, definition, journey.theaterTileId)?.bonus, 0);
   const facts = districtAdjacencyFacts(theaterCompleted, definition, journey.theaterTileId); assert.ok(facts);
   assert.equal(facts.source, 'wonder'); assert.deepEqual(facts.tileIds, [journey.wonderTileId]); assert.equal(facts.bonus, 2);
@@ -77,9 +67,9 @@ await test('culture same-town paid Printing house operates only after completion
   assert.equal(waterLandTown(printingCompleted, journey.cityId).buildingOperations?.['printing-house']?.lastResult, null);
   const receipt = waterLandTown(operated, journey.cityId).buildingOperations?.['printing-house']?.lastResult; assert.ok(receipt);
   assert.equal(receipt.status, 'operated'); assert.deepEqual(receipt.paid, { materials: 1 }); assert.equal(receipt.residents?.allocated, 3); assert.equal(receipt.produced.culture, Math.round(6 * cityProductivity(waterLandTown(printingCompleted, journey.cityId)) * 100) / 100);
-  const wrong = printingReady.cities.find(city => city.civId === 0 && city.id !== journey.cityId); assert.ok(wrong);
+  const wrong = waterLandTown(printingReady, journey.alternateCityId); assert.equal(wrong.civId, 0);
   const refused = applyCommand(printingReady, { seat: 0, expectedRevision: printingReady.revision, timestamp: coastalPrefixTime((printingReady.independentTurns?.strategyTicks ?? 0) * 60 + 50), action: { type: 'build', project: 'printing-house', cityId: wrong.id } });
-  assert.equal(refused.ok, false); assert.deepEqual(refused.state, printingReady);
+  assert.equal(refused.ok, false); assert.deepEqual(refused.state, printingReady); assert.deepEqual(refused.events, []);
   const eraControl = structuredClone(printingReady); const civilization = eraControl.civilizations[0]; assert.ok(civilization); civilization.era = 1;
   const eraRefusal = applyCommand(eraControl, { seat: 0, expectedRevision: eraControl.revision, timestamp: coastalPrefixTime((eraControl.independentTurns?.strategyTicks ?? 0) * 60 + 50), action: { type: 'build', project: 'printing-house', cityId: journey.cityId } });
   assert.equal(eraRefusal.ok, false); assert.deepEqual(eraRefusal.state, eraControl);
@@ -98,16 +88,16 @@ await test('culture exact occupied foreign and missing sites refuse with no paym
 
 await test('culture purchased-site beneficiary and district cap remain canonical start conditions', () => {
   const { journey } = cultureProductionJourney(); journey.research('construction');
-  journey.act({ type: 'acquire-tile', cityId: 'city-2-263', tileId: 181 }, 2);
+  const territory = ownedTerritoryJourney(); territory.act({ type: 'acquire-tile', cityId: territory.previous.cityId, tileId: 181 });
   const definition = BUILDINGS.find(item => item.id === 'theater-square'); assert.ok(definition);
-  assert.equal(districtSiteBlock(journey.state, waterLandTown(journey.state, 'city-2-263'), definition, 181), null);
-  assert.match(districtSiteBlock(journey.state, waterLandTown(journey.state, 'city-2'), definition, 181) ?? '', /another|different|bound/i);
+  assert.equal(districtSiteBlock(territory.state, waterLandTown(territory.state, territory.previous.cityId), definition, 181), null);
+  assert.match(districtSiteBlock(territory.state, waterLandTown(territory.state, 'city-2'), definition, 181) ?? '', /another|different|bound/i);
   const crowded = structuredClone(journey.state); waterLandTown(crowded, journey.cityId).population = 3;
   const refused = applyCommand(crowded, { seat: 0, expectedRevision: crowded.revision, timestamp: journey.time(), action: { type: 'build', project: definition.id, cityId: journey.cityId, tileId: journey.theaterTileId } });
   assert.equal(refused.ok, false); assert.deepEqual(refused.state, crowded);
 });
 
-await test('culture complete legal release research site and operation history replays exactly', () => {
+await test('culture actual research site and operation history replays from declared synthetic prerequisites', () => {
   const { journey } = cultureProductionOperationJourney(); let replay = structuredClone(journey.initial);
   for (const step of journey.steps) { assert.deepEqual(replay, step.before); const result = replayCoastalStep(replay, step.input); assert.deepEqual(result, step.result); assert.ok(isWorldState(result.state)); replay = result.state; }
   assert.deepEqual(replay, journey.state);

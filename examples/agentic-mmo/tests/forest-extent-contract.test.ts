@@ -30,10 +30,9 @@ await test('forest exact real payment completion later production pause and refu
   assert.deepEqual(probe.snapshot().state, before);
 });
 
-await test('actual extent release preserved world and new center supports conserved paid settlement and later output', () => {
+await test('fresh expanded world supports conserved paid settlement and later output', () => {
   const probe = new ForestExtentProbe();
   const cases: Array<[string, string[]]> = [
-    ['apply_world_expansion', ['expanded_dimensions', 'old_tiles_unchanged', 'history_unchanged', 'retained_deposits_unchanged', 'rng_unchanged']],
     ['found_new_extent_town', ['new_site_reachable', 'new_town_founded', 'population_conserved', 'paid_once', 'only_claimed_center_owned']],
     ['operate_new_extent_town', ['later_base_output']],
     ['refuse_extent_action', ['refused', 'no_effects']],

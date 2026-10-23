@@ -9,7 +9,7 @@ import test from 'node:test';
 import { DIRECTOR_EVENTS, ECONOMY_RULES, RESOURCE_IDS } from '../core/content.ts';
 import type { Resources } from '../core/types.ts';
 import type { ActionPlan } from '../core/planning.ts';
-import { applyCommand, applyDirectorTick, applyHistoryAdvance, applyRelease, catchUpClock, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, applyDirectorTick, applyHistoryAdvance, catchUpClock, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { createWorker } from '../server/worker.ts';
 import { WorldRepository, type D1Database, type D1Result, type D1Statement, type SqlValue } from '../server/repository.ts';
 
@@ -78,22 +78,16 @@ function post(path: string, payload: Record<string, unknown>, authenticated = tr
 function initialize() { return { seed: 1701, clockEpoch: epoch, commandId: 'initialize-online-run' }; }
 function action(commandId = 'aster-first-choice') { return { seat: 0, expectedRevision: 0, choice: 1, model: 'gpt-6.1-sol', commandId }; }
 
-async function independentWorld(item: ReturnType<typeof fixture>): Promise<void> {
-  assert.equal((await item.worker.fetch(post('/api/init', initialize()), item.env)).status, 200);
-  for (const [expectedRevision, expectedFromReleaseId, targetReleaseId] of [[0, 'settlement-foundations-1', 'settlement-foundations-2'], [1, 'settlement-foundations-2', 'settlement-independent-1']] as const) {
-    const response = await item.worker.fetch(post('/api/release-apply', { expectedRevision, expectedFromReleaseId, targetReleaseId, model: 'gpt-6-astra', commandId: `release-${expectedRevision}` }), item.env);
-    assert.equal(response.status, 200, JSON.stringify(await body(response)));
-  }
+async function independentWorld(item: ReturnType<typeof fixture>, registeredRulesId = 'settlement-independent-1'): Promise<void> {
+  assert.equal((await item.worker.fetch(post('/api/init', { ...initialize(), clockEpoch: now().toISOString(), registeredRulesId }), item.env)).status, 200);
 }
 
 async function planningWorld(item: ReturnType<typeof fixture>): Promise<void> {
-  await independentWorld(item);
-  const response = await item.worker.fetch(post('/api/release-apply', { expectedRevision: 2, expectedFromReleaseId: 'settlement-independent-1', targetReleaseId: 'settlement-plans-1', model: 'gpt-6-astra', commandId: 'release-plans' }), item.env);
-  assert.equal(response.status, 200, JSON.stringify(await body(response)));
+  await independentWorld(item, 'settlement-plans-1');
 }
 
 async function productionWorld(item: ReturnType<typeof fixture>): Promise<void> {
-  await independentWorld(item);
+  await independentWorld(item, 'settlement-production-1');
   const repository = new WorldRepository(item.database);
   const send = async (path: string, input: Record<string, unknown>, timestamp: string) => {
     const current = await repository.read();
@@ -102,7 +96,6 @@ async function productionWorld(item: ReturnType<typeof fixture>): Promise<void> 
     const reply = await worker.fetch(post(path, { ...input, expectedRevision: current.state.revision }), item.env);
     assert.equal(reply.status, 200, JSON.stringify(await body(reply)));
   };
-  await send('/api/release-apply', { expectedFromReleaseId: 'settlement-independent-1', targetReleaseId: 'settlement-production-1', model: 'gpt-6-astra', commandId: 'release-production' }, '2026-10-16T01:00:00.000Z');
   await send('/api/action', { seat: 0, action: { type: 'research', technology: 'agriculture' }, model: 'gpt-6-astra', commandId: 'production-cultivation' }, '2026-10-16T01:00:00.000Z');
   await send('/api/strategy-catchup', { timestamp: '2026-10-16T01:04:00.000Z', commandId: 'production-four-beats' }, '2026-10-16T01:04:00.000Z');
   await send('/api/action', { seat: 0, action: { type: 'research', technology: 'water-management' }, model: 'gpt-6-astra', commandId: 'production-water' }, '2026-10-16T01:04:00.000Z');
@@ -111,15 +104,11 @@ async function productionWorld(item: ReturnType<typeof fixture>): Promise<void> 
 }
 
 async function frontierWorld(item: ReturnType<typeof fixture>): Promise<void> {
-  await independentWorld(item);
-  for (const [expectedRevision, expectedFromReleaseId, targetReleaseId] of [[2, 'settlement-independent-1', 'settlement-production-1'], [3, 'settlement-production-1', 'settlement-frontiers-1']] as const) {
-    const response = await item.worker.fetch(post('/api/release-apply', { expectedRevision, expectedFromReleaseId, targetReleaseId, model: 'gpt-6-astra', commandId: `frontier-release-${expectedRevision}` }), item.env);
-    assert.equal(response.status, 200, JSON.stringify(await body(response)));
-  }
+  await independentWorld(item, 'settlement-frontiers-1');
 }
 
-async function specializationWorld(item: ReturnType<typeof fixture>): Promise<void> {
-  await frontierWorld(item);
+async function specializationWorld(item: ReturnType<typeof fixture>, registeredRulesId = 'settlement-specialization-1'): Promise<void> {
+  await independentWorld(item, registeredRulesId);
   const repository = new WorldRepository(item.database);
   const initial = await repository.read();
   assert.ok(initial);
@@ -129,7 +118,6 @@ async function specializationWorld(item: ReturnType<typeof fixture>): Promise<vo
     ['/api/action', { seat: 0, action: founding, commandId: 'specialization-frontier' }, '2026-10-16T01:00:00.000Z'],
     ['/api/action', { seat: 0, action: { type: 'research', technology: 'agriculture' }, commandId: 'specialization-cultivation' }, '2026-10-16T01:00:10.000Z'],
     ['/api/strategy-catchup', { timestamp: '2026-10-16T01:02:00.000Z', commandId: 'specialization-research-beats' }, '2026-10-16T01:02:00.000Z'],
-    ['/api/release-apply', { expectedFromReleaseId: 'settlement-frontiers-1', targetReleaseId: 'settlement-specialization-1', commandId: 'specialization-release' }, '2026-10-16T01:02:00.000Z'],
   ];
   for (const [path, input, timestamp] of steps) {
     const current = await repository.read();
@@ -141,12 +129,11 @@ async function specializationWorld(item: ReturnType<typeof fixture>): Promise<vo
 }
 
 async function recoveryWorld(item: ReturnType<typeof fixture>) {
-  await specializationWorld(item);
+  await specializationWorld(item, 'settlement-recovery-1');
   const repository = new WorldRepository(item.database);
   const worker = createWorker(undefined, { now: () => new Date('2026-10-16T01:02:00.000Z') });
   const current = await repository.read();
   assert.ok(current);
-  assert.equal((await worker.fetch(post('/api/release-apply', { expectedRevision: current.state.revision, expectedFromReleaseId: 'settlement-specialization-1', targetReleaseId: 'settlement-recovery-1', model: 'gpt-6-astra', commandId: 'recovery-release' }), item.env)).status, 200);
   const released = await repository.read();
   assert.ok(released);
   const quake = { expectedRevision: released.state.revision, kind: 'event', intervalId: 'recovery-earthquake', timestamp: '2026-10-16T01:02:00.000Z', event: 'earthquake', target: 0, model: 'gpt-6-astra' };
@@ -197,8 +184,7 @@ void test('city recovery charges the exact target once through concurrent rebase
     let reproduced = second.initial;
     for (const entry of (await repository.history()).entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+      const result = transition.kind === 'action' ? applyCommand(reproduced, transition.command)
           : transition.kind === 'director-tick' ? applyDirectorTick(reproduced, transition.command)
             : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
       assert.ok(result?.ok);
@@ -340,8 +326,7 @@ void test('targeted focus and construction retain their city through concurrent 
     let reproduced = built.initial;
     for (const entry of (await repository.history()).entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-        : transition.kind === 'action' ? applyCommand(reproduced, transition.command)
+      const result = transition.kind === 'action' ? applyCommand(reproduced, transition.command)
           : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
       assert.ok(result?.ok);
       assert.deepEqual(result.state, entry.state);
@@ -462,8 +447,7 @@ void test('hosted frontier founding preserves exact source and transfers residen
     assert.equal((await item.worker.fetch(post('/api/action', { ...input, action: { ...founding, sourceCityId: founded.id } }), item.env)).status, 409);
     let reproduced = after.initial;
     for (const entry of (await repository.history()).entries) {
-      const next = entry.transition.kind === 'release-apply' ? applyRelease(reproduced, entry.transition.command)
-        : entry.transition.kind === 'action' ? applyCommand(reproduced, entry.transition.command) : null;
+      const next = entry.transition.kind === 'action' ? applyCommand(reproduced, entry.transition.command) : null;
       assert.ok(next?.ok);
       assert.deepEqual(next.state, entry.state);
       reproduced = next.state;
@@ -623,7 +607,7 @@ void test('attached plans retain true observation revision through concurrent ex
   const item = fixture();
   try {
     await planningWorld(item);
-    const input = { expectedRevision: 3, observedRevision: 999, model: 'gpt-6-astra', action: attachedPlan[0]?.action, plan: attachedPlan };
+    const input = { expectedRevision: 0, observedRevision: 999, model: 'gpt-6-astra', action: attachedPlan[0]?.action, plan: attachedPlan };
     const replies = await Promise.all([0, 1].map((seat) => item.worker.fetch(post('/api/action', { ...input, seat, commandId: `planned-${seat}` }), item.env)));
     assert.deepEqual(replies.map((reply) => reply.status), [200, 200]);
     for (const reply of replies) assert.equal(object((await body(reply)).actionOutcome).status, 'completed');
@@ -633,19 +617,18 @@ void test('attached plans retain true observation revision through concurrent ex
     assert.equal(current.state.actionPlans?.length, 6);
     for (const seat of [0, 1]) {
       const plan: ActionPlan | null | undefined = current.state.actionPlans?.[seat];
-      assert.equal(plan?.observedRevision, 3);
+      assert.equal(plan?.observedRevision, 0);
       assert.deepEqual(plan?.items.map((entry) => entry.status), ['completed', 'needs-review']);
       assert.deepEqual(plan?.items.map(({ action: plannedAction, reason }) => ({ action: plannedAction, reason })), attachedPlan);
     }
     const history = await repository.history();
     let reproduced = current.initial;
     for (const entry of history.entries) {
-      const result = entry.transition.kind === 'release-apply' ? applyRelease(reproduced, entry.transition.command)
-        : entry.transition.kind === 'action' ? applyCommand(reproduced, entry.transition.command) : null;
+      const result = entry.transition.kind === 'action' ? applyCommand(reproduced, entry.transition.command) : null;
       assert.ok(result?.ok);
       reproduced = result.state;
       if (entry.transition.kind === 'action') {
-        assert.equal(entry.transition.command.observedRevision, 3);
+        assert.equal(entry.transition.command.observedRevision, 0);
         assert.deepEqual(entry.transition.command.plan, attachedPlan);
       }
     }
@@ -667,13 +650,13 @@ void test('invalid attached plans leave state, history, receipts and allowance u
     const batches = item.database.batches;
     const invalid: unknown[] = [null, {}, [...attachedPlan, attachedPlan[0]], [{ action: { type: 'wait' }, reason: 'Different head' }], [{ action: attachedPlan[0]?.action, reason: '' }], [{ action: attachedPlan[0]?.action, reason: 'x'.repeat(281) }], [{ action: { ...attachedPlan[0]?.action, injected: true }, reason: 'Extra action field' }]];
     for (const [index, plan] of invalid.entries()) {
-      const response = await item.worker.fetch(post('/api/action', { seat: 0, expectedRevision: 3, action: attachedPlan[0]?.action, plan, model: 'gpt-6-astra', commandId: `invalid-plan-${index}` }), item.env);
+      const response = await item.worker.fetch(post('/api/action', { seat: 0, expectedRevision: 0, action: attachedPlan[0]?.action, plan, model: 'gpt-6-astra', commandId: `invalid-plan-${index}` }), item.env);
       assert.equal(response.status, 400);
       assert.equal(object((await body(response)).actionOutcome).status, 'failed');
       assert.deepEqual(await repository.read(), before);
       assert.equal(item.database.batches, batches);
     }
-    assert.equal((await repository.history()).entries.length, 3);
+    assert.equal((await repository.history()).entries.length, 0);
   } finally { item.cleanup(); }
 });
 
@@ -690,17 +673,17 @@ void test('MCP plans expose bounded schema and let the same agent preflight stra
     assert.ok(playTool);
     assert.equal(object(object(object(playTool.inputSchema).properties).plan).maxItems, 2);
     assert.match(String(playTool.description), /catchup_strategy/);
-    assert.equal((await call(item.worker, 'tools/call', { name: 'play_action', arguments: { seat: 0, expectedRevision: 3, action: plan[0]?.action, plan, model: 'gpt-6-astra', commandId: 'mcp-plan' } })).status, 200);
+    assert.equal((await call(item.worker, 'tools/call', { name: 'play_action', arguments: { seat: 0, expectedRevision: 0, action: plan[0]?.action, plan, model: 'gpt-6-astra', commandId: 'mcp-plan' } })).status, 200);
     const lateWorker = createWorker(undefined, { now: () => new Date('2026-10-16T01:01:00.000Z') });
     const before = await repository.read();
     const batches = item.database.batches;
-    const late = await body(await call(lateWorker, 'tools/call', { name: 'play_action', arguments: { seat: 0, expectedRevision: 4, action: { type: 'wait' }, model: 'gpt-6-astra', commandId: 'late-follow-up' } }));
+    const late = await body(await call(lateWorker, 'tools/call', { name: 'play_action', arguments: { seat: 0, expectedRevision: 1, action: { type: 'wait' }, model: 'gpt-6-astra', commandId: 'late-follow-up' } }));
     const failure = object(late.error);
     assert.equal(failure.message, 'strategy_catchup_required');
     assert.equal(object(object(failure.data).actionOutcome).status, 'blocked');
     assert.deepEqual(await repository.read(), before);
     assert.equal(item.database.batches, batches);
-    const caught = await body(await call(lateWorker, 'tools/call', { name: 'catchup_strategy', arguments: { expectedRevision: 4, timestamp: '2026-10-16T01:01:00.000Z', commandId: 'self-preflight', model: 'gpt-6-astra' } }));
+    const caught = await body(await call(lateWorker, 'tools/call', { name: 'catchup_strategy', arguments: { expectedRevision: 1, timestamp: '2026-10-16T01:01:00.000Z', commandId: 'self-preflight', model: 'gpt-6-astra' } }));
     assert.equal(object(object(caught.result).structuredContent).remainingTicks, 0);
     const afterBeat = await repository.read();
     assert.equal(afterBeat?.state.actionPlans?.[0]?.items[1]?.status, 'needs-review');
@@ -713,7 +696,7 @@ void test('MCP plans expose bounded schema and let the same agent preflight stra
     assert.equal(object(projected.items[1]).status, 'ready');
     assert.deepEqual(await repository.read(), afterBeat);
     assert.equal(item.database.batches, afterBatches);
-    assert.equal((await call(lateWorker, 'tools/call', { name: 'play_action', arguments: { seat: 0, expectedRevision: 5, action: { type: 'wait' }, plan: [], model: 'gpt-6-astra', commandId: 'chosen-follow-up' } })).status, 200);
+    assert.equal((await call(lateWorker, 'tools/call', { name: 'play_action', arguments: { seat: 0, expectedRevision: 2, action: { type: 'wait' }, plan: [], model: 'gpt-6-astra', commandId: 'chosen-follow-up' } })).status, 200);
     assert.equal((await repository.read())?.state.actionPlans?.[0], null);
   } finally { item.cleanup(); }
 });
@@ -726,12 +709,12 @@ void test('a failed plan receipt rolls back plan, gameplay, history and allowanc
     const before = await repository.read();
     const batches = item.database.batches;
     item.database.database.exec("CREATE TRIGGER fail_plan_receipt BEFORE INSERT ON world_receipts WHEN NEW.receipt_key = 'action:fail-plan' BEGIN SELECT RAISE(ABORT, 'test plan receipt failure'); END;");
-    const input = { seat: 0, expectedRevision: 3, action: attachedPlan[0]?.action, plan: attachedPlan, model: 'gpt-6-astra', commandId: 'fail-plan' };
+    const input = { seat: 0, expectedRevision: 0, action: attachedPlan[0]?.action, plan: attachedPlan, model: 'gpt-6-astra', commandId: 'fail-plan' };
     assert.equal((await item.worker.fetch(post('/api/action', input), item.env)).status, 500);
     assert.equal(item.database.batches, batches + 1);
     assert.deepEqual(await repository.read(), before);
-    assert.equal((await repository.history()).entries.length, 3);
-    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_receipts').get()).count, 4);
+    assert.equal((await repository.history()).entries.length, 0);
+    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_receipts').get()).count, 1);
     item.database.database.exec('DROP TRIGGER fail_plan_receipt');
     assert.equal((await item.worker.fetch(post('/api/action', input), item.env)).status, 200);
     assert.equal((await repository.read())?.state.actionPlans?.[0]?.items.length, 2);
@@ -748,7 +731,7 @@ void test('malformed stored plans fail closed before hosted reads or writes', as
     item.database.database.prepare('UPDATE world_state SET state_json = ?').run(corrupt);
     const batches = item.database.batches;
     assert.equal((await item.worker.fetch(new Request('https://world.test/api/observe?seat=0'), item.env)).status, 503);
-    assert.equal((await item.worker.fetch(post('/api/action', { seat: 0, expectedRevision: 3, action: attachedPlan[0]?.action, plan: attachedPlan, model: 'gpt-6-astra', commandId: 'corrupt-plan-write' }), item.env)).status, 503);
+    assert.equal((await item.worker.fetch(post('/api/action', { seat: 0, expectedRevision: 0, action: attachedPlan[0]?.action, plan: attachedPlan, model: 'gpt-6-astra', commandId: 'corrupt-plan-write' }), item.env)).status, 503);
     assert.equal(item.database.batches, batches);
     assert.equal(object(item.database.database.prepare('SELECT state_json FROM world_state').get()).state_json, corrupt);
   } finally { item.cleanup(); }
@@ -814,7 +797,7 @@ void test('paid production and owner pause persist exact replay without spending
     let reproduced = current.initial;
     for (const entry of (await repository.history()).entries) {
       const transition = entry.transition;
-      const next = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command) : transition.kind === 'action' ? applyCommand(reproduced, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
+      const next = transition.kind === 'action' ? applyCommand(reproduced, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp) : null;
       assert.ok(next?.ok);
       assert.deepEqual(next.state, entry.state);
       reproduced = next.state;
@@ -857,17 +840,17 @@ void test('paid operation receipt failure rolls back inputs, result and every au
   } finally { item.cleanup(); }
 });
 
-void test('independent release records authoritative epoch and unrelated concurrent exact actions both commit', async () => {
+void test('fresh independent initialization records authoritative epoch and unrelated concurrent exact actions both commit', async () => {
   const item = fixture();
   try {
     await independentWorld(item);
     const repository = new WorldRepository(item.database);
     assert.equal((await repository.read())?.state.independentTurns?.epoch, now().toISOString());
-    const input = { expectedRevision: 2, model: 'gpt-6-astra', action: { type: 'focus', focus: 'industry' }, timestamp: '2099-01-01T00:00:00Z' };
+    const input = { expectedRevision: 0, model: 'gpt-6-astra', action: { type: 'focus', focus: 'industry' }, timestamp: '2099-01-01T00:00:00Z' };
     const replies = await Promise.all([0, 1].map((seat) => item.worker.fetch(post('/api/action', { ...input, seat, commandId: `parallel-${seat}` }), item.env)));
     assert.deepEqual(replies.map((reply) => reply.status), [200, 200]);
     const current = await repository.read();
-    assert.equal(current?.state.revision, 4);
+    assert.equal(current?.state.revision, 2);
     assert.equal(current?.state.round, 0);
     assert.deepEqual(current?.state.cities.slice(0, 2).map((city) => city.focus), ['industry', 'industry']);
     const history = await repository.history();
@@ -879,8 +862,8 @@ void test('independent release records authoritative epoch and unrelated concurr
     assert.equal(view.activeSeat, null);
     assert.equal(object(view.admission).mode, 'independent');
     assert.equal((await item.worker.fetch(post('/api/action', { ...input, seat: 0, commandId: 'same-window' }), item.env)).status, 400);
-    assert.equal((await item.worker.fetch(post('/api/action', { seat: 2, expectedRevision: 2, choice: 0, model: 'gpt-6-astra', commandId: 'stale-index' }), item.env)).status, 409);
-    assert.equal((await repository.read())?.state.revision, 4);
+    assert.equal((await item.worker.fetch(post('/api/action', { seat: 2, expectedRevision: 0, choice: 0, model: 'gpt-6-astra', commandId: 'stale-index' }), item.env)).status, 409);
+    assert.equal((await repository.read())?.state.revision, 2);
     assert.equal((await body(await item.worker.fetch(post('/api/action', { ...input, seat: 0, commandId: 'parallel-0' }), item.env))).duplicate, true);
   } finally { item.cleanup(); }
 });
@@ -893,11 +876,11 @@ void test('protected strategic catchup is separate from invalid actions and pers
     const repository = new WorldRepository(item.database);
     const before = await repository.read();
     const batches = item.database.batches;
-    const invalid = await worker.fetch(post('/api/action', { seat: 4, expectedRevision: 2, action: { type: 'build', project: 'missing' }, model: 'gpt-6-astra', commandId: 'invalid-late' }), item.env);
+    const invalid = await worker.fetch(post('/api/action', { seat: 4, expectedRevision: 0, action: { type: 'build', project: 'missing' }, model: 'gpt-6-astra', commandId: 'invalid-late' }), item.env);
     assert.equal(invalid.status, 400);
     assert.equal(item.database.batches, batches);
     assert.deepEqual(await repository.read(), before);
-    const input = { expectedRevision: 2, timestamp: '2026-10-16T02:02:00.000Z', commandId: 'strategy-1' };
+    const input = { expectedRevision: 0, timestamp: '2026-10-16T02:02:00.000Z', commandId: 'strategy-1' };
     assert.equal((await worker.fetch(post('/api/strategy-catchup', input, false), item.env)).status, 401);
     const reply = await worker.fetch(post('/api/strategy-catchup', input), item.env);
     assert.equal(reply.status, 200);
@@ -913,8 +896,7 @@ void test('protected strategic catchup is separate from invalid actions and pers
     assert.ok(current);
     let reproduced = current.initial;
     for (const entry of history.entries) {
-      const result = entry.transition.kind === 'release-apply' ? applyRelease(reproduced, entry.transition.command)
-        : entry.transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, entry.transition.timestamp) : null;
+      const result = entry.transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, entry.transition.timestamp) : null;
       assert.ok(result?.ok);
       reproduced = result.state;
     }
@@ -926,20 +908,20 @@ void test('all six independent actors can race while one actor cannot spend its 
   const item = fixture();
   try {
     await independentWorld(item);
-    const input = { expectedRevision: 2, model: 'gpt-6-astra', action: { type: 'wait' } };
+    const input = { expectedRevision: 0, model: 'gpt-6-astra', action: { type: 'wait' } };
     const replies = await Promise.all(Array.from({ length: 6 }, (_, seat) => item.worker.fetch(post('/api/action', { ...input, seat, commandId: `all-six-${seat}` }), item.env)));
     assert.deepEqual(replies.map((reply) => reply.status), [200, 200, 200, 200, 200, 200]);
     const repository = new WorldRepository(item.database);
     assert.deepEqual((await repository.read())?.state.independentTurns?.actionsInWindow, [1, 1, 1, 1, 1, 1]);
     assert.equal((await repository.read())?.state.round, 0);
     const worker = createWorker(undefined, { now: () => new Date('2026-10-16T01:00:10.000Z') });
-    const competing = await Promise.all(['a', 'b'].map((id) => worker.fetch(post('/api/action', { ...input, seat: 0, expectedRevision: 8, commandId: `same-actor-${id}` }), item.env)));
+    const competing = await Promise.all(['a', 'b'].map((id) => worker.fetch(post('/api/action', { ...input, seat: 0, expectedRevision: 6, commandId: `same-actor-${id}` }), item.env)));
     assert.deepEqual(competing.map((reply) => reply.status).toSorted((a, b) => a - b), [200, 400]);
-    assert.equal((await repository.read())?.state.revision, 9);
+    assert.equal((await repository.read())?.state.revision, 7);
     const entries = (await repository.history()).entries;
     const final = entries.at(-1);
     assert.equal(final?.transition.kind === 'action' && final.transition.command.timestamp, '2026-10-16T01:00:10.000Z');
-    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_receipts').get()).count, 10);
+    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_receipts').get()).count, 8);
   } finally { item.cleanup(); }
 });
 
@@ -950,7 +932,7 @@ void test('late valid actions return an actionable strategy guard without partia
     const worker = createWorker(undefined, { now: () => new Date('2026-10-16T01:01:00.000Z') });
     const before = await new WorldRepository(item.database).read();
     const batches = item.database.batches;
-    const response = await worker.fetch(post('/api/action', { seat: 3, expectedRevision: 2, action: { type: 'focus', focus: 'growth' }, model: 'gpt-6-astra', commandId: 'late-growth' }), item.env);
+    const response = await worker.fetch(post('/api/action', { seat: 3, expectedRevision: 0, action: { type: 'focus', focus: 'growth' }, model: 'gpt-6-astra', commandId: 'late-growth' }), item.env);
     assert.equal(response.status, 400);
     const result = await body(response);
     assert.equal(result.error, 'strategy_catchup_required');
@@ -964,7 +946,7 @@ void test('a duplicate committed between receipt lookup and snapshot read still 
   const item = fixture();
   try {
     await independentWorld(item);
-    const input = { seat: 1, expectedRevision: 2, action: { type: 'wait' }, model: 'gpt-6-astra', commandId: 'interleaved-duplicate' };
+    const input = { seat: 1, expectedRevision: 0, action: { type: 'wait' }, model: 'gpt-6-astra', commandId: 'interleaved-duplicate' };
     const first = new WorldRepository(item.database);
     class InterleavedRepository extends WorldRepository {
       pending = true;
@@ -978,8 +960,8 @@ void test('a duplicate committed between receipt lookup and snapshot read still 
     }
     const reply = await new InterleavedRepository(item.database).mutate('action', input, identity, now().toISOString());
     assert.equal(reply.duplicate, true);
-    assert.equal(reply.acceptedRevision, 3);
-    assert.equal((await first.read())?.state.revision, 3);
+    assert.equal(reply.acceptedRevision, 1);
+    assert.equal((await first.read())?.state.revision, 1);
   } finally { item.cleanup(); }
 });
 
@@ -992,11 +974,11 @@ void test('strategic receipt failure rolls back every realized beat and never re
     const worker = createWorker(undefined, { now: () => new Date('2026-10-16T01:03:00.000Z') });
     item.database.database.exec("CREATE TRIGGER fail_strategy_receipt BEFORE INSERT ON world_receipts WHEN NEW.receipt_key = 'strategy-catchup:fail-strategy' BEGIN SELECT RAISE(ABORT, 'test strategy receipt failure'); END;");
     const batches = item.database.batches;
-    const input = { expectedRevision: 2, timestamp: '2026-10-16T01:03:00.000Z', commandId: 'fail-strategy' };
+    const input = { expectedRevision: 0, timestamp: '2026-10-16T01:03:00.000Z', commandId: 'fail-strategy' };
     assert.equal((await worker.fetch(post('/api/strategy-catchup', input), item.env)).status, 500);
     assert.equal(item.database.batches, batches + 1);
     assert.deepEqual(await repository.read(), before);
-    assert.equal((await repository.history()).entries.length, 2);
+    assert.equal((await repository.history()).entries.length, 0);
     item.database.database.exec('DROP TRIGGER fail_strategy_receipt');
     assert.equal((await worker.fetch(post('/api/strategy-catchup', input), item.env)).status, 200);
     assert.equal((await repository.read())?.state.independentTurns?.strategyTicks, 3);
@@ -1014,7 +996,7 @@ void test('corrupt independent ledgers fail closed before public exposure or pro
     item.database.database.prepare('UPDATE world_state SET state_json = ?').run(bytes);
     const batches = item.database.batches;
     assert.equal((await item.worker.fetch(new Request('https://world.test/api/world'), item.env)).status, 503);
-    assert.equal((await item.worker.fetch(post('/api/action', { seat: 0, expectedRevision: 2, action: { type: 'wait' }, model: 'gpt-6-astra', commandId: 'corrupt-ledger' }), item.env)).status, 503);
+    assert.equal((await item.worker.fetch(post('/api/action', { seat: 0, expectedRevision: 0, action: { type: 'wait' }, model: 'gpt-6-astra', commandId: 'corrupt-ledger' }), item.env)).status, 503);
     assert.equal(item.database.batches, batches);
     assert.equal(object(item.database.database.prepare('SELECT state_json FROM world_state').get()).state_json, bytes);
   } finally { item.cleanup(); }
@@ -1306,115 +1288,133 @@ void test('generated migrations carry real metadata and preserve schema constrai
 });
 
 function releaseInput(expectedRevision = 0): Record<string, unknown> {
-  return { expectedRevision, expectedFromReleaseId: 'settlement-foundations-1', targetReleaseId: 'settlement-foundations-2', model: 'gpt-6.1-sol', commandId: 'release-2' };
+  return { expectedRevision, expectedFromReleaseId: 'settlement-foundations-2', targetReleaseId: 'settlement-trade-1', model: 'gpt-6.1-sol', commandId: 'release-refused' };
 }
-function advanceInput(expectedRevision = 1): Record<string, unknown> {
+function advanceInput(expectedRevision = 0): Record<string, unknown> {
   return { expectedRevision, cause: { kind: 'feature', id: 'history-advancement' }, reason: 'Verified delivery', deltaYears: 75, timestamp: '2026-10-16T00:01:00.000Z', model: 'gpt-6.1-sol', commandId: 'history-delivery' };
 }
+function durableRecords(item: ReturnType<typeof fixture>) {
+  return ['world_state', 'world_transitions', 'world_receipts'].map(table => item.database.database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+}
+async function historyWorld(item: ReturnType<typeof fixture>) {
+  assert.equal((await item.worker.fetch(post('/api/init', { ...initialize(), registeredRulesId: 'settlement-foundations-2' }), item.env)).status, 200);
+}
 
-void test('protected release and history writes keep exact durable replay and the six-minute baseline', async () => {
+void test('protected release refusal leaves fresh history writes and six-minute baseline exactly replayable', async () => {
   const item = fixture();
   try {
-    await item.worker.fetch(post('/api/init', initialize()), item.env);
+    await historyWorld(item);
     for (const route of ['/api/release-apply', '/api/history-advance']) assert.equal((await item.worker.fetch(post(route, {}, false), item.env)).status, 401);
-    assert.equal((await item.worker.fetch(post('/api/release-apply', releaseInput()), item.env)).status, 200);
+    const before = durableRecords(item); const batches = item.database.batches;
+    const refused = await item.worker.fetch(post('/api/release-apply', releaseInput()), item.env);
+    assert.equal(refused.status, 409); assert.equal((await body(refused)).error, 'pre_release_migration_disabled');
+    assert.deepEqual(durableRecords(item), before); assert.equal(item.database.batches, batches);
     assert.equal((await item.worker.fetch(post('/api/history-advance', advanceInput()), item.env)).status, 200);
     assert.equal((await body(await item.worker.fetch(post('/api/history-advance', advanceInput()), item.env))).duplicate, true);
-    assert.equal((await item.worker.fetch(post('/api/catchup', { expectedRevision: 2, timestamp: '2026-10-16T00:06:00.000Z', commandId: 'normal-clock' }), item.env)).status, 200);
+    assert.equal((await item.worker.fetch(post('/api/catchup', { expectedRevision: 1, timestamp: '2026-10-16T00:06:00.000Z', commandId: 'normal-clock' }), item.env)).status, 200);
     const reopened = new SqliteD1(item.path);
     try {
-      const repository = new WorldRepository(reopened);
-      const current = await repository.read();
-      assert.equal(current?.state.year, -9915);
-      assert.equal(current?.state.clockTicks, 1);
-      assert.equal(current?.state.clockEpoch, epoch);
-      assert.equal(current?.state.phase, 0);
-      assert.equal(current?.initial.releaseId, 'settlement-foundations-1');
+      const repository = new WorldRepository(reopened); const current = await repository.read(); assert.ok(current);
+      assert.equal(current.state.year, -9915); assert.equal(current.state.clockTicks, 1); assert.equal(current.state.clockEpoch, epoch); assert.equal(current.state.phase, 0);
+      assert.equal(current.initial.releaseId, 'settlement-foundations-2'); assert.equal(current.initial.revision, 0);
       const history = await repository.history();
-      assert.deepEqual(history.entries.map((entry) => entry.transition.kind), ['release-apply', 'history-advance', 'clock-catchup']);
-      assert.equal(object(object(history.entries[0]?.transition).command).targetReleaseId, 'settlement-foundations-2');
-      assert.ok(current);
+      assert.deepEqual(history.entries.map(entry => entry.transition.kind), ['history-advance', 'clock-catchup']);
       let reproduced = current.initial;
-      for (const { transition } of history.entries) {
-        const result = transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
-          : transition.kind === 'history-advance' ? applyHistoryAdvance(reproduced, transition.command)
-            : transition.kind === 'clock-catchup' ? catchUpClock(reproduced, transition.timestamp) : null;
-        assert.ok(result?.ok);
-        reproduced = result.state;
+      for (const entry of history.entries) {
+        const transition = entry.transition;
+        const result = transition.kind === 'history-advance' ? applyHistoryAdvance(reproduced, transition.command) : transition.kind === 'clock-catchup' ? catchUpClock(reproduced, transition.timestamp) : null;
+        assert.ok(result?.ok); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); reproduced = result.state;
       }
       assert.deepEqual(reproduced, current.state);
     } finally { reopened.database.close(); }
   } finally { item.cleanup(); }
 });
 
-void test('release races commit once and changed or stale history writes leave no partial records', async () => {
+void test('concurrent release requests refuse without writes while changed or stale history writes retain exact CAS', async () => {
   const item = fixture();
   try {
-    await item.worker.fetch(post('/api/init', initialize()), item.env);
+    await historyWorld(item); const before = durableRecords(item); const batches = item.database.batches;
     const releases = await Promise.all([item.worker.fetch(post('/api/release-apply', releaseInput()), item.env), item.worker.fetch(post('/api/release-apply', releaseInput()), item.env)]);
-    assert.deepEqual(releases.map((reply) => reply.status), [200, 200]);
-    assert.equal((await Promise.all(releases.map(body))).filter((value) => value.duplicate === true).length, 1);
-    for (const input of [{ ...advanceInput(), deltaYears: -1 }, { ...advanceInput(), timestamp: '2026-10-17T00:00:00.000Z' }, { ...advanceInput(), cause: { kind: 'event', id: 'unknown' } }, { ...advanceInput(), expectedRevision: 0 }]) assert.ok((await item.worker.fetch(post('/api/history-advance', input), item.env)).status >= 400);
-    assert.equal((await new WorldRepository(item.database).read())?.state.revision, 1);
-    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_transitions').get()).count, 1);
+    assert.deepEqual(releases.map(reply => reply.status), [409, 409]);
+    for (const response of releases) assert.equal((await body(response)).error, 'pre_release_migration_disabled');
+    assert.deepEqual(durableRecords(item), before); assert.equal(item.database.batches, batches);
+    for (const input of [{ ...advanceInput(), deltaYears: -1 }, { ...advanceInput(), timestamp: '2026-10-17T00:00:00.000Z' }, { ...advanceInput(), cause: { kind: 'event', id: 'unknown' } }, { ...advanceInput(), expectedRevision: 1 }]) {
+      assert.ok((await item.worker.fetch(post('/api/history-advance', input), item.env)).status >= 400); assert.deepEqual(durableRecords(item), before);
+    }
     assert.equal((await item.worker.fetch(post('/api/history-advance', advanceInput()), item.env)).status, 200);
+    const accepted = durableRecords(item);
     assert.equal((await item.worker.fetch(post('/api/history-advance', { ...advanceInput(), deltaYears: 76 }), item.env)).status, 409);
-    assert.equal((await item.worker.fetch(post('/api/history-advance', { ...advanceInput(2), commandId: 'same-cause' }), item.env)).status, 400);
+    assert.equal((await item.worker.fetch(post('/api/history-advance', { ...advanceInput(1), commandId: 'same-cause' }), item.env)).status, 400);
+    assert.deepEqual(durableRecords(item), accepted);
   } finally { item.cleanup(); }
 });
 
-void test('MCP discovers and applies explicit release and history operations through the same authorization', async () => {
+void test('MCP release refusal and fresh history operations use the same authorization and discovery', async () => {
   const item = fixture();
   try {
-    await item.worker.fetch(post('/api/init', initialize()), item.env);
+    await historyWorld(item);
     const invoke = (name: string, args: Record<string, unknown>, authenticated = true) => item.worker.fetch(post('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, authenticated), item.env);
+    const before = durableRecords(item); const batches = item.database.batches;
     assert.equal((await invoke('apply_release', releaseInput(), false)).status, 401);
-    assert.equal((await invoke('apply_release', releaseInput())).status, 200);
+    const refused = await invoke('apply_release', releaseInput()); assert.equal(refused.status, 409); assert.equal(object((await body(refused)).error).message, 'pre_release_migration_disabled');
+    assert.deepEqual(durableRecords(item), before); assert.equal(item.database.batches, batches);
     assert.equal((await invoke('advance_history', advanceInput())).status, 200);
-    assert.equal((await new WorldRepository(item.database).read())?.state.revision, 2);
+    assert.equal((await new WorldRepository(item.database).read())?.state.revision, 1);
     const discovery = await body(await item.worker.fetch(post('/mcp', { jsonrpc: '2.0', id: 2, method: 'tools/list' }, false), item.env));
-    const listed = object(discovery.result).tools;
-    assert.ok(Array.isArray(listed));
-    assert.ok(listed.some((entry: unknown) => object(entry).name === 'apply_release'));
-    assert.ok(listed.some((entry: unknown) => object(entry).name === 'advance_history'));
+    const listed = object(discovery.result).tools; assert.ok(Array.isArray(listed));
+    assert.equal(listed.some((entry: unknown) => object(entry).name === 'apply_release'), false); assert.ok(listed.some((entry: unknown) => object(entry).name === 'advance_history'));
   } finally { item.cleanup(); }
 });
 
-void test('competing history causes commit one atomic transition and operation namespaces remain independent', async () => {
+void test('competing history causes commit one atomic transition and refused operation namespaces stay empty', async () => {
   const item = fixture();
   try {
-    await item.worker.fetch(post('/api/init', initialize()), item.env);
-    const release = { ...releaseInput(), commandId: 'shared-id' };
-    assert.equal((await item.worker.fetch(post('/api/release-apply', release), item.env)).status, 200);
-    const requests = [{ ...advanceInput(), commandId: 'shared-id' }, { ...advanceInput(), cause: { kind: 'feature', id: 'release-evolution' }, commandId: 'other-cause' }];
-    const replies = await Promise.all(requests.map((request) => item.worker.fetch(post('/api/history-advance', request), item.env)));
-    assert.deepEqual(replies.map((reply) => reply.status).toSorted((a, b) => a - b), [200, 409]);
-    assert.equal((await body(await item.worker.fetch(post('/api/release-apply', release), item.env))).duplicate, true);
-    const current = await new WorldRepository(item.database).read();
-    assert.equal(current?.state.revision, 2);
-    assert.equal(Object.keys(current?.state.historyAdvances ?? {}).length, 1);
-    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_transitions').get()).count, 2);
-    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_receipts').get()).count, 3);
+    await historyWorld(item);
+    const release = { ...releaseInput(), commandId: 'shared-id' }; const before = durableRecords(item);
+    assert.equal((await item.worker.fetch(post('/api/release-apply', release), item.env)).status, 409); assert.deepEqual(durableRecords(item), before);
+    const requests = [{ ...advanceInput(), commandId: 'shared-id' }, { ...advanceInput(), cause: { kind: 'feature', id: 'settlement-production' }, commandId: 'other-cause' }];
+    const replies = await Promise.all(requests.map(request => item.worker.fetch(post('/api/history-advance', request), item.env)));
+    assert.deepEqual(replies.map(reply => reply.status).toSorted((a, b) => a - b), [200, 409]);
+    const accepted = durableRecords(item);
+    assert.equal((await item.worker.fetch(post('/api/release-apply', release), item.env)).status, 409); assert.deepEqual(durableRecords(item), accepted);
+    const current = await new WorldRepository(item.database).read(); assert.equal(current?.state.revision, 1); assert.equal(Object.keys(current?.state.historyAdvances ?? {}).length, 1);
+    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_transitions').get()).count, 1);
+    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_receipts').get()).count, 2);
   } finally { item.cleanup(); }
 });
 
 void test('persisted corrupt history ledger fails closed for public reads and protected writes', async () => {
   const item = fixture();
   try {
-    await item.worker.fetch(post('/api/init', initialize()), item.env);
-    await item.worker.fetch(post('/api/release-apply', releaseInput()), item.env);
-    await item.worker.fetch(post('/api/history-advance', advanceInput()), item.env);
-    const current = await new WorldRepository(item.database).read();
-    assert.ok(current);
-    const receipt = current.state.historyAdvances?.['feature:history-advancement'];
-    assert.ok(receipt);
-    receipt.yearAfter += 1;
-    const bytes = JSON.stringify(current.state);
-    item.database.database.prepare('UPDATE world_state SET state_json = ?').run(bytes);
+    await historyWorld(item); await item.worker.fetch(post('/api/history-advance', advanceInput()), item.env);
+    const current = await new WorldRepository(item.database).read(); assert.ok(current);
+    const receipt = current.state.historyAdvances?.['feature:history-advancement']; assert.ok(receipt); receipt.yearAfter += 1;
+    const bytes = JSON.stringify(current.state); item.database.database.prepare('UPDATE world_state SET state_json = ?').run(bytes);
+    const before = durableRecords(item); const batches = item.database.batches;
     assert.equal((await item.worker.fetch(new Request('https://world.test/api/world'), item.env)).status, 503);
-    assert.equal((await item.worker.fetch(post('/api/catchup', { expectedRevision: 2, timestamp: epoch, commandId: 'corrupt-write' }), item.env)).status, 503);
-    assert.equal(object(item.database.database.prepare('SELECT state_json FROM world_state').get()).state_json, bytes);
-    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_transitions').get()).count, 2);
+    assert.equal((await item.worker.fetch(post('/api/catchup', { expectedRevision: 1, timestamp: epoch, commandId: 'corrupt-write' }), item.env)).status, 503);
+    assert.deepEqual(durableRecords(item), before); assert.equal(item.database.batches, batches);
+    assert.equal(object(item.database.database.prepare('SELECT COUNT(*) AS count FROM world_transitions').get()).count, 1);
+  } finally { item.cleanup(); }
+});
+
+void test('fresh host initialization strictly validates registered rules and cannot replace an existing world', async () => {
+  const item = fixture();
+  try {
+    const before = durableRecords(item); const batches = item.database.batches;
+    for (const registeredRulesId of [null, 0, {}, [], '', 'settlement-missing', ' settlement-independent-1']) {
+      const response = await item.worker.fetch(post('/api/init', { ...initialize(), registeredRulesId }), item.env);
+      assert.equal(response.status, 400); assert.equal((await body(response)).error, 'unknown_registered_rules');
+      assert.deepEqual(durableRecords(item), before); assert.equal(item.database.batches, batches);
+    }
+    const input = { ...initialize(), registeredRulesId: 'settlement-independent-1' };
+    assert.equal((await item.worker.fetch(post('/api/init', input), item.env)).status, 200);
+    const current = await new WorldRepository(item.database).read(); assert.ok(current);
+    assert.equal(current.state.releaseId, input.registeredRulesId); assert.equal(current.state.revision, 0); assert.deepEqual(current.initial, current.state);
+    const accepted = durableRecords(item);
+    assert.equal((await body(await item.worker.fetch(post('/api/init', input), item.env))).duplicate, true); assert.deepEqual(durableRecords(item), accepted);
+    const replacement = await item.worker.fetch(post('/api/init', { ...input, registeredRulesId: 'settlement-plans-1', commandId: 'replace-rules' }), item.env);
+    assert.equal(replacement.status, 409); assert.equal((await body(replacement)).error, 'world_already_initialized'); assert.deepEqual(durableRecords(item), accepted);
   } finally { item.cleanup(); }
 });
 
@@ -1722,12 +1722,14 @@ await test('history decoder introduction leaves initial, current and every newly
   } finally { item.cleanup(); }
 });
 
-await test('mixed encoded recovery history retains every release, production and damage frame exactly', async () => {
+await test('mixed encoded fresh recovery history retains every action, production and damage frame exactly', async () => {
   const item = fixture();
   try {
     const { repository, damaged } = await recoveryWorld(item);
     const original = await repository.history(0, 200);
-    assert.equal(original.entries.length, 10);
+    assert.equal(damaged.initial.revision, 0);
+    assert.equal(original.entries.length, 4);
+    assert.deepEqual(original.entries.map(entry => entry.transition.kind), ['action', 'action', 'strategy-catchup', 'director-tick']);
     for (const [index, entry] of original.entries.entries()) {
       if (index % 2 === 0)
         item.database.database.prepare('UPDATE world_transitions SET state_json = ? WHERE end_revision = ?').run(encodedHistoryFixture(JSON.stringify(entry.state)), entry.endRevision);
@@ -1739,7 +1741,6 @@ await test('mixed encoded recovery history retains every release, production and
     for (const entry of decoded.entries) {
       const transition = entry.transition;
       const result = transition.kind === 'action' ? applyCommand(reproduced, transition.command)
-        : transition.kind === 'release-apply' ? applyRelease(reproduced, transition.command)
         : transition.kind === 'strategy-catchup' ? catchUpStrategy(reproduced, transition.timestamp)
         : transition.kind === 'director-tick' ? applyDirectorTick(reproduced, transition.command) : null;
       assert.ok(result?.ok);

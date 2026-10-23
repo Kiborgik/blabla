@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRelease, createWorld } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
+import { createWorld } from '../core/engine.ts';
 import { FOOD_BUDGET_RULES } from '../core/food-security-content.ts';
 import { RELIEF_RULES } from '../core/relief-content.ts';
 import { isReliefResult, isReliefState, validReliefEvent } from '../core/relief-validation.ts';
@@ -17,12 +16,7 @@ import type { GameEvent, WorldState } from '../core/types.ts';
 
 const epoch = '2026-10-22T00:00:00.000Z';
 function released(budget: boolean): WorldState {
-  let state = createWorld(1701, epoch); const target = budget ? 'settlement-food-budget-1' : 'settlement-regional-targets-1';
-  for (const release of RELEASES.slice(1)) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch });
-    assert.ok(result.ok, result.error); state = result.state; if (state.releaseId === target) break;
-  }
-  assert.equal(state.releaseId, target); return state;
+  return createWorld(1701, epoch, budget ? 'settlement-food-budget-1' : 'settlement-regional-targets-1');
 }
 function corridor(budget = true): WorldState {
   const state = released(budget); const donor = state.civilizations[1]!; const recipient = state.civilizations[4]!;
@@ -106,18 +100,6 @@ void test('new consent cannot resize cargo and blocked route, insufficient compl
   }
   const state = corridor(); const charter = accept(state); assert.equal(charter.status, 'accepted'); if (charter.status !== 'accepted') return;
   state.civilizations[4]!.resources.food = 200; resolve(state, charter.dueRound); assert.equal(state.civilizations[4]!.resources.food, 236);
-});
-
-void test('legacy exact-key charter survives a release upgrade and still validates and describes its original0.5 rule', () => {
-  const old = corridor(false); const charter = accept(old); assert.equal(charter.terms.food, 30); assert.equal('kind' in charter.terms.proposal, false);
-  const retained = structuredClone(old.relief); const stock = structuredClone(old.civilizations);
-  const adopted = applyRelease(old, { expectedRevision: old.revision, expectedFromReleaseId: old.releaseId, targetReleaseId: 'settlement-food-budget-1', timestamp: epoch });
-  assert.ok(adopted.ok, adopted.error); assert.deepEqual(adopted.state.relief, retained); assert.deepEqual(adopted.state.civilizations, stock); assert.ok(isWorldState(adopted.state));
-  assert.ok(old.events.some(event => event.type === 'relief-accepted' && event.effects.some(effect => effect.includes('Initial proposal need was 30 Food'))));
-  assert.equal(charter.status, 'accepted'); if (charter.status !== 'accepted') return;
-  resolve(adopted.state, charter.dueRound); const result = adopted.state.relief!.lastResults[1]!;
-  assert.equal(result.paid.food, 30); assert.equal('kind' in result.charter.terms.proposal, false); assert.ok(isReliefResult(result)); assert.ok(isReliefState(adopted.state.relief, adopted.state));
-  adopted.state.events = []; assert.ok(isReliefState(adopted.state.relief, adopted.state));
 });
 
 void test('old and new relief proof variants reject excess, missing, unknown, and reinterpreted rule fields after event pruning', () => {

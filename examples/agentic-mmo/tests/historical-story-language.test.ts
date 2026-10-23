@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyHistoryAdvance, applyRelease, createWorld } from '../core/engine.ts';
+import { applyHistoryAdvance, createWorld } from '../core/engine.ts';
 import { CIVICS, ERAS, FEATURES, TECHNOLOGIES } from '../core/content.ts';
-import { RELEASES } from '../core/release.ts';
 import { chooseCivic, resolveCivics } from '../core/simulation/civics.ts';
 import { executeAction } from '../core/simulation/commands.ts';
 import { adoptGovernment, resolveGovernmentTransitions } from '../core/simulation/government.ts';
@@ -16,14 +15,7 @@ import { renderSpectatorChronicle, spectatorChronicle, type SpectatorDestination
 const epoch = '2026-10-16T00:00:00.000Z';
 let baseline: WorldState | undefined;
 function world(): WorldState {
-  if (!baseline) {
-    baseline = createWorld(1701, epoch);
-    for (const release of RELEASES) {
-      if (!release.compatibleFrom.includes(baseline.releaseId)) continue;
-      const result = applyRelease(baseline, { expectedRevision: baseline.revision, expectedFromReleaseId: baseline.releaseId, targetReleaseId: release.id, timestamp: epoch });
-      assert.ok(result.ok, result.error); baseline = result.state;
-    }
-  }
+  baseline ??= createWorld(1701, epoch, 'settlement-knowledge-compacts-1');
   return structuredClone(baseline);
 }
 function language(state: WorldState, event: GameEvent) {

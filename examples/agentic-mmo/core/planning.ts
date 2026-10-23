@@ -1,3 +1,5 @@
+import { isKnowledgeAction } from './knowledge-validation.ts';
+import { knowledgeActionFailure } from './simulation/knowledge-compacts.ts';
 import { isReliefAction } from './relief-validation.ts';
 import { reliefActionFailure } from './simulation/relief-charters.ts';
 import { isHistoricalEventSelection } from './historical-selection-validation.ts';
@@ -70,6 +72,10 @@ function integer(value: unknown, maximum = Number.MAX_SAFE_INTEGER): value is nu
 export function isGameAction(value: unknown): value is GameAction {
   if (!record(value)) return false;
   switch (value.type) {
+    case 'propose-knowledge':
+    case 'respond-knowledge':
+    case 'withdraw-knowledge':
+      return isKnowledgeAction(value);
     case 'propose-relief':
     case 'respond-relief':
     case 'withdraw-relief':
@@ -196,6 +202,24 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
   if (specialized && (action.type === 'focus' || action.type === 'build') && !cities.some((city) => city.id === action.cityId))
     return invalidated('This release requires an explicit existing owned city target; review and choose the exact city');
   switch (action.type) {
+    case 'propose-knowledge': {
+      const route = state.routes.find(candidate => candidate.id === action.routeId);
+      const teacher = cities.find(city => city.id === action.teacherCityId);
+      const learner = state.cities.find(city => city.id === action.learnerCityId);
+      return !route?.agreement?.enabled || !teacher || !learner || learner.civId === seat
+        || !((route.owner === seat && route.from === teacher.id && route.to === learner.id && route.partner === learner.civId)
+          || (route.partner === seat && route.to === teacher.id && route.from === learner.id && route.owner === learner.civId))
+        || !teacher.buildings.includes(action.teacherInstitutionId) || !learner.buildings.includes(action.learnerInstitutionId)
+        || !civilization?.technologies.includes(action.technologyId) || state.civilizations[learner.civId]?.researchTarget !== action.technologyId
+        ? invalidated('The exact teaching route, institutions or active discovery changed') : null;
+    }
+    case 'respond-knowledge':
+    case 'withdraw-knowledge': {
+      const compact = state.knowledge?.active.find(candidate => candidate.id === action.compactId);
+      return !compact || (action.type === 'respond-knowledge' ? compact.terms.learnerId !== seat || compact.status !== 'proposed'
+        : compact.terms.teacherId !== seat && (compact.status !== 'accepted' || compact.terms.learnerId !== seat))
+        ? invalidated('The exact knowledge compact is resolved or no longer open to this actor') : null;
+    }
     case 'propose-relief':
     case 'respond-relief':
     case 'withdraw-relief': {
@@ -357,6 +381,7 @@ function unavailableReason(state: WorldState, seat: number, action: GameAction):
   if (action.type === 'settle-coast') { const block = coastalSourceBlock(state, seat, action.sourceCityId); if (block) return block; }
   const decisionBlock = decisionActionBlock(state, seat, action);
   if (decisionBlock) return decisionBlock;
+  if (action.type === 'propose-knowledge' || action.type === 'respond-knowledge' || action.type === 'withdraw-knowledge') return knowledgeActionFailure(state, seat, action) ?? 'Review the exact knowledge commitment and admission';
   if (action.type === 'propose-relief' || action.type === 'respond-relief' || action.type === 'withdraw-relief') return reliefActionFailure(state, seat, action) ?? 'Review the exact relief commitment and admission';
   if (action.type === 'propose-public-project' || action.type === 'respond-public-project' || action.type === 'cancel-public-project') return publicProjectActionFailure(state, seat, action) ?? 'Review the current charter and admission';
   const civilization = state.civilizations.find((candidate) => candidate.id === seat);

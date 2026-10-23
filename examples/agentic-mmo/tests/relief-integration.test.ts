@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld } from '../core/engine.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
-import { RELEASES } from '../core/release.ts';
 import { isGameEvent, isWorldState } from '../core/validation.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 import { GameStore } from '../cli/store.ts';
+import { seedLocalWorld } from './fixtures/current-world.ts';
 import { RECORDED_CHOICES_FORMAT } from '../server/public-protocol.ts';
 import { WorldRepository, type D1Database, type D1Statement, type D1Result, type SqlValue } from '../server/repository.ts';
 import { isRecord } from '../server/validation.ts';
@@ -21,14 +21,7 @@ const latest = 'settlement-regional-targets-1';
 const time = (milliseconds: number) => new Date(Date.parse(epoch) + milliseconds).toISOString();
 
 function syntheticInitial(): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const release of RELEASES) {
-    if (!release.compatibleFrom.includes(state.releaseId)) continue;
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch });
-    assert.ok(result.ok, result.error); state = result.state;
-    if (state.releaseId === latest) break;
-  }
-  state.revision = 0; state.events = []; state.eventCounts = {};
+  let state = createWorld(1701, epoch, latest);
   state.cities.find(city => city.civId === 1)!.population = 10;
   state.cities.find(city => city.civId === 4)!.population = 30;
   state.civilizations[1]!.resources.food = 100; state.civilizations[1]!.resources.energy = 30;
@@ -58,9 +51,8 @@ class Database implements D1Database {
 async function hosted() {
   const database = new Database(); const store = new WorldRepository(database);
   for (const migration of ['0000_world', '0001_autonomous_policy']) database.sql.exec(readFileSync(new URL(`../server/migrations/${migration}.sql`, import.meta.url), 'utf8'));
-  await store.initialize({ seed: 1701, clockEpoch: epoch, commandId: 'synthetic-relief-init' }, 'fixture-owner', epoch);
   const initial = syntheticInitial();
-  database.sql.prepare('UPDATE world_state SET initial_json=?, state_json=?').run(JSON.stringify(initial), JSON.stringify(initial));
+  database.sql.prepare('INSERT INTO world_state (world_id, revision, initial_json, state_json, updated_at) VALUES (?, ?, ?, ?, ?)').run('main', initial.revision, JSON.stringify(initial), JSON.stringify(initial), epoch);
   const state = async () => { const snapshot = await store.read(); assert.ok(snapshot); return snapshot.state; };
   const action = async (seat: number, value: GameAction, id: string, at = epoch) => {
     const before = await state(); const input = { seat, action: value, expectedRevision: before.revision, model: 'synthetic-relief-integration', commandId: id };
@@ -185,9 +177,8 @@ for (const outcome of ['declined', 'withdrawn'] as const) void test(`hosted ${ou
 void test('durable CLI relief commands use fresh process state and replay the exact paid outcome from a labelled synthetic genesis', () => {
   const directory = mkdtempSync(join(tmpdir(), 'relief-integration-')); const path = join(directory, 'world.json');
   try {
-    const store = new GameStore(path); store.initialize(1701, false, epoch);
-    const campaign = store.snapshot(); const initial = syntheticInitial(); campaign.initial = structuredClone(initial); campaign.state = structuredClone(initial);
-    writeFileSync(path, JSON.stringify(campaign));
+    const store = new GameStore(path);
+    seedLocalWorld(store, syntheticInitial());
     const submit = (seat: number, action: GameAction, id: string, at: string) => {
       const current = new GameStore(path); const input = { seat, action, expectedRevision: current.snapshot().state.revision, model: 'synthetic-cli-relief', commandId: id, timestamp: at };
       const reply = current.submit(input); assert.ok(reply.ok, reply.error); return input;

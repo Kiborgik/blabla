@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyRelease, createWorld } from '../core/engine.ts';
+import { createWorld } from '../core/engine.ts';
 import { HISTORICAL_DIRECTOR_EVENTS, type HistoricalEventId } from '../core/historical-event-content.ts';
 import { historicalEventCandidates, historicalEventInstanceId, selectHistoricalEventTarget, type HistoricalEventSelection } from '../core/historical-selection.ts';
 import { assertHistoricalEventReceipt } from '../core/historical-selection-validation.ts';
-import { RELEASES } from '../core/release.ts';
 import { hexDistance } from '../core/simulation/geography.ts';
 import { applyHistoricalEvent, applyHistoricalEventWithReceipt, historicalEventQuote, historicalEventWeight } from '../core/simulation/historical-events.ts';
 import { resolveEconomy } from '../core/simulation/economy.ts';
@@ -15,17 +14,7 @@ const epoch = '2026-10-16T00:00:00.000Z';
 let baseline: WorldState | undefined;
 
 function world(): WorldState {
-  if (!baseline) {
-    baseline = createWorld(1701, epoch);
-    for (const release of RELEASES) {
-      if (!release.compatibleFrom.includes(baseline.releaseId)) continue;
-      const result = applyRelease(baseline, { expectedRevision: baseline.revision, expectedFromReleaseId: baseline.releaseId, targetReleaseId: release.id, timestamp: epoch });
-      assert.equal(result.ok, true, result.error);
-      baseline = result.state;
-      if (release.id === 'settlement-regional-targets-1') break;
-    }
-    assert.equal(baseline.releaseId, 'settlement-regional-targets-1');
-  }
+  baseline ??= createWorld(1701, epoch, 'settlement-regional-targets-1');
   return structuredClone(baseline);
 }
 

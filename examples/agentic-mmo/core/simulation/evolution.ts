@@ -1,24 +1,14 @@
-import { createReliefState } from './relief-charters.ts';
-import { initializeSpaceflight } from './spaceflight.ts';
-import { POWERED_SCIENCE_RULES, SECOND_GOVERNMENT_RULES, LOCAL_POWER_RULES, INDUSTRIAL_RULES, CIVIC_RULES, TERRITORY_RULES } from '../content.ts';
-import { expandMapExtent, mapExpansionBlock } from './map-expansion.ts';
-import { initializeCityHousing } from './growth.ts';
-import { WORLD_EXPANSION_RULES, LOCAL_GROWTH_RULES, DISTRICT_RULES, IMPROVEMENT_RULES, FEATURES, METAL_RULES, PASTORAL_RULES, RESEARCH_INVESTMENT_RULES, WONDER_RULES } from '../content.ts';
-import { createCoalDeposits, createStrategicDeposits } from './metals.ts';
-import { createPastoralSites } from './pastoral.ts';
-import { RELEASES } from '../release.ts';
+import { FEATURES } from '../content.ts';
 import {
   DIRECTOR_SEAT,
   type GameEvent,
   type HistoryAdvanceCommand,
-  type ReleaseApplyCommand,
   type TransitionResult,
   type WorldState,
 } from '../types.ts';
 import { parseUtcTimestamp } from './clock.ts';
 import { commitEvents, emitEvent } from './events.ts';
 import { hasFeatures } from './history.ts';
-import { createIndependentTurns, strategyTimingError } from './turns.ts';
 
 function rejected(state: WorldState, error: string): TransitionResult {
   return { ok: false, state, events: [], error };
@@ -115,111 +105,6 @@ export function applyHistoryAdvance(
       `Calendar ${state.year} → ${next.year}`,
       `Reason: ${command.reason}`,
       'Authoritative clock accounting and released capabilities remain unchanged',
-    ],
-    importance: 5,
-  });
-  commitEvents(next, events);
-  return { ok: true, state: next, events };
-}
-
-export function applyRelease(state: WorldState, command: ReleaseApplyCommand): TransitionResult {
-  if (
-    typeof command !== 'object' ||
-    command === null ||
-    !validRevision(state, command.expectedRevision) ||
-    command.expectedFromReleaseId !== state.releaseId
-  ) {
-    return rejected(state, 'Release application requires the current revision and source release');
-  }
-  const source = RELEASES.find((release) => release.id === state.releaseId);
-  const target = RELEASES.find((release) => release.id === command.targetReleaseId);
-  if (
-    !source ||
-    !target ||
-    target.id === source.id ||
-    !target.compatibleFrom.includes(source.id) ||
-    source.schemaVersion !== state.schemaVersion ||
-    target.schemaVersion !== state.schemaVersion ||
-    source.gameVersion !== state.gameVersion ||
-    target.gameVersion !== state.gameVersion ||
-    state.unlockedFeatures.length !== source.featureIds.length ||
-    new Set(state.unlockedFeatures).size !== state.unlockedFeatures.length ||
-    !source.featureIds.every((feature) => state.unlockedFeatures.includes(feature)) ||
-    !state.unlockedFeatures.every((feature) => target.featureIds.includes(feature))
-  ) {
-    return rejected(
-      state,
-      'Release target is unknown, incompatible, nonadditive or not a registered successor',
-    );
-  }
-  const startsIndependent =
-    target.featureIds.includes('independent-actions') &&
-    !source.featureIds.includes('independent-actions');
-  if (
-    startsIndependent &&
-    (command.timestamp === undefined || parseUtcTimestamp(command.timestamp) === null)
-  )
-    return rejected(state, 'Independent release activation requires an explicit UTC epoch');
-  if ([POWERED_SCIENCE_RULES.featureId, SECOND_GOVERNMENT_RULES.featureId, LOCAL_POWER_RULES.featureId, INDUSTRIAL_RULES.featureId, CIVIC_RULES.featureId, TERRITORY_RULES.featureId, WORLD_EXPANSION_RULES.featureId, PASTORAL_RULES.featureId, LOCAL_GROWTH_RULES.featureId, 'resident-capacity', RESEARCH_INVESTMENT_RULES.featureId, DISTRICT_RULES.featureId, IMPROVEMENT_RULES.featureId, METAL_RULES.featureId, WONDER_RULES.featureId].some(feature => target.featureIds.includes(feature) && !source.featureIds.includes(feature))) {
-    const timingError = strategyTimingError(state, command.timestamp);
-    if (timingError) return rejected(state, timingError);
-  }
-  const startsSpaceflight = target.featureIds.includes('interplanetary-logistics') && !source.featureIds.includes('interplanetary-logistics');
-  const startsEarnedHistory = target.featureIds.includes('earned-history') && !source.featureIds.includes('earned-history');
-  const startsIndustrial = target.featureIds.includes(INDUSTRIAL_RULES.featureId) && !source.featureIds.includes(INDUSTRIAL_RULES.featureId);
-  if (startsIndustrial && (state.calendarMilestones.includes('industrial-world') || state.civilizations.some(civilization => civilization.technologies.includes('industrialization') || civilization.researchTarget === 'industrialization')))
-    return rejected(state, 'Legacy Industrialization conflicts with the accepted 220-Science chain; preserve this save for an explicitly approved migration');
-  const expandsMap = target.featureIds.includes(WORLD_EXPANSION_RULES.featureId) && !source.featureIds.includes(WORLD_EXPANSION_RULES.featureId);
-  if (expandsMap) {
-    const blocker = mapExpansionBlock(state);
-    if (blocker) return rejected(state, blocker);
-  }
-  const next = structuredClone(state);
-  const events: GameEvent[] = [];
-  next.revision += 1;
-  next.releaseId = target.id;
-  next.unlockedFeatures = [...target.featureIds];
-  if (startsSpaceflight) initializeSpaceflight(next);
-  if (startsEarnedHistory) next.milestoneProofs = {};
-  if (expandsMap) expandMapExtent(next);
-  if (startsIndustrial) {
-    next.coalDeposits = createCoalDeposits(next);
-    next.railEdges = {};
-    next.industrialEvidence = { ruleVersion: 1, foundryOperations: [], steamDelivery: null };
-  }
-  if (target.featureIds.includes(CIVIC_RULES.featureId) && !source.featureIds.includes(CIVIC_RULES.featureId)) {
-    for (const civilization of next.civilizations) {
-      civilization.civics = { ruleVersion: 1, completedCivicIds: [], active: null, lastCompleted: null, reformEntitlement: null };
-      civilization.government = { ruleVersion: 1, lastSpentReformCompletionEventId: null, active: null, pending: null };
-    }
-  }
-  if (target.featureIds.includes(TERRITORY_RULES.featureId) && !source.featureIds.includes(TERRITORY_RULES.featureId)) next.tileAcquisitions = {};
-  if (target.featureIds.includes(METAL_RULES.featureId) && !source.featureIds.includes(METAL_RULES.featureId)) {
-    next.strategicDeposits = createStrategicDeposits(next);
-    for (const civilization of next.civilizations) civilization.strategicResources = {};
-  }
-  if (target.featureIds.includes(WONDER_RULES.featureId) && !source.featureIds.includes(WONDER_RULES.featureId)) next.wonders = {};
-  if (target.featureIds.includes(PASTORAL_RULES.featureId) && !source.featureIds.includes(PASTORAL_RULES.featureId)) next.pastoralSites = createPastoralSites(next);
-  if (target.featureIds.includes(LOCAL_GROWTH_RULES.featureId) && !source.featureIds.includes(LOCAL_GROWTH_RULES.featureId))
-    for (const city of next.cities) initializeCityHousing(next, city, 'legacy-adoption');
-  if (startsIndependent && command.timestamp !== undefined)
-    next.independentTurns = createIndependentTurns(command.timestamp);
-  if (target.featureIds.includes('bounded-plans') && !source.featureIds.includes('bounded-plans'))
-    next.actionPlans = Array.from({ length: DIRECTOR_SEAT + 1 }, () => null);
-  if (target.featureIds.includes('public-projects') && !source.featureIds.includes('public-projects')) next.publicProjects = [];
-  if (target.featureIds.includes('consented-relief') && !source.featureIds.includes('consented-relief')) next.relief = createReliefState(next);
-  const added = target.featureIds.filter((feature) => !source.featureIds.includes(feature));
-  emitEvent(next, events, {
-    type: 'release-applied',
-    title: 'The world gains released capabilities',
-    detail: `${source.id} → ${target.id}`,
-    actor: DIRECTOR_SEAT,
-    target: null,
-    tileId: null,
-    cause: `Registered compatible successor ${target.id} explicitly applied to ${source.id}`,
-    effects: [
-      `Released capabilities added: ${added.join(', ')}`,
-      'Existing world assets, history and clock accounting are preserved',
     ],
     importance: 5,
   });

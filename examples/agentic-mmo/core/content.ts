@@ -52,7 +52,7 @@ export const LOCAL_POWER_RULES = { ruleVersion: 1, featureId: 'local-power' } as
 
 export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { 'research-lab': 18, 'coal-plant': 18, launchpad: 24, factory: 18, observatory: 14, foundry: 14, 'theater-square': 10, 'printing-house': 14, 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
 
-export const LOCAL_GROWTH_RULES = { ruleVersion: 1, featureId: 'local-growth', legacyBaseCapacity: 20, foundedBaseCapacity: 8, baseFoodCost: 6, populationPerFoodCost: 4, researchMultiplier: 3 } as const;
+export const LOCAL_GROWTH_RULES = { ruleVersion: 1, featureId: 'local-growth', initialCapitalBaseCapacity: 20, foundedBaseCapacity: 8, baseFoodCost: 6, populationPerFoodCost: 4, researchMultiplier: 3 } as const;
 
 export const WONDER_RULES = { ruleVersion: 1, featureId: 'unique-wonders', loserMaterialRefundPercent: 50, boostLimit: 2, boostPercent: 20, boostMaximumEra: 1 } as const;
 
@@ -88,6 +88,7 @@ export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'nav
 export const FEATURES: FeatureDefinition[] = [
   { id: 'shore-fisheries', name: 'Maintained shore fisheries', description: 'Water management opens exact owned coastal land near a coastal town. One opening Material and one remaining local resident fund three base Food on later beats; no boats, fish stocks or free shoreline goods.' },
   { id: 'food-budget', name: 'Household food security', description: 'Earth households require 1.25 Food per resident each working season. Food responds to wellbeing, damage, geography and staffed facilities rather than infrastructure amplification; other resources and off-world supplies keep their own rules.' },
+  { id: 'knowledge-compacts', name: 'Consented knowledge compacts', description: 'Two fresh ordinary deliveries with paid Science institutions at both exact endpoints permit one consented, funded contribution to an active terrestrial discovery. Due contributions are not escrow, cargo or free technology.' },
   { id: 'consented-relief', name: 'Consented food relief', description: 'A civilization may promise contextual surplus Food over an existing exact consenting corridor. Explicit acceptance precedes one conserved, fully funded due transfer; withdrawal and shortage do not invent cargo or betrayal.' },
   { id: 'partnership-stewardship', name: 'Partnership stewardship', description: 'Civilizations weigh supplied exchanges, expiring consent and promised repair contributions against their current needs. This additive controller rule leaves older release policies unchanged.' },
   { id: 'procedural-regional-targets', name: 'Local historical variety', description: 'Deterministic qualifying local event targets are quoted explicitly and retained with immediate factual consequences.' },
@@ -123,7 +124,7 @@ export const FEATURES: FeatureDefinition[] = [
   { id: 'settlement-research', name: 'First discoveries', description: 'Civilizations invest their knowledge in released discoveries.' },
   { id: 'director-events', name: 'A changing world', description: 'The World Director introduces real environmental pressures and opportunities.' },
   { id: 'history-advancement', name: 'Turning points in history', description: 'Deliberate, explained historical advances move the calendar once without changing the regular clock or unlocking unfinished capabilities.' },
-  { id: 'release-evolution', name: 'A world that keeps growing', description: 'Compatible delivered releases enter the inhabited world once while preserving its state, identity and history.' },
+  { id: 'release-evolution', name: 'Historical release marker', description: 'Inactive historical metadata only. Fresh configurations do not enable world/save migrations before release.' },
   { id: 'independent-actions', name: 'Civilizations act together', description: 'Independent fair tactical windows and shared strategic beats let each civilization act without waiting for another actor.' },
   { id: 'bounded-plans', name: 'The next useful step', description: 'At most two explicit actionable intentions guide real agent decisions and retain concrete lifecycle results without automatic execution.' },
   { id: 'building-operations', name: 'Working choices', description: 'Pause or operate constructed recipes that consume scarce inputs for useful output.' },
@@ -153,6 +154,7 @@ export const FEATURES: FeatureDefinition[] = [
 ];
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  'propose-knowledge': ['knowledge-compacts'], 'respond-knowledge': ['knowledge-compacts'], 'withdraw-knowledge': ['knowledge-compacts'],
   'propose-relief': ['consented-relief'], 'respond-relief': ['consented-relief'], 'withdraw-relief': ['consented-relief'],
   'build-rail': ['industrial-steam', 'recurring-decisions', 'owned-territory'],
   'choose-civic': ['civic-bootstrap'],

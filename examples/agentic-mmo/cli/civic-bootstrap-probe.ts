@@ -2,7 +2,7 @@ import { SecondGovernmentProbe, SECOND_GOVERNMENT_ACTIONS } from './second-gover
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { BUILDINGS, GOVERNMENTS, RESOURCE_IDS, ECONOMY_RULES, IMPROVEMENTS } from '../core/content.ts';
-import { applyCommand, catchUpStrategy } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { constructionWork } from '../core/simulation/construction.ts';
 import { governmentActionBlock } from '../core/simulation/government.ts';
 import { cityProductivity } from '../core/simulation/world.ts';
@@ -13,10 +13,10 @@ import { wonderBaseProduction } from '../core/simulation/wonders.ts';
 import { siteProduction } from '../core/simulation/sites.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { GameAction, Resources, TransitionResult, WorldState } from '../core/types.ts';
-import { coastalPrefixTime, replayCoastalStep, type CoastalPrefixStep } from '../tests/fixtures/coastal-prefix.ts';
+import { coastalPrefixTime, replayCoastalStep, syntheticInstitution, syntheticTechnologies, type CoastalPrefixStep } from '../tests/fixtures/coastal-prefix.ts';
 import { civicBootstrapJourney } from '../tests/fixtures/civic-bootstrap-journey.ts';
 
-const actions = ['adopt_civic_release', 'start_civic', 'invest_culture', 'complete_civic', 'adopt_arrangement', 'work_with_arrangement', 'resolve_government_transition', 'refuse_civic_action', 'replay_civic_history'];
+const actions = ['start_civic', 'invest_culture', 'complete_civic', 'adopt_arrangement', 'work_with_arrangement', 'resolve_government_transition', 'refuse_civic_action', 'replay_civic_history'];
 function actor(state: WorldState) { const result = state.civilizations.find(candidate => candidate.id === 0); assert.ok(result); return result; }
 function time(state: WorldState): string { return coastalPrefixTime(Math.max((state.independentTurns?.strategyTicks ?? 0) * 60 + 20, ((state.independentTurns?.lastActionWindow[0] ?? -1) + 1) * 10)); }
 function nextBeat(state: WorldState): TransitionResult { const result = catchUpStrategy(state, coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60)); assert.ok(result.ok, result.error); return result; }
@@ -67,20 +67,16 @@ export class CivicBootstrapProbe {
     if (action === 'replay_civic_history') {
       this.before = structuredClone(path.initial); let state = structuredClone(path.initial);
       for (const step of path.steps) { assert.deepEqual(state, step.before); const retained = structuredClone(state); const result = replayCoastalStep(state, structuredClone(step.input)); assert.deepEqual(state, retained); assert.deepEqual(result, step.result); assert.ok(isWorldState(result.state)); state = result.state; this.result = result; this.replayedFrames++; }
-      this.state = state; this.predicates = { replay_exact: equal(state, path.operated) && this.replayedFrames === path.steps.length, legacy_preserved: equal(path.beforeRelease.civilizations.map(civilization => civilization.technologies), path.adopted.civilizations.map(civilization => civilization.technologies)) }; return;
+      this.state = state; this.predicates = { replay_exact: equal(state, path.operated) && this.replayedFrames === path.steps.length }; return;
     }
     if (action === 'refuse_civic_action') {
-      this.state ??= structuredClone(path.adopted); this.before = structuredClone(this.state); this.result = command(this.state, { type: 'adopt-government', governmentId: 'missing-government', assignments: [] }); this.state = this.result.state;
+      this.state ??= structuredClone(path.prepared); this.before = structuredClone(this.state); this.result = command(this.state, { type: 'adopt-government', governmentId: 'missing-government', assignments: [] }); this.state = this.result.state;
       this.predicates = { refused: !this.result.ok, no_effects: equal(this.state, this.before) && this.result.events.length === 0 }; return;
     }
     if (action === 'resolve_government_transition') { this.switchControl(); return; }
-    const destination = action === 'adopt_civic_release' ? path.adopted : action === 'start_civic' ? path.selected : action === 'invest_culture' ? path.invested : action === 'complete_civic' ? path.completed : action === 'adopt_arrangement' ? path.arranged : path.built;
+    const destination = action === 'start_civic' ? path.selected : action === 'invest_culture' ? path.invested : action === 'complete_civic' ? path.completed : action === 'adopt_arrangement' ? path.arranged : path.built;
     const step = path.steps.find(candidate => candidate.result.state.revision === destination.revision); assert.ok(step); this.select(step); assert.ok(this.before && this.state && this.result);
     const before = actor(this.before); const after = actor(this.state);
-    if (action === 'adopt_civic_release') this.predicates = {
-      migrated_empty: this.state.civilizations.every(civilization => equal(civilization.civics, { ruleVersion: 1, completedCivicIds: [], active: null, lastCompleted: null, reformEntitlement: null }) && equal(civilization.government, { ruleVersion: 1, lastSpentReformCompletionEventId: null, active: null, pending: null })),
-      legacy_preserved: equal(science(this.before), science(this.state)) && equal(this.before.cities, this.state.cities) && equal(this.before.tiles, this.state.tiles) && equal(this.before.independentTurns, this.state.independentTurns) && this.before.year === this.state.year && this.before.clockTicks === this.state.clockTicks && this.before.civilizations.every((civilization, index) => equal(civilization.resources, this.state?.civilizations[index]?.resources)),
-    };
     if (action === 'start_civic') this.predicates = { selected_explicitly: before.civics?.active === null && after.civics?.active?.civicId === 'code-of-laws', cost_snapshotted: after.civics?.active?.requiredCulture === 16 && after.civics.active.progress === 0 && equal(before.resources, after.resources), science_independent: equal(science(this.before), science(this.state)) };
     if (action === 'invest_culture') {
       const idle = structuredClone(this.before); assert.ok(actor(idle).civics); actor(idle).civics = { ...actor(idle).civics, ruleVersion: 1, completedCivicIds: [], active: null, lastCompleted: null, reformEntitlement: null };
@@ -118,6 +114,16 @@ export class CivicBootstrapProbe {
   private switchControl(): void {
     const path = this.getPath(); let state = structuredClone(path.arranged);
     for (let count = 0; count < 4; count++) state = nextBeat(state).state;
+    syntheticTechnologies(state, 0, ['printing']); syntheticInstitution(state, 'city-0', 'printing-house');
+    for (const civilization of state.civilizations) for (const resource of RESOURCE_IDS) civilization.resources[resource] = Math.max(civilization.resources[resource], 200);
+    const proposal = legalActions(state, 0, time(state)).find(option => option.action.type === 'propose-trade' && option.action.recipeId === 'harvest-for-materials'); assert.ok(proposal);
+    const proposed = command(state, proposal.action); assert.ok(proposed.ok, proposed.error); state = proposed.state;
+    const offer = state.tradeOffers?.find(candidate => candidate.proposer === 0 && candidate.status === 'pending'); assert.ok(offer);
+    const consented = applyCommand(state, { seat: offer.recipient, expectedRevision: state.revision, timestamp: time(state), action: { type: 'respond-trade', offerId: offer.id, accept: true } }); assert.ok(consented.ok, consented.error); state = consented.state;
+    const route = state.routes.find(candidate => candidate.agreement?.offerId === offer.id); assert.ok(route?.agreement);
+    const due = route.agreement.nextDeliveryRound;
+    for (let count = 0; state.round < due - 1 && count < 60; count++) state = nextBeat(state).state;
+    assert.equal(state.round, due - 1);
     GOVERNMENTS.push({ id: 'synthetic-probe-council', name: 'Synthetic probe council', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slots: { military: 0, economic: 1, diplomatic: 0, wildcard: 0 }, baseProduction: { food: 3 } });
     try {
       this.before = structuredClone(state); const accepted = command(state, { type: 'adopt-government', governmentId: 'synthetic-probe-council', assignments: [] }); assert.ok(accepted.ok, accepted.error);
@@ -127,9 +133,9 @@ export class CivicBootstrapProbe {
       const opening = structuredClone(accepted.state); opening.round++; const ordinary = ordinaryOutputs(opening, 1); const reduced = ordinaryOutputs(opening, 0.75);
       const active = actor(second.state).government?.active; const refused = command(accepted.state, { type: 'adopt-government', governmentId: 'chiefdom', assignments: [] });
       const controlResult = this.control;
-      this.predicates = { transition_timing_exact: actor(first.state).government?.active?.governmentId === 'chiefdom' && actor(first.state).government?.pending?.completionRound === state.round + 2 && active?.governmentId === 'synthetic-probe-council' && active.effectiveRound === state.round + 2 && actor(second.state).government?.pending === null && second.events.filter(event => event.type === 'transition-completed').length === 1 && third.events.every(event => event.type !== 'transition-completed'), transition_outputs_exact: RESOURCE_IDS.every(resource => round(actor(controlResult.state).resources[resource] - actor(first.state).resources[resource]) === round(ordinary[resource] - reduced[resource])), fixed_transfers_preserved: equal(paidInputs(first), paidInputs(this.control)) && equal(exempt(first), exempt(this.control)), commitment_enforced: active?.governmentLockUntilRound === state.round + 6 && active.policyLockUntilRound === state.round + 6 && !refused.ok && equal(refused.state, accepted.state) };
+      this.predicates = { transition_timing_exact: actor(first.state).government?.active?.governmentId === 'chiefdom' && actor(first.state).government?.pending?.completionRound === state.round + 2 && active?.governmentId === 'synthetic-probe-council' && active.effectiveRound === state.round + 2 && actor(second.state).government?.pending === null && second.events.filter(event => event.type === 'transition-completed').length === 1 && third.events.every(event => event.type !== 'transition-completed'), transition_outputs_exact: RESOURCE_IDS.every(resource => round(actor(controlResult.state).resources[resource] - actor(first.state).resources[resource]) === round(ordinary[resource] - reduced[resource])), fixed_transfers_preserved: first.state.cities.find(city => city.id === 'city-0')?.buildingOperations?.['printing-house']?.lastResult?.paid.materials === 1 && first.events.some(event => event.type === 'trade-delivered') && equal(paidInputs(first), paidInputs(this.control)) && equal(exempt(first), exempt(this.control)), commitment_enforced: active?.governmentLockUntilRound === state.round + 6 && active.policyLockUntilRound === state.round + 6 && !refused.ok && equal(refused.state, accepted.state) };
     } finally { GOVERNMENTS.pop(); }
   }
 
-  observe() { if (this.successor) return this.successor.observe(); return { initialized: this.state !== null, ...this.predicates, replayed_frames: this.replayedFrames, provenance: this.operation === 'resolve_government_transition' ? 'Actual generic switch actions with a synthetic advanced-government definition; not a released advanced government' : this.operation === 'work_with_arrangement' || this.operation === 'invest_culture' ? 'Legal civic journey with explicitly synthetic idle, modifier-removal and construction-removal controls' : 'Legal Observatory-to-civic journey and exact deterministic replay' }; }
+  observe() { if (this.successor) return this.successor.observe(); return { initialized: this.state !== null, ...this.predicates, replayed_frames: this.replayedFrames, provenance: this.operation === 'resolve_government_transition' ? 'Actual generic switch and trade-consent actions with a synthetic advanced-government definition, Printing house and opening stocks; not a released advanced government' : this.operation === 'work_with_arrangement' || this.operation === 'invest_culture' ? 'Legal civic journey with explicitly synthetic idle, modifier-removal and construction-removal controls' : 'Synthetic named fresh civic prerequisites followed by actual paid civic actions and exact deterministic replay' }; }
 }

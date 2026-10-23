@@ -39,7 +39,7 @@ export class CultureProductionProbe {
     if (!actions.includes(action)) throw new RangeError(`Unknown culture action ${action}`);
     this.operation = action; this.control = null; this.allocation = null; this.repeated = null; this.replayedFrames = 0;
     if (action === 'refuse_culture_action') {
-      this.state ??= structuredClone(this.basis().adopted); this.before = structuredClone(this.state);
+      this.state ??= structuredClone(this.basis().prepared); this.before = structuredClone(this.state);
       this.result = applyCommand(this.state, { seat: 0, expectedRevision: this.state.revision, timestamp: time(this.state), action: { type: 'build', project: 'printing-house', cityId: 'missing-culture-town' } });
       assert.deepEqual(this.state, this.before); this.state = this.result.state; return;
     }
@@ -90,7 +90,7 @@ export class CultureProductionProbe {
     }));
     return {
       initialized: state !== null,
-      provenance: state ? 'Actual immutable legal culture journey; named completion/output controls are explicitly synthetic detached engine comparisons' : 'Uninitialized; no journey executed',
+      provenance: state ? 'Synthetic named fresh-rule prerequisites followed by actual paid culture transitions; completion/output controls are detached' : 'Uninitialized; no journey executed',
       replayed_frames: this.replayedFrames,
       paid_once: action === 'start_theater' && exactPayment && this.repeated?.ok === false && equal(this.repeated.state, state) && this.repeated.events.length === 0,
       exact_site: action === 'start_theater' && !!path && !!order && !('kind' in order) && order.buildingId === 'theater-square' && order.cityId === cityId && order.tileId === path.journey.theaterTileId && city?.districtSites?.['theater-square'] === undefined,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, createWorld, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, createWorld, legalActions, observe } from '../core/engine.ts';
 import { isGameAction } from '../core/planning.ts';
 import { RELEASES } from '../core/release.ts';
 import { PUBLIC_PROJECT_RECIPES } from '../core/content.ts';
@@ -15,13 +15,8 @@ import type { GameEvent, WorldState } from '../core/types.ts';
 
 const epoch = '2026-10-22T00:00:00.000Z';
 function syntheticPaidCorridor(donor = 1, recipient = 4): WorldState {
-  let state = createWorld(1701, epoch);
   const target = RELEASES.find(release => release.featureIds.includes(RELIEF_RULES.featureId)); assert.ok(target);
-  for (let count = 0; state.releaseId !== target.id && count < RELEASES.length; count++) {
-    const next = RELEASES.find(release => release.compatibleFrom.includes(state.releaseId)); assert.ok(next);
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: next.id, timestamp: epoch });
-    assert.ok(result.ok, result.error); state = result.state;
-  }
+  const state = createWorld(1701, epoch, target.id);
   const source = state.cities.find(city => city.civId === donor)!; const destination = state.cities.find(city => city.civId === recipient)!;
   state.revision++; let events: GameEvent[] = [];
   executeTradeAction(state, donor, { type: 'propose-trade', partner: recipient, recipeId: 'harvest-for-materials', sourceCityId: source.id, recipientCityId: destination.id }, events); commitEvents(state, events);

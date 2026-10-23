@@ -1,14 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
 import { allocateOperations, emitOperations } from '../core/simulation/operations.ts';
 import { recordLocalPower } from '../core/simulation/local-power.ts';
 import { commitEvents } from '../core/simulation/events.ts';
 import type { GameEvent, Resources } from '../core/types.ts';
-import { RELEASES } from '../core/release.ts';
 import { isWorldState } from '../core/validation.ts';
-import { LOCAL_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, advanceLocalSimulation, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, parsePreviousLocalSimulation } from '../web/local-simulation.ts';
+import { advanceLocalSimulation, createLocalSimulation, parseLocalSimulation } from '../web/local-simulation.ts';
 import { processLocalSimulationRequest } from '../web/local-simulation-worker.ts';
 
 const epoch = '2000-01-01T00:00:00.000Z';
@@ -57,29 +56,6 @@ await test('paid rail endpoints can share an earned wonder hex without replacing
   const other = collided.cities[0]!;
   other.districtSites = { campus: wonder.tileId }; other.buildings.push('campus');
   assert.equal(isWorldState(collided), false, 'Exclusive district and wonder occupancy remains forbidden');
-});
-
-await test('generated default and frozen prior local checkpoint have separate identities and storage without migration', () => {
-  let state = createWorld(1701, epoch);
-  for (const release of RELEASES.slice(1, RELEASES.findIndex(candidate => candidate.id === 'settlement-interplanetary-1'))) { const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch }); assert.ok(result.ok, result.error); state = result.state; }
-  const previous = { version: 1, source: 'local-procedural', policyVersion: 'weighted-civilizations-v1', seed: 1701, timestamp: epoch, steps: 0, state, memories: Array(6).fill(null), decisions: [] };
-  const bytes = JSON.stringify(previous);
-  const parsed = parsePreviousLocalSimulation(JSON.parse(bytes)); assert.ok(parsed);
-  const current = createLocalSimulation();
-  assert.equal(current.version, 2);
-  assert.equal(current.policyVersion, 'weighted-civilizations-v2');
-  assert.ok(current.state.origin);
-  assert.equal(current.state.height, 24);
-  assert.notEqual(LOCAL_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY);
-  assert.notEqual(localSimulationSnapshot(current).identity, localSimulationSnapshot(parsed).identity);
-  assert.equal(parseLocalSimulation(previous), null);
-  assert.equal(parsePreviousLocalSimulation(current), null);
-  assert.equal(processLocalSimulationRequest({ id: 1, run: previous, steps: 1 }).ok, false);
-  assert.equal(JSON.stringify(previous), bytes);
-  assert.equal(JSON.stringify(parsed), bytes);
-  const progressed = advanceLocalSimulation(current, 2);
-  assert.equal(localSimulationSnapshot(current).identity, localSimulationSnapshot(progressed).identity);
-  assert.ok(isWorldState(progressed.state));
 });
 
 await test('unknown generator origins and relabelled policy or timeline cannot replace a saved world', () => {

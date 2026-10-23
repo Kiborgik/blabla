@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { cityProductivity } from '../core/simulation/world.ts';
 import type { WorldState } from '../core/types.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
 import { CultureProductionProbe } from '../cli/culture-production-probe.ts';
@@ -33,7 +34,7 @@ await test('actual locally staffed Printing pays complete inputs and legal pause
   for (const field of ['same_town', 'staffed', 'inputs_paid', 'culture_made'] as const) assert.equal(probe.observe()[field], true, field);
   const value = probe.snapshot(); const town = value.state?.cities.find(city => city.id === 'city-0'); assert.ok(town);
   const result = town.buildingOperations?.['printing-house']?.lastResult; assert.ok(result);
-  assert.deepEqual(result.paid, { materials: 1 }); assert.equal(result.residents?.allocated, 3); assert.equal(result.produced.culture, 11.7);
+  assert.deepEqual(result.paid, { materials: 1 }); assert.equal(result.residents?.allocated, 3); const opening = probe.snapshot().before?.cities.find(city => city.id === 'city-0'); assert.ok(opening); assert.deepEqual(result.produced, { culture: Math.round(6 * cityProductivity(opening) * 100) / 100 });
   probe.call('pause_printing_house'); assert.equal(probe.observe().paused, true); assert.equal(probe.observe().no_payment_or_output, true);
   assert.equal(probe.observe().culture_made, false);
 });

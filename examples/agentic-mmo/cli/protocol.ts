@@ -17,7 +17,8 @@ export class GameProtocol extends Adapter {
           const seed = request.seed ?? 17;
           if (typeof seed !== 'number' || !Number.isSafeInteger(seed)) throw new ProtocolError('seed must be a safe integer');
           if (request.clockEpoch !== undefined && typeof request.clockEpoch !== 'string') throw new ProtocolError('clockEpoch must be an explicit UTC timestamp');
-          return this.store.initialize(seed, false, request.clockEpoch);
+          if (request.registeredRulesId !== undefined && typeof request.registeredRulesId !== 'string') throw new ProtocolError('Fresh worlds require a registered rules ID');
+          return this.store.initialize(seed, false, request.clockEpoch, request.registeredRulesId);
         }
         case 'observe': return this.store.observation(request.seat, request.timestamp, request.observationFormat);
         case 'action': return this.store.submit(request);

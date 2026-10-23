@@ -83,17 +83,15 @@ void test('synthetic unused generation expires honestly and retained receipts ca
 });
 
 import { localPowerJourney } from './fixtures/local-power-journey.ts';
-void test('one legal industrial continuation constructs a paid plant and Factory then records a positive same-town consumer', context => {
+void test('a fresh synthetic industrial prerequisite scenario constructs a paid plant and Factory then records a positive same-town consumer', context => {
   const journey = localPowerJourney(); const town = journey.productive.cities.find(city => city.id === journey.cityId); const proof = town?.localPower?.lastProductiveBeat;
   assert.ok(proof); assert.equal(proof.generated, 8); assert.equal(proof.consumed, 3); assert.equal(proof.expired, 5);
   assert.ok((proof.operations.find(operation => operation.buildingId === 'factory')?.result.produced.materials ?? 0) > 0);
-  assert.deepEqual(journey.adopted.civilizations, journey.beforeRelease.civilizations);
-  assert.deepEqual(journey.adopted.coalDeposits, journey.beforeRelease.coalDeposits); assert.deepEqual(journey.adopted.industrialEvidence, journey.beforeRelease.industrialEvidence);
   assert.equal(journey.plantCompleted.cities.find(city => city.id === journey.cityId)?.buildingOperations?.['coal-plant']?.lastResult, null);
   assert.equal(journey.factoryCompleted.cities.find(city => city.id === journey.cityId)?.buildingOperations?.factory?.lastResult, null);
   assert.deepEqual(journey.unused.cities.find(city => city.id === journey.cityId)?.localPower?.lastProductiveBeat, proof);
   assert.equal(journey.unused.cities.find(city => city.id === journey.cityId)?.localPower?.lastBeat?.expired, 8);
-  assert.equal(journey.state.year, journey.beforeRelease.year); assert.equal(journey.state.clockTicks, journey.beforeRelease.clockTicks);
+  assert.equal(journey.state.year, journey.initial.year); assert.equal(journey.state.clockTicks, journey.initial.clockTicks);
   context.diagnostic(JSON.stringify({ steps: journey.steps.length, cityId: journey.cityId, proof, retainedBytes: Buffer.byteLength(JSON.stringify(town?.localPower)) }));
 });
 

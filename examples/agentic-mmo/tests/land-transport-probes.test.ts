@@ -34,8 +34,8 @@ await test('land contract actions have real bindings and positive consent and du
     call('resolve_land_exchange');
     assert.equal(observe().land_delivered, true);
     assert.equal(observe().land_payment_exact, true);
-    call('replay_abstract_exchange');
-    assert.equal(observe().land_legacy_preserved, true);
+    call('restart_consented_exchange');
+    assert.equal(observe().land_restart_preserved, true);
     assert.deepEqual(store.snapshot(), before);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -150,17 +150,19 @@ await test('a valid funded early exchange remains unpaid before its accepted int
   assert.equal(probes.snapshot().state?.routes[0]?.agreement?.lastAttemptRound, null);
 });
 
-await test('old abstract acceptance matches actual historical engine timing after release and JSON replay', () => {
+await test('current land acceptance preserves exact quoted terms and schedule across JSON restart', () => {
   const probes = new LandTransportProbes();
-  probes.replayAbstract();
-  const legacy = probes.snapshot().legacy;
-  assert.ok(legacy);
-  assert.equal(legacy.before.round, 2);
-  assert.equal(legacy.before.tradeOffers?.[0]?.terms.transport, undefined);
-  assert.equal(legacy.accepted.routes[0]?.agreement?.nextDeliveryRound, 4);
-  assert.deepEqual(legacy.accepted.routes[0]?.agreement, legacy.historical.routes[0]?.agreement);
-  assert.deepEqual(legacy.accepted, legacy.replay);
-  assert.equal(probes.observe().land_legacy_preserved, true);
+  probes.restartConsented();
+  const restarted = probes.snapshot().restarted;
+  assert.ok(restarted);
+  assert.equal(restarted.before.round, 2);
+  const offer = restarted.before.tradeOffers?.[0]; const agreement = restarted.accepted.routes[0]?.agreement;
+  assert.ok(offer && agreement); assert.equal(offer.terms.transport?.mode, 'land');
+  assert.equal(agreement.nextDeliveryRound, agreement.acceptedRound + offer.terms.cadenceRounds);
+  assert.deepEqual(agreement.terms, offer.terms);
+  assert.deepEqual(restarted.before, restarted.restored);
+  assert.deepEqual(restarted.accepted, restarted.replay);
+  assert.equal(probes.observe().land_restart_preserved, true);
 });
 
 await test('initialization is lazy, hostile fixture integers are bounded, and reset and snapshots are detached', () => {

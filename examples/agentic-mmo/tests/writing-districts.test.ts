@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { GameAction, Resources, TransitionResult, WorldState } from '../core/types.ts';
 import { coastalDeparturePrefix, coastalPrefixTime } from './fixtures/coastal-prefix.ts';
@@ -8,11 +8,8 @@ import { coastalDeparturePrefix, coastalPrefixTime } from './fixtures/coastal-pr
 function accepted(result: TransitionResult): WorldState { assert.ok(result.ok, result.error); return result.state; }
 function timestamp(state: WorldState, offset = 20): string { assert.ok(state.independentTurns); return coastalPrefixTime(state.independentTurns.strategyTicks * 60 + offset); }
 function prior(): WorldState {
-  let state = coastalDeparturePrefix().state;
-  for (const targetReleaseId of ['settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1']) state = accepted(applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: timestamp(state) }));
-  return state;
+  return coastalDeparturePrefix('settlement-research-rate-1').state;
 }
-function adopt(state: WorldState): TransitionResult { return applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-writing-1', timestamp: timestamp(state) }); }
 function act(state: WorldState, action: GameAction, offset = 20): TransitionResult { return applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: timestamp(state, offset), action }); }
 function beat(state: WorldState): TransitionResult { assert.ok(state.independentTurns); return catchUpStrategy(state, coastalPrefixTime((state.independentTurns.strategyTicks + 1) * 60)); }
 
@@ -26,20 +23,8 @@ await test('prior productive release retains a legal unmodified prefix and has n
   assert.ok(beat(state).ok);
 });
 
-await test('Writing is an explicit compatible successor that preserves prior world and unlocks real research', () => {
-  const before = prior();
-  const state = accepted(adopt(before));
-  assert.deepEqual(state.civilizations, before.civilizations);
-  assert.deepEqual(state.cities, before.cities);
-  assert.deepEqual(state.tiles, before.tiles);
-  assert.ok(legalActions(state, 0, timestamp(state)).some(option => option.action.type === 'research' && option.action.technology === 'writing'));
-  const started = accepted(act(state, { type: 'research', technology: 'writing' }));
-  assert.equal(started.civilizations[0]?.researchTarget, 'writing');
-  assert.equal(started.civilizations[0]?.researchProgress, 0);
-});
-
 function learnWriting(): WorldState {
-  let state = accepted(act(accepted(adopt(prior())), { type: 'research', technology: 'writing' }));
+  let state = accepted(act(coastalDeparturePrefix('settlement-writing-1').state, { type: 'research', technology: 'writing' }));
   for (let count = 0; count < 40 && !state.civilizations[0]?.technologies.includes('writing'); count++) state = accepted(beat(state));
   assert.ok(state.civilizations[0]?.technologies.includes('writing'));
   return state;
@@ -193,15 +178,8 @@ await test('exact district plan head cannot substitute another site and projecti
   assert.equal(projectCapabilities(state, 0, 'city-0', timestamp(state)).buildings.find(row => row.nodeId === 'building:campus')?.district?.availableSites.length, 6);
 });
 
-await test('district adoption refuses overdue strategy without altering the old world', () => {
-  const state = prior(); assert.ok(state.independentTurns);
-  const before = JSON.stringify(state);
-  const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-writing-1', timestamp: coastalPrefixTime((state.independentTurns.strategyTicks + 1) * 60) });
-  assert.equal(result.ok, false); assert.equal(JSON.stringify(result.state), before);
-});
-
 await test('complete legal Writing Campus Library trajectory replays every exact JSON input and preserves prior frames', () => {
-  const prefix = coastalDeparturePrefix();
+  const prefix = coastalDeparturePrefix('settlement-writing-1');
   let state = prefix.state;
   let frames = 0;
   const commit = (transition: (world: WorldState) => TransitionResult): void => {
@@ -216,10 +194,6 @@ await test('complete legal Writing Campus Library trajectory replays every exact
     state = next;
     frames++;
   };
-  for (const targetReleaseId of ['settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1']) {
-    const command = { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: timestamp(state) };
-    commit(world => applyRelease(world, command));
-  }
   const action = (value: GameAction): void => {
     const command = { seat: 0, expectedRevision: state.revision, timestamp: timestamp(state), action: value };
     assert.ok(legalActions(state, 0, command.timestamp).some(option => JSON.stringify(option.action) === JSON.stringify(value)));

@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { TECHNOLOGIES, validateContent } from '../core/content.ts';
-import { applyRelease } from '../core/simulation/evolution.ts';
-import { civicBootstrapJourney } from './fixtures/civic-bootstrap-journey.ts';
 
 void test('industrial steam research uses the four accepted prerequisite records without retuning', () => {
   for (const [id, cost, requires] of [
@@ -16,19 +14,6 @@ void test('industrial steam research uses the four accepted prerequisite records
     assert.equal(technology.cost, cost);
     assert.deepEqual(technology.requires, requires);
   }
-});
-
-void test('industrial successor migrates the actual civic journey without granting technology or stock', () => {
-  const journey = civicBootstrapJourney(); const before = structuredClone(journey.state);
-  const result = applyRelease(journey.state, { expectedRevision: journey.state.revision, expectedFromReleaseId: journey.state.releaseId, targetReleaseId: 'settlement-industrial-steam-1', timestamp: journey.time() });
-  assert.ok(result.ok, result.error);
-  assert.deepEqual(journey.state, before);
-  assert.deepEqual(result.state.civilizations, before.civilizations);
-  assert.deepEqual(result.state.strategicDeposits, before.strategicDeposits);
-  assert.deepEqual(result.state.tiles, before.tiles);
-  assert.equal(result.state.rng, before.rng);
-  assert.equal(result.state.year, before.year);
-  assert.equal(result.state.clockTicks, before.clockTicks);
 });
 
 import { industrialSteamPrefix } from './fixtures/industrial-steam-journey.ts';
@@ -63,13 +48,13 @@ void test('steam has a separate weighted quote interpreter rather than changing 
 });
 
 import { industrialSteamJourney } from './fixtures/industrial-steam-journey.ts';
-void test('one unedited legal journey joins research, Coal, paid Rail, fresh consent, funded faster delivery and the two-town industrial milestone', context => {
+void test('one fresh synthetic-prerequisite scenario joins actual research, Coal, paid Rail, consent, funded faster delivery and the two-town industrial milestone', context => {
   const journey = industrialSteamJourney();
   for (const step of journey.steps) assert.ok(isWorldState(step.result.state), `Invalid durable frame ${step.result.state.revision}`);
   const proof = journey.state.industrialEvidence; assert.ok(proof?.steamDelivery);
   assert.equal(new Set(proof.foundryOperations.map(receipt => receipt.cityId)).size, 2);
-  assert.equal(journey.state.year, journey.adopted.year);
-  assert.equal(journey.state.clockTicks, journey.adopted.clockTicks);
+  assert.equal(journey.state.year, journey.prepared.year);
+  assert.equal(journey.state.clockTicks, journey.prepared.clockTicks);
   assert.equal(journey.researched.civilizations[journey.seat]?.era, 2);
   assert.equal(journey.twoFoundries.civilizations[journey.seat]?.era, 2);
   assert.equal(journey.state.civilizations[journey.seat]?.era, 3);
@@ -80,7 +65,7 @@ void test('one unedited legal journey joins research, Coal, paid Rail, fresh con
   assert.ok(planner.work.visitedTiles <= sources.length * journey.beforeOffer.tiles.length);
   assert.ok(planner.work.relaxedEdges <= sources.length * journey.beforeOffer.tiles.length * 6);
   context.diagnostic(JSON.stringify({ planner: planner.work, unrailedPlanner: planner.unrailedWork, evidenceBytes: Buffer.byteLength(JSON.stringify(proof)), railBytes: Buffer.byteLength(JSON.stringify(journey.state.railEdges)) }));
-  context.diagnostic(JSON.stringify({ steps: journey.steps.length, rails: Object.keys(journey.state.railEdges ?? {}), proof, rounds: [journey.adopted.round, journey.state.round] }));
+  context.diagnostic(JSON.stringify({ steps: journey.steps.length, rails: Object.keys(journey.state.railEdges ?? {}), proof, rounds: [journey.prepared.round, journey.state.round] }));
 });
 
 import { isWorldState } from '../core/validation.ts';

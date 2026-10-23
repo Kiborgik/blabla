@@ -1,3 +1,4 @@
+import { availableKnowledgeActions } from './knowledge-compacts.ts';
 import { availableReliefActions } from './relief-charters.ts';
 import { selectHistoricalEventTarget } from '../historical-selection.ts';
 import { isHistoricalEventSelection } from '../historical-selection-validation.ts';
@@ -234,7 +235,7 @@ export function availableActions(
   }
   choices.push(...availableRailActions(state, seat));
   choices.push(...availableCoastalActions(state, seat));
-  choices.push(...availableTradeActions(state, seat, tradePresentation), ...availablePublicProjectActions(state, seat), ...availableReliefActions(state, seat));
+  choices.push(...availableTradeActions(state, seat, tradePresentation), ...availablePublicProjectActions(state, seat), ...availableReliefActions(state, seat), ...availableKnowledgeActions(state, seat));
   if (actionFeatureAvailable(state, 'repair-city') && canAfford(civilization.resources, ECONOMY_RULES.repair.cost)) {
     for (const city of cities.filter((candidate) => candidate.damage > 0)) {
       choices.push({
@@ -326,6 +327,12 @@ export function sameAction(left: GameAction, right: unknown): boolean {
         left.offerId === right.offerId &&
         left.accept === right.accept
       );
+    case 'propose-knowledge':
+      return 'routeId' in right && 'teacherCityId' in right && 'learnerCityId' in right && 'technologyId' in right && 'teacherInstitutionId' in right && 'learnerInstitutionId' in right && left.routeId === right.routeId && left.teacherCityId === right.teacherCityId && left.learnerCityId === right.learnerCityId && left.technologyId === right.technologyId && left.teacherInstitutionId === right.teacherInstitutionId && left.learnerInstitutionId === right.learnerInstitutionId;
+    case 'respond-knowledge':
+      return 'compactId' in right && 'accept' in right && left.compactId === right.compactId && left.accept === right.accept;
+    case 'withdraw-knowledge':
+      return 'compactId' in right && left.compactId === right.compactId;
     case 'propose-relief':
       return 'routeId' in right && 'sourceCityId' in right && 'recipientCityId' in right && left.routeId === right.routeId && left.sourceCityId === right.sourceCityId && left.recipientCityId === right.recipientCityId;
     case 'respond-relief':

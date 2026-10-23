@@ -1,20 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BUILDINGS, IMPROVEMENTS, IMPROVEMENT_RULES, WONDERS } from '../core/content.ts';
-import { applyRelease, createWorld } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
+import { createWorld } from '../core/engine.ts';
 import { availableDistrictSites, districtCapacity, districtCount, districtSiteBlock } from '../core/simulation/districts.ts';
 import { availableImprovementSites, improvementSiteBlock } from '../core/simulation/improvements.ts';
 import { availableWonderSites, wonderSiteBlock } from '../core/simulation/wonders.ts';
 import type { City, WorldState } from '../core/types.ts';
 
 function releasedWorld(seed: number): WorldState {
-  let state = createWorld(seed);
-  for (const release of RELEASES.slice(1)) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: '2026-01-01T00:00:00.000Z' });
-    assert.ok(result.ok, result.error); state = result.state;
-  }
-  return state;
+  return createWorld(seed, '2026-01-01T00:00:00.000Z', 'settlement-knowledge-compacts-1');
 }
 
 function assertEquivalent(state: WorldState, city: City): void {

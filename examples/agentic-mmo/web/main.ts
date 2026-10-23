@@ -1,3 +1,4 @@
+import { knowledgeRouteRecords, renderKnowledgeRoute } from './knowledge-inspection.ts';
 import { advanceLocalSimulationAsync, disposeLocalSimulationWorker } from './local-simulation-client.ts';
 import { localSimulationSnapshot } from './local-simulation.ts';
 import { createLocalWorldStorage, type LocalCheckpointResult } from './local-world-storage.ts';
@@ -253,15 +254,18 @@ function renderInspection(): void {
   const route = displayed.routes.find((entry) => entry.id === selectedRoute);
   panel.hidden = !civ && !route;
   if (route) {
-    const fingerprint = JSON.stringify(['route', route, routeListPage, displayed.routes, mode]);
+    const knowledge = mode === 'sample' || !snapshot ? [] : knowledgeRouteRecords(snapshot.state, route.id);
+    const fingerprint = JSON.stringify(['route', route, routeListPage, displayed.routes, mode, observedWorldKey(), knowledge]);
     if (fingerprint === inspectionFingerprint) return;
-    const sameRoute = panel.dataset['routeId'] === routeInspectionIdentity(route);
+    const sameRoute = panel.dataset['routeId'] === routeInspectionIdentity(route) && panel.dataset['routeWorld'] === observedWorldKey();
+    const knowledgeOpen = new Set(sameRoute ? [...panel.querySelectorAll<HTMLDetailsElement>('details[data-knowledge-key]')].filter(node => node.open).map(node => node.dataset['knowledgeKey']!) : []);
     const pathDetails = panel.querySelector<HTMLDetailsElement>('.route-path-tiles');
     const pathInspection = retainedRoutePathInspection(panel.dataset['routeId'], route, pathDetails?.open ?? false, Number(pathDetails?.dataset['page'] ?? 0), panel.querySelector<HTMLDetailsElement>('.route-steam-terms')?.open ?? false);
     const scroll = sameRoute ? panel.scrollTop : 0;
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement.dataset['routeFocus'] : undefined;
     inspectionFingerprint = fingerprint;
     panel.dataset['routeId'] = routeInspectionIdentity(route);
+    panel.dataset['routeWorld'] = observedWorldKey();
     panel.replaceChildren();
     const close = document.createElement('button');
     close.type = 'button';
@@ -271,12 +275,14 @@ function renderInspection(): void {
     close.setAttribute('aria-label', 'Close trade route details');
     panel.append(close);
     renderRouteCard(panel, route, selectCity, pathInspection);
+    if (mode !== 'sample' && snapshot) renderKnowledgeRoute(panel, snapshot.state, route.id, knowledgeOpen);
     renderRouteList(panel, displayed.routes, selectedRoute, routeListPage, selectRoute, selectRoutePage);
     if (sameRoute && focused) [...panel.querySelectorAll<HTMLElement>('[data-route-focus]')].find((node) => node.dataset['routeFocus'] === focused)?.focus({ preventScroll: true });
     panel.scrollTop = scroll;
     return;
   }
   delete panel.dataset['routeId'];
+  delete panel.dataset['routeWorld'];
   if (!civ) return;
   const state = mode === 'sample' ? null : snapshot?.state;
   const actual = state?.civilizations.find((entry) => entry.id === civ.id);
@@ -964,13 +970,7 @@ element('#world-source').addEventListener('change', (event) => {
 async function tickLocalObservatory(): Promise<void> {
   if (mode !== 'local' || document.hidden || localStopped || localSaveBlocked || localAdvancing || !localSimulation || localSimulation.state.outcome) return;
   localAdvancing = true;
-  const prior = localSimulation;
   try {
-    const prepared = await localWorldStorage.prepareCurrentRelease(() => mode === 'local' && !document.hidden && !localStopped ? localSimulation : null);
-    localSaveMessage = prepared.message; localEphemeral = prepared.ephemeral; localSaveBlocked = prepared.blocked;
-    if (mode !== 'local' || document.hidden || localStopped || localSaveBlocked || localSimulation !== prior || !prepared.run) { renderConnection(); return; }
-    localSimulation = prepared.run;
-    if (localSimulation.state.outcome) { observeLocalSimulation(); return; }
     const advancing = localSimulation;
     const next = await advanceLocalSimulationAsync(advancing, 2);
     if (mode !== 'local' || document.hidden || localStopped || localSaveBlocked || localSimulation !== advancing) return;

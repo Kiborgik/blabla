@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { arch, platform } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { TURN_RULES } from '../core/content.ts';
 import { DIRECTOR_SEAT, type TransitionResult } from '../core/types.ts';
 
@@ -15,7 +15,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const root = fileURLToPath(new URL('../', import.meta.url));
 const epoch = '2026-10-16T00:00:00.000Z';
-const releases = ['settlement-foundations-2', 'settlement-independent-1', 'settlement-plans-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1'];
+const registeredRulesId = 'settlement-recovery-1';
 
 function utf8(bytes: Uint8Array): string {
   try { return decoder.decode(bytes); } catch { throw new TypeError('snapshot_invalid_utf8'); }
@@ -109,14 +109,12 @@ export async function decodeSnapshot(encoded: unknown): Promise<{ text: string; 
 }
 
 function* frames(transitions: number) {
-  let state = createWorld(1701, epoch);
+  let state = createWorld(1701, epoch, registeredRulesId);
   for (let number = 1; number <= transitions; number += 1) {
-    const release = releases[number - 1];
     let result: TransitionResult;
-    if (release) result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release, timestamp: epoch });
-    else {
+    {
       const actorCount = DIRECTOR_SEAT + 1;
-      const step = number - releases.length - 1;
+      const step = number - 1;
       const seat = step % (actorCount + 1);
       const beat = Math.floor(step / (actorCount + 1));
       const timestamp = new Date(Date.parse(epoch) + (beat + (seat === actorCount ? 1 : 0)) * TURN_RULES.strategyIntervalMs).toISOString();
@@ -209,7 +207,7 @@ export async function measureSnapshotEncoding(transitions = 1000) {
   return {
     measuredAt: new Date().toISOString(), identity: source,
     environment: { node: process.version, platform: platform(), arch: arch(), localConstrainedMemoryBytes: process.constrainedMemory() },
-    workload: { provenance: 'synthetic-deterministic-driver', seed: 1701, epoch, releases, description: 'Same seven-release and six-action/one-beat sequence as hosted-storage.ts; tests independently compare raw sample totals and state hashes against actual repository storage.' },
+    workload: { provenance: 'synthetic-deterministic-driver', seed: 1701, epoch, registeredRulesId, description: 'Same fresh registered configuration and six-action/one-beat sequence as hosted-storage.ts; tests independently compare raw sample totals and state hashes against actual repository storage.' },
     frames: number, controls, limits: SNAPSHOT_LIMITS,
     candidates: candidates.map(({ encode, decode, ...current }) => ({ ...current, encodeMs: timing(encode), decodeMs: timing(decode) })),
     memory: { before, after: process.memoryUsage(), sampledRssBytes, sampledHeapBytes, sampledArrayBufferBytes, processPeakRssBytes: process.resourceUsage().maxRSS * 1024, sampling: 'After each frame; process-wide high water includes startup and prior work. Neither sampled deltas nor RSS establish a Worker peak or native codec allocation bound.' },

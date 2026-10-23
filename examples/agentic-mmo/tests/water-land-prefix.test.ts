@@ -8,9 +8,9 @@ import type { GameAction } from '../core/types.ts';
 import { replayCoastalStep } from './fixtures/coastal-prefix.ts';
 import { waterLandPrefix } from './fixtures/water-land-prefix.ts';
 
-await test('water land prefix has real owned free grassland and exact adjacent mountain geography without deposits', () => {
+await test('fresh water-land synthetic prerequisites retain actual free grassland and adjacent mountain geography', () => {
   const value = waterLandPrefix(); const { state, pasture, mill, aqueduct } = value;
-  assert.ok(isWorldState(state)); assert.equal(state.revision, 217);
+  assert.ok(isWorldState(state)); assert.equal(state.revision, 0); assert.equal(state.releaseId, 'settlement-water-land-1');
   const site = state.tiles.find(tile => tile.id === pasture.tileId); assert.ok(site);
   const city = state.cities.find(candidate => candidate.id === pasture.cityId); assert.ok(city);
   const center = state.tiles.find(tile => tile.id === city.tileId); assert.ok(center);
@@ -19,7 +19,7 @@ await test('water land prefix has real owned free grassland and exact adjacent m
   assert.ok(!state.cities.some(candidate => candidate.tileId === site.id));
   assert.equal(site.resource, null);
   const irrigated = state.cities.find(candidate => candidate.id === mill.cityId); assert.ok(irrigated); assert.ok(irrigated.buildings.includes('irrigation'));
-  assert.equal(irrigated.buildingOperations?.irrigation?.lastResult?.status, 'operated');
+  assert.equal(irrigated.buildingOperations?.irrigation?.lastResult, null);
   const mountainTown = state.cities.find(candidate => candidate.id === aqueduct.cityId); assert.ok(mountainTown);
   const mountainCenter = state.tiles.find(tile => tile.id === mountainTown.tileId); assert.ok(mountainCenter);
   assert.deepEqual(aqueduct.mountainTileIds, [5, 22, 24]);
@@ -27,20 +27,22 @@ await test('water land prefix has real owned free grassland and exact adjacent m
   for (const seat of [pasture.seat, mill.seat, aqueduct.seat]) { const owner = state.civilizations.find(candidate => candidate.id === seat); assert.ok(owner); assert.ok(owner.resources.materials >= 44 && owner.resources.credits >= 17); }
 });
 
-await test('water land predecessor retains paid growth staffing and current free town lanes', () => {
+await test('water-land synthetic prerequisites declare residents and institutions without fabricating paid receipts', () => {
   const value = waterLandPrefix(); const city = value.state.cities.find(candidate => candidate.id === value.mill.cityId); assert.ok(city);
-  assert.equal(city.population, 22); assert.ok(city.buildings.includes('granary'));
-  assert.equal(city.buildingOperations?.university?.lastResult?.status, 'operated');
-  assert.deepEqual(city.buildingOperations?.university?.lastResult?.paid, { credits: 2 });
+  assert.equal(city.population, 12); assert.ok(city.buildings.includes('campus') && city.buildings.includes('library'));
+  assert.ok(!city.buildings.includes('granary') && !city.buildings.includes('university'));
+  assert.ok(Object.values(city.buildingOperations ?? {}).every(operation => operation.lastResult === null));
+  assert.deepEqual(value.steps, []); assert.deepEqual(value.state.events.map(event => event.type), ['world-founded']);
   for (const target of [value.pasture, value.mill, value.aqueduct]) assert.equal(value.state.cities.find(candidate => candidate.id === target.cityId)?.construction?.active ?? null, null);
 });
 
-await test('water land predecessor future branch choices are absent and exact attempts have zero effects', () => {
+await test('fresh water-land permits initial discovery but rejects unmet research and building prerequisites atomically', () => {
   const value = waterLandPrefix();
   const options = legalActions(value.state, value.pasture.seat, value.timestamp);
-  for (const technology of ['animal-husbandry', 'wheel', 'engineering']) assert.ok(!options.some(option => option.action.type === 'research' && option.action.technology === technology));
+  assert.ok(options.some(option => option.action.type === 'research' && option.action.technology === 'animal-husbandry'));
+  for (const technology of ['wheel', 'engineering']) assert.ok(!options.some(option => option.action.type === 'research' && option.action.technology === technology));
   const attempts: { seat: number; action: GameAction }[] = [
-    ...['animal-husbandry', 'wheel', 'engineering'].map(technology => ({ seat: value.pasture.seat, action: { type: 'research' as const, technology } })),
+    ...['wheel', 'engineering'].map(technology => ({ seat: value.pasture.seat, action: { type: 'research' as const, technology } })),
     { seat: value.mill.seat, action: { type: 'build', project: 'water-mill', cityId: value.mill.cityId } },
     { seat: value.aqueduct.seat, action: { type: 'build', project: 'aqueduct', cityId: value.aqueduct.cityId } },
     { seat: value.pasture.seat, action: { type: 'improve', improvementId: 'pasture', cityId: value.pasture.cityId, tileId: value.pasture.tileId } },
@@ -48,7 +50,7 @@ await test('water land predecessor future branch choices are absent and exact at
   for (const { seat, action } of attempts) { const before = structuredClone(value.state); const result = applyCommand(value.state, { seat, expectedRevision: value.state.revision, timestamp: value.timestamp, action }); assert.equal(result.ok, false, JSON.stringify(action)); assert.deepEqual(result.state, before); assert.deepEqual(result.events, []); assert.deepEqual(value.state, before); }
 });
 
-await test('water land full legal prefix replays exactly and returned snapshots are detached', () => {
+await test('water-land explicit synthetic root is deterministic and returned snapshots are detached', () => {
   const value = waterLandPrefix(); let state = structuredClone(value.initial);
   for (const step of value.steps) { assert.deepEqual(state, step.before); const before = structuredClone(state); const result = replayCoastalStep(state, step.input); assert.deepEqual(state, before); assert.deepEqual(result, step.result); assert.ok(result.ok); assert.ok(isWorldState(result.state)); state = result.state; }
   assert.deepEqual(state, value.state); const second = waterLandPrefix(); assert.deepEqual(second, value);

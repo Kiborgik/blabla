@@ -5,12 +5,10 @@ import { legalActions } from '../../core/engine.ts';
 import { constructionWork, requiredConstructionWork } from '../../core/simulation/construction.ts';
 import type { GameAction, WorldState } from '../../core/types.ts';
 import { coastalPrefixTime, replayCoastalStep, type CoastalPrefixInput, type CoastalPrefixStep } from './coastal-prefix.ts';
-import { localPowerJourney } from './local-power-journey.ts';
-
-let previous: ReturnType<typeof localPowerJourney> | undefined;
+import { civicBootstrapJourney } from './civic-bootstrap-journey.ts';
 
 export function secondGovernmentJourney() {
-  previous ??= localPowerJourney();
+  const previous = civicBootstrapJourney('settlement-second-government-1');
   const initial = previous.initial; const steps: CoastalPrefixStep[] = [...previous.steps]; const seat = previous.seat; const cityId = `city-${seat}`;
   let state = structuredClone(previous.state);
   const time = (): string => coastalPrefixTime(Math.max((state.independentTurns?.strategyTicks ?? 0) * 60 + 20, ...state.civilizations.map(civilization => ((state.independentTurns?.lastActionWindow[civilization.id] ?? -1) + 1) * 10)));
@@ -26,9 +24,7 @@ export function secondGovernmentJourney() {
     commit({ kind: 'action', command: { seat: actor, expectedRevision: state.revision, timestamp: time(), action } });
   };
   const until = (condition: () => boolean, label: string, limit = 120): void => { for (let count = 0; count < limit && !condition(); count++) beat(); assert.ok(condition(), label); };
-  const beforeRelease = structuredClone(state);
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-second-government-1', timestamp: time() } });
-  const adopted = structuredClone(state);
+  const prepared = structuredClone(state);
   const civicFrames: Array<{ civicId: string; before: WorldState; selected: WorldState; completed: WorldState }> = [];
   for (const civicId of ['craftsmanship', 'foreign-trade', 'early-empire', 'state-workforce', 'political-philosophy']) {
     const before = structuredClone(state); act({ type: 'choose-civic', civicId }); const selected = structuredClone(state);
@@ -67,7 +63,7 @@ export function secondGovernmentJourney() {
   const returnAccepted = structuredClone(state);
   beat(); const returnFirstBeat = structuredClone(state);
   beat(); const returned = structuredClone(state);
-  return { initial, steps, seat, cityId, beforeRelease, adopted, civicFrames, completed, accepted, firstTransitionBeat, transitionCompleted, beforeConstruction, constructionStarted, firstWorkBeat, built, beforeReslot, reslotted, beforeReturn, returnAccepted, returnFirstBeat, returned, get state(): WorldState { return state; }, time, act, beat, until, commit };
+  return { initial, steps, seat, cityId, prepared, provenance: previous.provenance, civicFrames, completed, accepted, firstTransitionBeat, transitionCompleted, beforeConstruction, constructionStarted, firstWorkBeat, built, beforeReslot, reslotted, beforeReturn, returnAccepted, returnFirstBeat, returned, get state(): WorldState { return state; }, time, act, beat, until, commit };
 }
 
 function must<T>(value: T | null | undefined): T { if (value === null || value === undefined) throw new RangeError('Required government journey fact is missing'); return value; }

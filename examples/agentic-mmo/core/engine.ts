@@ -1,14 +1,17 @@
 import { observedRail } from './simulation/rail.ts';
 import { observedGovernment } from './simulation/government.ts';
 import { observedTerritory } from './simulation/territory.ts';
-import { cityGrowthFacts } from './simulation/growth.ts';
+import { cityGrowthFacts, initializeCityHousing } from './simulation/growth.ts';
 import { observedWonders } from './simulation/wonders.ts';
 import type { TradePresentation } from './simulation/trade.ts';
 import { observedRecipes, observedResidentCapacity } from './simulation/operations.ts';
-import { observedStrategicResources } from './simulation/metals.ts';
-import { observedPastoralSites } from './simulation/pastoral.ts';
-import { CIVILIZATIONS, ECONOMY_RULES, LOCAL_GROWTH_RULES, validateContent } from './content.ts';
-import { CURRENT_RELEASE } from './release.ts';
+import { createCoalDeposits, createStrategicDeposits, observedStrategicResources } from './simulation/metals.ts';
+import { createPastoralSites, observedPastoralSites } from './simulation/pastoral.ts';
+import { CIVIC_RULES, CIVILIZATIONS, ECONOMY_RULES, INDUSTRIAL_RULES, LOCAL_GROWTH_RULES, METAL_RULES, PASTORAL_RULES, TERRITORY_RULES, WONDER_RULES, WORLD_EXPANSION_RULES, validateContent } from './content.ts';
+import { CURRENT_RELEASE, RELEASES } from './release.ts';
+import { initializeSpaceflight } from './simulation/spaceflight.ts';
+import { createReliefState } from './simulation/relief-charters.ts';
+import { createKnowledgeState } from './simulation/knowledge-compacts.ts';
 import { completeAttachedPlan, observeActionPlan, validateAttachedPlan } from './planning.ts';
 import {
   CIV_COUNT,
@@ -41,23 +44,28 @@ import {
 } from './simulation/turns.ts';
 
 export { applyDirectorTick, catchUpClock } from './simulation/clock.ts';
-export { applyHistoryAdvance, applyRelease } from './simulation/evolution.ts';
+export { applyHistoryAdvance } from './simulation/evolution.ts';
 export { catchUpStrategy } from './simulation/turns.ts';
 
-export function createWorld(seed: number, clockEpoch?: string): WorldState {
+export function createWorld(seed: number, clockEpoch?: string, registeredRulesId = CURRENT_RELEASE.id): WorldState {
   const errors = validateContent();
   if (errors.length) throw new Error(`Invalid content: ${errors.join('; ')}`);
   const normalized = normalizeSeed(seed);
+  const rules = RELEASES.find(candidate => candidate.id === registeredRulesId);
+  if (!rules) throw new RangeError('Fresh worlds require a registered rules ID');
   if (clockEpoch !== undefined && parseUtcTimestamp(clockEpoch) === null)
     throw new RangeError('Clock epoch must be an explicit UTC timestamp');
-  const width = 18;
-  const height = 12;
+  if (rules.featureIds.includes('independent-actions') && clockEpoch === undefined)
+    throw new RangeError('Independent worlds require an explicit epoch');
+  const expanded = rules.featureIds.includes(WORLD_EXPANSION_RULES.featureId);
+  const width = expanded ? WORLD_EXPANSION_RULES.width : WORLD_EXPANSION_RULES.fromWidth;
+  const height = expanded ? WORLD_EXPANSION_RULES.height : WORLD_EXPANSION_RULES.fromHeight;
   const map = createMap(normalized, width, height);
   const state: WorldState = {
     schemaVersion: SCHEMA_VERSION,
     gameVersion: GAME_VERSION,
-    releaseId: CURRENT_RELEASE.id,
-    unlockedFeatures: [...CURRENT_RELEASE.featureIds],
+    releaseId: rules.id,
+    unlockedFeatures: [...rules.featureIds],
     calendarMilestones: [],
     seed: normalized,
     rng: map.seed,
@@ -81,9 +89,7 @@ export function createWorld(seed: number, clockEpoch?: string): WorldState {
     climate: 0,
     directorCooldown: 0,
   };
-  if (usesIndependentTurns(state)) {
-    if (clockEpoch === undefined)
-      throw new RangeError('Independent worlds require an explicit epoch');
+  if (usesIndependentTurns(state) && clockEpoch !== undefined) {
     state.independentTurns = createIndependentTurns(clockEpoch);
   }
   if (hasFeatures(state, ['bounded-plans']))
@@ -137,6 +143,30 @@ export function createWorld(seed: number, clockEpoch?: string): WorldState {
       buildings: [],
     });
   }
+  if (hasFeatures(state, [CIVIC_RULES.featureId])) {
+    for (const civilization of state.civilizations) {
+      civilization.civics = { ruleVersion: CIVIC_RULES.ruleVersion, completedCivicIds: [], active: null, lastCompleted: null, reformEntitlement: null };
+      civilization.government = { ruleVersion: CIVIC_RULES.ruleVersion, lastSpentReformCompletionEventId: null, active: null, pending: null };
+    }
+  }
+  if (hasFeatures(state, [TERRITORY_RULES.featureId])) state.tileAcquisitions = {};
+  if (hasFeatures(state, [WONDER_RULES.featureId])) state.wonders = {};
+  if (hasFeatures(state, [METAL_RULES.featureId])) {
+    state.strategicDeposits = createStrategicDeposits(state);
+    for (const civilization of state.civilizations) civilization.strategicResources = {};
+  }
+  if (hasFeatures(state, [PASTORAL_RULES.featureId])) state.pastoralSites = createPastoralSites(state);
+  if (hasFeatures(state, [INDUSTRIAL_RULES.featureId])) {
+    state.coalDeposits = createCoalDeposits(state);
+    state.railEdges = {};
+    state.industrialEvidence = { ruleVersion: INDUSTRIAL_RULES.ruleVersion, foundryOperations: [], steamDelivery: null };
+  }
+  for (const city of state.cities) initializeCityHousing(state, city, 'initial-capital');
+  initializeSpaceflight(state);
+  if (hasFeatures(state, ['earned-history'])) state.milestoneProofs = {};
+  if (hasFeatures(state, ['public-projects'])) state.publicProjects = [];
+  if (hasFeatures(state, ['consented-relief'])) state.relief = createReliefState(state);
+  if (hasFeatures(state, ['knowledge-compacts'])) state.knowledge = createKnowledgeState(state);
   const event: GameEvent = {
     id: '0:foundation',
     round: 0,
@@ -146,7 +176,7 @@ export function createWorld(seed: number, clockEpoch?: string): WorldState {
     actor: null,
     target: null,
     tileId: null,
-    cause: `Seed ${normalized} established geography under release ${CURRENT_RELEASE.id}`,
+    cause: `Seed ${normalized} established geography under release ${rules.id}`,
     effects: [`${CIV_COUNT} civilizations and ${state.cities.length} working settlements created`],
     importance: 5,
   };
@@ -208,6 +238,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
         (director || offer.proposer === seat || offer.recipient === seat),
     ),
     ...(hasFeatures(state, ['consented-relief']) ? { relief: state.relief } : {}),
+    ...(hasFeatures(state, ['knowledge-compacts']) ? { knowledge: structuredClone(state.knowledge) } : {}),
     ...(hasFeatures(state, ['public-projects']) ? { publicProjects: (state.publicProjects ?? []).filter((project) => director || project.proposer === seat || project.recipient === seat) } : {}),
     recentEvents: state.events.slice(-12),
     legalActions: availableActions(state, seat, timestamp, tradePresentation),

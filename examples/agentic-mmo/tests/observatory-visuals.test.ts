@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { BUILDINGS, ECONOMY_RULES } from '../core/content.ts';
+import { buildingBaseProduction } from '../core/simulation/districts.ts';
+import { siteProduction } from '../core/simulation/sites.ts';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
-import type { City, WorldState } from '../core/types.ts';
+import type { City, Resources, WorldState } from '../core/types.ts';
 import { observedResidentCapacity } from '../core/simulation/operations.ts';
 import { observatoryLearningOperationJourney } from './fixtures/observatory-learning-journey.ts';
 import { districtParts, DISTRICT_PART_BUDGETS } from '../visuals/district-visuals.ts';
@@ -33,11 +36,15 @@ await test('canonical current options and retained high ground remain separate e
 await test('shared own-Campus Observatory foundation and rounded crown preserve every built family within caps', () => {
   const active = campus(legal.started); const completed = campus(legal.completed);
   assert.equal(active.tileId, 39); assert.equal(completed.cityId, legal.journey.cityId);
+  assert.equal(completed.library, 'built');
   for (const detail of ['far', 'mid', 'close'] as const) {
     const before = districtParts(active, detail); const after = districtParts(completed, detail);
     assert.ok(before.some(part => part.id.endsWith('observatory-foundation'))); assert.ok(before.every(part => !part.id.endsWith('observatory-crown')));
-    for (const suffix of ['hall-roof--0.43', 'library-roof', 'university-roof', 'observatory-body', 'observatory-crown']) assert.ok(after.some(part => part.id.endsWith(suffix)), detail + ': ' + suffix);
-    assert.ok(after.filter(part => /observatory-(body|crown)$/.test(part.id)).every(part => part.position[0] < -.6));
+    assert.equal(after.some(part => part.id.endsWith('library-roof')), detail !== 'far');
+    for (const suffix of ['hall-roof--0.43', 'observatory-body', 'observatory-crown']) assert.ok(after.some(part => part.id.endsWith(suffix)), detail + ': ' + suffix);
+    assert.equal(town(legal.completed).buildings.includes('university'), false);
+    assert.ok(after.every(part => !part.id.endsWith('university-roof')));
+    for (const part of after.filter(part => /observatory-(body|crown)$/.test(part.id))) assert.equal(part.position[0], -.69 * .72);
     assert.ok(after.length <= DISTRICT_PART_BUDGETS[detail]); assert.equal(new Set(after.map(part => part.id)).size, after.length);
   }
   assert.ok(projectWorld(legal.completed).districts?.filter(site => site.cityId !== legal.journey.cityId).every(site => !site.attachments?.some(item => item.buildingId === 'observatory')));
@@ -96,10 +103,21 @@ await test('active Work exposes retained Campus/source and exact paid work witho
 await test('completion and later paid Science retain the source while current pause preserves immutable output', () => {
   const completed = inspect([town(legal.completed)], true, host => { const picker = host.all().find(node => node.tag === 'select' && node.className === 'work-picker'); assert.ok(picker); picker.value = 'observatory'; picker.listeners.get('change')?.(); });
   assert.match(completed.content(), /Retained high ground.*Campus Tile 39.*Source Tile 22/); assert.match(completed.content(), /No operating result recorded yet/);
+  const opening = town(legal.operationStep.before); const state = legal.operationStep.before;
+  assert.deepEqual(opening.buildings.toSorted(), ['campus', 'fuel-yard', 'library', 'observatory']);
+  assert.equal(opening.buildingOperations?.['fuel-yard']?.enabled, false); assert.equal(opening.buildingOperations?.library?.enabled, true);
+  assert.equal(town(legal.operated).buildingOperations?.library?.lastResult?.status, 'operated'); assert.deepEqual(state.wonders, {}); assert.equal(state.unlockedFeatures.includes('civic-bootstrap'), false);
+  const tile = state.tiles.find(candidate => candidate.id === opening.tileId); const campusDefinition = BUILDINGS.find(building => building.id === 'campus'); assert.ok(tile && campusDefinition);
+  const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[opening.focus];
+  const raw = ECONOMY_RULES.baseProduction.science + (focus.science ?? 0) + (siteProduction(state, tile).science ?? 0) + (buildingBaseProduction(state, opening, campusDefinition).science ?? 0) + 3;
+  const productivity = (0.5 + opening.wellbeing / 100) * (1 - opening.damage / 100) * (1 + opening.infrastructure / 10);
+  const rounded = (value: number): number => Math.round(value * 100) / 100;
+  const science = rounded(rounded((raw + 7) * productivity) - rounded(raw * productivity));
+  assert.equal(town(legal.operated).buildingOperations?.observatory?.lastResult?.produced.science, science);
   const paused = structuredClone(town(legal.operated)); const operation = paused.buildingOperations?.observatory; assert.ok(operation); operation.enabled = false;
   const before = structuredClone(paused);
   const view = inspect([paused], true, host => { const picker = host.all().find(node => node.tag === 'select' && node.className === 'work-picker'); assert.ok(picker); picker.value = 'observatory'; picker.listeners.get('change')?.(); });
-  assert.match(view.content(), /Paused now/); assert.match(view.content(), /Made:.*13.65 Science/); assert.match(view.content(), /Used:.*2 Credits/); assert.match(view.content(), /Assigned: 3 residents/); assert.deepEqual(paused, before);
+  assert.match(view.content(), /Paused now/); assert.match(view.content(), new RegExp(`Made:.*${String(science).replaceAll('.', '\\.')} Science`)); assert.match(view.content(), /Used:.*2 Credits/); assert.match(view.content(), /Assigned: 3 residents/); assert.deepEqual(paused, before);
 });
 
 await test('old Campus adds no Observatory and completion alone cannot imply another operating beat', () => {

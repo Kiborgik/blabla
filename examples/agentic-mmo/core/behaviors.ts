@@ -1,3 +1,4 @@
+import { deriveKnowledgePlan, knowledgeProtects, knowledgeReason, knowledgeWeight, type KnowledgePlan } from './behavior-knowledge.ts';
 import { FOOD_BUDGET_RULES } from './food-security-content.ts';
 import { civilizationFoodUpkeep, forecastCivilizationFoodProduction } from './simulation/food-security.ts';
 import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, behaviorDrawVersion, behaviorPolicyVersion, type BehaviorPolicyVersion, LEGACY_BEHAVIOR_POLICY_VERSION, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
@@ -136,6 +137,7 @@ interface Situation {
   progression: ProgressionPlan;
   diplomacy: DiplomacyPlan | null;
   relief: ReliefPlan | null;
+  knowledge: KnowledgePlan | null;
 }
 
 function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
@@ -158,7 +160,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null };
+  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null };
 }
 
 function selectPhase(context: Situation, options: readonly ActionOption[], candidates?: readonly Candidate[]): BehaviorPhase {
@@ -354,6 +356,7 @@ function actionWeight(option: ActionOption, context: Situation): number {
       const route = state.routes.find(candidate => candidate.id === project?.routeId);
       return action.accept === ((route?.damage ?? 0) > 0) ? 12 : 0;
     }
+    case 'propose-knowledge': case 'respond-knowledge': case 'withdraw-knowledge':
     case 'propose-relief': case 'respond-relief': case 'withdraw-relief': return 0;
     case 'cancel-public-project': case 'trade': case 'event': return 0;
     case 'federate': return 10 * profile.priorities.trade;
@@ -461,7 +464,7 @@ function committedDecision(state: WorldState, memory: BehaviorMemory, candidate:
 
 
 function protectedCandidate(option: ActionOption, context: Situation): boolean {
-  return !!context.diplomacy && diplomacyProtects(option, context.diplomacy) || !!context.relief && reliefProtects(option, context.relief);
+  return !!context.diplomacy && diplomacyProtects(option, context.diplomacy) || !!context.relief && reliefProtects(option, context.relief) || !!context.knowledge && knowledgeProtects(option, context.knowledge);
 }
 
 function scoreCandidates(context: Situation, options: readonly ActionOption[], lanes: Map<string, Set<string>>): Candidate[] {
@@ -471,7 +474,8 @@ function scoreCandidates(context: Situation, options: readonly ActionOption[], l
     const replacing = action.type === 'stop-trade' && context.progression.replaceableRoutes.has(action.routeId)
       && !context.state.publicProjects?.some(project => project.routeId === action.routeId && project.status === 'committed');
     const diplomatic = context.diplomacy && !replacing ? diplomacyWeight(option, base, context.diplomacy) : base;
-    const assessed = context.relief ? reliefWeight(option, diplomatic, context.relief) : diplomatic;
+    const relief = context.relief ? reliefWeight(option, diplomatic, context.relief) : diplomatic;
+    const assessed = context.knowledge ? knowledgeWeight(option, relief, context.knowledge) : relief;
     const weight = context.memory.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION && protectedCandidate(option, context) ? 0 : assessed;
     return { option, weight, ...classify(option.action), lane: laneOf(option.action, lanes) };
   });
@@ -564,6 +568,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   else if (isUrgent && !context.foodRisk && progressionTransportPriority(choice.option, state, context.progression)) reason = 'Seek fresh consent for a funded steam exchange whose paid rails improve delivery cadence.';
   if (context.diplomacy && !(choice.option.action.type === 'stop-trade' && context.progression.replaceableRoutes.has(choice.option.action.routeId))) reason = diplomacyReason(choice.option, context.diplomacy) ?? reason;
   if (context.relief) reason = reliefReason(choice.option, context.relief) ?? reason;
+  if (context.knowledge) reason = knowledgeReason(choice.option, context.knowledge) ?? reason;
   return committedDecision(state, memory, choice, context.phase, reason, profile, isUrgent);
 }
 

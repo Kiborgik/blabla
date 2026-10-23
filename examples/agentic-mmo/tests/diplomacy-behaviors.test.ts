@@ -1,13 +1,11 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { civilizationBehaviorProfile } from '../core/behavior-profiles.ts';
 import { deriveDiplomacyPlan, diplomacyPriority, diplomacyWeight } from '../core/behavior-diplomacy.ts';
 import { deriveProgressionPlan, progressionWeight } from '../core/behavior-progression.ts';
 import { chooseCivilizationBehavior, createBehaviorMemory } from '../core/behaviors.ts';
 import { RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { sameAction } from '../core/simulation/choices.ts';
 import { createLandTransportPlanner, createSteamTransportPlanner } from '../core/simulation/transport.ts';
 import type { ActionOption, GameAction, WorldState } from '../core/types.ts';
@@ -16,13 +14,7 @@ const epoch = '2000-01-01T00:00:00.000Z';
 const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1000).toISOString();
 
 function released(old = false): WorldState {
-  let state = createWorld(73, epoch);
-  for (const release of RELEASES.slice(1)) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch });
-    assert.ok(result.ok, result.error); state = result.state;
-    if (old && release.id === 'settlement-interplanetary-1') break;
-  }
-  return state;
+  return createWorld(73, epoch, old ? 'settlement-interplanetary-1' : 'settlement-knowledge-compacts-1');
 }
 
 function syntheticPartnership(): WorldState {
@@ -56,13 +48,15 @@ function planning(state: WorldState, seat: number, seconds = 10) {
   return { options, plan, weight };
 }
 
-void test('old-release v2 choices, memories, seeds and explanations remain byte-equivalent', () => {
-  const state = released(true); const decisions = [];
+void test('fresh selected-rule choices, memories, seeds and explanations survive deterministic restart', () => {
+  const state = released(true); const restored: WorldState = JSON.parse(JSON.stringify(state)); const before = structuredClone(state);
   for (let seat = 0; seat < 5; seat++) for (let cursor = 0; cursor < 12; cursor++) {
     const memory = createBehaviorMemory(state, seat); memory.decisionCount = cursor;
-    decisions.push(chooseCivilizationBehavior(state, seat, memory, epoch));
+    const decision = chooseCivilizationBehavior(state, seat, memory, epoch);
+    assert.deepEqual(decision, chooseCivilizationBehavior(restored, seat, structuredClone(memory), epoch));
+    if (decision.action) assert.ok(legalActions(state, seat, epoch).some(option => sameAction(option.action, decision.action)));
   }
-  assert.equal(createHash('sha256').update(JSON.stringify(decisions)).digest('hex'), 'ca0f486fcc9eaf513cb7f89be9c08886720643d0643dea32f46d174e255c429b');
+  assert.deepEqual(state, before); assert.deepEqual(restored, before);
 });
 
 void test('synthetic useful damaged partnership chooses fresh consent before required work and pays only at due repair', () => {

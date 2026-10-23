@@ -10,11 +10,11 @@ import { coastalPrefixTime, replayCoastalStep } from './fixtures/coastal-prefix.
 
 const recipes = ['academy', 'fuel-yard', 'irrigation', 'kiln', 'library'];
 
-await test('legal population20 town operates five paid recipes while its completed funded University lacks one resident', context => {
+await test('synthetic population20 prerequisites operate five paid recipes while a real completed University lacks one resident', context => {
   const prefix = localGrowthPrefix();
   const city = prefix.state.cities.find(city => city.id === prefix.cityId); assert.ok(city);
-  assert.equal(prefix.state.releaseId, 'settlement-manufacturing-1');
-  assert.equal(city.population, 20); assert.equal('housing' in city, false);
+  assert.equal(prefix.state.releaseId, 'settlement-growth-1'); assert.equal(prefix.initial.revision, 0);
+  assert.equal(city.population, 20); assert.deepEqual(city.housing, { ruleVersion: 1, baseCapacity: 20, establishedRound: 0, origin: 'initial-capital' });
   assert.ok(city.buildings.includes('university')); assert.equal(city.construction?.active, null);
   const completed = city.construction?.lastCompleted; assert.ok(completed && !('kind' in completed));
   assert.equal(completed.buildingId, 'university');
@@ -33,7 +33,7 @@ await test('legal population20 town operates five paid recipes while its complet
   assert.deepEqual(university?.lastResult?.paid, {}); assert.deepEqual(university?.lastResult?.produced, {});
   assert.deepEqual(university?.lastResult?.shortages, []);
   assert.deepEqual(university?.lastResult?.residents, { ruleVersion: 1, openingPopulation: 20, communityReserve: 3, required: 3, available: 2, allocated: 0 });
-  context.diagnostic(JSON.stringify({ basis: 'Legal engine predecessor; no released housing or live outcome claimed', transitions: prefix.steps.length, revision: prefix.state.revision, round: prefix.state.round, cityId: prefix.cityId, university: university?.lastResult }));
+  context.diagnostic(JSON.stringify({ basis: 'Explicit synthetic capacity prerequisite; actual paid University construction and subsequent operations', transitions: prefix.steps.length, revision: prefix.state.revision, round: prefix.state.round, cityId: prefix.cityId, university: university?.lastResult }));
 });
 
 await test('actual allocator debits opening inputs only and the subsequent canonical beat reports the same resident assignments', () => {
@@ -54,7 +54,7 @@ await test('actual allocator debits opening inputs only and the subsequent canon
   assert.deepEqual(prefix.blockedBeat.before, opening);
 });
 
-await test('detached retained transitions replay canonically without injected population stocks technologies or scheduler state', () => {
+await test('actual University transitions replay canonically from declared synthetic population stocks and technologies', () => {
   const prefix = localGrowthPrefix();
   const restored: unknown = JSON.parse(JSON.stringify(prefix.initial)); assert.ok(isWorldState(restored));
   let state: WorldState = restored;
@@ -69,7 +69,7 @@ await test('detached retained transitions replay canonically without injected po
   assert.deepEqual(state, prefix.state);
 });
 
-await test('equal old-release beats retain capacity20 and funded resident blocking without advancing or injecting housing', () => {
+await test('equal current-rule beats retain capacity20 and funded resident blocking without a completed housing addition', () => {
   const prefix = localGrowthPrefix();
   let state = structuredClone(prefix.state);
   const control = structuredClone(prefix.state);
@@ -79,7 +79,7 @@ await test('equal old-release beats retain capacity20 and funded resident blocki
     assert.equal(result.remainingTicks, 0); assert.ok(isWorldState(result.state));
     state = result.state;
     const city = state.cities.find(city => city.id === prefix.cityId); assert.ok(city);
-    assert.equal(city.population, 20); assert.equal('housing' in city, false);
+    assert.equal(city.population, 20); assert.deepEqual(city.housing, { ruleVersion: 1, baseCapacity: 20, establishedRound: 0, origin: 'initial-capital' });
     assert.equal(city.buildingOperations?.university?.lastResult?.status, 'blocked');
     assert.deepEqual(city.buildingOperations?.university?.lastResult?.shortages, []);
     assert.ok(!result.events.some(event => event.type === 'population-growth' && event.tileId === city.tileId));

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 import { legalActions } from '../../core/engine.ts';
 import { isGameAction } from '../../core/planning.ts';
-import { RELEASES } from '../../core/release.ts';
 import type { GameAction, WorldState, TileAcquisitionReceipt } from '../../core/types.ts';
 import { isWorldState } from '../../core/validation.ts';
 import { coastalPrefixTime, replayCoastalStep, type CoastalPrefixInput, type CoastalPrefixStep } from './coastal-prefix.ts';
@@ -29,21 +28,15 @@ export function ownedTerritoryJourney() {
     steps.push({ before, input, result }); state = result.state;
   };
   const act = (action: GameAction, seat = previous.seat): void => {
+    if (Date.parse(time()) >= Date.parse(coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60))) beat();
     assert.ok(legalActions(state, seat, time()).some(option => isDeepStrictEqual(option.action, action)), JSON.stringify({ seat, action }));
     commit({ kind: 'action', command: { seat, expectedRevision: state.revision, timestamp: time(), action } });
   };
   const beat = (): void => commit({ kind: 'strategy', timestamp: coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60) });
   const until = (condition: () => boolean): void => { for (let count = 0; count < 160 && !condition(); count++) beat(); assert.ok(condition(), 'Bounded actual territory outcome was not reached'); };
   const research = (technology: string, seat = previous.seat): void => { if (state.civilizations[seat]?.technologies.includes(technology)) return; act({ type: 'research', technology }, seat); until(() => !!state.civilizations[seat]?.technologies.includes(technology)); };
-  let beforeRelease: WorldState | undefined;
-  for (const targetReleaseId of ['settlement-forest-production-1', 'settlement-world-expansion-1', 'settlement-territory-1']) {
-    const release = RELEASES.find(candidate => candidate.id === targetReleaseId && candidate.compatibleFrom.includes(state.releaseId));
-    assert.ok(release, `Actual compatible ${targetReleaseId} is required`);
-    if (targetReleaseId === 'settlement-territory-1') beforeRelease = structuredClone(state);
-    commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: time() } });
-  }
-  assert.ok(beforeRelease); const adopted = structuredClone(state);
-  return { previous, initial: previous.initial, steps, beforeRelease, adopted, get state() { return state; }, time, act, beat, until, research };
+  const prepared = structuredClone(state);
+  return { previous, initial: previous.initial, steps, prepared, provenance: previous.provenance, get state() { return state; }, time, act, beat, until, research };
 }
 
 export function ownedTerritoryPastureJourney() {

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy } from '../core/engine.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, type CoastalPrefixStep } from './fixtures/coastal-prefix.ts';
@@ -44,7 +45,7 @@ class Fixture {
   constructor() { this.database.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8')); }
   get store() { return new WorldRepository(this.database); }
   async state() { const result = await this.store.read(); assert.ok(result); return result.state; }
-  async initialize() { await this.store.initialize({ seed: 1701, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0)); }
+  async initialize(state: WorldState) { seedHostedWorld(this.database.sql, state); }
   async input(commandId: string, action: GameAction) { return { seat: 0, expectedRevision: (await this.state()).revision, model, commandId, action: { type: 'strategy-action', action } }; }
   send(input: Record<string, unknown>, seconds: number) { return this.store.mutate('action', input, actor, coastalPrefixTime(seconds)); }
   async beat() { const state = await this.state(); const seconds = ((state.independentTurns?.strategyTicks ?? 0) + 1) * 60; return this.store.mutate('strategy-catchup', { expectedRevision: state.revision, commandId: `beat-${state.revision}`, timestamp: coastalPrefixTime(seconds), model }, actor, coastalPrefixTime(seconds)); }
@@ -57,7 +58,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 25);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state; count++;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return count; }
@@ -69,15 +70,14 @@ async function replay(item: Fixture) {
 function stepArguments(step: CoastalPrefixStep, commandId: string): Record<string, unknown> {
   const input = step.input;
   if (input.kind === 'strategy') return { expectedRevision: step.before.revision, timestamp: input.timestamp, model, commandId };
-  if (input.kind === 'release') return { ...input.command, model, commandId };
   return { seat: input.command.seat, expectedRevision: input.command.expectedRevision, action: { type: 'strategy-action', action: input.command.action }, ...(input.command.plan === undefined ? {} : { plan: input.command.plan }), model, commandId };
 }
 function sendStep(item: Fixture, step: CoastalPrefixStep, commandId: string) {
   const input = step.input; const timestamp = input.kind === 'strategy' ? input.timestamp : input.command.timestamp; assert.ok(timestamp);
-  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : input.kind === 'release' ? 'release-apply' : 'action', stepArguments(step, commandId), actor, timestamp);
+  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : 'action', stepArguments(step, commandId), actor, timestamp);
 }
-async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER): Promise<void> {
-  await item.initialize();
+async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER, initial = steps[0]?.before): Promise<void> {
+  assert.ok(initial); await item.initialize(initial);
   for (const [index, step] of steps.entries()) {
     if (step.result.state.revision > through) break;
     await sendStep(item, step, `observatory-step-${index}`); assert.deepEqual(await item.state(), step.result.state); assert.ok(isWorldState(await item.state()));
@@ -87,24 +87,24 @@ async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Numb
 let cachedPrefix: ReturnType<typeof observatoryPrefix> | undefined;
 function prefix() { cachedPrefix ??= observatoryPrefix(); return cachedPrefix; }
 
-await test('observatory real686-frame predecessor preserves Campus and paid recipes through SQLite reopen replay', async context => {
+await test('observatory fresh synthetic prerequisite fixture preserves Campus and paid recipes through SQLite reopen replay', async context => {
   const previous = prefix(); const item = new Fixture();
   try {
-    assert.equal(previous.steps.length, 686); assert.equal(previous.state.revision, 686);
+    assert.equal(previous.initial.revision, 0); assert.equal(previous.state.revision, previous.steps.length);
     assert.equal(previous.campusTileId, 39); assert.deepEqual(previous.highGroundTileIds, [22, 56]);
     assert.ok(previous.state.cities.every(city => !Object.hasOwn(city, 'buildingHighGround')));
-    await persist(item, previous.steps); const before = item.database.records(); item.reopen();
+    await persist(item, previous.steps, Number.MAX_SAFE_INTEGER, previous.initial); const before = item.database.records(); item.reopen();
     assert.deepEqual(await item.state(), previous.state); assert.deepEqual(item.database.records(), before);
-    for (const action of [{ type: 'research', technology: 'sailing' }, { type: 'build', project: 'observatory', cityId: previous.cityId }]) {
+    for (const action of [{ type: 'build', project: 'observatory', cityId: previous.cityId }]) {
       await assert.rejects(item.store.mutate('action', { seat: previous.seat, expectedRevision: previous.state.revision, commandId: `unreleased-${JSON.stringify(action)}`, model, action: { type: 'strategy-action', action } }, actor, previous.timestamp));
       assert.deepEqual(item.database.records(), before);
     }
-    assert.equal(await replay(item), 686);
-    context.diagnostic(JSON.stringify({ basis: 'Unedited legal predecessor', revision: previous.state.revision, round: previous.state.round, campusTileId: previous.campusTileId, highGroundTileIds: previous.highGroundTileIds }));
+    assert.equal(await replay(item), previous.steps.length);
+    context.diagnostic(JSON.stringify({ basis: 'fresh synthetic prerequisite fixture', revision: previous.state.revision, round: previous.state.round, campusTileId: previous.campusTileId, highGroundTileIds: previous.highGroundTileIds }));
   } finally { item.close(); }
 });
 
-await test('observatory prospective canonical guard rejects source mapping before its release', () => {
+await test('observatory canonical guard rejects source mapping before the building exists', () => {
   const state = structuredClone(prefix().state); const city = state.cities.find(value => value.id === prefix().cityId); assert.ok(city);
   Reflect.set(city, 'buildingHighGround', { observatory: { campusTileId: 39, sourceTileId: 22 } });
   assert.equal(isWorldState(state), false, 'Unreleased uninstalled high-ground provenance must not be silently accepted');
@@ -117,10 +117,9 @@ function order(state: WorldState) { const city = town(state); const value = city
 function startStep() { const value = story(); const step = value.journey.steps.find(candidate => candidate.result.state.revision === value.started.revision); assert.ok(step?.input.kind === 'action' && step.input.command.timestamp); return { value, step }; }
 
 await test('observatory exact paid source and later staffed output persist once through full SQLite replay and public detail', async context => {
-  const value = story(); const item = new Fixture(); const selected = new Set([value.journey.adopted.revision, value.started.revision, value.completed.revision, value.operated.revision]);
-  for (const key of ['tiles', 'cities', 'civilizations', 'wonders', 'tileAcquisitions', 'strategicDeposits', 'pastoralSites', 'routes', 'rng', 'clockTicks'] as const) assert.deepEqual(value.journey.adopted[key], value.journey.beforeRelease[key]);
+  const value = story(); const item = new Fixture(); const selected = new Set([value.journey.prepared.revision, value.started.revision, value.completed.revision, value.operated.revision]);
   try {
-    await item.initialize();
+    await item.initialize(value.journey.initial);
     for (const [index, step] of value.journey.steps.entries()) {
       const commandId = `observatory-step-${index}`;
       if (selected.has(step.result.state.revision)) {
@@ -153,14 +152,14 @@ await test('observatory exact paid source and later staffed output persist once 
       assert.equal(detail.recordedReason, null);
     }
     assert.deepEqual(item.database.records(), committed); assert.equal(await replay(item), value.journey.steps.length);
-    context.diagnostic(JSON.stringify({ basis: 'Real legal686-frame predecessor plus exact paid Observatory journey', revision: value.operated.revision, round: value.operated.round, started, completed: order(value.completed), operated }));
+    context.diagnostic(JSON.stringify({ basis: 'Fresh explicit prerequisites plus exact paid Observatory journey', revision: value.operated.revision, round: value.operated.round, started, completed: order(value.completed), operated }));
   } finally { item.close(); }
 });
 
 for (const milestone of ['start', 'completion'] as const) for (const table of ['world_transitions', 'world_receipts']) await test(`observatory ${milestone} ${table} fault rolls back then exact reopened retry commits once`, async () => {
   const value = story(); const step = milestone === 'start' ? startStep().step : value.completionStep; const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records(); const operation = step.input.kind === 'action' ? 'action' : 'strategy-catchup';
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records(); const operation = step.input.kind === 'action' ? 'action' : 'strategy-catchup';
     item.database.sql.exec(`CREATE TRIGGER fail_observatory BEFORE INSERT ON ${table} WHEN NEW.receipt_key = '${operation}:observatory-fault' BEGIN SELECT RAISE(ABORT, 'synthetic observatory rollback'); END;`);
     await assert.rejects(sendStep(item, step, 'observatory-fault'), /synthetic observatory rollback/); assert.deepEqual(item.database.records(), before);
     item.reopen(); assert.deepEqual(await item.state(), step.before); assert.deepEqual(item.database.records(), before); item.database.sql.exec('DROP TRIGGER fail_observatory');
@@ -172,7 +171,7 @@ for (const milestone of ['start', 'completion'] as const) for (const table of ['
 await test('observatory competing exact starts commit one payment with a stale CAS loser', async () => {
   const { value, step } = startStep(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records();
     const replies = await Promise.allSettled([sendStep(item, step, 'observatory-race-a'), sendStep(item, step, 'observatory-race-b')]);
     assert.equal(replies.filter(reply => reply.status === 'fulfilled').length, 1); const loser = replies.find(reply => reply.status === 'rejected'); assert.ok(loser?.status === 'rejected'); assert.match(String(loser.reason), /stale_revision/);
     assert.deepEqual(await item.state(), step.result.state); const committed = item.database.records(); assert.equal(committed.history.length, before.history.length + 1); assert.equal(committed.receipts.length, before.receipts.length + 1);
@@ -183,7 +182,7 @@ await test('observatory competing exact starts commit one payment with a stale C
 await test('observatory foreign absent and forged-source actions roll back candidate upkeep and every row', async () => {
   const { value, step } = startStep(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records(); const timestamp = coastalPrefixTime(((step.before.independentTurns?.strategyTicks ?? 0) + 1) * 60);
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records(); const timestamp = coastalPrefixTime(((step.before.independentTurns?.strategyTicks ?? 0) + 1) * 60);
     for (const [index, action] of [
       { type: 'build', project: 'observatory', cityId: 'city-1' },
       { type: 'build', project: 'observatory', cityId: 'missing-town' },
@@ -206,7 +205,7 @@ await test('observatory strict historical source rejects malformed missing forei
     const state = structuredClone(value.completed); if (replacement === undefined) Reflect.deleteProperty(town(state), 'buildingHighGround'); else Reflect.set(town(state), 'buildingHighGround', replacement);
     assert.equal(isWorldState(state), false, JSON.stringify(replacement));
   }
-  const wrongBuilding = structuredClone(value.journey.beforeRelease); const ordinary = wrongBuilding.cities.map(city => city.construction?.lastCompleted).find(entry => entry && !('kind' in entry)); assert.ok(ordinary); Reflect.set(ordinary, 'highGround', { campusTileId: 39, sourceTileId: 22 }); assert.equal(isWorldState(wrongBuilding), false);
+  const wrongBuilding = structuredClone(value.completed); const ordinary = town(wrongBuilding).construction?.lastCompleted; assert.ok(ordinary && !('kind' in ordinary)); ordinary.buildingId = 'library'; Reflect.deleteProperty(ordinary, 'highGround'); wrongBuilding.events = []; assert.ok(isWorldState(wrongBuilding)); Reflect.set(ordinary, 'highGround', { campusTileId: 39, sourceTileId: 22 }); assert.equal(isWorldState(wrongBuilding), false);
   const ungated = structuredClone(value.started); ungated.unlockedFeatures = ungated.unlockedFeatures.filter(feature => feature !== 'observatory-learning'); assert.equal(isWorldState(ungated), false);
   for (const patch of [{ type: 'improvement-completed' }, { round: value.completed.round - 1 }, { actor: 1 }, { target: 1 }, { tileId: 39 }]) {
     const state = structuredClone(value.completed); const completion = town(state).construction?.lastCompleted; assert.ok(completion); const event = state.events.find(candidate => candidate.id === completion.eventId); assert.ok(event); Object.assign(event, patch); assert.equal(isWorldState(state), false, JSON.stringify(patch));
@@ -227,7 +226,7 @@ await test('observatory paid provenance survives changed source terrain ownershi
 await test('observatory malformed retained source is explicit SQLite current and historical corruption with zero repair writes', async () => {
   const value = story(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, value.completed.revision); const state = await item.state(); Reflect.set(town(state), 'buildingHighGround', { observatory: { campusTileId: 39, sourceTileId: 56 } }); assert.equal(isWorldState(state), false);
+    await persist(item, value.journey.steps, value.completed.revision, value.journey.initial); const state = await item.state(); Reflect.set(town(state), 'buildingHighGround', { observatory: { campusTileId: 39, sourceTileId: 56 } }); assert.equal(isWorldState(state), false);
     item.database.sql.prepare('UPDATE world_state SET state_json=? WHERE world_id=?').run(JSON.stringify(state), 'main'); const corrupt = item.database.records(); item.reopen();
     await assert.rejects(item.store.read(), { message: 'corrupt_or_incompatible_world' }); assert.deepEqual(item.database.records(), corrupt);
     item.database.sql.prepare('UPDATE world_state SET state_json=? WHERE world_id=?').run(JSON.stringify(value.completed), 'main');
@@ -240,6 +239,6 @@ await test('observatory malformed retained source is explicit SQLite current and
 await test('observatory new operation requires retained residents while historical ordinary receipts remain valid', () => {
   const value = story(); const state = structuredClone(value.operated); const result = town(state).buildingOperations?.observatory?.lastResult; assert.ok(result);
   Reflect.deleteProperty(result, 'residents'); assert.equal(isWorldState(state), false);
-  const legacy = structuredClone(value.journey.beforeRelease); const ordinary = town(legacy).buildingOperations?.library?.lastResult; assert.ok(ordinary);
+  const legacy = structuredClone(value.operated); const ordinary = town(legacy).buildingOperations?.library?.lastResult; assert.ok(ordinary);
   Reflect.deleteProperty(ordinary, 'residents'); assert.ok(isWorldState(legacy));
 });

@@ -13,12 +13,11 @@ function corrupt(state: WorldState, change: (copy: WorldState) => void, label: s
   const copy = structuredClone(state); change(copy); assert.equal(isWorldState(copy), false, label);
 }
 
-void test('local Power migration and every genuine paid construction and consumer frame validate', () => {
+void test('fresh local Power scenario and every paid construction and consumer frame validate', () => {
   const journey = story();
-  assert.ok(isWorldState(journey.beforeRelease)); assert.ok(isWorldState(journey.adopted));
-  assert.ok(journey.adopted.cities.every(city => city.localPower === undefined));
+  assert.ok(isWorldState(journey.prepared));
+  assert.ok(journey.prepared.cities.every(city => city.localPower === undefined));
   for (const step of journey.steps) assert.ok(isWorldState(step.result.state), `legal frame ${step.result.state.revision}`);
-  corrupt(journey.beforeRelease, copy => { town(copy).localPower = { ruleVersion: 1, lastBeat: null, lastProductiveBeat: null }; }, 'unreleased field');
   corrupt(journey.plantCompleted, copy => { delete town(copy).localPower; }, 'installed plant requires bounded ledger');
   corrupt(journey.productive, copy => { Object.assign(required(town(copy).localPower), { storedPower: 5 }); }, 'no spendable receipt balance');
 });

@@ -1,3 +1,4 @@
+import { resolveKnowledgeCompacts } from './knowledge-compacts.ts';
 import { FOOD_BUDGET_RULES } from '../food-security-content.ts';
 import { allocatedCityFoodProduction, householdFoodUpkeep } from './food-security.ts';
 import { resolveReliefCharters } from './relief-charters.ts';
@@ -230,10 +231,11 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
       importance: 1,
     });
   }
-  resolveTrade(state, events);
+  const deliveries = resolveTrade(state, events);
   resolvePublicProjects(state, events);
   resolveReliefCharters(state, events);
   for (const civilization of state.civilizations) resolveResearch(state, civilization.id, researchBudgets.get(civilization.id) ?? 0, events);
+  resolveKnowledgeCompacts(state, events, deliveries);
   for (const civilization of state.civilizations) resolveCivics(state, civilization.id, civicBudgets.get(civilization.id) ?? 0, events);
   resolveConstruction(state, openingWork, events);
   resolveGovernmentTransitions(state, events);

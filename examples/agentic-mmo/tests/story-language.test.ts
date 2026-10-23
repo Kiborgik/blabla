@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyRelease, createWorld } from '../core/engine.ts';
+import { createWorld } from '../core/engine.ts';
 import { BUILDINGS, PUBLIC_PROJECT_RECIPES, TECHNOLOGIES } from '../core/content.ts';
-import { RELEASES } from '../core/release.ts';
 import { selectHistoricalEventTarget } from '../core/historical-selection.ts';
 import { executeAction, applyDirectorEvent } from '../core/simulation/commands.ts';
 import { installBuilding } from '../core/simulation/construction.ts';
@@ -18,16 +17,7 @@ import { spectatorChronicle } from '../web/spectator-hud.ts';
 const epoch = '2026-10-16T00:00:00.000Z';
 let baseline: WorldState | undefined;
 function world(): WorldState {
-  if (!baseline) {
-    baseline = createWorld(1701, epoch);
-    for (const release of RELEASES) {
-      if (!release.compatibleFrom.includes(baseline.releaseId)) continue;
-      const next = applyRelease(baseline, { expectedRevision: baseline.revision, expectedFromReleaseId: baseline.releaseId, targetReleaseId: release.id, timestamp: epoch });
-      assert.ok(next.ok, next.error); baseline = next.state;
-      if (baseline.releaseId === 'settlement-food-budget-1') break;
-    }
-    assert.equal(baseline.releaseId, 'settlement-food-budget-1');
-  }
+  baseline ??= createWorld(1701, epoch, 'settlement-food-budget-1');
   return structuredClone(baseline);
 }
 function language(state: WorldState, event: GameEvent) {

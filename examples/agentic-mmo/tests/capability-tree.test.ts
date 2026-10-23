@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld } from '../core/engine.ts';
 import { capabilityTreeNodes, createCapabilityTreeSheet, railCapabilityPresentation, restoreCapabilityOpener } from '../web/capability-tree.ts';
 import type { CapabilityTreeInput } from '../web/capability-tree.ts';
 
@@ -329,11 +329,7 @@ await test('selected-town Done and missing-town blockers are consumed from separ
 
 // Entirely legal canonical prefix; no stocks, technologies or order facts are edited.
 function committedFixture(): CapabilityTreeInput {
-  let state = createWorld(1701, time);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: time });
-    assert.ok(result.ok, result.error); state = result.state;
-  }
+  let state = createWorld(1701, time, 'settlement-decisions-1');
   const researched = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: time, action: { type: 'research', technology: 'agriculture' } });
   assert.ok(researched.ok); state = researched.state;
   const caught = catchUpStrategy(state, '2026-10-16T00:03:00.000Z');

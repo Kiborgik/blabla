@@ -1,3 +1,5 @@
+import { knowledgeRouteMatches } from './knowledge-inspection.ts';
+import { validKnowledgeEvent } from '../core/knowledge-validation.ts';
 import { BUILDINGS, CIVICS, GOVERNMENTS, IMPROVEMENTS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
 import { BEHAVIOR_PROFILES } from '../core/behavior-profiles.ts';
 import { STRATEGIC_ARCHETYPES, STRATEGIC_TEMPERAMENT_VERSION } from '../core/strategic-temperaments.ts';
@@ -22,6 +24,18 @@ export interface SpectatorStory {
 type StoryWorld = Pick<WorldState, 'cities' | 'routes' | 'civilizations'> & Partial<Pick<WorldState, 'publicProjects' | 'events'>>;
 
 export function spectatorEventDestination(state: StoryWorld, event: GameEvent): SpectatorDestination | null {
+  const terms = validKnowledgeEvent(event) ? event.knowledgeCompact?.terms ?? event.knowledgeResult?.compact.terms : undefined;
+  if (terms) {
+    const route = state.routes.find(candidate => knowledgeRouteMatches(state, candidate, terms));
+    if (route) return { kind: 'route', id: route.id, label: `${terms.names.teacherCity} ↔ ${terms.names.learnerCity}` };
+    const civilization = state.civilizations.find(candidate => candidate.id === terms.learnerId);
+    return civilization ? { kind: 'civilization', id: civilization.id, label: civilization.name } : null;
+  }
+  const study = validKnowledgeEvent(event) ? event.knowledgeStudy?.attempt.delivery : undefined;
+  if (study) {
+    const route = state.routes.find(candidate => knowledgeRouteMatches(state, candidate, study));
+    if (route) return { kind: 'route', id: route.id, label: 'Recorded study route' };
+  }
   const partnership = event.type.startsWith('public-project-');
   const trade = event.type.startsWith('trade-') && event.type !== 'trade-fair';
   const participantsMatch = (candidate: { proposer: number; recipient: number }): boolean => (event.actor === candidate.proposer && event.target === candidate.recipient) || (event.actor === candidate.recipient && event.target === candidate.proposer);

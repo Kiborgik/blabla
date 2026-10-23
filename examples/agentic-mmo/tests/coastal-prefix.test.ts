@@ -29,15 +29,17 @@ await test('legal coastal departure transfers the existing three residents and p
   assert.equal(departure.focus, before.focus);
 });
 
-await test('real strategic growth and research prepare the same exact departure without injected capability', context => {
+await test('fresh coastal rules retain real strategic growth and research before Navigation is learned', context => {
   const prefix = coastalDeparturePrefix();
   const departure = prefix.state.cities.find(city => city.id === prefix.departureCityId);
   assert.ok(departure);
   assert.ok(departure.population >= 6);
   assert.ok(prefix.state.civilizations[0]?.technologies.includes('water-management'));
   assert.equal(prefix.state.civilizations[0]?.technologies.includes('navigation'), false);
-  assert.equal(prefix.state.unlockedFeatures.includes('navigation'), false);
-  assert.equal(prefix.state.releaseId, 'settlement-decisions-1');
+  assert.equal(prefix.state.unlockedFeatures.includes('navigation'), true);
+  assert.deepEqual(prefix.state.unlockedFeatures, prefix.initial.unlockedFeatures);
+  assert.equal(prefix.initial.revision, 0);
+  assert.equal(prefix.state.releaseId, 'settlement-coastal-1');
   const growth = prefix.steps.flatMap(step => step.result.events).filter(event => event.type === 'population-growth' && event.tileId === 23);
   assert.ok(growth.length >= 3);
   assert.ok(prefix.steps.some(step => step.input.kind === 'action' && step.input.command.action.type === 'research' && step.input.command.action.technology === 'water-management'));

@@ -2,7 +2,9 @@ import { renderTerritoryInspection } from '../web/settlement-inspection.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { projectCapabilities } from '../core/capabilities.ts';
-import type { WorldState } from '../core/types.ts';
+import { ECONOMY_RULES } from '../core/content.ts';
+import { siteProduction } from '../core/simulation/sites.ts';
+import type { Resources, WorldState } from '../core/types.ts';
 import { projectAcquiredLand, selectedAcquiredLand, territoryPage, TERRITORY_OUTLINE_LIMIT, projectTownTerritory } from '../visuals/territory-visuals.ts';
 import { ownedTerritoryForestJourney } from './fixtures/owned-territory-journey.ts';
 
@@ -12,12 +14,27 @@ const projection = (state: WorldState, cityId = pasture.cityId) => projectCapabi
 const view = (state: WorldState, cityId = pasture.cityId) => projectTownTerritory(state, projection(state, cityId));
 const pastureSite = (state: WorldState) => view(state).purchases.find(item => item.receipt.tileId === 164)?.site;
 
+function expectedSiteOutput(state: WorldState, cityId: string, tileId: number, resource: 'food' | 'materials', base: number): number {
+  const step = legal.journey.steps.find(candidate => candidate.result.state.revision === state.revision); assert.ok(step?.input.kind === 'strategy');
+  const opening = step.before; const city = opening.cities.find(candidate => candidate.id === cityId); assert.ok(city);
+  const tile = opening.tiles.find(candidate => candidate.id === city.tileId); assert.ok(tile);
+  assert.deepEqual(city.buildings, []); assert.deepEqual(Object.keys(city.improvements ?? {}), [String(tileId)]); assert.deepEqual(opening.wonders, {});
+  assert.equal(opening.unlockedFeatures.includes('civic-bootstrap'), false); assert.equal(opening.unlockedFeatures.includes('food-budget'), false);
+  const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[city.focus];
+  const raw = ECONOMY_RULES.baseProduction[resource] + (focus[resource] ?? 0) + (siteProduction(opening, tile)[resource] ?? 0);
+  const productivity = (0.5 + city.wellbeing / 100) * (1 - city.damage / 100) * (1 + city.infrastructure / 10);
+  const round = (value: number): number => Math.round(value * 100) / 100;
+  return round(round((raw + base) * productivity) - round(raw * productivity));
+}
+
 await test('exact-town historical purchases keep their original Credits and connectivity, separate from current quotes', () => {
   const input = projection(pasture.operated); const result = projectTownTerritory(pasture.operated, input);
   assert.equal(result.status, 'available'); assert.equal(result.cityName, 'Ember 2');
   assert.deepEqual(result.purchases.map(item => item.receipt.tileId), [164, 181]);
   const horse = result.purchases.find(item => item.receipt.tileId === 164); assert.ok(horse);
-  assert.equal(horse.receipt.paid.credits, 18); assert.equal(horse.receipt.eventId, '294:0');
+  assert.equal(horse.receipt.paid.credits, 18);
+  const retained = pasture.purchased.tileAcquisitions?.['164']; assert.ok(retained); assert.deepEqual(horse.receipt, retained);
+  const event = pasture.purchased.events.find(candidate => candidate.id === retained.eventId); assert.equal(event?.type, 'territory-acquired'); assert.deepEqual(event?.territoryAcquisition, retained);
   assert.deepEqual(horse.historicalPath?.map(point => point.tileId), [199, 181, 164]);
   assert.deepEqual(result.available.map(item => item.quote), input.territory?.cities.find(city => city.cityId === pasture.cityId)?.available);
   assert.deepEqual(result.blocked, input.territory?.cities.find(city => city.cityId === pasture.cityId)?.blocked);
@@ -29,7 +46,10 @@ await test('land purchase, active Pasture, installed site and later actual food 
   assert.equal(active.name, 'Pasture'); assert.equal(active.status, 'building');
   assert.equal(active.construction?.workDone, 0); assert.equal(active.construction?.workRequired, 3); assert.equal(active.installed, null);
   const built = pastureSite(pasture.completed)?.work; assert.equal(built?.status, 'built'); assert.equal(built?.installed?.operation.lastResult, null);
-  const worked = pastureSite(pasture.operated)?.work; assert.equal(worked?.installed?.operation.lastResult?.produced.food, 3.08);
+  const worked = pastureSite(pasture.operated)?.work;
+  const retained = pasture.operated.cities.find(city => city.id === pasture.cityId)?.improvements?.['164']?.operation.lastResult; assert.ok(retained);
+  assert.deepEqual(worked?.installed?.operation.lastResult, retained);
+  assert.equal(retained.produced.food, expectedSiteOutput(pasture.operated, pasture.cityId, 164, 'food', 2));
   assert.equal(worked?.installed?.operation.lastResult?.residents.allocated, 1);
 });
 await test('new-row acquired forest stays bound to Ember 3 and the exact staffed Lumber mill', () => {
@@ -38,7 +58,9 @@ await test('new-row acquired forest stays bound to Ember 3 and the exact staffed
   const forest = result.purchases.find(item => item.receipt.tileId === 237); assert.ok(forest?.site);
   assert.equal(forest.site.terrain, 'forest'); assert.equal(forest.site.work?.name, 'Lumber mill');
   assert.equal(forest.receipt.paid.credits, 22); assert.deepEqual(forest.historicalPath?.map(point => point.tileId), [218, 219, 237]);
-  assert.equal(forest.site.work?.installed?.operation.lastResult?.produced.materials, 5.19);
+  const retained = legal.operated.cities.find(city => city.id === legal.cityId)?.improvements?.['237']?.operation.lastResult; assert.ok(retained);
+  assert.deepEqual(forest.site.work?.installed?.operation.lastResult, retained);
+  assert.equal(retained.produced.materials, expectedSiteOutput(legal.operated, legal.cityId, 237, 'materials', 4));
   const tile = legal.operated.tiles.find(candidate => candidate.id === 237); assert.ok(tile);
   assert.equal(forest.site.q, tile.q - (legal.operated.width - 1) / 2);
   assert.equal(forest.site.r, tile.r - (legal.operated.height - 1) / 2);
@@ -59,8 +81,7 @@ await test('current ownership is observed separately and missing exact geometry 
   assert.ok(horse); assert.equal(horse.site?.owner, null); assert.equal(horse.historicalPath, null); assert.equal(horse.receipt.paid.credits, 18);
   assert.equal(result.purchases.find(item => item.receipt.tileId === 181)?.site, null);
 });
-await test('older releases and stale or foreign town contexts have explicit non-actionable states', () => {
-  const old = pasture.journey.beforeRelease; assert.equal(view(old).status, 'planned');
+await test('stale or foreign town contexts have explicit non-actionable states', () => {
   const input = projection(pasture.operated); input.revision--;
   const stale = projectTownTerritory(pasture.operated, input); assert.equal(stale.status, 'unavailable'); assert.match(stale.reason ?? '', /revision/i);
   const foreign = projection(pasture.operated, 'city-0');
@@ -83,7 +104,7 @@ await test('a real pause keeps installed forest identity and the immutable previ
   assert.equal(paused?.terrain, 'forest'); assert.equal(paused?.work?.status, 'built');
   assert.equal(paused?.work?.installed?.operation.enabled, false);
   assert.deepEqual(paused?.work?.installed?.operation.lastResult, legal.operated.cities.find(city => city.id === legal.cityId)?.improvements?.['237']?.operation.lastResult);
-  assert.equal(paused?.work?.installed?.operation.lastResult?.produced.materials, 5.19);
+  assert.equal(paused?.work?.installed?.operation.lastResult?.produced.materials, expectedSiteOutput(legal.operated, legal.cityId, 237, 'materials', 4));
 });
 
 await test('selected-town map outlines use real retained plots within a finite cap, including orphan-receipt handling', () => {
@@ -138,21 +159,33 @@ await test('native Land detail leads with actual worked output and pages current
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { createElement: createTerritoryElement, createElementNS: (_ns: string, tag: string) => createTerritoryElement(tag), createTextNode: (value: string) => { const item = createTerritoryElement('#text'); item.textContent = value; return item; } } });
   try {
     const host = document.createElement('section'); assert.ok(host instanceof TerritoryElement);
-    renderTerritoryInspection(host, view(legal.operated, legal.cityId));
+    const territory = view(legal.operated, legal.cityId); const before = structuredClone(territory);
+    renderTerritoryInspection(host, territory);
     const land = host.all().find(node => node.dataset['townDisclosure'] === 'land'); assert.ok(land);
     land.firstElementChild?.listeners.get('click')?.(); land.open = true; frames.shift()?.(0);
     assert.deepEqual(land.scrolled, { block: 'start', inline: 'nearest', behavior: 'instant' });
     const list = host.all().find(node => node.className === 'territory-records'); assert.ok(list);
-    assert.match(list.children[0]?.content() ?? '', /Lumber mill · Tile 237.*Forest.*5.19 Materials.*22 Credits/);
+    const output = expectedSiteOutput(legal.operated, legal.cityId, 237, 'materials', 4);
+    assert.match(list.children[0]?.content() ?? '', new RegExp(`Lumber mill · Tile 237.*Forest.*${String(output).replaceAll('.', '\\.')} Materials.*22 Credits`));
     const selector = host.all().find(node => node.attributes.get('aria-label') === 'Land information'); assert.ok(selector);
     selector.value = 'available'; selector.listeners.get('change')?.();
-    assert.equal(list.children.length, 6); assert.match(list.content(), /Cost now:.*No payment has been made/);
+    assert.match(list.content(), /Cost now:.*No payment has been made/);
+    const pages = Math.ceil(territory.available.length / 6); assert.ok(pages > 1);
     const next = host.all().find(node => node.dataset['inspectionFocus'] === 'land-next'); assert.ok(next && !next.disabled);
-    next.listeners.get('click')?.(); assert.equal(list.children.length, 2); assert.equal(next.disabled, true);
+    const seen: number[] = [];
+    for (let page = 0; page < pages; page++) {
+      const expected = territory.available.slice(page * 6, page * 6 + 6).map(item => item.quote.tileId);
+      const actual: number[] = list.children.map(row => Number(/Tile (\d+)/.exec(row.content())?.[1]));
+      assert.deepEqual(actual, expected); assert.ok(list.children.length <= 6); seen.push(...actual);
+      assert.equal(next.disabled, page === pages - 1); if (page < pages - 1) next.listeners.get('click')?.();
+    }
+    assert.deepEqual(seen, territory.available.map(item => item.quote.tileId));
     assert.ok(host.all().filter(node => node.tag === 'button').every(node => ['Previous', 'Next'].includes(node.textContent)));
     const restored = document.createElement('section'); assert.ok(restored instanceof TerritoryElement);
-    renderTerritoryInspection(restored, view(legal.operated, legal.cityId), { view: 'available', page: 1 });
-    assert.equal(restored.all().find(node => node.className === 'territory-records')?.children.length, 2);
+    renderTerritoryInspection(restored, territory, { view: 'available', page: 1 });
+    const restoredRows = restored.all().find(node => node.className === 'territory-records'); assert.ok(restoredRows);
+    assert.deepEqual(restoredRows.children.map(row => Number(/Tile (\d+)/.exec(row.content())?.[1])), territory.available.slice(6, 12).map(item => item.quote.tileId));
+    assert.deepEqual(territory, before);
   } finally {
     if (previousFrame) Object.defineProperty(globalThis, 'requestAnimationFrame', previousFrame); else Reflect.deleteProperty(globalThis, 'requestAnimationFrame');
     if (previous) Object.defineProperty(globalThis, 'document', previous); else Reflect.deleteProperty(globalThis, 'document');

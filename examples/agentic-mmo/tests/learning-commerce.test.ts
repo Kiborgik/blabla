@@ -4,10 +4,11 @@ import { BUILDINGS, TECHNOLOGIES } from '../core/content.ts';
 import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { projectCapabilities } from '../core/capabilities.ts';
 import { coastalPrefixTime, replayCoastalStep } from './fixtures/coastal-prefix.ts';
+import { metalEconomyPrefix } from './fixtures/metal-economy-prefix.ts';
 import { connectedMetalJourney } from './metal-economy.test.ts';
 
-export function learningCommerceJourney() {
-  const journey = connectedMetalJourney();
+export function learningCommerceJourney(rulesId = 'settlement-metal-learning-1') {
+  const journey = connectedMetalJourney(metalEconomyPrefix(rulesId));
   const exchange = (proposer: number, recipient: number): void => {
     journey.act(proposer, { type: 'propose-trade', partner: recipient, recipeId: 'harvest-for-materials', sourceCityId: `city-${proposer}`, recipientCityId: `city-${recipient}` });
     const offer = journey.state.tradeOffers?.find(candidate => candidate.proposer === proposer && candidate.recipient === recipient && candidate.status === 'pending'); assert.ok(offer);

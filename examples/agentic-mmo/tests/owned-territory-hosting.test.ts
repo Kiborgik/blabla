@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, observe } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, observe } from '../core/engine.ts';
+import { ECONOMY_RULES, SETTLEMENT_SITE_OUTPUTS } from '../core/content.ts';
 import { observeCompactTrade } from '../core/observation.ts';
 import { createWorker } from '../server/worker.ts';
-import type { GameAction } from '../core/types.ts';
+import type { GameAction, Resources, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, type CoastalPrefixStep } from './fixtures/coastal-prefix.ts';
 import { ownedTerritoryPrefix } from './fixtures/owned-territory-prefix.ts';
@@ -46,7 +48,7 @@ class Fixture {
   constructor() { this.database.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8')); }
   get store() { return new WorldRepository(this.database); }
   async state() { const result = await this.store.read(); assert.ok(result); return result.state; }
-  async initialize() { await this.store.initialize({ seed: 1701, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0)); }
+  async initialize(state: WorldState) { seedHostedWorld(this.database.sql, state); }
   async input(commandId: string, action: GameAction) { return { seat: 0, expectedRevision: (await this.state()).revision, model, commandId, action: { type: 'strategy-action', action } }; }
   send(input: Record<string, unknown>, seconds: number) { return this.store.mutate('action', input, actor, coastalPrefixTime(seconds)); }
   async beat() { const state = await this.state(); const seconds = ((state.independentTurns?.strategyTicks ?? 0) + 1) * 60; return this.store.mutate('strategy-catchup', { expectedRevision: state.revision, commandId: `beat-${state.revision}`, timestamp: coastalPrefixTime(seconds), model }, actor, coastalPrefixTime(seconds)); }
@@ -59,7 +61,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 3);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state; count++;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return count; }
@@ -71,15 +73,14 @@ async function replay(item: Fixture) {
 function stepArguments(step: CoastalPrefixStep, commandId: string): Record<string, unknown> {
   const input = step.input;
   if (input.kind === 'strategy') return { expectedRevision: step.before.revision, timestamp: input.timestamp, model, commandId };
-  if (input.kind === 'release') return { ...input.command, model, commandId };
   return { seat: input.command.seat, expectedRevision: input.command.expectedRevision, action: { type: 'strategy-action', action: input.command.action }, ...(input.command.plan === undefined ? {} : { plan: input.command.plan }), model, commandId };
 }
 function sendStep(item: Fixture, step: CoastalPrefixStep, commandId: string) {
   const input = step.input; const timestamp = input.kind === 'strategy' ? input.timestamp : input.command.timestamp; assert.ok(timestamp);
-  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : input.kind === 'release' ? 'release-apply' : 'action', stepArguments(step, commandId), actor, timestamp);
+  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : 'action', stepArguments(step, commandId), actor, timestamp);
 }
-async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER): Promise<void> {
-  await item.initialize();
+async function persist(item: Fixture, steps: CoastalPrefixStep[], through = Number.MAX_SAFE_INTEGER, initial = steps[0]?.before): Promise<void> {
+  assert.ok(initial); await item.initialize(initial);
   for (const [index, step] of steps.entries()) {
     if (step.result.state.revision > through) break;
     await sendStep(item, step, `territory-step-${index}`); assert.deepEqual(await item.state(), step.result.state); assert.ok(isWorldState(await item.state()));
@@ -96,40 +97,41 @@ function purchaseStep() {
   assert.ok(step); return { value, step };
 }
 
-await test('territory actual289-frame predecessor retains revealed horses and rejects unowned work without durable effects', async context => {
+await test('territory fresh synthetic prerequisite fixture retains revealed horses and rejects unowned work without durable effects', async context => {
   const previous = prefix(); const item = new Fixture();
   try {
-    assert.equal(previous.steps.length, 289); assert.equal(previous.state.revision, 289);
+    assert.equal(previous.initial.revision, 0); assert.equal(previous.state.revision, previous.steps.length);
     assert.equal(previous.state.tiles.find(tile => tile.id === 181)?.owner, null);
     assert.equal(previous.state.tiles.find(tile => tile.id === 164)?.owner, null);
     assert.equal(previous.state.pastoralSites?.sites['164']?.resource, 'horses');
     assert.ok(previous.state.civilizations[2]?.technologies.includes('animal-husbandry'));
-    await persist(item, previous.steps); const before = item.database.records(); item.reopen();
+    await persist(item, previous.steps, Number.MAX_SAFE_INTEGER, previous.initial); const before = item.database.records(); item.reopen();
     assert.deepEqual(await item.state(), previous.state); assert.deepEqual(item.database.records(), before);
     assert.equal(await replay(item), previous.steps.length);
     for (const action of [
-      { type: 'acquire-tile', cityId: previous.cityId, tileId: 181 },
+      { type: 'acquire-tile', cityId: previous.cityId, tileId: 164 },
       { type: 'improve', cityId: previous.cityId, tileId: 164, improvementId: 'pasture' },
     ]) {
       await assert.rejects(item.store.mutate('action', { seat: previous.seat, expectedRevision: previous.state.revision, model, commandId: `old-${action.type}`, action: { type: 'strategy-action', action } }, actor, previous.timestamp));
       assert.deepEqual(item.database.records(), before);
     }
-    context.diagnostic(JSON.stringify({ basis: 'Actual researched and grown center-only town, no injected ownership or resources', revision: previous.state.revision, cityId: previous.cityId, path: previous.pathTileIds, replayFrames: previous.steps.length }));
+    context.diagnostic(JSON.stringify({ basis: 'Fresh synthetic prerequisites followed by actual founding, research and growth', revision: previous.state.revision, cityId: previous.cityId, path: previous.pathTileIds, replayFrames: previous.steps.length }));
   } finally { item.close(); }
 });
 
-await test('territory prospective real compatible adoption preserves all assets and adds only empty retained purchase records', async () => {
+await test('fresh territory initialization retains empty purchase records and refuses migration without rewriting assets', async () => {
   const value = ownedTerritoryJourney(); const item = new Fixture();
   try {
-    await persist(item, value.steps, value.beforeRelease.revision);
-    const step = value.steps.find(candidate => candidate.result.state.revision === value.adopted.revision); assert.ok(step);
-    const before = item.database.records(); const accepted = await sendStep(item, step, 'territory-adopt');
-    const state = await item.state(); assert.deepEqual(state, value.adopted); assert.deepEqual(acquisitionReceipts(state), {});
-    for (const key of ['tiles', 'cities', 'civilizations', 'rng', 'strategicDeposits', 'pastoralSites', 'routes', 'clockTicks'] as const) assert.deepEqual(state[key], value.beforeRelease[key]);
-    const committed = item.database.records(); assert.deepEqual(committed.history.slice(0, before.history.length), before.history);
-    item.reopen(); const duplicate = await sendStep(item, step, 'territory-adopt');
-    assert.equal(duplicate.duplicate, true); assert.equal(duplicate.acceptedRevision, accepted.acceptedRevision); assert.deepEqual(item.database.records(), committed);
-    assert.equal(await replay(item), value.steps.length);
+    await persist(item, value.steps, value.prepared.revision, value.initial);
+    const state = await item.state(); assert.deepEqual(state, value.prepared); assert.deepEqual(acquisitionReceipts(state), {});
+    const before = item.database.records();
+    const input = { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-culture-production-1', model, commandId: 'territory-refused' };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await assert.rejects(item.store.mutate('release-apply', input, actor, value.time()), /pre_release_migration_disabled/);
+      assert.deepEqual(item.database.records(), before);
+    }
+    item.reopen(); assert.deepEqual(await item.state(), state); assert.deepEqual(item.database.records(), before);
+    assert.equal(await replay(item), value.steps.filter(step => step.result.state.revision <= value.prepared.revision).length);
   } finally { item.close(); }
 });
 
@@ -137,7 +139,7 @@ await test('territory prospective exact purchases and staffed retained Pasture p
   const value = story(); const item = new Fixture();
   const witnesses = new Set([value.firstPurchased.revision, value.purchased.revision, value.started.revision, value.completed.revision]);
   try {
-    await item.initialize();
+    await item.initialize(value.journey.initial);
     for (const [index, step] of value.journey.steps.entries()) {
       const commandId = `territory-step-${index}`;
       if (witnesses.has(step.result.state.revision)) {
@@ -154,10 +156,10 @@ await test('territory prospective exact purchases and staffed retained Pasture p
     assert.deepEqual(first.pathTileIds, [199, 181]); assert.deepEqual(second.pathTileIds, [199, 181, 164]);
     assert.deepEqual(first.paid, { credits: 12 }); assert.deepEqual(second.paid, { credits: 18 });
     assert.equal(first.priorCivilizationPurchases, 0); assert.equal(second.priorCivilizationPurchases, 1);
-    const beforeOwner = value.journey.adopted.civilizations[2]; const afterOwner = value.purchased.civilizations[2]; assert.ok(beforeOwner && afterOwner);
+    const beforeOwner = value.journey.prepared.civilizations[2]; const afterOwner = value.purchased.civilizations[2]; assert.ok(beforeOwner && afterOwner);
     assert.equal(beforeOwner.resources.credits - afterOwner.resources.credits, 30);
-    assert.deepEqual(value.purchased.pastoralSites, value.journey.adopted.pastoralSites);
-    assert.equal(value.purchased.rng, value.journey.adopted.rng);
+    assert.deepEqual(value.purchased.pastoralSites, value.journey.prepared.pastoralSites);
+    assert.equal(value.purchased.rng, value.journey.prepared.rng);
     const operation = value.operated.cities.find(city => city.id === value.cityId)?.improvements?.['164']?.operation.lastResult; assert.ok(operation);
     assert.equal(operation.status, 'operated'); assert.equal(operation.residents.allocated, 1); assert.ok((operation.produced.food ?? 0) > 0); assert.equal(Object.hasOwn(operation, 'extraction'), false);
     const committed = item.database.records(); item.reopen(); assert.deepEqual(await item.state(), value.operated);
@@ -183,7 +185,7 @@ await test('territory prospective exact purchases and staffed retained Pasture p
 for (const table of ['world_transitions', 'world_receipts']) await test(`territory prospective ${table} failure rolls back payment ownership beneficiary and receipt before exact retry`, async () => {
   const { value, step } = purchaseStep(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records();
     item.database.sql.exec(`CREATE TRIGGER fail_territory BEFORE INSERT ON ${table} WHEN NEW.receipt_key = 'action:territory-fault' BEGIN SELECT RAISE(ABORT, 'synthetic territory rollback'); END;`);
     await assert.rejects(sendStep(item, step, 'territory-fault'), /synthetic territory rollback/); assert.deepEqual(item.database.records(), before);
     item.reopen(); assert.deepEqual(await item.state(), step.before); item.database.sql.exec('DROP TRIGGER fail_territory');
@@ -197,7 +199,7 @@ for (const table of ['world_transitions', 'world_receipts']) await test(`territo
 await test('territory prospective two competing exact requests commit one payment and one beneficiary with explicit stale loser', async () => {
   const { value, step } = purchaseStep(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision); const before = item.database.records();
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial); const before = item.database.records();
     const replies = await Promise.allSettled([sendStep(item, step, 'territory-race-a'), sendStep(item, step, 'territory-race-b')]);
     assert.equal(replies.filter(reply => reply.status === 'fulfilled').length, 1);
     const refusal = replies.find(reply => reply.status === 'rejected'); assert.ok(refusal?.status === 'rejected');
@@ -211,7 +213,7 @@ await test('territory prospective two competing exact requests commit one paymen
 await test('territory prospective invalid exact and forged requests roll back due candidate upkeep without writes', async () => {
   const value = story(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, value.purchased.revision); const state = await item.state(); const before = item.database.records();
+    await persist(item, value.journey.steps, value.purchased.revision, value.journey.initial); const state = await item.state(); const before = item.database.records();
     const timestamp = coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60);
     const actions = [
       { type: 'acquire-tile', cityId: value.cityId, tileId: 164 },
@@ -232,7 +234,7 @@ await test('territory prospective invalid exact and forged requests roll back du
 await test('territory prospective public receipt rejects unknown event fields without repair writes', async () => {
   const { value, step } = purchaseStep(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.result.state.revision);
+    await persist(item, value.journey.steps, step.result.state.revision, value.journey.initial);
     const event = step.result.events.find(candidate => candidate.type === 'territory-acquired'); assert.ok(event);
     const corrupt = step.result.events.map(candidate => candidate.id === event.id ? { ...candidate, unexpectedReceiptField: true } : candidate);
     item.database.sql.prepare('UPDATE world_transitions SET events_json=? WHERE end_revision=?').run(JSON.stringify(corrupt), step.result.state.revision);
@@ -280,8 +282,9 @@ await test('territory historical purchase topology and payment survive feed trim
 await test('territory actual appended-row purchases open exact staffed forest work with retained civilization-wide history', async context => {
   const value = ownedTerritoryForestJourney(); const item = new Fixture();
   try {
-    assert.equal(value.journey.steps.length, 513); assert.equal(value.founded.cities.find(city => city.id === value.cityId)?.tileId, 218);
-    await persist(item, value.journey.steps); const committed = item.database.records(); item.reopen();
+    assert.equal(value.journey.initial.revision, 0); assert.ok(value.journey.steps.length > 0);
+    assert.equal(value.operated.revision, value.journey.steps.length); assert.equal(value.founded.cities.find(city => city.id === value.cityId)?.tileId, 218);
+    await persist(item, value.journey.steps, Number.MAX_SAFE_INTEGER, value.journey.initial); const committed = item.database.records(); item.reopen();
     assert.deepEqual(await item.state(), value.operated);
     const purchases = Object.values(value.operated.tileAcquisitions ?? {}).toSorted((left, right) => left.priorCivilizationPurchases - right.priorCivilizationPurchases);
     assert.deepEqual(purchases.map(receipt => receipt.tileId), [181, 164, 219, 237]);
@@ -289,11 +292,24 @@ await test('territory actual appended-row purchases open exact staffed forest wo
     assert.ok(purchases.slice(2).every(receipt => receipt.cityId === value.cityId));
     const installed = value.operated.cities.find(city => city.id === value.cityId)?.improvements?.['237']; assert.ok(installed);
     assert.equal(installed.improvementId, 'lumber-mill'); assert.equal(installed.operation.lastResult?.status, 'operated');
-    assert.equal(installed.operation.lastResult.residents.allocated, 1); assert.equal(installed.operation.lastResult.produced.materials, 5.19);
-    assert.equal(await replay(item), 513); assert.deepEqual(item.database.records(), committed);
+    assert.equal(installed.operation.lastResult.residents.allocated, 1);
+    assert.deepEqual(installed.completion.paid, { materials: 10, credits: 5 }); assert.equal(installed.completion.workRequired, 6);
+    const openingStep = value.journey.steps.at(-1); assert.ok(openingStep?.input.kind === 'strategy'); assert.deepEqual(openingStep.result.state, value.operated);
+    const openingCity = openingStep.before.cities.find(city => city.id === value.cityId); const openingActor = openingStep.before.civilizations[value.seat]; assert.ok(openingCity && openingActor);
+    const site = openingStep.before.tiles.find(tile => tile.id === openingCity.tileId); assert.ok(site);
+    assert.ok(openingStep.before.unlockedFeatures.includes('terrain-production'));
+    assert.deepEqual(openingCity.buildings, []); assert.deepEqual(Object.keys(openingCity.improvements ?? {}), ['237']);
+    assert.equal(openingActor.government?.active ?? null, null); assert.ok(!Object.values(openingStep.before.wonders ?? {}).some(wonder => wonder.completion.cityId === value.cityId));
+    const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[openingCity.focus];
+    const rawMaterials = ECONOMY_RULES.baseProduction.materials + (focus.materials ?? 0) + (SETTLEMENT_SITE_OUTPUTS[site.terrain]?.materials ?? 0) + (site.resource === 'materials' ? 1 : 0);
+    const productivity = (0.5 + openingCity.wellbeing / 100) * (1 - openingCity.damage / 100) * (1 + openingCity.infrastructure / 10);
+    const expectedMaterials = Math.round((Math.round((rawMaterials + 4) * productivity * 100) / 100 - Math.round(rawMaterials * productivity * 100) / 100) * 100) / 100;
+    assert.ok(expectedMaterials > 0); assert.equal(installed.operation.lastResult.produced.materials, expectedMaterials);
+    assert.equal(committed.history.length, value.journey.steps.length); assert.equal(committed.receipts.length, value.journey.steps.length);
+    assert.equal(await replay(item), value.journey.steps.length); assert.deepEqual(item.database.records(), committed);
     const retained = structuredClone(value.operated); retained.events = []; retained.cities = retained.cities.filter(city => city.id !== value.pasture.cityId);
     assert.ok(isWorldState(retained)); assert.equal(Object.keys(retained.tileAcquisitions ?? {}).length, 4);
-    context.diagnostic(JSON.stringify({ basis: 'Actual appended-row founding and exact purchases after legal productive research', frames: 513, cityId: value.cityId, purchases, operation: installed.operation.lastResult }));
+    context.diagnostic(JSON.stringify({ basis: 'Actual appended-row founding and exact purchases after legal productive research', frames: value.journey.steps.length, cityId: value.cityId, purchases, operation: installed.operation.lastResult }));
   } finally { item.close(); }
 });
 
@@ -315,7 +331,7 @@ function object(value: unknown): Record<string, unknown> {
 await test('territory generic protected action and public full compact observations preserve detached canonical facts without worker edits', async () => {
   const { value, step } = purchaseStep(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, step.before.revision);
+    await persist(item, value.journey.steps, step.before.revision, value.journey.initial);
     assert.ok(step.input.kind === 'action' && step.input.command.timestamp);
     const timestamp = step.input.command.timestamp; let readTimestamp = timestamp; const worker = createWorker(undefined, { now: () => new Date(readTimestamp) });
     const env = { DB: item.database, AGENT_WRITER_USER_IDS: actor };
@@ -343,7 +359,7 @@ await test('territory generic protected action and public full compact observati
 await test('territory malformed persisted registry refuses reopening without repair writes', async () => {
   const value = story(); const item = new Fixture();
   try {
-    await persist(item, value.journey.steps, value.purchased.revision);
+    await persist(item, value.journey.steps, value.purchased.revision, value.journey.initial);
     const corrupt = structuredClone(value.purchased); const receipt = corrupt.tileAcquisitions?.['164']; assert.ok(receipt); corrupt.events = []; receipt.priorCivilizationPurchases = 7;
     item.database.sql.prepare('UPDATE world_state SET state_json=?').run(JSON.stringify(corrupt)); item.reopen();
     const before = item.database.records(); await assert.rejects(item.store.read()); assert.deepEqual(item.database.records(), before);

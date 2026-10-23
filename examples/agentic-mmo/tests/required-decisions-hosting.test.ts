@@ -7,21 +7,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { BUILDINGS, RESOURCE_IDS } from '../core/content.ts';
 import { WorldRepository, type D1Database, type D1Result, type D1Statement, type SqlValue } from '../server/repository.ts';
 import { createWorker } from '../server/worker.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, observe } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, observe } from '../core/engine.ts';
 import type { BuildingConstructionOrder, GameAction, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 
 const epoch = '2026-10-16T00:00:00.000Z';
-const releases = ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1'];
 
 function released(): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const targetReleaseId of releases) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.ok(result.ok, result.error);
-    state = result.state;
-  }
-  return state;
+  return createWorld(1701, epoch, 'settlement-decisions-1');
 }
 
 function syntheticRecords(): WorldState {
@@ -161,11 +154,7 @@ class Fixture {
   }
   get store(): WorldRepository { return new WorldRepository(this.database); }
   async initialize(decisions = true): Promise<void> {
-    await this.store.initialize({ seed: 1701, clockEpoch: epoch, commandId: 'initialize' }, actor, epoch);
-    for (const targetReleaseId of decisions ? releases : releases.slice(0, -1)) {
-      const state = await this.state();
-      await this.store.mutate('release-apply', { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, model, commandId: targetReleaseId }, actor, epoch);
-    }
+    await this.store.initialize({ seed: 1701, clockEpoch: epoch, registeredRulesId: decisions ? 'settlement-decisions-1' : 'settlement-operating-exchange-1', commandId: 'initialize' }, actor, epoch);
   }
   async state(): Promise<WorldState> { const value = await this.store.read(); assert.ok(value); return value.state; }
   async input(action: GameAction, commandId: string, seat = 0, composite = false) { return { seat, expectedRevision: (await this.state()).revision, model, commandId, action: composite ? { type: 'strategy-action', action } : action }; }
@@ -196,7 +185,7 @@ async function assertReplay(item: Fixture): Promise<void> {
     const page = await item.store.history(after, 3);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok);
       assert.ok(isWorldState(entry.state));
       assert.deepEqual(result.state, entry.state);

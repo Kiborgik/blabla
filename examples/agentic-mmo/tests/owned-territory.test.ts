@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, legalActions, observe } from '../core/engine.ts';
 import { BUILDINGS, IMPROVEMENTS, WONDERS } from '../core/content.ts';
 import { isGameAction } from '../core/planning.ts';
 import { districtSiteBlock } from '../core/simulation/districts.ts';
@@ -12,33 +12,13 @@ import { createTerritoryPlanner } from '../core/simulation/territory.ts';
 import { decisionObligations } from '../core/simulation/decisions.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, replayCoastalStep } from './fixtures/coastal-prefix.ts';
-import { ownedTerritoryPrefix } from './fixtures/owned-territory-prefix.ts';
 import { acquireTileAction, acquisitionReceipts, ownedTerritoryJourney, ownedTerritoryPastureJourney, ownedTerritoryForestJourney } from './fixtures/owned-territory-journey.ts';
 import { waterLandTown } from './fixtures/water-land-journey.ts';
-
-await test('territory legal old prefix reveals actual retained horse but owns only the founded center', () => {
-  const value = ownedTerritoryPrefix(); assert.ok(isWorldState(value.state));
-  assert.equal(value.state.tiles[199]?.owner, 2); assert.equal(value.state.tiles[181]?.owner, null); assert.equal(value.state.tiles[164]?.owner, null);
-  assert.ok(waterLandTown(value.state, value.cityId).population > 3); assert.ok(value.state.civilizations[2]?.technologies.includes('animal-husbandry'));
-  assert.equal(acquisitionReceipts(value.state), undefined);
-  assert.ok(!legalActions(value.state, 2, value.timestamp).some(option => option.action.type === 'acquire-tile'));
-  const action = acquireTileAction(value.cityId, 181);
-  const refused = applyCommand(value.state, { seat: 2, expectedRevision: value.state.revision, timestamp: value.timestamp, action });
-  assert.equal(refused.ok, false); assert.deepEqual(refused.state, value.state); assert.deepEqual(refused.events, []);
-});
 
 await test('territory exact action grammar rejects caller quote payment path and beneficiary overrides', () => {
   const action = { type: 'acquire-tile', cityId: 'city-2-263', tileId: 181 };
   assert.ok(isGameAction(action));
   for (const changed of [{ ...action, paid: { credits: 0 } }, { ...action, pathTileIds: [199, 181] }, { ...action, civId: 0 }, { ...action, tileId: 1.5 }, { ...action, cityId: '' }]) assert.equal(isGameAction(changed), false);
-});
-
-await test('territory actual compatible adoption initializes receipts without assigning land or altering old assets', () => {
-  const value = ownedTerritoryJourney(); assert.deepEqual(acquisitionReceipts(value.adopted), {});
-  assert.deepEqual(value.adopted.tiles, value.beforeRelease.tiles); assert.deepEqual(value.adopted.cities, value.beforeRelease.cities);
-  assert.deepEqual(value.adopted.civilizations, value.beforeRelease.civilizations); assert.deepEqual(value.adopted.routes, value.beforeRelease.routes);
-  assert.deepEqual(value.adopted.pastoralSites, value.beforeRelease.pastoralSites); assert.deepEqual(value.adopted.strategicDeposits, value.beforeRelease.strategicDeposits); assert.equal(value.adopted.rng, value.beforeRelease.rng);
-  assert.equal(value.adopted.clockTicks, value.beforeRelease.clockTicks); assert.equal(value.adopted.year, value.beforeRelease.year);
 });
 
 await test('territory real two-purchase path pays12 then18 once and preserves exact beneficiary receipts', () => {
@@ -47,10 +27,10 @@ await test('territory real two-purchase path pays12 then18 once and preserves ex
   assert.deepEqual(first.paid, { credits: 12 }); assert.deepEqual(second.paid, { credits: 18 }); assert.equal(first.priorCivilizationPurchases, 0); assert.equal(second.priorCivilizationPurchases, 1);
   assert.equal(first.distance, 1); assert.equal(second.distance, 2); assert.equal(first.cityTileId, 199); assert.equal(second.cityId, value.cityId); assert.equal(second.civId, 2);
   assert.equal(first.id, `territory-${value.firstPurchased.revision}`); assert.equal(second.id, `territory-${value.purchased.revision}`);
-  const before = value.journey.adopted.civilizations[2]; const after = value.purchased.civilizations[2]; assert.ok(before && after);
+  const before = value.journey.prepared.civilizations[2]; const after = value.purchased.civilizations[2]; assert.ok(before && after);
   assert.deepEqual(after.resources, { ...before.resources, credits: Math.round((before.resources.credits - 30) * 100) / 100 });
-  assert.deepEqual(value.purchased.cities, value.journey.adopted.cities); assert.equal(value.purchased.tiles[181]?.owner, 2); assert.equal(value.purchased.tiles[164]?.owner, 2);
-  assert.deepEqual(value.purchased.pastoralSites, value.journey.adopted.pastoralSites); assert.equal(value.purchased.rng, value.journey.adopted.rng);
+  assert.deepEqual(value.purchased.cities, value.journey.prepared.cities); assert.equal(value.purchased.tiles[181]?.owner, 2); assert.equal(value.purchased.tiles[164]?.owner, 2);
+  assert.deepEqual(value.purchased.pastoralSites, value.journey.prepared.pastoralSites); assert.equal(value.purchased.rng, value.journey.prepared.rng);
   const event = value.purchased.events.find(candidate => candidate.id === second.eventId); assert.ok(event); assert.equal(event.type, 'territory-acquired'); assert.equal(event.actor, 2); assert.equal(event.tileId, 164);
   assert.deepEqual(event.territoryAcquisition, second);
 });
@@ -105,7 +85,7 @@ await test('territory new appended-row town purchases actual forest and later st
   assert.equal(value.purchased.tiles[237]?.terrain, 'forest'); assert.equal(value.purchased.tiles[237]?.owner, 2);
   const result = city.improvements?.['237']?.operation.lastResult; assert.ok(result); assert.equal(result.status, 'operated'); assert.equal(result.residents.allocated, 1); assert.ok((result.produced.materials ?? 0) > 0);
   assert.equal(city.improvements?.['237']?.improvementId, 'lumber-mill'); assert.equal(result.extraction, undefined);
-  assert.deepEqual(value.operated.pastoralSites, value.journey.adopted.pastoralSites); assert.deepEqual(value.operated.strategicDeposits?.tileIds, value.journey.adopted.strategicDeposits?.tileIds);
+  assert.deepEqual(value.operated.pastoralSites, value.journey.prepared.pastoralSites); assert.deepEqual(value.operated.strategicDeposits?.tileIds, value.journey.prepared.strategicDeposits?.tileIds);
   context.diagnostic(JSON.stringify({ transitions: value.journey.steps.length, cityId: city.id, population: city.population, result }));
 });
 
@@ -152,10 +132,8 @@ await test('territory actual ownership deliberately opens the existing founding 
   assert.ok(legalActions(value.state, 2, value.time()).some(option => option.action.type === 'settle' && option.action.tileId === 76 && option.action.sourceCityId === 'city-2'));
 });
 
-await test('territory adoption requires caught-up strategy and retained purchases still count after synthetic town removal', () => {
-  const value = ownedTerritoryPastureJourney(); const old = value.journey.beforeRelease;
-  const result = applyRelease(old, { expectedRevision: old.revision, expectedFromReleaseId: old.releaseId, targetReleaseId: 'settlement-territory-1', timestamp: coastalPrefixTime(((old.independentTurns?.strategyTicks ?? 0) + 1) * 60) });
-  assert.equal(result.ok, false); assert.deepEqual(result.state, old); assert.deepEqual(result.events, []);
+await test('territory retained purchases still count after synthetic town removal', () => {
+  const value = ownedTerritoryPastureJourney();
   const removed = structuredClone(value.purchased); removed.cities = removed.cities.filter(city => city.id !== value.cityId);
   const quote = createTerritoryPlanner(removed).assess(2, 'city-2', 112).quote; assert.ok(quote); assert.equal(quote.priorCivilizationPurchases, 2); assert.deepEqual(quote.paid, { credits: 20 });
   assert.deepEqual(acquisitionReceipts(removed), acquisitionReceipts(value.purchased));

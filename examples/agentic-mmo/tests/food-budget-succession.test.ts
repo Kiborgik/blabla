@@ -11,16 +11,18 @@ import { processLocalSimulationRequest } from '../web/local-simulation-worker.ts
 import { createWorldViewSession, DEFAULT_WORLD_CAMERA, parseWorldSource, saveWorldView, worldSourceHref, worldViewKey, type WorldViewIdentity } from '../web/world-view.ts';
 import { DEFAULT_PREFERENCES, parsePreferences } from '../web/viewer-state.ts';
 
-void test('fresh Food genesis uses its own policy with version-two checkpoint and memory envelopes', () => {
+void test('fresh Knowledge genesis retains Food-v3 policy with version-two checkpoint and memory envelopes', () => {
   const fresh = createLocalSimulation(1701);
-  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-food-budget-1');
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:food-budget-v1');
+  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-knowledge-compacts-1');
+  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:knowledge-compacts-v1');
   assert.equal(fresh.version, 2);
   assert.equal(fresh.policyVersion, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION);
   assert.equal(behaviorPolicyVersion(fresh.state), fresh.policyVersion);
   assert.equal(fresh.state.origin?.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.equal(fresh.state.origin?.namingVersion, 'cultural-toponyms-v1');
   assert.ok(fresh.state.unlockedFeatures.includes('food-budget'));
+  assert.ok(fresh.state.unlockedFeatures.includes('knowledge-compacts'));
+  assert.equal(fresh.state.origin?.temperamentVersion, undefined);
   assert.equal(createBehaviorMemory(fresh.state, 0).version, 2);
   assert.equal(createBehaviorMemory(fresh.state, 0).policyVersion, fresh.policyVersion);
   assert.deepEqual(parseActiveLocalSimulation(JSON.parse(JSON.stringify(fresh))), fresh);
@@ -67,7 +69,7 @@ void test('legacy version-one checkpoint memories retain their exact policy and 
   assert.equal(parsePreviousLocalSimulation(prior), null);
 });
 
-void test('old living checkpoint names and non-null v2 memories stay byte-exact while a distinct Food world is saved', async () => {
+void test('old living storage is read-only while a distinct current world is saved', async () => {
   for (const naming of [undefined, 'cultural-toponyms-v1'] as const) {
     const old = createLocalSimulation(1701, 'settlement-regional-targets-1');
     old.state = createGeneratedWorld(1701, old.timestamp, 'settlement-regional-targets-1', naming);
@@ -100,7 +102,7 @@ void test('old living checkpoint names and non-null v2 memories stay byte-exact 
   }
 });
 
-void test('Food active parser refuses both an old release and an old genesis with a current release', () => {
+void test('Knowledge active parser refuses both an old release and an old genesis with a current release', () => {
   const fresh = createLocalSimulation();
   const olderGenesis = structuredClone(fresh);
   olderGenesis.state.origin!.initialReleaseId = 'settlement-regional-targets-1';
@@ -113,7 +115,7 @@ void test('Food active parser refuses both an old release and an old genesis wit
   assert.equal(parseActiveLocalSimulation(historical), null);
 });
 
-void test('current Food advancement and JSON restart agree with the Worker without changing input or policy', () => {
+void test('current Knowledge advancement and JSON restart agree with the Worker without changing input or policy', () => {
   const initial = createLocalSimulation(1701);
   const bytes = JSON.stringify(initial);
   const first = advanceLocalSimulation(initial, 2);
@@ -130,7 +132,7 @@ void test('current Food advancement and JSON restart agree with the Worker witho
   assert.equal(continuation.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
 });
 
-void test('terminal Food checkpoints remain exact under bounded direct and Worker advancement', () => {
+void test('terminal Knowledge checkpoints remain exact under bounded direct and Worker advancement', () => {
   const terminal = createLocalSimulation();
   terminal.state.outcome = { kind: 'cultural', winners: [0], round: terminal.state.round, reason: 'Terminal checkpoint fixture' };
   const bytes = JSON.stringify(terminal);

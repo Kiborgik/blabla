@@ -19,7 +19,6 @@ import {
   applyCommand,
   applyDirectorTick,
   applyHistoryAdvance,
-  applyRelease,
   catchUpClock,
   catchUpStrategy,
   createWorld,
@@ -28,6 +27,7 @@ import {
 } from '../core/engine.ts';
 import { observeCompactTrade, type CompactTradeObservation } from '../core/observation.ts';
 import { parseUtcTimestamp } from '../core/simulation/clock.ts';
+import { CURRENT_RELEASE, RELEASES } from '../core/release.ts';
 import { isDirectorEvent, isWorldState } from '../core/validation.ts';
 import { isGameAction, validateAttachedPlan } from '../core/planning.ts';
 import {
@@ -322,10 +322,14 @@ export class GameStore {
     return value;
   }
 
-  initialize(seed = 17, reset = false, clockEpoch?: string): ActionReply {
+  initialize(seed = 17, reset = false, clockEpoch?: string, registeredRulesId = CURRENT_RELEASE.id): ActionReply {
     if (!integer(seed)) throw new ProtocolError('seed must be a safe integer');
     if (clockEpoch !== undefined && parseUtcTimestamp(clockEpoch) === null)
       throw new ProtocolError('clockEpoch must be an explicit UTC ISO timestamp');
+    const rules = RELEASES.find(candidate => candidate.id === registeredRulesId);
+    if (!rules) throw new ProtocolError('Fresh worlds require a registered rules ID');
+    if (rules.featureIds.includes('independent-actions') && clockEpoch === undefined)
+      throw new ProtocolError('Independent worlds require an explicit epoch');
     return this.locked(() => {
       if (existsSync(this.path) && !reset) {
         const current = this.load();
@@ -336,7 +340,7 @@ export class GameStore {
           error: 'world already initialized',
         };
       }
-      const state = createWorld(seed, clockEpoch);
+      const state = createWorld(seed, clockEpoch, rules.id);
       atomicWrite(this.path, {
         schemaVersion: SCHEMA_VERSION,
         gameVersion: GAME_VERSION,
@@ -521,7 +525,7 @@ export class GameStore {
       };
       if (!isWorldState(campaign.state))
         return refuse(
-          'legacy pre-clock history requires an explicit host migration before system operations',
+          'pre_release_migration_disabled: pre-clock history is read-only; start a fresh current-version world for system operations',
         );
       const revision = input.expectedRevision;
       const timestamp = input.timestamp;
@@ -671,6 +675,7 @@ export class GameStore {
   }
 
   authoredTransition(input: Record<string, unknown>, operation: 'history-advance' | 'release-apply'): ActionReply {
+    if (operation === 'release-apply') throw new ProtocolError('pre_release_migration_disabled: no world/save migrations before release; start a fresh current-version world');
     return this.locked(() => {
       const campaign = this.load();
       const refuse = (error: string): ActionReply => {
@@ -680,27 +685,18 @@ export class GameStore {
         }
         return { ok: false, revision: campaign.state.revision, last_valid: false, error };
       };
-      if (!isWorldState(campaign.state)) return refuse('legacy pre-clock history requires an explicit host migration before system operations');
+      if (!isWorldState(campaign.state)) return refuse('pre_release_migration_disabled: pre-clock history is read-only; start a fresh current-version world for system operations');
       const expectedRevision = input.expectedRevision;
       const model = input.model;
       const commandId = input.commandId;
       if (!integer(expectedRevision) || expectedRevision < 0) return refuse('expectedRevision must be a nonnegative safe integer');
       if (typeof model !== 'string' || model.trim().length === 0 || model.length > 200) return refuse('authored transitions require a nonempty model identifier');
       if (typeof commandId !== 'string' || commandId.trim().length === 0 || commandId.length > 200) return refuse('commandId must contain 1 to 200 characters');
-      let transition: RecordedTransition;
-      let action: HistoryAdvanceCommand | ReleaseApplyCommand;
-      if (operation === 'history-advance') {
-        const cause = input.cause;
-        if (!isRecord(cause) || (cause.kind !== 'feature' && cause.kind !== 'event') || typeof cause.id !== 'string'
-          || typeof input.reason !== 'string' || !integer(input.deltaYears) || typeof input.timestamp !== 'string') return refuse('invalid history advance fields');
-        action = { expectedRevision, cause: { kind: cause.kind, id: cause.id }, reason: input.reason, deltaYears: input.deltaYears, timestamp: input.timestamp };
-        transition = { kind: 'history-advance', command: action };
-      } else {
-        if (typeof input.expectedFromReleaseId !== 'string' || typeof input.targetReleaseId !== 'string') return refuse('exact source and target release IDs are required');
-        if (input.timestamp !== undefined && (typeof input.timestamp !== 'string' || parseUtcTimestamp(input.timestamp) === null)) return refuse('timestamp must be an explicit UTC ISO timestamp');
-        action = { expectedRevision, expectedFromReleaseId: input.expectedFromReleaseId, targetReleaseId: input.targetReleaseId, ...(typeof input.timestamp === 'string' ? { timestamp: input.timestamp } : {}) };
-        transition = { kind: 'release-apply', command: action };
-      }
+      const cause = input.cause;
+      if (!isRecord(cause) || (cause.kind !== 'feature' && cause.kind !== 'event') || typeof cause.id !== 'string'
+        || typeof input.reason !== 'string' || !integer(input.deltaYears) || typeof input.timestamp !== 'string') return refuse('invalid history advance fields');
+      const action: HistoryAdvanceCommand = { expectedRevision, cause: { kind: cause.kind, id: cause.id }, reason: input.reason, deltaYears: input.deltaYears, timestamp: input.timestamp };
+      const transition: RecordedTransition = { kind: 'history-advance', command: action };
       const request: Record<string, unknown> = { operation, model, ...action };
       const prior = campaign.provenance.find((entry) => entry.operation === operation && entry.commandId === commandId);
       if (prior) {
@@ -709,8 +705,7 @@ export class GameStore {
         return { ok: true, duplicate: true, revision: campaign.state.revision, acceptedRevision: prior.revision, last_valid: true, commandId };
       }
       if (expectedRevision !== campaign.state.revision) return refuse(`stale revision: expected ${campaign.state.revision}`);
-      const result = transition.kind === 'history-advance'
-        ? applyHistoryAdvance(campaign.state, transition.command) : applyRelease(campaign.state, transition.command);
+      const result = applyHistoryAdvance(campaign.state, transition.command);
       if (!result.ok) return refuse(result.error ?? 'authored transition refused by engine');
       campaign.state = result.state;
       campaign.frames.push({ state: result.state, events: result.events });

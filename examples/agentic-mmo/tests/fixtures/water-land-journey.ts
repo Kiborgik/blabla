@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 import { legalActions } from '../../core/engine.ts';
-import { RELEASES } from '../../core/release.ts';
 import type { GameAction, WorldState } from '../../core/types.ts';
 import { isWorldState } from '../../core/validation.ts';
 import { coastalPrefixTime, replayCoastalStep, type CoastalPrefixInput, type CoastalPrefixStep } from './coastal-prefix.ts';
@@ -27,12 +26,8 @@ export function waterLandJourney() {
   const beat = (): void => commit({ kind: 'strategy', timestamp: coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60) });
   const until = (condition: () => boolean): void => { for (let count = 0; count < 100 && !condition(); count++) beat(); assert.ok(condition(), 'Bounded legal water-land outcome was not reached'); };
   const research = (technology: string, seat = 0): void => { if (state.civilizations[seat]?.technologies.includes(technology)) return; act({ type: 'research', technology }, seat); until(() => !!state.civilizations[seat]?.technologies.includes(technology)); };
-  const release = RELEASES.find(candidate => candidate.compatibleFrom.includes(state.releaseId) && candidate.featureIds.includes('water-land'));
-  assert.ok(release, 'Compatible water-land successor must expose actual horse-site Pasture and water infrastructure');
-  const beforeRelease = structuredClone(state);
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: time() } });
-  const adopted = structuredClone(state);
-  return { previous, initial: previous.initial, steps, beforeRelease, adopted, get state() { return state; }, time, act, beat, until, research };
+  const prepared = structuredClone(state);
+  return { previous, initial: previous.initial, steps, prepared, provenance: previous.provenance, get state() { return state; }, time, act, beat, until, research };
 }
 
 export function waterLandPastureJourney() {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { TRADE_RECIPES } from '../core/content.ts';
-import { applyCommand, applyRelease, createWorld } from '../core/engine.ts';
+import { applyCommand, createWorld } from '../core/engine.ts';
 import { observeCompactTrade } from '../core/observation.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
@@ -10,13 +10,8 @@ import { choiceActionId, createChoicePage, parseChoicePageRequest, ChoicePageErr
 const epoch = '2026-10-16T00:00:00.000Z';
 const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1000).toISOString();
 
-function world(plans = false): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', ...(plans ? ['settlement-plans-1'] : []), 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+function world(): WorldState {
+  let state = createWorld(1701, epoch, 'settlement-operating-exchange-1');
   const capitals = structuredClone(state.cities);
   const occupied = new Set(state.cities.map(city => city.tileId));
   const sites = state.tiles.filter(tile => !occupied.has(tile.id) && tile.owner === null && tile.terrain !== 'mountain' && tile.terrain !== 'ocean');
@@ -33,7 +28,7 @@ function world(plans = false): WorldState {
 
 function encode(value: Record<string, unknown>): string { return Buffer.from(JSON.stringify(Object.fromEntries(Object.entries(value).toSorted(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)))).toString('base64url'); }
 
-function source(state = world(), scope = 'main') { return { initial: createWorld(1701, epoch), state, scope }; }
+function source(state = world(), scope = 'main') { return { initial: createWorld(1701, epoch, state.releaseId), state, scope }; }
 function request(choiceCursor?: string, now = epoch) { return parseChoicePageRequest({ seat: 0, ...(choiceCursor === undefined ? {} : { choiceCursor }) }, 'host', now); }
 function failure(code: string, status: number, reason?: string) {
   return (value: unknown): boolean => value instanceof ChoicePageError && value.code === code && value.status === status && (reason === undefined || value.details.reason === reason);
@@ -201,7 +196,7 @@ await test('cursor exact shape, canonical encoding and bounded offsets are enfor
 });
 
 await test('page context preserves bounded plans and immutable pending or accepted consent after current recipe changes', async () => {
-  const input = source(world(true));
+  const input = source(world());
   const action: GameAction = { type: 'propose-trade', partner: 4, recipeId: 'energy-for-materials', sourceCityId: 'city-1', recipientCityId: 'city-4' };
   const proposed = applyCommand(input.state, { seat: 1, action, plan: [{ action, reason: 'Offer operating energy for materials' }, { action: { type: 'wait' }, reason: 'Review the recipient response before choosing another command' }], expectedRevision: input.state.revision, timestamp: epoch });
   assert.equal(proposed.ok, true, proposed.error);

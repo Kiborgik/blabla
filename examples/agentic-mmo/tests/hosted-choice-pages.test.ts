@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { TRADE_RECIPES } from '../core/content.ts';
-import { applyRelease, createWorld } from '../core/engine.ts';
+import { createWorld } from '../core/engine.ts';
 import { observeCompactTrade } from '../core/observation.ts';
 import type { WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -15,12 +15,7 @@ const format = 'compact-trade-pages-v1';
 
 function object(value: unknown): Record<string, unknown> { assert.ok(typeof value === 'object' && value !== null && !Array.isArray(value)); return Object.fromEntries(Object.entries(value)); }
 function world(): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+  const state = createWorld(1701, epoch, 'settlement-operating-exchange-1');
   const capitals = structuredClone(state.cities);
   const occupied = new Set(state.cities.map(city => city.tileId));
   const sites = state.tiles.filter(tile => !occupied.has(tile.id) && tile.owner === null && tile.terrain !== 'mountain' && tile.terrain !== 'ocean');
@@ -41,7 +36,7 @@ class Database implements D1Database {
   writes = 0;
   constructor(state: WorldState) {
     this.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8'));
-    this.sql.prepare('INSERT INTO world_state (world_id, revision, initial_json, state_json, updated_at) VALUES (?, ?, ?, ?, ?)').run('main', state.revision, JSON.stringify(createWorld(1701, epoch)), JSON.stringify(state), epoch);
+    this.sql.prepare('INSERT INTO world_state (world_id, revision, initial_json, state_json, updated_at) VALUES (?, ?, ?, ?, ?)').run('main', state.revision, JSON.stringify(state), JSON.stringify(state), epoch);
   }
   prepare(sql: string): D1Statement {
     let values: SqlValue[] = [];

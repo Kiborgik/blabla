@@ -1,3 +1,4 @@
+import { createWorld } from '../core/engine.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { capabilityCatalogue, projectCapabilities } from '../core/capabilities.ts';
@@ -15,12 +16,12 @@ function input(state: WorldState, cityId: string | null = journey.cityId): Civic
 }
 
 await test('a legacy world has no invented civic surface', () => {
-  assert.equal(civicProgressPresentation(input(journey.beforeRelease)), null);
-  assert.equal(createCivicProgress(input(journey.beforeRelease)), null);
+  assert.equal(civicProgressPresentation(input(createWorld(1701, journey.initial.clockEpoch ?? undefined, 'settlement-observatory-1'))), null);
+  assert.equal(createCivicProgress(input(createWorld(1701, journey.initial.clockEpoch ?? undefined, 'settlement-observatory-1'))), null);
 });
 
 await test('the released empty lane asks for a civic without adopting a government', () => {
-  const view = civicProgressPresentation(input(journey.adopted));
+  const view = civicProgressPresentation(input(journey.prepared));
   assert.ok(view);
   assert.equal(view.status, 'required');
   assert.equal(view.heading, 'Awaiting a civic choice');
@@ -150,7 +151,7 @@ await test('prerequisite eligibility does not imply legal adoption and missing t
 });
 
 await test('unknown civic records and canonical locked blockers remain honest', () => {
-  const source = structuredClone(input(journey.adopted));
+  const source = structuredClone(input(journey.prepared));
   assert.ok(source.projection.governance);
   source.projection.governance.civics = undefined;
   source.projection.governance.government = undefined;
@@ -316,8 +317,10 @@ await test('actual paid capital work displays exact current capacity and recorde
   const view = civicProgressPresentation(source);
   const order = source.city?.construction?.active;
   assert.ok(view && order && source.projection.governance);
-  assert.equal(order.workDone, 4.49);
-  assert.match(view.constructionRecord ?? '', /^Theater square · 4.49 \/ 10 work recorded/);
+  assert.ok(order.workDone > 0 && order.workDone <= order.workRequired);
+  const id = 'buildingId' in order ? order.buildingId : 'improvementId' in order ? order.improvementId : 'wonderId' in order ? order.wonderId : 'rail';
+  const definition = [...source.catalogue.buildings, ...source.catalogue.improvements, ...source.catalogue.wonders].find(item => item.id === id); assert.ok(definition);
+  assert.equal(view.constructionRecord, `${definition.name} · ${order.workDone} / ${order.workRequired} work recorded · Order ${order.id}`);
   assert.equal(view.constructionCapacity, `${source.projection.governance.cityConstructionWork} work · Current town capacity`);
   assert.match(view.effectExplanation, /already includes focus, productivity and any applicable capital bonus/);
   assert.match(view.effectExplanation, /does not identify which government produced it/);
@@ -390,9 +393,9 @@ await test('the civic dependency view derives every node and multi-parent edge f
 });
 
 await test('civic statuses distinguish released choice, unknown record and completed history', () => {
-  assert.equal(civicTreeNodes(input(journey.adopted)).find(node => node.id === 'code-of-laws')?.status, 'available');
+  assert.equal(civicTreeNodes(input(journey.prepared)).find(node => node.id === 'code-of-laws')?.status, 'available');
   assert.equal(civicTreeNodes(input(journey.completed)).find(node => node.id === 'code-of-laws')?.status, 'completed');
-  const unknown = input(journey.adopted);
+  const unknown = input(journey.prepared);
   delete unknown.projection.governance;
   assert.equal(civicTreeNodes(unknown).find(node => node.id === 'code-of-laws')?.status, 'unknown');
   const expanded = input(journey.selected);

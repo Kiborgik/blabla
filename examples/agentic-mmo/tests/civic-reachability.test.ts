@@ -1,33 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { GameAction, TransitionResult, WorldState } from '../core/types.ts';
 
 const epoch = '2026-10-16T00:00:00.000Z';
 
-function recoveryWorld(): WorldState {
-  let state = createWorld(17, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+function civicWorld(): WorldState {
+  const state = createWorld(17, epoch, 'settlement-civics-1');
+  assert.ok(isWorldState(state));
   return state;
 }
 
-await test('registered recovery world admits the prepared civic successor without forged progress', () => {
-  const state = recoveryWorld();
-  const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-civics-1', timestamp: epoch });
-  assert.equal(result.ok, true, result.error);
-  assert.equal(result.state.releaseId, 'settlement-civics-1');
-  assert.deepEqual(result.state.civilizations, state.civilizations);
-  assert.deepEqual(result.state.cities, state.cities);
-  assert.deepEqual(result.state.calendarMilestones, state.calendarMilestones);
-});
-
 class LegalJourney {
-  state = recoveryWorld();
+  state = civicWorld();
   milliseconds = Date.parse(epoch);
   commands = 0;
   beats = 0;
@@ -45,11 +31,6 @@ class LegalJourney {
     assert.ok(isWorldState(result.state));
     this.state = result.state;
     return result;
-  }
-
-  release(): void {
-    const command = { expectedRevision: this.state.revision, expectedFromReleaseId: this.state.releaseId, targetReleaseId: 'settlement-civics-1', timestamp: this.timestamp() };
-    this.accept((state) => applyRelease(state, command));
   }
 
   act(seat: number, action: GameAction): void {
@@ -97,7 +78,6 @@ class LegalJourney {
 function civicJourney(): LegalJourney {
   const journey = new LegalJourney();
   assert.equal(legalActions(journey.state, 0, epoch).some(({ action }) => action.type === 'research' && action.technology === 'civic-institutions'), false);
-  journey.release();
   for (const seat of [0, 1, 2]) journey.act(seat, { type: 'research', technology: 'agriculture' });
   journey.until(() => [0, 1, 2].every((seat) => journey.knows(seat, 'agriculture')));
   for (const seat of [0, 1, 2]) journey.build(seat, 'farm');

@@ -15,10 +15,9 @@ void test('civic standalone probe is lazy and refuses unknown operations without
   probe.reset(); assert.deepEqual(probe.snapshot(), before);
 });
 
-void test('nine civic draft actions derive their predicates from actual transitions and labeled controls', context => {
+void test('eight civic draft actions derive their predicates from actual transitions and labeled controls', context => {
   const probe = new CivicBootstrapProbe();
   const cases = [
-    ['adopt_civic_release', ['migrated_empty', 'legacy_preserved']],
     ['start_civic', ['selected_explicitly', 'cost_snapshotted', 'science_independent']],
     ['invest_culture', ['current_culture_only', 'culture_conserved', 'science_independent']],
     ['complete_civic', ['completed_once', 'entitlement_exact', 'successor_unselected']],
@@ -26,10 +25,10 @@ void test('nine civic draft actions derive their predicates from actual transiti
     ['work_with_arrangement', ['opening_food_exact', 'opening_work_exact', 'completion_before_output']],
     ['resolve_government_transition', ['transition_timing_exact', 'transition_outputs_exact', 'fixed_transfers_preserved', 'commitment_enforced']],
     ['refuse_civic_action', ['refused', 'no_effects']],
-    ['replay_civic_history', ['replay_exact', 'legacy_preserved']],
+    ['replay_civic_history', ['replay_exact']],
   ] as const;
   for (const [action, fields] of cases) { const start = performance.now(); probe.call(action); for (const field of fields) assert.equal(Reflect.get(probe.observe(), field), true, `${action}: ${field}`); context.diagnostic(`${action}: ${Math.round(performance.now() - start)}ms`); if (action === 'resolve_government_transition') assert.match(probe.observe().provenance, /synthetic advanced-government/); }
-  assert.equal(probe.observe().replayed_frames, 728);
+  const replayed = probe.snapshot().state; assert.ok(replayed); assert.equal(probe.observe().replayed_frames, replayed.revision);
   const retained = probe.snapshot(); const detached = probe.snapshot(); assert.ok(detached.state); detached.state.cities.length = 0; assert.deepEqual(probe.snapshot(), retained);
   probe.call('refuse_civic_action'); assert.deepEqual(probe.snapshot().state, retained.state); probe.reset(); assert.equal(probe.observe().initialized, false);
 });

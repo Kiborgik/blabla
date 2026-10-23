@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions, observe } from '../core/engine.ts';
-import { TECHNOLOGIES, TRADE_RECIPES } from '../core/content.ts';
-import { RELEASES } from '../core/release.ts';
+import { applyCommand, catchUpStrategy, legalActions, observe } from '../core/engine.ts';
+import { TRADE_RECIPES } from '../core/content.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 import { resolveTrade } from '../core/simulation/trade.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -49,24 +48,10 @@ export function connectedMetalJourney(prefix = metalEconomyPrefix()) {
     act(city.civId, { type: 'build', cityId, project, ...(tileId === undefined ? {} : { tileId }) });
     until(() => !state.cities.find(candidate => candidate.id === cityId)?.construction?.active);
   };
-  const bronze = TECHNOLOGIES.find(technology => technology.id === 'bronze-working');
-  assert.ok(bronze, 'The connected Bronze discovery must exist before its positive legal journey');
-  const target = RELEASES.find(release => release.compatibleFrom.includes(state.releaseId) && bronze.requiredFeatures.every(feature => release.featureIds.includes(feature)));
-  assert.ok(target, 'A registered compatible connected-metal successor is required');
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: target.id, timestamp: time() } });
   return { prefix, get state() { return state; }, steps, researchWork, time, act, beat, until, research, build };
 }
 
-await test('prior Mining history refuses unreleased Bronze and Currency without mutating stocks or admission', () => {
-  const prefix = metalEconomyPrefix();
-  for (const technology of ['bronze-working', 'currency']) {
-    const before = JSON.stringify(prefix.state);
-    const result = applyCommand(prefix.state, { seat: 0, expectedRevision: prefix.state.revision, timestamp: prefix.timestamp, action: { type: 'research', technology } });
-    assert.equal(result.ok, false); assert.equal(JSON.stringify(result.state), before); assert.equal(JSON.stringify(prefix.state), before);
-  }
-});
-
-await test('the compatible connected release preserves the legal inhabited map and opens actual Bronze and Currency decisions', () => {
+await test('fresh connected-metal rules expose actual Bronze and Currency decisions', () => {
   const journey = connectedMetalJourney();
   assert.deepEqual(journey.state.tiles, journey.prefix.state.tiles);
   for (const technology of ['bronze-working', 'currency']) assert.ok(legalActions(journey.state, 0, journey.time()).some(option => option.action.type === 'research' && option.action.technology === technology));
@@ -76,7 +61,7 @@ await test('the compatible connected release preserves the legal inhabited map a
 
 export function metalDeliveryJourney() {
   const journey = connectedMetalJourney();
-  const adopted = structuredClone(journey.state);
+  const prepared = structuredClone(journey.state);
   journey.beat();
   const unrevealed = structuredClone(journey.state);
   journey.research(0, 'bronze-working');
@@ -92,26 +77,13 @@ export function metalDeliveryJourney() {
   const route = journey.state.routes.find(candidate => candidate.agreement?.offerId === offer.id); assert.ok(route?.agreement);
   const accepted = structuredClone(journey.state);
   journey.until(() => (journey.state.routes.find(candidate => candidate.id === route.id)?.agreement?.deliveryCount ?? 0) > 0);
-  return { journey, adopted, unrevealed, discovered, extracted, beforeProposal, proposed, accepted, routeId: route.id };
+  return { journey, prepared, unrevealed, discovered, extracted, beforeProposal, proposed, accepted, routeId: route.id };
 }
 
 function nextMetalBeat(state: WorldState): WorldState {
   const result = catchUpStrategy(state, coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60));
   assert.ok(result.ok, result.error); return result.state;
 }
-
-await test('adoption places one deterministic retained deposit layer without changing map or RNG and refuses overdue migration', () => {
-  const journey = connectedMetalJourney();
-  const layer = journey.state.strategicDeposits; assert.ok(layer);
-  assert.equal(layer.ruleVersion, 1);
-  assert.deepEqual(Object.keys(layer.deposits).map(Number).toSorted((a, b) => a - b), [49, 58, 99, 118, 124, 131, 174, 205]);
-  assert.deepEqual(journey.state.tiles, journey.prefix.state.tiles); assert.equal(journey.state.rng, journey.prefix.state.rng);
-  assert.ok(journey.state.civilizations.every(civ => JSON.stringify(civ.strategicResources) === '{}'));
-  for (const deposit of Object.values(layer.deposits)) { assert.equal(deposit.initialReserve, 240); assert.equal(deposit.remaining, 240); }
-  const source = journey.prefix.state;
-  const result = applyRelease(source, { expectedRevision: source.revision, expectedFromReleaseId: source.releaseId, targetReleaseId: journey.state.releaseId, timestamp: coastalPrefixTime(((source.independentTurns?.strategyTicks ?? 0) + 1) * 60) });
-  assert.equal(result.ok, false); assert.deepEqual(result.state, source); assert.deepEqual(result.events, []);
-});
 
 await test('Bronze reveals actual finite iron and the same staffed Mine conserves reserve and credited stock', context => {
   const result = metalDeliveryJourney();
@@ -197,9 +169,9 @@ await test('paused and resident-blocked Mines retain finite reserves while a new
   const blocked = nextMetalBeat(scarce);
   assert.equal(blocked.strategicDeposits?.deposits['58']?.remaining, scarce.strategicDeposits?.deposits['58']?.remaining);
   assert.equal(blocked.cities[0]?.improvements?.['58']?.operation.lastResult?.extraction, undefined);
-  const prefix = metalEconomyPrefix(); const index = prefix.steps.findIndex(step => step.result.state.revision === 66); assert.ok(index >= 0);
+  const prefix = metalEconomyPrefix(); const index = prefix.steps.findIndex(step => step.input.kind === 'action' && step.input.command.action.type === 'improve' && step.input.command.action.cityId === 'city-0' && step.input.command.action.tileId === 58 && step.input.command.action.improvementId === 'mine'); assert.ok(index >= 0);
   const earlier = prefix.steps[index]; assert.ok(earlier);
-  const run = connectedMetalJourney({ ...prefix, state: structuredClone(earlier.result.state), steps: prefix.steps.slice(0, index + 1) });
+  const run = connectedMetalJourney({ ...prefix, state: structuredClone(earlier.before), steps: prefix.steps.slice(0, index) });
   run.research(0, 'bronze-working');
   run.act(0, { type: 'improve', cityId: 'city-0', tileId: 58, improvementId: 'mine' });
   run.until(() => !run.state.cities[0]?.construction?.active);
@@ -220,12 +192,10 @@ await test('canonical strategic observations and compact recipe terms are detach
   assert.equal(TRADE_RECIPES.find(candidate => candidate.id === 'iron-for-food')?.terms.strategicCargo?.proposer.iron, 2);
 });
 
-await test('placement is independent of container order and retained migration cannot reroll exhausted history', () => {
+await test('placement is independent of container order and later economy preserves retained stocks', () => {
   const journey = connectedMetalJourney();
   const reordered = structuredClone(journey.prefix.state); reordered.tiles.reverse(); reordered.cities.reverse(); reordered.civilizations.reverse();
   assert.deepEqual(createStrategicDeposits(reordered), journey.state.strategicDeposits);
-  const repeat = applyRelease(journey.state, { expectedRevision: journey.state.revision, expectedFromReleaseId: journey.state.releaseId, targetReleaseId: journey.state.releaseId, timestamp: journey.time() });
-  assert.equal(repeat.ok, false); assert.deepEqual(repeat.state, journey.state);
   const reduced = structuredClone(journey.state); assert.ok(reduced.civilizations[0]?.strategicResources);
   reduced.civilizations[0].strategicResources.iron = 80;
   reduced.cities = reduced.cities.filter(city => city.tileId !== 23);
@@ -234,12 +204,11 @@ await test('placement is independent of container order and retained migration c
   assert.equal(observe(after, 0).strategicCapacity, 40);
 });
 
-await test('an old pending six-resource offer retains its exact terms and schedule through the new release', () => {
+await test('a pending six-resource offer retains exact terms and schedule through consent and scheduled delivery', () => {
   const prefix = metalEconomyPrefix();
   const proposal = applyCommand(prefix.state, { seat: 0, expectedRevision: prefix.state.revision, timestamp: prefix.timestamp, action: { type: 'propose-trade', partner: 1, recipeId: 'harvest-for-materials', sourceCityId: 'city-0', recipientCityId: 'city-1' } }); assert.ok(proposal.ok, proposal.error);
   const offer = proposal.state.tradeOffers?.find(candidate => candidate.status === 'pending'); assert.ok(offer);
-  const release = applyRelease(proposal.state, { expectedRevision: proposal.state.revision, expectedFromReleaseId: proposal.state.releaseId, targetReleaseId: 'settlement-metal-learning-1', timestamp: prefix.timestamp }); assert.ok(release.ok, release.error);
-  const accepted = applyCommand(release.state, { seat: 1, expectedRevision: release.state.revision, timestamp: prefix.timestamp, action: { type: 'respond-trade', offerId: offer.id, accept: true } }); assert.ok(accepted.ok, accepted.error);
+  const accepted = applyCommand(proposal.state, { seat: 1, expectedRevision: proposal.state.revision, timestamp: prefix.timestamp, action: { type: 'respond-trade', offerId: offer.id, accept: true } }); assert.ok(accepted.ok, accepted.error);
   const agreement = accepted.state.routes.find(route => route.agreement?.offerId === offer.id)?.agreement; assert.ok(agreement);
   assert.deepEqual(agreement.terms, offer.terms); assert.equal(agreement.terms.strategicCargo, undefined);
   assert.equal(agreement.nextDeliveryRound, accepted.state.round + offer.terms.cadenceRounds);
@@ -249,7 +218,7 @@ await test('an old pending six-resource offer retains its exact terms and schedu
   assert.deepEqual(state.civilizations.map(civ => civ.strategicResources), [{}, {}, {}, {}, {}]);
 });
 
-await test('an active paid Mine remains an eligible deposit site during compatible adoption', () => {
+await test('an active paid Mine preserves its retained deposit site and exact construction', () => {
   const prefix = metalEconomyPrefix();
   const start = prefix.steps.find(step => step.input.kind === 'action' && step.input.command.action.type === 'improve' && step.input.command.action.tileId === 58);
   assert.ok(start && start.input.kind === 'action' && start.input.command.timestamp);
@@ -257,9 +226,6 @@ await test('an active paid Mine remains an eligible deposit site during compatib
   const expected = createStrategicDeposits(start.before);
   assert.ok(expected.tileIds.includes(58));
   assert.deepEqual(createStrategicDeposits(start.result.state), expected);
-  const adopted = applyRelease(start.result.state, { expectedRevision: start.result.state.revision, expectedFromReleaseId: start.result.state.releaseId, targetReleaseId: 'settlement-metal-learning-1', timestamp: start.input.command.timestamp });
-  assert.ok(adopted.ok, adopted.error);
-  assert.deepEqual(adopted.state.strategicDeposits, expected);
-  assert.deepEqual(adopted.state.cities[0]?.construction, start.result.state.cities[0]?.construction);
-  assert.ok(isWorldState(adopted.state));
+  assert.deepEqual(start.result.state.strategicDeposits, start.before.strategicDeposits);
+  assert.ok(isWorldState(JSON.parse(JSON.stringify(start.result.state))));
 });

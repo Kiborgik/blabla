@@ -6,18 +6,22 @@ import { isWorldState } from '../core/validation.ts';
 import { greatLibraryPrefix } from './fixtures/great-library-prefix.ts';
 import { replayCoastalStep } from './fixtures/coastal-prefix.ts';
 
-await test('two distinct civilizations legally finish Writing and operate their own learning cities', context => {
+await test('two distinct civilizations with synthetic Writing prerequisites pay for and operate their own learning cities', context => {
   const prefix = greatLibraryPrefix();
-  assert.equal(prefix.state.releaseId, 'settlement-metal-learning-1');
-  assert.ok(prefix.state.calendarMilestones.includes('rise-of-states'));
-  assert.ok(prefix.state.routes.filter(route => route.active).length >= 3);
+  assert.equal(prefix.initial.releaseId, 'settlement-wonders-1'); assert.equal(prefix.initial.revision, 0);
+  assert.deepEqual(prefix.state.calendarMilestones, prefix.initial.calendarMilestones);
+  assert.deepEqual(prefix.state.routes, []); assert.deepEqual(prefix.initial.routes, []);
   assert.equal(new Set(prefix.contenders.map(contender => contender.seat)).size, 2);
   for (const contender of prefix.contenders) {
     const civilization = prefix.state.civilizations.find(candidate => candidate.id === contender.seat);
     const city = prefix.state.cities.find(candidate => candidate.id === contender.cityId);
     assert.ok(civilization && city);
     assert.equal(city.civId, civilization.id);
-    assert.ok(civilization.era >= 1, 'The accepted Great library construction gate requires an actually reached era1');
+    assert.equal(civilization.era, 1);
+    assert.equal(prefix.initial.civilizations[contender.seat]?.era, 1);
+    assert.ok(prefix.initial.civilizations[contender.seat]?.technologies.includes('writing'));
+    assert.deepEqual(prefix.initial.cities.find(candidate => candidate.id === contender.cityId)?.buildings, []);
+    for (const project of ['campus', 'library']) assert.ok(prefix.steps.some(step => step.input.kind === 'action' && step.input.command.seat === contender.seat && step.input.command.action.type === 'build' && step.input.command.action.project === project));
     assert.ok(civilization.technologies.includes('writing'));
     assert.equal(civilization.researchTarget, '');
     assert.equal(city.construction?.active, null);
@@ -29,7 +33,7 @@ await test('two distinct civilizations legally finish Writing and operate their 
     assert.equal(city.buildingOperations?.library?.lastResult?.residents?.allocated, 3);
     assert.ok(civilization.resources.materials >= 50 && civilization.resources.credits >= 25);
   }
-  context.diagnostic(JSON.stringify({ basis: 'Legal deterministic engine prefix, not native play or future wonder eligibility', transitions: prefix.steps.length, revision: prefix.state.revision, round: prefix.state.round, contenders: prefix.contenders }));
+  context.diagnostic(JSON.stringify({ basis: 'Declared synthetic era, Writing and resources; actual paid Campus and Library construction and operation, not native play', transitions: prefix.steps.length, revision: prefix.state.revision, round: prefix.state.round, contenders: prefix.contenders }));
 });
 
 await test('every retained transition replays from detached initial JSON with canonical frames and immutable inputs', () => {
@@ -47,16 +51,18 @@ await test('every retained transition replays from detached initial JSON with ca
   assert.deepEqual(state, prefix.state);
 });
 
-await test('current release refuses Great library for both prepared cities without payment or future effects', () => {
-  const prefix = greatLibraryPrefix();
-  for (const contender of prefix.contenders) {
-    const before = structuredClone(prefix.state);
-    const action = { type: 'build', project: 'great-library', cityId: contender.cityId } as const;
-    assert.equal(legalActions(prefix.state, contender.seat, prefix.timestamp).some(option => option.action.type === 'build' && option.action.project === 'great-library'), false);
-    const refused = applyCommand(prefix.state, { seat: contender.seat, expectedRevision: prefix.state.revision, timestamp: prefix.timestamp, action });
+await test('fresh Wonders rules offer actual wonder commands while explicit fresh metal rules refuse without payment', () => {
+  const current = greatLibraryPrefix(); const historical = greatLibraryPrefix('settlement-metal-learning-1');
+  for (const contender of current.contenders) {
+    const option = legalActions(current.state, contender.seat, current.timestamp).find(candidate => candidate.action.type === 'build-wonder' && candidate.action.wonderId === 'great-library' && candidate.action.cityId === contender.cityId);
+    assert.ok(option?.action.type === 'build-wonder');
+    const before = structuredClone(historical.state);
+    assert.equal(legalActions(historical.state, contender.seat, historical.timestamp).some(candidate => candidate.action.type === 'build-wonder'), false);
+    const refused = applyCommand(historical.state, { seat: contender.seat, expectedRevision: historical.state.revision, timestamp: historical.timestamp, action: option.action });
     assert.equal(refused.ok, false); assert.deepEqual(refused.events, []);
-    assert.deepEqual(refused.state, before); assert.deepEqual(prefix.state, before);
-    assert.ok(!prefix.state.cities.some(city => city.buildings.includes('great-library') || (city.construction?.active && !('kind' in city.construction.active) && city.construction.active.buildingId === 'great-library')));
+    assert.deepEqual(refused.state, before); assert.deepEqual(historical.state, before);
+    assert.deepEqual(historical.state.wonders ?? {}, {});
+    assert.ok(historical.state.cities.every(city => (city.construction?.active ?? null) === null));
   }
 });
 

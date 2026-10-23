@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BUILDINGS, CONSTRUCTION_RULES, TECHNOLOGIES } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { GameAction, TransitionResult, WorldState } from '../core/types.ts';
 
@@ -52,24 +52,21 @@ function now(state: WorldState, extra = 10): number {
   return state.independentTurns.strategyTicks * 60 + extra;
 }
 
-let cached: WorldState | undefined;
-function legalPrefix(): WorldState {
-  if (cached) return structuredClone(cached);
-  let state = createWorld(1701, epoch);
-  for (const release of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1']) {
-    state = transition(state, value => applyRelease(value, { expectedRevision: value.revision, expectedFromReleaseId: value.releaseId, targetReleaseId: release, timestamp: epoch }));
-  }
+const cached = new Map<string, WorldState>();
+function legalPrefix(rulesId = 'settlement-operating-exchange-1'): WorldState {
+  const existing = cached.get(rulesId);
+  if (existing) return structuredClone(existing);
+  let state = createWorld(1701, epoch, rulesId);
   state = act(state, { type: 'research', technology: 'agriculture' }, 0);
   for (let count = 0; count < 10 && !civilization(state).technologies.includes('agriculture'); count++) state = beat(state);
   assert.ok(civilization(state).technologies.includes('agriculture'));
   assert.equal(civilization(state).researchTarget, '');
-  cached = state;
-  return structuredClone(cached);
+  cached.set(rulesId, state);
+  return structuredClone(state);
 }
 
 function released(): WorldState {
-  const state = legalPrefix();
-  return transition(state, value => applyRelease(value, { expectedRevision: value.revision, expectedFromReleaseId: value.releaseId, targetReleaseId: targetRelease, timestamp: timestamp(now(value)) }));
+  return legalPrefix(targetRelease);
 }
 
 function decisionWorld(): WorldState {
@@ -113,18 +110,6 @@ await test('historical control keeps research replacement and its original progr
   const replaced = act(state, { type: 'research', technology: 'water-management' }, now(state));
   assert.equal(civilization(replaced).researchTarget, 'water-management');
   assert.equal(civilization(replaced).researchProgress, 0);
-});
-
-await test('registered decisions successor preserves existing assets, research and history without retroactive construction', () => {
-  const state = legalPrefix();
-  const next = released();
-  assert.equal(next.releaseId, targetRelease);
-  assert.ok(next.unlockedFeatures.includes('recurring-decisions'));
-  assert.deepEqual(next.civilizations, state.civilizations);
-  assert.deepEqual(next.cities, state.cities);
-  assert.equal(next.round, state.round);
-  assert.equal(next.year, state.year);
-  assert.deepEqual(next.independentTurns, state.independentTurns);
 });
 
 await test('released decision capability refuses Hold while released research and construction decisions remain', () => {

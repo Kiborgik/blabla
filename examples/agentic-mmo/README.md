@@ -1,90 +1,56 @@
 # Agentic Civilizations
 
-A zero-player civilization simulation (ZPG) built through [BlaBla](https://github.com/Kiborgik/blabla). Five seeded, weighted finite-state civilizations and a procedural World Director inhabit the world without runtime language-model calls. Humans watch a Civilization-inspired map and use observational camera, inspection and layer controls.
+A zero-player civilization simulation built through [BlaBla](https://github.com/Kiborgik/blabla). Five seeded civilizations and a procedural World Director make legal engine decisions. Humans watch, inspect, move the camera and change display settings; there are no player faction orders or runtime language-model calls.
 
-Public spectator: https://agentic-civilizations.kibgames.chatgpt.site
+[Public spectator](https://agentic-civilizations.kibgames.chatgpt.site). Deployed content may lag the repository.
 
-## What exists now
+## NO MIGRATIONS BEFORE RELEASE
 
-The viewer defaults to a separate accelerated generated observatory: a browser Worker advances five civilizations and a procedural Director through authoritative engine commands. New worlds have coherent seeded terrain, separated viable starts and finite resource deposits. A compatible v2 checkpoint is saved in this browser when storage and coordination are available; otherwise a clearly labelled this-tab simulation never writes a shared checkpoint. The fresh Living world combines consented relief and seeded regional targets under one explicit content genesis and storage key. Its initial seed is chosen once under browser locking and persisted before Worker advancement. New genesis uses original culture-seeded place names assigned once from actual founding geography; existing saved names and histories are never regenerated. Naming version is part of the observation identity, not a reason to clear or rotate the existing checkpoint. The Living partnerships, preceding generated v2 and original v1 checkpoints remain untouched and selectable read-only, separate from the native shared archive. Older worlds are not silently upgraded, resumed under new rules or reset. The map-first interface includes narrow layouts, settlement inspection, light/dark/system themes, effect preferences, resource explanations, version polling and a changelog. Public shared-world reads never run the simulation or mutate storage. Protected host commands commit state, transitions and receipts atomically in D1; explicit activation and a supported external wake source are required for shared-host autonomy. An explicitly labelled sample remains available when the shared source cannot be loaded.
+Prioritize procedural content and the whole historical journey over pre-release save compatibility. New rules may start an explicitly fresh world. No browser, CLI or hosted operation upgrades an existing world in place. Do not delete external stored data. Same-version deterministic restart, atomic writes, paid effects and honest source labels remain required. Reconsider migrations after release; this does not remove unrelated database schema infrastructure.
 
-The shared deterministic engine supports settlement production, focus, research, building and Director events. Actual development agents have played the hosted world through protected commands. Agents use compact legal choices without waiting for animation. History distinguishes genuine development-agent decisions, built-in policies and contract probes. See [server/README.md](server/README.md) for hosted endpoints, enrollment and clock limitations, and [cli/README.md](cli/README.md) for local play.
+## Watch the world
 
-Compatible source increments add consent-based trade, independent tactical allowances, shared strategic production, two-item plans, pauseable input-consuming buildings, conserved frontier founding and exact city specialization. These capabilities become available only when their release is explicitly applied to a world. Shipping a viewer or deploying code does not silently enable them. The fresh authoritative read on 2026-10-22 found the shared world on settlement-local-power-1 at revision 2790; this is a historical checkpoint, not evidence of continuous operation. Always re-read before a live claim.
+The default observatory runs a separate accelerated generated world in a browser Worker. Its seed is chosen once and persisted before advancement when coordinated browser storage is available. It pauses while hidden. A clearly labeled this-tab fallback is not a durable or shared world. Read-only historical sources and the native hosted archive are separate; viewing them does not advance them.
 
-The regular clock accounts for ten years per six-minute interval. An external caller explicitly realizes due ticks; a late caller realizes them late. Ordinary turns, spectator reads and routine Director events do not add calendar years. Deliberate hybrid history advances and compatible release application have explicit causes and exactly-once receipts without changing baseline clock accounting. The hosted history already records an explained farming advance separately from regular ticks.
+Current gameplay includes:
 
-The Living partnerships release adds autonomous stewardship of useful paid exchanges: civilizations consider local needs and soft priorities, negotiate affordable shared repairs, protect promised contributions, recover urgent routes alone when needed, and reconsider persistently unsupported suppliers. Agreement is not shipment, and a repair promise is not completed work. Six qualified regional events add cultivated harvests, forest fires, coastal storms, trade fairs, industrial accidents and conserved internal migration. Eligibility follows actual local farms, forests, coasts, delivered trade, current operations and safe housing; causes and finite paid consequences are recorded. Earlier releases retain their original Director choices and policy path.
+- Seeded geography, viable starts, culture-shaped founding names and soft strategic temperaments.
+- Paid settlement growth, farming, resident-limited production, household Food demand and shore fisheries.
+- Research, civic commitments, governments, policies, local industry, power and finite resource deposits.
+- Consented trade, funded route repairs, voluntary conserved Food relief and paid Knowledge compacts.
+- Qualified regional events with exact local targets and recorded consequences.
+- Earned interplanetary transport and supplied habitats as a late endpoint, not the purpose of every earlier era.
 
-Compact, detail-dependent town compositions emphasize actual installed specialization and original color-independent faction crests without filling neighboring terrain with repeated oversized buildings. Chronicle cards show recorded causes and results; all active construction towns remain reachable through inspection. Those cues explain accepted history, not future intentions or human faction commands.
+Knowledge compacts require explicit consent, two fresh qualifying trade deliveries and operated institutions. They buy bounded research work, not free discoveries. Inspection separates promises, actual payments, lessons, production and failures. Full event details remain available.
 
-The main viewport offers observational Earth and Mars bodies with separate source/genesis-qualified cameras and selection. Earth settlement and district forms follow local installed assets; active production cues require a current operation, not a shared era label. Mars is an original illustrative red-terrain diorama of recorded flights, paid habitat work, residents and delivered reserves, not new simulated geography, ownership or local production. The Journey history remains available. Switching bodies never advances a completed world. Source and focused rendering checks do not establish matched-camera visual acceptance or WebGL/touch performance.
+Flat and Three renderers share factual visual models. Towns, worked sites and routes represent installed or committed state. Mars terrain is illustrative context for recorded missions and colonies, not an additional simulated economy. Broader early/middle-history variety, balance and visual refinement remain ongoing work; catalogue ideas are not implemented mechanics.
 
-## Procedural direction
+## Run locally
 
-The engine remains authoritative. Versioned behavior profiles choose legal actions with seeded randomness, required-lane fairness and persistent strategic state. Development agents continue the complete BlaBla workflow; they no longer act as the runtime civilizations. Existing model-agent history keeps its true attribution.
+From this directory, with Node 24:
 
-The local observatory is a distinct accelerated procedural run. It runs while the page is open and is never represented as the shared native world or an unattended server. World identity records its origin, seed and clock epoch independently of policy version. Viewing a different source does not command its civilizations, regenerate the previous world or migrate its historical decisions. Hosted autonomy requires explicit protected activation and a verified supported wake source; source code alone does not establish scheduling.
+```sh
+npm ci
+npm run dev
+npm run typecheck
+npm run typecheck:web
+npm run build
+```
 
-Civilization-like look and feel is a hard acceptance requirement: a legible, inhabited, map-first world rather than a developer dashboard. Humans only observe.
+`build` creates the client plus a Worker with embedded assets and verifies their provenance. `build:web` builds only the browser client. Runtime checkpoints, build output and local evidence are ignored by Git.
 
-## Where the world goes
+See [CLI usage](cli/README.md) for a persistent headless world and [server usage](server/README.md) for authenticated hosting. Hosted simulation requires explicit activation and an external wake source; a page visit or deployment is not a scheduler.
 
-Development adds real mechanics to an inhabited world. Fast tactical choices and slower strategic commitments apply across production, trade, research, politics, culture and conflict. Calendar time, capability availability and rendering are distinct. The interplanetary source release connects earned industry and planetary research to staffed, powered launch complexes, prepaid transport, delayed conserved settlers and cargo, paid habitat construction and sustained colony-only supplies. Launching is not winning; shortages can kill residents and paid replacement flights can recover a colony. For that preceding interplanetary release, a recorded default-seed campaign executed the same local engine used by the Worker and verified the natural journey, exact restart and a separately injected missed-window recovery. This historical result is not a current living-partnerships release outcome claim. That is not a claim that every seed, browser, hosted schedule or rendered age has been accepted. Wider political, cultural, economic and military paths, richer per-age visual evolution and broad balance remain open.
+## Architecture and development
 
-The current content transition preserves two prior local generations read-only and starts a distinct content genesis. General succession into newly seeded named worlds after victory or collapse, with a durable multi-run archive, remains future work; it is not simulated by ticking a terminal world or silently replacing its history. Fun and balance are learned through real play; they do not become an indefinite launch gate.
+[DESIGN.md](DESIGN.md) describes the current state and execution boundaries. [VISUAL_DIRECTION.md](VISUAL_DIRECTION.md) contains the map-first art direction. `mission.bla`, `goals.bla`, `system.bla` and `process.bla` hold the registered intent; planned contracts remain draft until actually adapted.
 
-See [DESIGN.md](DESIGN.md), the adaptive [ROADMAP.md](ROADMAP.md), [VISUAL_DIRECTION.md](VISUAL_DIRECTION.md) and executable project intent in mission.bla, goals.bla, system.bla and process.bla. DRY, SOLID and DATA DRIVEN are hard requirements backed by named structural checks and independent semantic review.
+Run BlaBla from repository source, not an installed binary:
 
-## Development and verification
+```sh
+cargo run --locked --quiet --bin blabla -- --project examples/agentic-mmo status
+```
 
-Use Node 24 and run `npm ci` here. `npm run verify` runs strict TypeScript, strict Vite Plus lint, all focused tests and the hosted build. `npm run build:web` builds only the browser scaffold; `npm run build` embeds the browser assets in the Worker and verifies the artifact and generated migrations. Runtime data and built assets are ignored by Git.
+Accept a scoped task before edits. Batch focused tests and independent review after substantial features, then run the declared integration boundary; do not repeat unchanged suites for small edits or administrative freshness. Read actual child exits and complete logs. The canonical adapter covers its registered scenarios, not every possible procedural outcome. Synthetic prerequisites, autonomous campaigns, browser acceptance and deployed behavior are distinct evidence.
 
-Run BlaBla from repository source with `cargo run --locked --bin blabla -- --project examples/agentic-mmo …`. Accept a bounded task before editing, write only its disjoint scope, record the exact check and complete log, challenge, review and use canonical finish. Only the orchestrator owns Git and integration. All six current development streams use actual Astra/xhigh with primary specialties and explicit scoped cross-role handoffs. Historical work retains its actual authorship.
-
-Focused source checks and independent reviews accompany completed meaningful features, not every small edit. An hourly commit-readiness inspection does not force gates or commits. The registered behavior adapter retains a historical sequential fixture and adds isolated real-engine probes as newer contracts become executable; those probes are not model-agent play. Future outcome contracts remain draft. Actual cloud-browser evidence covers the fallback map, approximately 500-pixel narrow layouts, desktop settings and version reload. Smaller phone widths, WebGL rendering and physical touch still need suitable-browser evidence.
-
-
-### Seeded regional locality
-
-The additive `settlement-regional-targets-1` release chooses among eligible local towns and attachments using the world seed and successful event occurrence. It does not change regional costs, damage magnitudes, cooldowns or the Director's existing family/civilization odds. Commands retain the exact selected town, forest, route, building or migration destination; a stale selection is refused rather than silently moved. Immediate typed receipts describe the actual mutation, separately from any later economy beat. Older releases retain their original first-qualified semantics and action shape.
-
-Source support and synthetic command/host/CLI checks do not establish a naturally exercised campaign, current browser acceptance or hosted activation. Fresh local release activation and preservation of previous saves are integrated explicitly, not inferred from catalogue registration.
-
-### Consented relief
-
-A donor may offer 6–36 Food over an existing consenting land corridor when real recipient need and unpromised donor surplus support it. The named recipient explicitly accepts or declines. The exact amount is fixed at proposal; ordinary trade, economy and public projects happen before due funding is checked. A due charter transfers the full conserved civilization Food and consumes 1 Energy, or records zero-effect failure. Promises are not inventory, there is no invented caravan, and either consenting party may withdraw without a betrayal penalty. Soft priorities and current needs drive the autonomous policy; recipient recovery is a choice consideration, not an arbitrary due-time deficit requirement.
-
-The combined source release and browser-local genesis are not shared-host activation. Synthetic feature checks, an actual autonomous campaign and browser observations are distinct evidence; current source support does not assert that all outcomes occurred naturally.
-
-### Conditional aid and the natural-content experiment
-
-Consented relief is available only when real recipient need and unpromised donor surplus qualify; healthy civilizations are not forced to donate. The seed 73 natural-content experiment reached paid Mars but produced no relief offers or deliveries. Meaningful food-security pressure and naturally observed aid remain unfinished product work, separate from the implemented exact-target events, preserved-world observation and conserved conditional transfer rules.
-
-Run the retained experiment explicitly with `node --test tests/relief-campaign.experiment.ts`. Its original natural-aid assertions are unchanged and currently fail; it is not part of the default regression glob. Source checks and synthetic consent/restart scenarios do not turn that failed natural-outcome experiment into a pass.
-
-## Household Food budget
-
-This release is enabled only for a distinct browser-local world. The hosted v2 controller refuses Food-policy activation and a hosted release crossing into the new policy before any world, autonomy, history or receipt write. Existing hosted memories and provenance are not migrated or reset; a future hosted rollout requires an explicit compatible lifecycle.
-
-The additive `settlement-food-budget-1` rules separate Earth Food from infrastructure amplification and require 1.25 Food per resident each strategic season. Geography, wellbeing, damage, focus and genuinely staffed facilities determine food production; other resources, paid recipes, growth costs and Mars cargo/upkeep retain their own rules. A town's latest household receipt distinguishes Food made, required meals, actual Food spent and growth payment. Before/after stocks belong to its civilization at that town's resolution, not an invented town pantry or a full-season balance.
-
-The fresh Food world has a separate genesis and checkpoint. Previous living, partnerships, generated and first-local worlds remain read-only under their original rules and names. Versioned controller estimates use the same upkeep and staffed-production authority; historical relief proposal facts retain their original rule, and every accepted charter still transfers its exact agreed quantity or truthfully ends without delivery.
-
-This is a bounded resilience prototype, not a promise of aid in every world. Existing natural-aid failure evidence remains intact. Earned surpluses can still accumulate; no storage cap, spoilage, artificial famine or compulsory gift is added. New natural cooperation, recovery and paid Mars require their own actual campaign evidence.
-
-## Seeded strategic temperaments
-
-Newly created local Food worlds can record `strategic-temperaments-v1` and use `weighted-civilizations-v4-temperaments`. A seeded allocation gives each civilization one of five soft strategic archetypes, with a compact, measured or outward posture. Funded opportunities and current household needs determine eligible phases; preferences do not grant resources, override consent or make unavailable actions legal. These choices apply throughout settlement growth, exchange, civic development and recovery, not only to late spaceflight.
-
-Existing Food worlds keep their v3 policy, names, checkpoint and exact history. The browser uses the same Food storage key and never rotates or resets a saved world to expose a new personality. Explicit deterministic helpers retain v3 unless a caller requests the new genesis marker. New v4 choices inherit the accepted Food-v3 random draw family, while recording their distinct policy and profile identity. Hosted activation remains unsupported.
-
-The whole historical journey remains unfinished: early and middle ages need further meaningful autonomous alternatives, rivalries and consequences. Existing farming, towns, trade and industry are implemented systems, not evidence that every era already has rich content; planned mechanics remain planned until delivered.
-
-## Maintained shore fisheries
-
-The additive `settlement-shore-fisheries-1` release adds an early Food alternative after Water management. A Shore fishery belongs to one exact acquired coastal land tile within three hexes of its coastal town. Construction costs 8 Materials and 4 Credits and requires 4 paid construction work. Completion alone makes no Food. A later season needs one remaining local resident and 1 Material from the civilization's opening supplies to produce 3 base Food under the actual Food productivity rule. Blocked or paused work pays nothing and produces nothing; people remain in their town. Boats, fish stocks and ecological depletion are not simulated.
-
-An active saved local Food-family world may receive this registered compatible release under its existing writer lock before its next simulation step. The release checkpoint must be saved successfully first. Its seed, genesis, names, v3/v4 policy, controller memories, existing commitments and storage key are unchanged. Inspection, historical sources, hosted worlds and completed worlds do not apply the transition. Corrupt or conflicting records remain preserved rather than being reset. The one release event uses the normal 96-event retention window: at capacity it evicts the oldest retained event, without rewriting the remaining events or their counts.
-
-Work inspection and the research/building tree separate the construction payment, opening operating recipe, assigned residents and actual recorded payment/output. An installed net frame is equipment, not evidence of a catch. New legal opportunities do not guarantee that an autonomous civilization will build a fishery or avoid a shortage; conditional mechanics, source activation, actual uptake and browser pixels are separate evidence.
+Keep only useful code, assets, contracts, tests and concise usage/architecture documentation in Git. Internal handbacks, research packets, raw logs and experiment reports belong in ignored task scratch. Full development history is in Git, not the runtime changelog.

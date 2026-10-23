@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, createWorld, observe } from '../core/engine.ts';
+import { applyCommand, createWorld, observe } from '../core/engine.ts';
 import { observeCompactTrade } from '../core/observation.ts';
 import type { WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -20,12 +20,7 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 function syntheticWorld(count = 5): WorldState {
-  let state = createWorld(17, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+  const state = createWorld(17, epoch, 'settlement-endpoints-1');
   const capitals = structuredClone(state.cities);
   const occupied = new Set(state.cities.map(city => city.tileId));
   const sites = state.tiles.filter(tile => !occupied.has(tile.id) && tile.owner === null && tile.terrain !== 'ocean' && tile.terrain !== 'mountain');
@@ -47,7 +42,7 @@ class ReadDatabase implements D1Database {
   writes = 0;
   constructor(state: WorldState) {
     this.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8'));
-    this.sql.prepare('INSERT INTO world_state (world_id, revision, initial_json, state_json, updated_at) VALUES (?, ?, ?, ?, ?)').run('main', state.revision, JSON.stringify(createWorld(17, epoch)), JSON.stringify(state), timestamp);
+    this.sql.prepare('INSERT INTO world_state (world_id, revision, initial_json, state_json, updated_at) VALUES (?, ?, ?, ?, ?)').run('main', state.revision, JSON.stringify(state), JSON.stringify(state), timestamp);
   }
   prepare(sql: string): D1Statement {
     let values: SqlValue[] = [];

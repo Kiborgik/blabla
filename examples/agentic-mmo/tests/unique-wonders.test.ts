@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { isDeepStrictEqual } from 'node:util';
 import { applyCommand, catchUpStrategy, legalActions, observe } from '../core/engine.ts';
-import { RELEASES } from '../core/release.ts';
 import { isWorldState } from '../core/validation.ts';
 import { isGameAction } from '../core/planning.ts';
 import { isWonderOrder } from '../core/simulation/wonders.ts';
@@ -34,12 +33,8 @@ export function uniqueWonderJourney() {
   };
   const beat = (): void => commit({ kind: 'strategy', timestamp: coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60) });
   const until = (condition: () => boolean): void => { for (let count = 0; count < 80 && !condition(); count++) beat(); assert.ok(condition()); };
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-manufacturing-1', timestamp: time() } });
-  const target = RELEASES.find(release => release.compatibleFrom.includes(state.releaseId) && release.featureIds.includes('unique-wonders'));
-  assert.ok(target, 'A compatible unique-wonders release must expose the real Great library path');
-  const beforeRelease = structuredClone(state);
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: target.id, timestamp: time() } });
-  return { previous, beforeRelease, steps, get state() { return state; }, time, act, beat, until };
+  const prepared = structuredClone(state);
+  return { previous, prepared, steps, get state() { return state; }, time, act, beat, until };
 }
 function chooseWonder(journey: ReturnType<typeof uniqueWonderJourney>, seat: number): Extract<GameAction, { type: 'build-wonder' }> {
   const selected = legalActions(journey.state, seat, journey.time()).find(candidate => candidate.action.type === 'build-wonder');
@@ -54,25 +49,6 @@ export function uniqueWonderCompletionJourney() {
   journey.until(() => !!record(journey.state));
   return { journey, contested, completed: structuredClone(journey.state) };
 }
-
-await test('unique wonder historical prefix retains era-one Writing and refuses future exact actions without effects', () => {
-  const prefix = greatLibraryPrefix();
-  for (const contender of prefix.contenders) {
-    const civ = prefix.state.civilizations.find(item => item.id === contender.seat); assert.ok(civ);
-    assert.ok(civ.era >= 1 && civ.technologies.includes('writing')); assert.ok(civ.resources.materials >= 50 && civ.resources.credits >= 25);
-  }
-  const before = structuredClone(prefix.state);
-  const result = applyCommand(prefix.state, { seat: 0, expectedRevision: prefix.state.revision, timestamp: prefix.timestamp, action: typed({ type: 'build-wonder', wonderId: 'great-library', cityId: 'city-0', tileId: 56 }) });
-  assert.equal(result.ok, false); assert.deepEqual(result.state, before); assert.deepEqual(result.events, []);
-});
-
-await test('unique wonder compatible adoption preserves stocks sites history and exposes actual exact starts', () => {
-  const journey = uniqueWonderJourney();
-  assert.deepEqual(journey.state.tiles, journey.beforeRelease.tiles);
-  assert.deepEqual(journey.state.civilizations, journey.beforeRelease.civilizations);
-  assert.deepEqual(journey.state.cities, journey.beforeRelease.cities);
-  assert.ok(chooseWonder(journey, 0)); assert.ok(chooseWonder(journey, 1));
-});
 
 await test('unique wonder contender start reserves one exact site and pays fifty materials twenty-five credits once', () => {
   const journey = uniqueWonderJourney(); const action = chooseWonder(journey, 0);
@@ -308,7 +284,7 @@ await test('unique wonder reservations and completed sites block other exact con
     const result = applyCommand(state, { seat: other.civId, expectedRevision: state.revision, timestamp: coastalPrefixTime(Math.max((state.independentTurns?.strategyTicks ?? 0) * 60 + 50, ((state.independentTurns?.lastActionWindow[other.civId] ?? -1) + 1) * 10)), action: { type: 'build', cityId: other.id, project: 'campus', tileId: won.completion.tileId } });
     assert.equal(result.ok, false); assert.deepEqual(result.state, before); assert.deepEqual(result.events, []);
   }
-  assert.deepEqual(completed.tiles, journey.beforeRelease.tiles);
+  assert.deepEqual(completed.tiles, journey.prepared.tiles);
 });
 
 await test('unique wonder synthetic ineligible era and unreleased active research cannot consume a retained charge', () => {

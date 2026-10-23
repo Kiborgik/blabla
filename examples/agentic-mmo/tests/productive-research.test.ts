@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
 import { TECHNOLOGIES } from '../core/content.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { TransitionResult, WorldState } from '../core/types.ts';
@@ -11,11 +11,8 @@ function civ(state: WorldState) { const value = state.civilizations[0]; assert.o
 function accepted(result: TransitionResult): WorldState { assert.ok(result.ok, result.error); assert.ok(isWorldState(result.state)); return result.state; }
 function nextBeat(state: WorldState): string { assert.ok(state.independentTurns); return coastalPrefixTime((state.independentTurns.strategyTicks + 1) * 60); }
 function actionTime(state: WorldState): string { assert.ok(state.independentTurns); return coastalPrefixTime(state.independentTurns.strategyTicks * 60 + 20); }
-function adopt(state: WorldState, targetReleaseId: string, timestamp = actionTime(state)): TransitionResult { return applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp }); }
 function prepared(productive = true): WorldState {
-  let state = coastalDeparturePrefix().state;
-  for (const release of ['settlement-residents-1', 'settlement-coastal-1']) state = accepted(adopt(state, release));
-  return productive ? accepted(adopt(state, 'settlement-research-rate-1')) : state;
+  return coastalDeparturePrefix(productive ? 'settlement-research-rate-1' : 'settlement-coastal-1').state;
 }
 function start(state: WorldState): WorldState {
   const before = JSON.stringify(state);
@@ -135,25 +132,7 @@ await test('unmodified legal journey retains intermediate progress, completion a
   assert.equal(completions, 1);
   assert.equal(civ(state).lastResearchCompletion?.technologyId, 'civic-institutions');
   assert.ok(legalActions(state, 0, actionTime(state)).some(value => value.action.type === 'research' && value.action.technology === 'navigation'));
-  context.diagnostic(JSON.stringify({ fixture: 'entirely legal release/start/beat journey without resource or technology edits', progress }));
-});
-
-await test('caught-up adoption preserves active progress and stock; overdue adoption refuses atomically', () => {
-  const started = start(prepared(false));
-  const progressed = advance(started).state;
-  assert.equal(civ(progressed).researchTarget, 'civic-institutions');
-  assert.ok(civ(progressed).researchProgress > 0);
-  const before = JSON.stringify(progressed);
-  const refused = adopt(progressed, 'settlement-research-rate-1', nextBeat(progressed));
-  assert.equal(refused.ok, false);
-  assert.match(refused.error ?? '', /strategy|strategic|catch/i);
-  assert.equal(JSON.stringify(refused.state), before);
-  assert.deepEqual(refused.events, []);
-  assert.equal(JSON.stringify(progressed), before);
-  const adopted = accepted(adopt(progressed, 'settlement-research-rate-1'));
-  assert.deepEqual(adopted.civilizations, progressed.civilizations);
-  assert.deepEqual(adopted.cities, progressed.cities);
-  assert.deepEqual(adopted.independentTurns, progressed.independentTurns);
+  context.diagnostic(JSON.stringify({ fixture: 'fresh selected-rule start/beat journey without resource or technology edits', progress }));
 });
 
 await test('idle and pre-start beats retain science without retroactive investment', () => {
@@ -169,7 +148,7 @@ await test('idle and pre-start beats retain science without retroactive investme
   assert.equal(civ(advance(started).state).researchProgress, idleProduction(started));
 });
 
-await test('old coastal release retains bank-funded completion and exact JSON replay', () => {
+await test('fresh coastal rules retain bank-funded completion and exact JSON replay', () => {
   const state = prepared(false);
   civ(state).resources.science = 1000;
   const started = start(state);

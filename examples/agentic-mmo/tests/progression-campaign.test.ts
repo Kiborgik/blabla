@@ -5,9 +5,8 @@ import { civilizationBehaviorProfile } from '../core/behavior-profiles.ts';
 import { deriveProgressionPlan, progressionWeight } from '../core/behavior-progression.ts';
 import { chooseCivilizationBehavior, createBehaviorMemory } from '../core/behaviors.ts';
 import { CIVICS, ECONOMY_RULES, IMPROVEMENTS, RESOURCE_IDS, SPACEFLIGHT_RULES, TECHNOLOGIES, TRADE_RECIPES, TURN_RULES, VICTORY_RULES } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
-import { RELEASES } from '../core/release.ts';
 import { sameAction } from '../core/simulation/choices.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
 import { improvementSiteBlock } from '../core/simulation/improvements.ts';
@@ -20,11 +19,7 @@ const epoch = '2000-01-01T00:00:00.000Z';
 const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1000).toISOString();
 
 function syntheticWorld(): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const release of RELEASES.slice(1)) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: epoch });
-    assert.ok(result.ok, result.error); state = result.state;
-  }
+  let state = createWorld(1701, epoch, 'settlement-knowledge-compacts-1');
   for (const actor of state.civilizations) {
     actor.technologies = TECHNOLOGIES.map(technology => technology.id);
     actor.resources = { food: 1000, materials: 1000, energy: 1000, credits: 1000, science: 0, culture: 1000 };

@@ -7,27 +7,15 @@ state available_stock_respected: bool
 state remaining_cost_respected: bool
 state bank_does_not_accelerate: bool
 state old_replay_preserved: bool
-state adoption_caught_up: bool
-state adoption_preserves_state: bool
 state completion_exact_once: bool
 state next_choice_visible: bool
 state prestart_beats_excluded: bool
-state science_bank_preserved: bool
-state adoption_eligible: bool
-state adoption_succeeded: bool
-state refusal_unchanged: bool
 
 action resolve_research_beat()
-action adopt_productive_research()
 
 when resolve_research_beat {
     expect "productive-research-obeys-actual-beat-capacity": not before.new_rule or (after.generated_budget_respected and after.available_stock_respected and after.remaining_cost_respected and after.bank_does_not_accelerate)
     expect "eligible-positive-research-makes-progress": not (before.eligible and before.positive_budget_and_remaining) or after.advanced
     expect "completion-and-next-choice-remain-exact": after.completion_exact_once and after.next_choice_visible
     expect "old-history-and-prestart-order-remain-valid": after.old_replay_preserved and after.prestart_beats_excluded
-}
-when adopt_productive_research {
-    expect "adoption-preserves-bank-progress-and-history": not after.adoption_succeeded or (after.adoption_caught_up and after.adoption_preserves_state and after.science_bank_preserved)
-    expect "eligible-caught-up-adoption-succeeds": not before.adoption_eligible or after.adoption_succeeded
-    expect "overdue-or-invalid-adoption-has-no-effects": before.adoption_eligible or (not after.adoption_succeeded and after.refusal_unchanged)
 }

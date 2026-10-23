@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyCommand, applyRelease, createWorld, observe } from '../core/engine.ts';
+import { applyCommand, createWorld, observe } from '../core/engine.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { GameAction, WorldState } from '../core/types.ts';
 
@@ -9,16 +9,7 @@ const later = '2026-10-16T00:00:10.000Z';
 type EndpointAction = Extract<GameAction, { type: 'propose-trade' }> & { sourceCityId: string; recipientCityId: string };
 
 function released(endpoints: boolean): WorldState {
-  let state = createWorld(17, epoch);
-  const releases = ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1'];
-  if (endpoints) releases.push('settlement-endpoints-1');
-  for (const targetReleaseId of releases) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, `${targetReleaseId}: ${result.error}`);
-    state = result.state;
-  }
-  assert.ok(isWorldState(state));
-  return state;
+  return createWorld(17, epoch, endpoints ? 'settlement-endpoints-1' : 'settlement-charters-1');
 }
 
 function syntheticCities(count: number, endpoints = true): WorldState {
@@ -118,7 +109,7 @@ await test('compact town facts expose canonical terrain, deposit and base vector
 await test('current proposal recipes expose all canonical obligation vectors once and exclude unreleased recipes', () => {
   const state = syntheticCities(10);
   const original = structuredClone(TRADE_RECIPES);
-  const first = TRADE_RECIPES[0];
+  const first = TRADE_RECIPES.find(candidate => candidate.id === 'harvest-for-materials');
   assert.ok(first);
   TRADE_RECIPES.push({ ...structuredClone(first), id: 'second-test-recipe', terms: { ...structuredClone(first.terms), recipeId: 'second-test-recipe' } });
   TRADE_RECIPES.push({ ...structuredClone(first), id: 'unreleased-test-recipe', requiredFeatures: ['not-released'], terms: { ...structuredClone(first.terms), recipeId: 'unreleased-test-recipe' } });
@@ -144,7 +135,7 @@ await test('pending and accepted consent snapshots remain authoritative after is
   assert.ok(offer);
   const accepted = applyCommand(proposed.state, { seat: 1, action: { type: 'respond-trade', offerId: offer.id, accept: true }, expectedRevision: proposed.state.revision, timestamp: epoch });
   assert.equal(accepted.ok, true, accepted.error);
-  const recipe = TRADE_RECIPES[0];
+  const recipe = TRADE_RECIPES.find(candidate => candidate.id === offer.terms.recipeId);
   assert.ok(recipe);
   const terms = structuredClone(recipe.terms);
   recipe.terms.proposerCargo.food = 999;
@@ -200,12 +191,7 @@ await test('two-item trade intention retains exact context and derived invalidat
 });
 
 await test('historical unpaired proposals keep exact actions and derive gated first-city site facts without retroactive terrain output', () => {
-  const initial = createWorld(17, epoch);
-  const upgraded = applyRelease(initial, { expectedRevision: initial.revision, expectedFromReleaseId: initial.releaseId, targetReleaseId: 'settlement-foundations-2', timestamp: epoch });
-  assert.equal(upgraded.ok, true, upgraded.error);
-  const traded = applyRelease(upgraded.state, { expectedRevision: upgraded.state.revision, expectedFromReleaseId: upgraded.state.releaseId, targetReleaseId: 'settlement-trade-1', timestamp: epoch });
-  assert.equal(traded.ok, true, traded.error);
-  const state = traded.state;
+  const state = createWorld(17, epoch, 'settlement-trade-1');
   assert.equal(state.unlockedFeatures.includes('terrain-production'), false);
   const full = observe(state, 0, epoch);
   const compact = observeCompactTrade(state, 0, epoch);

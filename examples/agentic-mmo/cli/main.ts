@@ -25,6 +25,7 @@ function numberOption(options: Map<string, string>, name: string): number | unde
 export function main(argv = process.argv.slice(2)): void {
   try {
     const operation = argv[0];
+    if (operation === 'release-apply') throw new ProtocolError('pre_release_migration_disabled: no world/save migrations before release; start a fresh current-version world');
     if (operation === undefined || operation === 'serve') {
       if (argv.length > 1) throw new ProtocolError('serve takes no options; state is stored in the current directory');
       new GameProtocol().serve();
@@ -32,20 +33,20 @@ export function main(argv = process.argv.slice(2)): void {
     }
     const options = flags(argv.slice(1));
     const allowed: Record<string, string[]> = {
-      init: ['--seed', '--clock-epoch', '--state'], observe: ['--seat', '--at', '--state', '--observation-format'], action: ['--seat', '--revision', '--choice', '--action', '--plan', '--at', '--model', '--id', '--state'], replay: ['--out', '--state'],
+      init: ['--seed', '--clock-epoch', '--rules', '--state'], observe: ['--seat', '--at', '--state', '--observation-format'], action: ['--seat', '--revision', '--choice', '--action', '--plan', '--at', '--model', '--id', '--state'], replay: ['--out', '--state'],
       tick: ['--revision', '--kind', '--interval', '--at', '--event', '--target', '--regional', '--model', '--state'],
       catchup: ['--revision', '--at', '--id', '--model', '--state'],
       'strategy-catchup': ['--revision', '--at', '--id', '--model', '--state'],
       'history-advance': ['--revision', '--cause-kind', '--cause-id', '--reason', '--years', '--at', '--id', '--model', '--state'],
-      'release-apply': ['--revision', '--from', '--to', '--at', '--id', '--model', '--state'],
     };
-    if (!allowed[operation]) throw new ProtocolError('commands: init, observe, action, tick, catchup, strategy-catchup, history-advance, release-apply, replay, serve');
+    if (!allowed[operation]) throw new ProtocolError('commands: init, observe, action, tick, catchup, strategy-catchup, history-advance, replay, serve');
     for (const name of options.keys()) if (!allowed[operation]?.includes(name)) throw new ProtocolError(`unknown option ${name}`);
     const store = new GameStore(options.get('--state'));
     const request: Record<string, unknown> = { op: operation };
     if (operation === 'init') {
       request.seed = numberOption(options, '--seed') ?? 17;
       request.clockEpoch = options.get('--clock-epoch');
+      request.registeredRulesId = options.get('--rules');
     }
     if (operation === 'observe') { request.seat = numberOption(options, '--seat'); request.timestamp = options.get('--at'); request.observationFormat = options.get('--observation-format'); }
     if (operation === 'action') {
@@ -85,20 +86,14 @@ export function main(argv = process.argv.slice(2)): void {
         }
       }
     }
-    if (operation === 'history-advance' || operation === 'release-apply') {
+    if (operation === 'history-advance') {
       request.expectedRevision = numberOption(options, '--revision');
       request.model = options.get('--model');
       request.commandId = options.get('--id');
-      if (operation === 'history-advance') {
-        request.cause = { kind: options.get('--cause-kind'), id: options.get('--cause-id') };
-        request.reason = options.get('--reason');
-        request.deltaYears = numberOption(options, '--years');
-        request.timestamp = options.get('--at');
-      } else {
-        request.timestamp = options.get('--at');
-        request.expectedFromReleaseId = options.get('--from');
-        request.targetReleaseId = options.get('--to');
-      }
+      request.cause = { kind: options.get('--cause-kind'), id: options.get('--cause-id') };
+      request.reason = options.get('--reason');
+      request.deltaYears = numberOption(options, '--years');
+      request.timestamp = options.get('--at');
     }
     const result = new GameProtocol(store).handle(request);
     const output = options.get('--out');

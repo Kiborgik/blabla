@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { RESOURCE_IDS, TRADE_RECIPES } from '../core/content.ts';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions, observe } from '../core/engine.ts';
 import { observeCompactTrade } from '../core/observation.ts';
 import { resolveTrade } from '../core/simulation/trade.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -13,21 +13,12 @@ const recipeId = 'energy-for-materials';
 const releaseId = 'settlement-operating-exchange-1';
 
 function landWorld(): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+  let state = createWorld(1701, epoch, 'settlement-land-transport-1');
   return state;
 }
 
 function released(): WorldState {
-  const state = landWorld();
-  const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: releaseId, timestamp: epoch });
-  assert.equal(result.ok, true, result.error);
-  assert.ok(isWorldState(result.state));
-  return result.state;
+  return createWorld(1701, epoch, releaseId);
 }
 
 function action(state: WorldState, proposer = 1, recipient = 4, recipe = recipeId): GameAction {
@@ -223,19 +214,16 @@ await test('isolated opening-stock shortage stays blocked on delivery beat, then
   context.diagnostic(JSON.stringify({ source: 'synthetic scarce energy1 and damage50 applied after legal research/build/consent; not a legal depletion journey', due, deliveredOpeningNext: resources(delivered, 4).energy, stoppedOpeningNext: resources(control, 4).energy, actualNextKiln: receipt }));
 });
 
-await test('release preserves old pending and accepted food terms and switching requires explicit stop and fresh consent', () => {
-  let state = landWorld();
+await test('current pending and accepted food terms require explicit stop and fresh consent before switching', () => {
+  let state = released();
   state = act(state, 2, action(state, 2, 3, 'harvest-for-materials'));
   const first = pending(state);
   state = act(state, 3, { type: 'respond-trade', offerId: first.id, accept: true });
   state = act(state, 1, action(state, 1, 4, 'harvest-for-materials'));
   const oldOffer = structuredClone(pending(state));
   const oldRoutes = structuredClone(state.routes);
-  const upgraded = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: releaseId, timestamp: epoch });
-  assert.equal(upgraded.ok, true, upgraded.error);
-  assert.deepEqual(upgraded.state.routes, oldRoutes);
-  assert.deepEqual(upgraded.state.tradeOffers, state.tradeOffers);
-  state = act(upgraded.state, 4, { type: 'respond-trade', offerId: oldOffer.id, accept: true });
+  assert.deepEqual(state.routes, oldRoutes);
+  state = act(state, 4, { type: 'respond-trade', offerId: oldOffer.id, accept: true });
   const foodRoute = state.routes.find(route => route.agreement?.offerId === oldOffer.id);
   assert.ok(foodRoute?.agreement);
   assert.deepEqual(foodRoute.agreement.terms, oldOffer.terms);

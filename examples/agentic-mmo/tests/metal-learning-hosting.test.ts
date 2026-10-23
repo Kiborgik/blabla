@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { seedHostedWorld } from './fixtures/current-world.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy } from '../core/engine.ts';
 import { RESOURCE_IDS } from '../core/content.ts';
 import type { GameAction, WorldState, StrategicExtractionResult, BuildingOperationResult } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -47,15 +48,14 @@ class Fixture {
   constructor() { this.database.sql.exec(readFileSync(new URL('../server/migrations/0000_world.sql', import.meta.url), 'utf8')); }
   get store() { return new WorldRepository(this.database); }
   async state() { const result = await this.store.read(); assert.ok(result); return result.state; }
-  async prefix() {
-    await this.store.initialize({ seed: 1701, clockEpoch: coastalPrefixTime(0), commandId: 'initialize' }, actor, coastalPrefixTime(0));
-    for (const [index, { input: step }] of predecessor.steps.entries()) {
+  async prefix(initial = predecessor.initial, steps = predecessor.steps) {
+    seedHostedWorld(this.database.sql, initial);
+    for (const [index, { input: step }] of steps.entries()) {
       const meta = { commandId: `prefix-${index}`, model };
-      if (step.kind === 'release') await this.store.mutate('release-apply', { ...step.command, ...meta }, actor, step.command.timestamp ?? coastalPrefixTime(0));
-      else if (step.kind === 'action') await this.store.mutate('action', { ...step.command, ...meta }, actor, step.command.timestamp ?? coastalPrefixTime(0));
+      if (step.kind === 'action') await this.store.mutate('action', { ...step.command, ...meta }, actor, step.command.timestamp ?? coastalPrefixTime(0));
       else await this.store.mutate('strategy-catchup', { expectedRevision: (await this.state()).revision, timestamp: step.timestamp, ...meta }, actor, step.timestamp);
     }
-    assert.deepEqual(await this.state(), predecessor.state);
+    assert.deepEqual(await this.state(), steps.at(-1)?.result.state ?? initial);
   }
   async input(commandId: string, action: GameAction) { return { seat: 0, expectedRevision: (await this.state()).revision, model, commandId, action: { type: 'strategy-action', action } }; }
   send(input: Record<string, unknown>, seconds: number) { return this.store.mutate('action', input, actor, coastalPrefixTime(seconds)); }
@@ -69,7 +69,7 @@ async function replay(item: Fixture) {
     const page = await item.store.history(after, 3);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'release-apply' ? applyRelease(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
+      const result = transition.kind === 'action' ? applyCommand(state, transition.command) : transition.kind === 'strategy-catchup' ? catchUpStrategy(state, transition.timestamp) : null;
       assert.ok(result?.ok, result?.error); assert.ok(isWorldState(entry.state)); assert.deepEqual(result.state, entry.state); assert.deepEqual(result.events, entry.events); state = result.state; count++;
     }
     if (!page.hasMore) { assert.deepEqual(state, saved.state); return count; }
@@ -78,31 +78,29 @@ async function replay(item: Fixture) {
   return assert.fail('bounded replay did not terminate');
 }
 
-await test('the legal71 predecessor keeps canonical six-resource snapshots with no strategic rewrite', () => {
-  assert.equal(predecessor.state.revision, 71);
-  assert.equal(predecessor.steps.length, 71);
-  assert.equal(predecessor.state.releaseId, 'settlement-mining-1');
+await test('the fresh synthetic prerequisite fixture keeps canonical six-resource snapshots with no strategic rewrite', () => {
+  assert.equal(predecessor.initial.revision, 0);
+  assert.equal(predecessor.state.revision, predecessor.steps.length);
+  assert.equal(predecessor.state.releaseId, 'settlement-metal-learning-1');
   for (const { result } of predecessor.steps) assert.ok(isWorldState(JSON.parse(JSON.stringify(result.state))));
   for (const civilization of predecessor.state.civilizations) {
-    assert.equal(Object.hasOwn(civilization, 'strategicResources'), false);
+    assert.deepEqual(civilization.strategicResources, {});
     assert.deepEqual(Object.keys(civilization.resources).toSorted(), [...RESOURCE_IDS].toSorted());
   }
   assert.equal(Object.hasOwn(predecessor.state, 'deposits'), false);
 });
 
-await test('real SQLite predecessor reopens and replays every retained old frame before metal adoption', async () => {
+await test('fresh SQLite fixture reopens and exactly replays its current-rule action frames', async () => {
   const item = new Fixture();
   try {
     await item.prefix(); const state = await item.state(); const rows = item.database.records();
     item.reopen(); assert.deepEqual(await item.state(), state); assert.deepEqual(item.database.records(), rows);
-    assert.equal(await replay(item), 71);
+    assert.equal(await replay(item), predecessor.steps.length);
   } finally { item.close(); }
 });
 
 function syntheticMetalState(): WorldState {
   const state = structuredClone(predecessor.state);
-  state.releaseId = 'settlement-metal-learning-1';
-  state.unlockedFeatures.push('finite-metals', 'learning-commerce');
   state.strategicDeposits = { ruleVersion: 1, placementId: 'iron-placement-1', seed: state.seed, tileIds: [56], deposits: { '56': { tileId: 56, resource: 'iron', initialReserve: 240, remaining: 240 } } };
   for (const civilization of state.civilizations) civilization.strategicResources = {};
   return state;
@@ -122,13 +120,13 @@ function syntheticExtractionState(): WorldState {
   return state;
 }
 
-await test('metal save rejects strategic data before its release gate without rewriting old saves', () => {
-  const old = structuredClone(predecessor.state); const before = JSON.stringify(old);
-  assert.ok(isWorldState(old)); assert.equal(JSON.stringify(old), before);
-  const stock = structuredClone(old); const civilization = stock.civilizations[0]; assert.ok(civilization); civilization.strategicResources = { iron: 0 };
+await test('fresh metal fixtures require their strategic layer and ledgers without validator repair', () => {
+  const state = structuredClone(predecessor.state); const before = JSON.stringify(state);
+  assert.ok(isWorldState(state)); assert.equal(JSON.stringify(state), before);
+  const stock = structuredClone(state); const civilization = stock.civilizations[0]; assert.ok(civilization); delete civilization.strategicResources;
   assert.equal(isWorldState(stock), false);
-  const layer = structuredClone(old); const added = syntheticMetalState().strategicDeposits; assert.ok(added); layer.strategicDeposits = added;
-  assert.equal(isWorldState(layer), false);
+  const layer = structuredClone(state); delete layer.strategicDeposits; assert.equal(isWorldState(layer), false);
+  assert.equal(JSON.stringify(state), before);
 });
 
 const metalFaults: Array<[string, (state: WorldState) => void]> = [
@@ -188,14 +186,13 @@ const learningStory = learningCommerceJourney();
 function stepArguments(step: CoastalPrefixStep, commandId: string): Record<string, unknown> {
   const input = step.input;
   if (input.kind === 'strategy') return { expectedRevision: step.before.revision, timestamp: input.timestamp, model, commandId };
-  if (input.kind === 'release') return { ...input.command, model, commandId };
   return { seat: input.command.seat, expectedRevision: input.command.expectedRevision, action: { type: 'strategy-action', action: input.command.action }, ...(input.command.plan === undefined ? {} : { plan: input.command.plan }), model, commandId };
 }
 function sendStep(item: Fixture, step: CoastalPrefixStep, commandId: string) {
   const input = step.input;
   const timestamp = input.kind === 'strategy' ? input.timestamp : input.command.timestamp;
   assert.ok(timestamp);
-  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : input.kind === 'release' ? 'release-apply' : 'action', stepArguments(step, commandId), actor, timestamp);
+  return item.store.mutate(input.kind === 'strategy' ? 'strategy-catchup' : 'action', stepArguments(step, commandId), actor, timestamp);
 }
 async function persistThrough(item: Fixture, steps: CoastalPrefixStep[], revision: number): Promise<void> {
   await item.prefix();
@@ -210,8 +207,7 @@ async function persistThrough(item: Fixture, steps: CoastalPrefixStep[], revisio
 await test('real SQLite legal Bronze Currency extraction consent and due shipment keep exact duplicates and full reopened replay', async context => {
   const item = new Fixture();
   try {
-    await item.prefix();
-    const steps = metalStory.journey.steps;
+    const steps = metalStory.journey.steps; await item.prefix(metalStory.journey.prefix.initial, metalStory.journey.prefix.steps);
     const consentIndex = steps.findIndex(step => step.input.kind === 'action' && step.input.command.action.type === 'respond-trade');
     assert.ok(consentIndex >= 0);
     for (const [index, step] of steps.entries()) {
@@ -233,13 +229,13 @@ await test('real SQLite legal Bronze Currency extraction consent and due shipmen
     assert.equal(duplicate.duplicate, true); assert.equal(duplicate.acceptedRevision, consent.result.state.revision);
     const args = stepArguments(consent, `metal-step-${consentIndex}`);
     await assert.rejects(item.store.mutate('action', { ...args, action: { type: 'strategy-action', action: { type: 'respond-trade', offerId: 'other-offer', accept: true } } }, actor, metalStory.journey.time()), { message: 'idempotency_key_reused' });
-    const release = steps[0]; assert.ok(release); assert.equal((await sendStep(item, release, 'metal-step-0')).duplicate, true);
+    const first = steps[0]; assert.ok(first); assert.equal((await sendStep(item, first, 'metal-step-0')).duplicate, true);
     assert.deepEqual(item.database.records(), rows);
     const connection = state.routes.find(route => route.id === metalStory.routeId); assert.ok(connection?.agreement);
     assert.equal(connection.agreement.deliveryCount, 1);
     assert.equal(state.civilizations[1]?.strategicResources?.iron, 2);
     assert.deepEqual(connection.agreement.terms.strategicCargo, { proposer: { iron: 2 }, recipient: {} });
-    context.diagnostic(JSON.stringify({ basis: 'Entirely legal71 predecessor and actual repository release/research/consent/due beats', revision: state.revision, round: state.round, replayFrames: await replay(item), extraction: state.cities[0]?.improvements?.['58']?.operation.lastResult?.extraction, shipment: state.events.find(event => event.strategicShipment?.routeId === connection.id)?.strategicShipment, research: metalStory.journey.researchWork }));
+    context.diagnostic(JSON.stringify({ basis: 'Fresh synthetic prerequisites and actual repository research/consent/due beats', revision: state.revision, round: state.round, replayFrames: await replay(item), extraction: state.cities[0]?.improvements?.['58']?.operation.lastResult?.extraction, shipment: state.events.find(event => event.strategicShipment?.routeId === connection.id)?.strategicShipment, research: metalStory.journey.researchWork }));
   } finally { item.close(); }
 });
 

@@ -1,28 +1,24 @@
+import { syntheticCurrentWorld } from './fixtures/current-world.ts';
+import { createWorld } from '../core/engine.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { isWorldState } from '../core/validation.ts';
-import { applyRelease } from '../core/engine.ts';
-import { observatoryLearningOperationJourney } from './fixtures/observatory-learning-journey.ts';
 
-void test('compatible civic adoption initializes empty lanes and preserves existing science and Culture', () => {
-  const { journey } = observatoryLearningOperationJourney();
-  const before = structuredClone(journey.state);
-  const result = applyRelease(before, { expectedRevision: before.revision, expectedFromReleaseId: before.releaseId, targetReleaseId: 'settlement-civic-bootstrap-1', timestamp: journey.time() });
-  assert.ok(result.ok, result.error);
-  assert.deepEqual(before, journey.state);
-  for (const civilization of result.state.civilizations) {
-    assert.deepEqual(Reflect.get(civilization, 'civics'), { ruleVersion: 1, completedCivicIds: [], active: null, lastCompleted: null, reformEntitlement: null });
-    assert.deepEqual(Reflect.get(civilization, 'government'), { ruleVersion: 1, lastSpentReformCompletionEventId: null, active: null, pending: null });
-    const previous = before.civilizations.find(candidate => candidate.id === civilization.id);
-    assert.ok(previous);
-    assert.deepEqual(civilization.resources, previous.resources);
-    assert.deepEqual(civilization.technologies, previous.technologies);
-    assert.equal(civilization.researchProgress, previous.researchProgress);
+void test('fresh civic rules initialize empty independent lanes without earned progress', () => {
+  const state = createWorld(1701, coastalPrefixTime(0), 'settlement-civic-bootstrap-1');
+  assert.ok(isWorldState(state));
+  assert.equal(state.revision, 0);
+  for (const civilization of state.civilizations) {
+    assert.deepEqual(civilization.civics, { ruleVersion: 1, completedCivicIds: [], active: null, lastCompleted: null, reformEntitlement: null });
+    assert.deepEqual(civilization.government, { ruleVersion: 1, lastSpentReformCompletionEventId: null, active: null, pending: null });
+    assert.deepEqual(civilization.technologies, []);
+    assert.equal(civilization.researchProgress, 0);
+    assert.deepEqual(civilization.resources, ECONOMY_RULES.initialResources);
   }
 });
 
 void test('civic selection is explicit, snapshots 16 Culture and spends no stored Culture or Science', () => {
-  const state = adopted();
+  const state = civicWorld();
   const before = structuredClone(state);
   const result = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: actionTime(state), action: { type: 'choose-civic', civicId: 'code-of-laws' } });
   assert.ok(result.ok, result.error);
@@ -36,7 +32,7 @@ void test('civic selection is explicit, snapshots 16 Culture and spends no store
 });
 
 void test('only current productive Culture funds the independent lane and completion grants one exact entitlement', () => {
-  const state = adopted();
+  const state = civicWorld();
   const result = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: actionTime(state), action: { type: 'choose-civic', civicId: 'code-of-laws' } });
   assert.ok(result.ok, result.error);
   const idle = advance(state); const working = advance(result.state);
@@ -62,11 +58,9 @@ import { applyCommand, catchUpStrategy } from '../core/engine.ts';
 import type { WorldState } from '../core/types.ts';
 import { coastalPrefixTime } from './fixtures/coastal-prefix.ts';
 let cached: WorldState | undefined;
-function adopted(): WorldState {
+function civicWorld(): WorldState {
   if (!cached) {
-    const { journey } = observatoryLearningOperationJourney();
-    const result = applyRelease(journey.state, { expectedRevision: journey.state.revision, expectedFromReleaseId: journey.state.releaseId, targetReleaseId: 'settlement-civic-bootstrap-1', timestamp: journey.time() });
-    assert.ok(result.ok, result.error); cached = result.state;
+    cached = syntheticCurrentWorld('settlement-civic-bootstrap-1', { technologies: ['writing'], buildings: ['campus', 'library', 'granary'], population: 24 });
   }
   return structuredClone(cached);
 }
@@ -75,7 +69,7 @@ function advance(state: WorldState) { const result = catchUpStrategy(state, coas
 function round(value: number): number { return Math.round(value * 100) / 100; }
 
 void test('Chiefdom requires actual completion and atomically spends the latest entitlement for the explicit arrangement', () => {
-  const empty = adopted(); const action = { type: 'adopt-government', governmentId: 'chiefdom', assignments: urban } as const;
+  const empty = civicWorld(); const action = { type: 'adopt-government', governmentId: 'chiefdom', assignments: urban } as const;
   const denied = act(empty, action); assert.equal(denied.ok, false); assert.equal(denied.state, empty);
   const ready = completed(); const before = structuredClone(ready);
   const result = act(ready, action); assert.ok(result.ok, result.error); assert.deepEqual(ready, before);
@@ -112,7 +106,7 @@ import { cityProductivity } from '../core/simulation/world.ts';
 import type { GameAction, PolicyAssignment } from '../core/types.ts';
 const urban: PolicyAssignment[] = [{ slotType: 'economic', slotIndex: 0, policyId: 'urban-planning' }];
 function act(state: WorldState, action: GameAction) { return applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: actionTime(state), action }); }
-function completed(): WorldState { let result = act(adopted(), { type: 'choose-civic', civicId: 'code-of-laws' }); assert.ok(result.ok, result.error); for (let count = 0; count < 20 && must(result.state.civilizations[0]).civics?.active; count++) result = advance(result.state); assert.equal(must(result.state.civilizations[0]).civics?.active, null); return result.state; }
+function completed(): WorldState { let result = act(civicWorld(), { type: 'choose-civic', civicId: 'code-of-laws' }); assert.ok(result.ok, result.error); for (let count = 0; count < 20 && must(result.state.civilizations[0]).civics?.active; count++) result = advance(result.state); assert.equal(must(result.state.civilizations[0]).civics?.active, null); return result.state; }
 
 void test('synthetic advanced-government switch retains two opening beats, exact payment and both locks', () => {
   GOVERNMENTS.push({ id: 'synthetic-council', name: 'Synthetic transition control', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slots: { military: 0, economic: 1, diplomatic: 0, wildcard: 0 }, baseProduction: { food: 3 } });
@@ -172,7 +166,7 @@ void test('synthetic transition applies once to six ordinary outputs and cumulat
 });
 
 void test('invalid civic and arrangement cases are zero-effect and strict action parsing rejects caller economics', () => {
-  const start = adopted(); const ready = completed();
+  const start = civicWorld(); const ready = completed();
   const cases: Array<[WorldState, GameAction]> = [[start, { type: 'choose-civic', civicId: 'invented' }], [ready, { type: 'choose-civic', civicId: 'code-of-laws' }], [ready, { type: 'adopt-government', governmentId: 'invented', assignments: [] }], ...[
     [{ slotType: 'military' as const, slotIndex: 0, policyId: 'urban-planning' }],
     [{ slotType: 'economic' as const, slotIndex: 1, policyId: 'urban-planning' }],
@@ -188,7 +182,7 @@ void test('invalid civic and arrangement cases are zero-effect and strict action
 });
 
 void test('zero current Culture cannot spend an old bank and remaining obligations cap actual investment', () => {
-  const state = act(adopted(), { type: 'choose-civic', civicId: 'code-of-laws' }).state; state.round++;
+  const state = act(civicWorld(), { type: 'choose-civic', civicId: 'code-of-laws' }).state; state.round++;
   const before = structuredClone(state); resolveCivics(state, 0, 0, []); assert.deepEqual(state, before);
   must(state.civilizations[0]).resources.culture = 1.25; const events: GameEvent[] = []; resolveCivics(state, 0, 12, events);
   assert.equal(must(must(must(state.civilizations[0]).civics).active).progress, 1.25); assert.equal(must(state.civilizations[0]).resources.culture, 0); assert.deepEqual(events, []);
@@ -219,7 +213,7 @@ void test('consumed reform remains unavailable after event pruning and exact JSO
 });
 
 void test('canonical civic facts expose the independent lane, exact arrangement and local work without shared mutation', () => {
-  const state = adopted(); const time = actionTime(state); const observation = observe(state, 0, time);
+  const state = civicWorld(); const time = actionTime(state); const observation = observe(state, 0, time);
   assert.equal(observation.decisions?.civic?.status, 'required'); assert.deepEqual(observation.decisions?.civic?.availableIds, ['code-of-laws']);
   assert.equal(observation.governance?.government?.active, null);
   const arranged = act(completed(), { type: 'adopt-government', governmentId: 'chiefdom', assignments: urban }).state;

@@ -1,32 +1,20 @@
 import assert from 'node:assert/strict';
-import { isDeepStrictEqual } from 'node:util';
-import { TECHNOLOGIES } from '../../core/content.ts';
 import { legalActions } from '../../core/engine.ts';
-import type { GameAction, WorldState } from '../../core/types.ts';
-import { coastalPrefixTime, replayCoastalStep, type CoastalPrefixInput, type CoastalPrefixStep } from './coastal-prefix.ts';
-import { civicBootstrapJourney } from './civic-bootstrap-journey.ts';
+import { freshFixtureJourney, syntheticInstitution, syntheticTechnologies } from './coastal-prefix.ts';
 
-let prefix: ReturnType<typeof civicBootstrapJourney> | undefined;
 export function industrialSteamPrefix() {
-  prefix ??= civicBootstrapJourney(); let state = structuredClone(prefix.state);
-  const initial = prefix.initial; const steps: CoastalPrefixStep[] = [...prefix.steps]; const seat = prefix.seat;
-  const time = (): string => coastalPrefixTime(Math.max((state.independentTurns?.strategyTicks ?? 0) * 60 + 20, ...state.civilizations.map(civilization => ((state.independentTurns?.lastActionWindow[civilization.id] ?? -1) + 1) * 10)));
-  const commit = (input: CoastalPrefixInput): void => {
-    const before = structuredClone(state); const result = replayCoastalStep(state, input);
-    assert.ok(result.ok, result.error); assert.deepEqual(state, before);
-    steps.push({ before, input, result }); state = result.state;
-  };
-  const act = (action: GameAction, actor = seat): void => {
-    assert.ok(legalActions(state, actor, time()).some(option => isDeepStrictEqual(option.action, action)), JSON.stringify({ actor, action }));
-    commit({ kind: 'action', command: { seat: actor, expectedRevision: state.revision, timestamp: time(), action } });
-  };
-  const beat = (): void => commit({ kind: 'strategy', timestamp: coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60) });
-  const until = (condition: () => boolean, label: string, limit = 160): void => { for (let count = 0; count < limit && !condition(); count++) beat(); assert.ok(condition(), label); };
-  const research = (technology: string, actor = seat): void => { if (state.civilizations[actor]?.technologies.includes(technology)) return; const definition = TECHNOLOGIES.find(item => item.id === technology); assert.ok(definition); for (const prerequisite of definition.requires) research(prerequisite, actor); act({ type: 'research', technology }, actor); until(() => !!state.civilizations[actor]?.technologies.includes(technology), `Productive completion ${technology}`); };
-  const beforeRelease = structuredClone(state);
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-industrial-steam-1', timestamp: time() } });
-  const adopted = structuredClone(state);
-  return { initial, steps, seat, beforeRelease, adopted, get state(): WorldState { return state; }, time, act, beat, until, research, commit };
+  const journey = freshFixtureJourney('settlement-industrial-steam-1', state => {
+    state.calendarMilestones = ['first-harvest', 'roads-between-peoples', 'rise-of-states', 'connected-world'];
+    for (const seat of [0, 1]) {
+      const actor = state.civilizations[seat]; const city = state.cities[seat]; assert.ok(actor && city);
+      actor.era = 2; actor.resources = { food: 160, materials: 120, credits: 140, energy: 80, culture: 0, science: 0 }; city.population = 16;
+      syntheticTechnologies(state, seat, ['printing', 'astronomy', 'metal-casting', 'apprenticeship']);
+      actor.strategicResources = { iron: 12 };
+      syntheticInstitution(state, city.id, 'campus', seat === 0 ? 39 : 30); syntheticInstitution(state, city.id, 'library');
+    }
+    syntheticInstitution(state, 'city-1', 'industrial-zone', 31); syntheticInstitution(state, 'city-1', 'foundry');
+  }, 'Synthetic era, prerequisite learning, stocks including twelve Iron per actor, residents, Campus/Library and city-1 Foundry/Industrial site; industrial research, Coal extraction, second Foundry, rail, consent and delivery are real');
+  return { ...journey, prepared: structuredClone(journey.state), get state() { return journey.state; } };
 }
 
 import { createSteamTransportPlanner } from '../../core/simulation/transport.ts';
@@ -79,5 +67,5 @@ export function industrialSteamJourney() {
   const accepted = structuredClone(journey.state);
   journey.until(() => !!journey.state.industrialEvidence?.steamDelivery, 'A genuinely faster due steam exchange pays complete cargo and Coal');
   assert.ok(journey.state.calendarMilestones.includes('industrial-world'));
-  return { initial: journey.initial, steps: journey.steps, seat: journey.seat, beforeRelease: journey.beforeRelease, adopted: journey.adopted, researched, coalReady, twoFoundries, beforeOffer, proposed, accepted, state: journey.state, mineTileId, mineCityId, offerId: pending.id };
+  return { initial: journey.initial, steps: journey.steps, seat: journey.seat, prepared: journey.prepared, provenance: journey.provenance, researched, coalReady, twoFoundries, beforeOffer, proposed, accepted, state: journey.state, mineTileId, mineCityId, offerId: pending.id };
 }

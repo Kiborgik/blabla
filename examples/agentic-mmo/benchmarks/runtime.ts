@@ -8,14 +8,13 @@ import {
   applyCommand,
   applyDirectorTick,
   applyHistoryAdvance,
-  applyRelease,
   catchUpClock,
   createWorld,
   observe,
 } from '../core/engine.ts';
 import { DIRECTOR_CLOCK_RULES } from '../core/content.ts';
 import { chooseAction } from '../core/policies.ts';
-import { CURRENT_RELEASE, RELEASES } from '../core/release.ts';
+import { CURRENT_RELEASE } from '../core/release.ts';
 import { GAME_VERSION, SCHEMA_VERSION, type TransitionResult } from '../core/types.ts';
 
 interface Options {
@@ -208,22 +207,7 @@ function clockWorkload(dueTicks: number) {
 }
 
 function historyWorkload(counts: number[]) {
-  let state = createWorld(17, epoch);
-  if (!state.unlockedFeatures.includes('history-advancement')) {
-    const target = RELEASES.find(
-      (candidate) =>
-        candidate.compatibleFrom.includes(state.releaseId) &&
-        candidate.featureIds.includes('history-advancement'),
-    );
-    if (!target) throw new Error('No registered compatible history-advancement release');
-    state = accepted(
-      applyRelease(state, {
-        expectedRevision: state.revision,
-        expectedFromReleaseId: state.releaseId,
-        targetReleaseId: target.id,
-      }),
-    );
-  }
+  let state = createWorld(17, epoch, 'settlement-foundations-2');
   const samples = [];
   for (const count of counts) {
     const started = performance.now();

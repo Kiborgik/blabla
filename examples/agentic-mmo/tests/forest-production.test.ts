@@ -6,24 +6,13 @@ import { projectCapabilities } from '../core/capabilities.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
 import { isWorldState } from '../core/validation.ts';
 import { coastalPrefixTime, replayCoastalStep } from './fixtures/coastal-prefix.ts';
-import { waterLandOperationJourney, waterLandTown } from './fixtures/water-land-journey.ts';
+import { waterLandTown } from './fixtures/water-land-journey.ts';
 import { forestProductionJourney, forestProductionOperationJourney } from './fixtures/forest-production-journey.ts';
 
-await test('forest historical262 control has actual free forest but no future choices', () => {
-  const value = waterLandOperationJourney(); const state = value.grown;
-  assert.equal(value.journey.steps.length, 262); assert.ok(isWorldState(state));
-  assert.equal(state.tiles.find(tile => tile.id === 56)?.terrain, 'forest');
-  assert.equal(state.tiles.find(tile => tile.id === 56)?.owner, 0);
-  assert.equal(waterLandTown(state, 'city-0').improvements?.['56'], undefined);
-  assert.ok(!legalActions(state, 0, value.journey.time()).some(option => option.action.type === 'research' && ['archery', 'machinery'].includes(option.action.technology)));
-  assert.ok(!legalActions(state, 0, value.journey.time()).some(option => option.action.type === 'improve' && option.action.improvementId === 'lumber-mill'));
-});
-
-await test('forest genuine successor preserves geography layers stocks and residents', () => {
+await test('forest fresh selected rules require Archery before Machinery', () => {
   const value = forestProductionJourney();
-  assert.deepEqual(value.adopted.tiles, value.beforeRelease.tiles); assert.equal(value.adopted.rng, value.beforeRelease.rng);
-  assert.deepEqual(value.adopted.strategicDeposits, value.beforeRelease.strategicDeposits); assert.deepEqual(value.adopted.pastoralSites, value.beforeRelease.pastoralSites);
-  assert.deepEqual(value.adopted.civilizations, value.beforeRelease.civilizations); assert.deepEqual(value.adopted.cities, value.beforeRelease.cities);
+  assert.equal(value.prepared.releaseId, 'settlement-forest-production-1');
+  assert.equal(value.initial.revision, 0);
   assert.ok(legalActions(value.state, 0, value.time()).some(option => option.action.type === 'research' && option.action.technology === 'archery'));
   assert.ok(!legalActions(value.state, 0, value.time()).some(option => option.action.type === 'research' && option.action.technology === 'machinery'));
 });
@@ -72,7 +61,8 @@ await test('forest legal Lumber mill and Mine share numeric allocation under syn
   const value = forestProductionOperationJourney(); const journey = value.journey;
   journey.act({ type: 'improve', cityId: value.cityId, tileId: 58, improvementId: 'mine' });
   journey.until(() => !!waterLandTown(journey.state, value.cityId).improvements?.['58']);
-  const state = structuredClone(journey.state); const city = waterLandTown(state, value.cityId); city.population = 22;
+  const state = structuredClone(journey.state); const city = waterLandTown(state, value.cityId); city.population = 4;
+  for (const operation of Object.values(city.buildingOperations ?? {})) operation.enabled = false;
   allocateOperations(state);
   assert.equal(city.improvements?.['56']?.operation.lastResult?.residents.allocated, 1);
   assert.equal(city.improvements?.['58']?.operation.lastResult?.blockedReason, 'resident-shortage');
@@ -92,16 +82,17 @@ await test('forest real pause resume and detached exact installed projection', (
 });
 
 await test('forest synthetic opening scarcity and later terrain loss leave retained sites without output', () => {
-  const value = forestProductionOperationJourney(); const state = structuredClone(value.operated); const city = waterLandTown(state, value.cityId); city.population = 21;
+  const value = forestProductionOperationJourney(); const state = structuredClone(value.operated); const city = waterLandTown(state, value.cityId); city.population = 3;
+  for (const operation of Object.values(city.buildingOperations ?? {})) operation.enabled = false;
   allocateOperations(state); const mill = city.improvements?.['56']; assert.ok(mill);
   assert.equal(mill.operation.lastResult?.blockedReason, 'resident-shortage'); assert.equal(mill.operation.lastResult?.residents.allocated, 0); assert.deepEqual(mill.operation.lastResult?.produced, {});
-  const irrigation = city.buildingOperations?.irrigation; assert.ok(irrigation); irrigation.enabled = false;
+  city.population = 4;
   allocateOperations(state); assert.equal(mill.operation.lastResult?.residents.allocated, 1);
   const site = state.tiles.find(tile => tile.id === 56); assert.ok(site); site.terrain = 'grassland';
   allocateOperations(state); assert.equal(mill.operation.lastResult?.blockedReason, 'site-ineligible'); assert.equal(mill.operation.lastResult?.residents.allocated, 0); assert.deepEqual(mill.operation.lastResult?.produced, {});
 });
 
-await test('forest full legal predecessor and productive branch replay with canonical immutable frames', () => {
+await test('forest actual productive branch replays from declared synthetic prerequisites', () => {
   const value = forestProductionOperationJourney(); let state = structuredClone(value.journey.initial);
   for (const step of value.journey.steps) { assert.deepEqual(state, step.before); const before = structuredClone(state); const result = replayCoastalStep(state, structuredClone(step.input)); assert.deepEqual(state, before); assert.deepEqual(result, step.result); assert.ok(isWorldState(result.state)); state = result.state; }
   assert.deepEqual(state, value.operated);

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
 import { legalActions } from '../../core/engine.ts';
-import { RELEASES } from '../../core/release.ts';
 import type { GameAction } from '../../core/types.ts';
 import { isWorldState } from '../../core/validation.ts';
 import { localGrowthPrefix } from './local-growth-prefix.ts';
@@ -25,13 +24,8 @@ export function localGrowthJourney() {
   };
   const beat = (): void => commit({ kind: 'strategy', timestamp: coastalPrefixTime(((state.independentTurns?.strategyTicks ?? 0) + 1) * 60) });
   const until = (condition: () => boolean): void => { for (let count = 0; count < 80 && !condition(); count++) beat(); assert.ok(condition(), 'Bounded legal local-growth outcome was not reached'); };
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-wonders-1', timestamp: time() } });
-  const beforeRelease = structuredClone(state);
-  const release = RELEASES.find(candidate => candidate.compatibleFrom.includes(state.releaseId) && candidate.featureIds.includes('local-growth'));
-  assert.ok(release, 'Compatible local-growth release must expose real housing and paid growth');
-  commit({ kind: 'release', command: { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: release.id, timestamp: time() } });
-  const adopted = structuredClone(state);
-  return { previous, initial: previous.initial, cityId: previous.cityId, steps, beforeRelease, adopted, get state() { return state; }, time, act, beat, until };
+  const prepared = structuredClone(state);
+  return { previous, initial: previous.initial, cityId: previous.cityId, steps, prepared, provenance: previous.provenance, get state() { return state; }, time, act, beat, until };
 }
 
 export function localGrowthOperationJourney() {
@@ -60,8 +54,11 @@ export function localGrowthFoundingJourney(kind: 'settle' | 'settle-coast') {
   if (kind === 'settle-coast') {
     journey.act({ type: 'research', technology: 'navigation' });
     journey.until(() => !!journey.state.civilizations[0]?.technologies.includes('navigation'));
-    journey.act({ type: 'build', project: 'boat-yard', cityId: 'city-0-14' });
-    journey.until(() => !!journey.state.cities.find(city => city.id === 'city-0-14')?.buildings.includes('boat-yard'));
+    journey.act({ type: 'settle', sourceCityId: 'city-0', tileId: 23 });
+    const departure = journey.state.cities.find(city => city.tileId === 23 && city.civId === 0); assert.ok(departure);
+    journey.until(() => (journey.state.cities.find(city => city.id === departure.id)?.population ?? 0) >= 6);
+    journey.act({ type: 'build', project: 'boat-yard', cityId: departure.id });
+    journey.until(() => !!journey.state.cities.find(city => city.id === departure.id)?.buildings.includes('boat-yard'));
   }
   const option = legalActions(journey.state, 0, journey.time()).find(candidate => candidate.action.type === kind);
   assert.ok(option && (option.action.type === 'settle' || option.action.type === 'settle-coast'));

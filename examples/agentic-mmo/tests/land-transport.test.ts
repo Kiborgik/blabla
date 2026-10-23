@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyCommand, applyRelease, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
+import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { observeCompactTrade } from '../core/observation.ts';
 import type { GameAction, TradeAgreement, TradeOffer, WorldState } from '../core/types.ts';
 import { createLandTransportPlanner, isLandTransportQuote, landTransportBlock, landTransportTopologyBlock } from '../core/simulation/transport.ts';
@@ -12,19 +12,8 @@ const epoch = '2026-10-16T00:00:00.000Z';
 const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1000).toISOString();
 
 function endpointsWorld(): WorldState {
-  let state = createWorld(1701, epoch);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1']) {
-    const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch });
-    assert.equal(result.ok, true, result.error);
-    state = result.state;
-  }
+  let state = createWorld(1701, epoch, 'settlement-endpoints-1');
   return state;
-}
-
-function upgrade(state: WorldState): WorldState {
-  const result = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-land-transport-1', timestamp: epoch });
-  assert.equal(result.ok, true, result.error);
-  return result.state;
 }
 
 function proposal(state: WorldState, seat: number, partner: number): GameAction {
@@ -50,14 +39,6 @@ function pending(state: WorldState): TradeOffer {
   return offer;
 }
 
-await test('land transport is an explicit additive release without rewriting prior world assets', () => {
-  const old = endpointsWorld();
-  const state = upgrade(old);
-  assert.equal(state.unlockedFeatures.includes('land-transport'), true);
-  assert.equal(state.unlockedFeatures.includes('navigation'), false);
-  for (const key of ['cities', 'civilizations', 'tiles', 'routes', 'tradeOffers'] as const) assert.deepEqual(state[key], old[key]);
-});
-
 await test('prospective synthetic feature probe requires actual quoted geography before consent', () => {
   const fixture = endpointsWorld();
   fixture.unlockedFeatures.push('land-transport');
@@ -68,7 +49,7 @@ await test('prospective synthetic feature probe requires actual quoted geography
 });
 
 await test('legal near and far agreements expose different cadence and deliver only after their accepted interval', (context) => {
-  let state = upgrade(endpointsWorld());
+  let state = createWorld(1701, epoch, 'settlement-land-transport-1');
   state = act(state, 1, proposal(state, 1, 4));
   const near = pending(state);
   state = act(state, 4, { type: 'respond-trade', offerId: near.id, accept: true });
@@ -105,7 +86,7 @@ await test('legal near and far agreements expose different cadence and deliver o
 });
 
 await test('legal acceptance off the old global boundary waits its complete quoted interval', () => {
-  let state = upgrade(endpointsWorld());
+  let state = createWorld(1701, epoch, 'settlement-land-transport-1');
   const advanced = catchUpStrategy(state, at(120));
   assert.equal(advanced.ok, true, advanced.error);
   state = advanced.state;
@@ -142,11 +123,7 @@ await test('historical pending and accepted abstract agreements keep original te
   const oldOffer = structuredClone(pending(state));
   const oldRoute = structuredClone(state.routes[0]);
   assert.equal(oldOffer.terms.transport, undefined);
-  const release = applyRelease(state, { expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId: 'settlement-land-transport-1', timestamp: at(120) });
-  assert.equal(release.ok, true, release.error);
-  assert.deepEqual(release.state.tradeOffers, state.tradeOffers);
-  assert.deepEqual(release.state.routes, state.routes);
-  state = act(release.state, 3, { type: 'respond-trade', offerId: oldOffer.id, accept: true }, at(120));
+  state = act(state, 3, { type: 'respond-trade', offerId: oldOffer.id, accept: true }, at(120));
   assert.deepEqual(state.routes[0], oldRoute);
   const accepted = state.routes.find(route => route.agreement?.offerId === oldOffer.id)?.agreement;
   assert.ok(accepted);
@@ -156,7 +133,7 @@ await test('historical pending and accepted abstract agreements keep original te
 });
 
 await test('synthetic quoted-path disruption refuses consent without charging or silently rerouting', () => {
-  let state = upgrade(endpointsWorld());
+  let state = createWorld(1701, epoch, 'settlement-land-transport-1');
   state = act(state, 2, proposal(state, 2, 3));
   const offer = pending(state);
   const transport = offer.terms.transport;
@@ -180,7 +157,7 @@ await test('synthetic quoted-path disruption refuses consent without charging or
 });
 
 await test('synthetic future blocked terrain causes zero-payment due attempts and retains the exact path and cadence', () => {
-  let state = upgrade(endpointsWorld());
+  let state = createWorld(1701, epoch, 'settlement-land-transport-1');
   state = act(state, 2, proposal(state, 2, 3));
   const offer = pending(state);
   state = act(state, 3, { type: 'respond-trade', offerId: offer.id, accept: true });
@@ -205,7 +182,7 @@ await test('synthetic future blocked terrain causes zero-payment due attempts an
 });
 
 await test('synthetic disconnected endpoints expose no payable proposal and refuse the exact action atomically', () => {
-  const state = upgrade(endpointsWorld());
+  const state = createWorld(1701, epoch, 'settlement-land-transport-1');
   const action = proposal(state, 2, 3);
   const destination = state.cities.find(city => city.civId === 3);
   const endpoint = state.tiles.find(tile => tile.id === destination?.tileId);
@@ -255,7 +232,7 @@ await test('quote shape and topology reject malformed, repeated, absent, reverse
 });
 
 await test('compact land choices retain canonical path and timing facts with finite twenty-five-city payload measurement', (context) => {
-  const state = upgrade(endpointsWorld());
+  const state = createWorld(1701, epoch, 'settlement-land-transport-1');
   const originals = structuredClone(state.cities);
   const occupied = new Set(state.cities.map(city => city.tileId));
   const sites = state.tiles.filter(tile => !occupied.has(tile.id) && tile.owner === null && tile.terrain !== 'mountain' && tile.terrain !== 'ocean');
@@ -286,7 +263,7 @@ await test('compact land choices retain canonical path and timing facts with fin
 });
 
 await test('structured proposal and consent quotes are detached from world, sibling options and compact consumers', () => {
-  let state = upgrade(endpointsWorld());
+  let state = createWorld(1701, epoch, 'settlement-land-transport-1');
   const before = structuredClone(state);
   const options = legalActions(state, 2, epoch).filter(option => option.action.type === 'propose-trade');
   const first = options[0];
