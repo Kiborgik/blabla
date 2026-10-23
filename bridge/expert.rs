@@ -61,6 +61,7 @@ impl Fixture {
         };
         let tree = project::snapshot(root.path(), &project.ignore);
         task.evidence.push(task::Evidence {
+            member_manifest: None,
             reuse: None,
             identity: task::declared_check(&task),
             acceptance_epoch: Some(task.acceptance_epoch),

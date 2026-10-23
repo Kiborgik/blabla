@@ -212,6 +212,7 @@ impl Assignment {
 
     fn record_result(&mut self, check: &str, exit: i32) {
         self.task.evidence.push(Evidence {
+            member_manifest: None,
             reuse: None,
             identity: Some(task::CheckIdentity::Text {
                 command: check.to_owned(),
@@ -389,6 +390,7 @@ impl Assignment {
         let evidence_inputs = task::evidence_inputs(&concurrent_task, &self.tree);
 
         concurrent_task.evidence = vec![Evidence {
+            member_manifest: None,
             reuse: None,
             identity: task::declared_check(&concurrent_task),
             acceptance_epoch: Some(concurrent_task.acceptance_epoch),
@@ -613,6 +615,7 @@ impl Assignment {
                 task::apply_evidence(
                     &mut self.task,
                     Evidence {
+                        member_manifest: None,
                         reuse: None,
                         identity: task::declared_check(&copy),
                         acceptance_epoch: Some(copy.acceptance_epoch),

@@ -96,6 +96,7 @@ fn legacy(temp: &TempDir, path: &str, deliverable: bool) -> task::Task {
     assert!(task::apply(&mut work, "accepted"));
     task::record_acceptance(&mut work, &tree, &project.ignore, "worker", 2);
     work.evidence.push(task::Evidence {
+        member_manifest: None,
         reuse: None,
         identity: task::declared_check(&work),
         acceptance_epoch: Some(work.acceptance_epoch),

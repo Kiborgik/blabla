@@ -136,6 +136,7 @@ impl Fixture {
     fn local_evidence(&mut self, exit: i32) {
         let tree = project::snapshot(self.root.path(), &self.project.ignore);
         self.task.evidence.push(Evidence {
+            member_manifest: None,
             reuse: None,
             identity: Some(CheckIdentity::Argv {
                 argv: self.task.check_argv.clone().unwrap(),

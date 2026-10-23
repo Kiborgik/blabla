@@ -47,6 +47,16 @@ struct Projection<'a> {
     groups: BTreeMap<String, String>,
     child_shown: usize,
     child_total: usize,
+    check_baseline: Option<Result<task::EvidenceMemberBaseline, &'static str>>,
+}
+
+enum ChildBaseline {
+    Check,
+    Opening(bool),
+}
+
+fn unavailable_children(reason: &str) -> Value {
+    json!({"availability": "baseline-unavailable", "reason": reason, "baseline": null, "total": null, "shown": 0, "omitted": 0, "limit": LIMIT, "entries": []})
 }
 
 impl<'a> Projection<'a> {
@@ -56,19 +66,30 @@ impl<'a> Projection<'a> {
         path: &str,
         recorded: Option<&str>,
         current: Option<&str>,
-        raw: bool,
+        selection: ChildBaseline,
         displayed: bool,
     ) -> Value {
-        let unavailable = json!({"availability": "baseline-unavailable", "baseline": null, "total": null, "shown": 0, "omitted": 0, "limit": LIMIT, "entries": []});
-        if owner.opened_tree.contains_key(path) || self.tree.contains_key(path) {
+        let (baseline_tree, baseline_label, raw) = match selection {
+            ChildBaseline::Check => match self
+                .check_baseline
+                .as_ref()
+                .expect("check baseline inspected")
+            {
+                Ok(baseline) => (&baseline.members, "evidence-input-manifest", true),
+                Err("legacy-absent") => (&owner.opened_tree, "opened-tree-digest-match", true),
+                Err(reason) => return unavailable_children(reason),
+            },
+            ChildBaseline::Opening(raw) => (&owner.opened_tree, "opened-tree-digest-match", raw),
+        };
+        if baseline_tree.contains_key(path) || self.tree.contains_key(path) {
             return json!({"availability": "not-a-directory-baseline", "baseline": null, "total": null, "shown": 0, "omitted": 0, "limit": LIMIT, "entries": []});
         }
         if !raw
-            || recorded.is_none()
-            || task::observed_digest(&owner.opened_tree, path).as_deref() != recorded
+            || (recorded.is_none() && baseline_label == "opened-tree-digest-match")
+            || task::observed_digest(baseline_tree, path).as_deref() != recorded
             || task::observed_digest(self.tree, path).as_deref() != current
         {
-            return unavailable;
+            return unavailable_children("projection-digest-mismatch");
         }
         let selected = |tree: &BTreeMap<String, String>| {
             tree.iter()
@@ -76,7 +97,7 @@ impl<'a> Projection<'a> {
                 .map(|(name, digest)| (name.clone(), Some(digest.clone())))
                 .collect()
         };
-        let entries = differences(&selected(&owner.opened_tree), &selected(self.tree), "path");
+        let entries = differences(&selected(baseline_tree), &selected(self.tree), "path");
         self.child_total += entries.len();
         let mut children = counted(
             entries,
@@ -88,7 +109,7 @@ impl<'a> Projection<'a> {
         );
         self.child_shown += children["shown"].as_u64().unwrap() as usize;
         children["availability"] = json!("available");
-        children["baseline"] = json!("opened-tree-digest-match");
+        children["baseline"] = json!(baseline_label);
         children
     }
 
@@ -116,6 +137,12 @@ impl<'a> Projection<'a> {
         let mut paths = differences(&recorded.paths, &current.paths, "path");
         for (index, row) in paths.iter_mut().enumerate() {
             let path = row["path"].as_str().unwrap();
+            if context == "check"
+                && (!recorded.paths.contains_key(path) || !current.paths.contains_key(path))
+            {
+                row["children"] = unavailable_children("input-selection-changed");
+                continue;
+            }
             let raw = context == "check"
                 || owner
                     .check_inputs
@@ -134,7 +161,11 @@ impl<'a> Projection<'a> {
                 path,
                 row["recorded"].as_str(),
                 row["current"].as_str(),
-                raw,
+                if context == "check" {
+                    ChildBaseline::Check
+                } else {
+                    ChildBaseline::Opening(raw)
+                },
                 index < LIMIT && self.deltas.len() < LIMIT,
             );
         }
@@ -178,6 +209,7 @@ pub(in crate::cli) fn show(
         groups: BTreeMap::new(),
         child_shown: 0,
         child_total: 0,
+        check_baseline: None,
     };
     let mut receipts = Vec::new();
     if identity.is_none() {
@@ -186,6 +218,14 @@ pub(in crate::cli) fn show(
         let latest = task::latest_evidence(&work).or_else(|| work.evidence.last());
         let mut row = json!({"kind": "check", "state": "missing", "recorded_unix": null, "shared_delta": null, "readiness": readiness, "tracking_error": task::tracking_error(&work, &project.manifest.root, &project.ignore)});
         if let Some(evidence) = latest {
+            let baseline = task::evidence_member_baseline(evidence);
+            row["member_manifest"] = match &baseline {
+                Ok(baseline) => {
+                    json!({"availability": "complete", "capture": baseline.capture, "member_count": baseline.members.len(), "basis": "tracked-input-snapshot-v1"})
+                }
+                Err(reason) => json!({"availability": "baseline-unavailable", "reason": reason}),
+            };
+            projection.check_baseline = Some(baseline);
             let recorded = task::RelevantRevision {
                 acceptance_epoch: evidence.acceptance_epoch.unwrap_or(work.acceptance_epoch),
                 task_digest: String::new(),
@@ -304,7 +344,7 @@ pub(in crate::cli) fn show(
         "review_current": review_current,
         "readiness_summary": delivery::readiness_summary(project, &work, &tree),
         "children": {"total_available": projection.child_total, "shown": projection.child_shown, "omitted_available": projection.child_total - projection.child_shown, "limit": LIMIT},
-        "limits": ["Fingerprint equality does not prove semantic equivalence.", "Assignment field history is unavailable. Reflection and review digests include composite receipt context.", "Child differences are tracking-set differences; unreadable and ignored members may be absent, and large-file hashes may be metadata-only.", "Only digest-matched opening trees can supply child baselines; counts include changed roots beyond the presentation cap. No receipt is refreshed or target repinned."]
+        "limits": ["Fingerprint equality does not prove semantic equivalence.", "Assignment field history is unavailable. Reflection and review digests include composite receipt context.", "Child differences are tracking-set differences; unreadable and ignored members may be absent, and large-file hashes may be metadata-only.", "Check children use validated evidence-input-manifest baselines; legacy checks and other receipts require digest-matched opening trees. Counts include changed roots beyond the presentation cap. No receipt is refreshed or target repinned."]
     });
     let result = if json_output {
         write_json(&output)
@@ -337,6 +377,25 @@ fn render(view: &Value) -> io::Result<()> {
         )?;
         if let Some(reason) = receipt["reason"].as_str() {
             writeln!(out, "    {reason}")?;
+        }
+        if let Some(manifest) = receipt.get("member_manifest") {
+            if let Some(capture) = manifest["capture"].as_str() {
+                writeln!(
+                    out,
+                    "    tracked input members: {} ({capture}{})",
+                    manifest["member_count"],
+                    if capture == "manual-record" {
+                        "; not an observed execution"
+                    } else {
+                        ""
+                    }
+                )?;
+            } else if let Some(reason) = manifest["reason"].as_str() {
+                writeln!(
+                    out,
+                    "    tracked input members: baseline-unavailable ({reason})"
+                )?;
+            }
         }
         if let Some(problems) = receipt["claim_problems"].as_array() {
             for problem in problems {
@@ -375,6 +434,12 @@ fn render(view: &Value) -> io::Result<()> {
                 )?;
                 if let Some(availability) = row["children"]["availability"].as_str() {
                     writeln!(out, "    children: {availability}")?;
+                    if let Some(baseline) = row["children"]["baseline"].as_str() {
+                        writeln!(out, "    baseline: {baseline}")?;
+                    }
+                    if let Some(reason) = row["children"]["reason"].as_str() {
+                        writeln!(out, "    reason: {reason}")?;
+                    }
                     for child in row["children"]["entries"].as_array().unwrap() {
                         writeln!(
                             out,

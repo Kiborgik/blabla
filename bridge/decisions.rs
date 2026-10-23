@@ -66,6 +66,7 @@ impl Decisions {
         });
         let tree = BTreeMap::from([(DELIVERABLE.to_owned(), "deliverable-1".to_owned())]);
         task.evidence.push(Evidence {
+            member_manifest: None,
             reuse: None,
             identity: task::declared_check(&task),
             acceptance_epoch: Some(task.acceptance_epoch),

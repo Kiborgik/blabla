@@ -3156,6 +3156,11 @@ fn record_evidence(
 ) -> i32 {
     let tree = blabla::project::snapshot(&project.manifest.root, &project.ignore);
     let inputs = task::evidence_inputs(task, &tree);
+    let member_manifest = Some(task::capture_evidence_members(
+        &inputs,
+        &tree,
+        "manual-record",
+    ));
     task.evidence.push(task::Evidence {
         reuse: None,
         identity: task::declared_check(task),
@@ -3168,6 +3173,7 @@ fn record_evidence(
         inputs,
         command,
         log,
+        member_manifest,
     });
     store(project, task, json)
 }
@@ -3230,6 +3236,11 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
     let root = &project.manifest.root;
     let tree = blabla::project::snapshot(root, &project.ignore);
     let input_digests = task::evidence_inputs(&task, &tree);
+    let member_manifest = Some(task::capture_evidence_members(
+        &input_digests,
+        &tree,
+        "execution-start",
+    ));
     let identity = task::declared_check(&task);
     let acceptance_epoch = task.acceptance_epoch;
     let scratch = task::scratch_directory(root, name);
@@ -3324,6 +3335,7 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         inputs: input_digests,
         command: Some(argv),
         log: Some(log),
+        member_manifest,
     };
     task::apply_evidence(&mut reloaded, evidence);
     let code = store(project, &mut reloaded, json);

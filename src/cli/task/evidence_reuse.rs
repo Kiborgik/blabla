@@ -459,6 +459,14 @@ mod tests {
         });
     }
     #[test]
+    fn evidence_member_manifest_changes_refuse_at_final_read() {
+        race(|root| {
+            rewrite(root, "review", |v| {
+                v["evidence"][0]["member_manifest"]["capture"] = json!("manual-record");
+            })
+        });
+    }
+    #[test]
     fn still_permitted_policy_and_project_identity_changes_refuse() {
         race(|root| {
             write(

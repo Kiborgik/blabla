@@ -255,6 +255,244 @@ fn receipt_after_source_edit_does_not_relabel_opening_children() {
 }
 
 #[test]
+fn evidence_member_manifest_after_edit_uses_receipt_children() {
+    let temp = fixture();
+    write(temp.path(), "core/extra.rs", "receipt boundary");
+    write(temp.path(), "core/removed.rs", "present at receipt");
+    success(&temp, &["task", "evidence", "work", "--run"]);
+    let evidence = show(&temp)["task"]["evidence"][0].clone();
+    assert_eq!(evidence["member_manifest"]["capture"], "execution-start");
+    assert_eq!(evidence["member_manifest"]["availability"], "complete");
+    write(temp.path(), "core/extra.rs", "current boundary");
+    std::fs::remove_file(temp.path().join("core/removed.rs")).unwrap();
+    write(temp.path(), "core/new.rs", "added after receipt");
+    let before = files(temp.path());
+    let view = freshness(&temp);
+    let check = receipt(&view, "check", None);
+    assert_eq!(check["state"], "stale");
+    let children = &delta(&view, check)["paths"]["entries"][0]["children"];
+    assert_eq!(children["baseline"], "evidence-input-manifest");
+    assert_eq!(children["total"], 3);
+    let rows = children["entries"].as_array().unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r["path"].as_str().unwrap(), r["change"].as_str().unwrap()))
+            .collect::<Vec<_>>(),
+        [
+            ("core/extra.rs", "changed"),
+            ("core/new.rs", "added"),
+            ("core/removed.rs", "removed")
+        ]
+    );
+    assert_eq!(
+        rows[0]["recorded"],
+        evidence["member_manifest"]["members"]["core/extra.rs"]
+    );
+    let text = support::run_in(
+        Some(temp.path()),
+        &support::args(&["task", "freshness", "work"]),
+    );
+    assert!(text.status.success());
+    assert!(String::from_utf8_lossy(&text.stdout).contains("evidence-input-manifest"));
+    assert_eq!(files(temp.path()), before);
+}
+
+#[test]
+fn evidence_member_manifest_stays_at_execution_start_when_child_changes_inputs_and_epoch() {
+    for amend in [false, true] {
+        let temp = fixture();
+        let script = if amend {
+            "from pathlib import Path\nimport json\np=Path('.blabla/tasks/work.json')\nt=json.loads(p.read_text())\nt['acceptance_epoch']+=1\nt['check_argv']=['python3','-c','pass']\np.write_text(json.dumps(t))\nPath('core/extra.rs').write_text('after child')\n"
+        } else {
+            "from pathlib import Path\nPath('core/extra.rs').write_text('after child')\n"
+        };
+        write(temp.path(), "check.py", script);
+        let project = blabla::project::load(
+            blabla::project::read_manifest(&temp.path().join("project.bla")).unwrap(),
+        )
+        .unwrap();
+        let tree = blabla::project::snapshot(temp.path(), &project.ignore);
+        success(&temp, &["task", "evidence", "work", "--run"]);
+        let record = show(&temp)["task"].clone();
+        let evidence = &record["evidence"][0];
+        assert_eq!(
+            evidence["member_manifest"]["members"]["core/extra.rs"],
+            tree["core/extra.rs"]
+        );
+        assert_eq!(
+            evidence["inputs"]["core"],
+            blabla::project::task::observed_digest(&tree, "core").unwrap()
+        );
+        assert_eq!(evidence["acceptance_epoch"], 1);
+        assert_eq!(evidence["identity"]["argv"], json!(["python3", "check.py"]));
+        assert_eq!(record["acceptance_epoch"], if amend { 2 } else { 1 });
+        assert_eq!(receipt(&freshness(&temp), "check", None)["state"], "stale");
+    }
+}
+
+#[test]
+fn evidence_member_manifest_invalid_and_legacy_are_distinct_read_only_diagnostics() {
+    let temp = fixture();
+    success(&temp, &["task", "evidence", "work", "--run"]);
+    let original = show(&temp)["task"]["evidence"][0]["member_manifest"].clone();
+    write(temp.path(), "core/extra.rs", "current boundary");
+    let mut unsupported = original.clone();
+    unsupported["basis"] = json!("future-v2");
+    let mut inconsistent = original.clone();
+    inconsistent["members"]["core/app.rs"] = json!("0000000000000000");
+    for (manifest, reason) in [
+        (Value::Null, "malformed-manifest"),
+        (json!([1]), "malformed-manifest"),
+        (unsupported, "unsupported-basis"),
+        (inconsistent, "input-digest-mismatch"),
+    ] {
+        amend_record(&temp, |record| {
+            record["evidence"][0]["member_manifest"] = manifest.clone()
+        });
+        let before = files(temp.path());
+        assert_eq!(
+            show(&temp)["task"]["evidence"][0]["member_manifest"],
+            manifest
+        );
+        let view = freshness(&temp);
+        let check = receipt(&view, "check", None);
+        assert_eq!(check["member_manifest"]["reason"], reason);
+        let children = &delta(&view, check)["paths"]["entries"][0]["children"];
+        assert_eq!(children["availability"], "baseline-unavailable");
+        assert_eq!(children["reason"], reason);
+        assert_eq!(children["total"], Value::Null);
+        assert_eq!(files(temp.path()), before);
+    }
+    amend_record(&temp, |record| {
+        record["evidence"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("member_manifest");
+    });
+    let view = freshness(&temp);
+    let check = receipt(&view, "check", None);
+    assert_eq!(check["member_manifest"]["reason"], "legacy-absent");
+    assert_eq!(
+        delta(&view, check)["paths"]["entries"][0]["children"]["baseline"],
+        "opened-tree-digest-match"
+    );
+    assert!(
+        show(&temp)["task"]["evidence"][0]
+            .get("member_manifest")
+            .is_none()
+    );
+}
+
+#[test]
+fn evidence_member_manifest_manual_record_is_not_an_execution() {
+    let temp = fixture();
+    success(
+        &temp,
+        &[
+            "task",
+            "check",
+            "work",
+            "manual inspection",
+            "--model",
+            "owner",
+            "--input",
+            "core",
+        ],
+    );
+    success(
+        &temp,
+        &[
+            "task", "evidence", "work", "--exit", "0", "--tool", "manual",
+        ],
+    );
+    let evidence = show(&temp)["task"]["evidence"][0].clone();
+    assert_eq!(evidence["member_manifest"]["capture"], "manual-record");
+    assert!(evidence.get("command").is_none());
+    assert!(evidence.get("log").is_none());
+    let text = support::run_in(
+        Some(temp.path()),
+        &support::args(&["task", "freshness", "work"]),
+    );
+    assert!(String::from_utf8_lossy(&text.stdout).contains("not an observed execution"));
+}
+
+#[test]
+fn evidence_member_manifest_counts_all_children_beyond_root_and_global_caps() {
+    let temp = fixture_files(60);
+    let paths: Vec<String> = (0..60).map(|n| format!("core/dir-{n:02}")).collect();
+    let mut args = vec!["task", "check", "work", "--input"];
+    args.extend(paths.iter().map(String::as_str));
+    args.extend(["--argv", "python3", "check.py"]);
+    success(&temp, &args);
+    for path in &paths {
+        write(temp.path(), &format!("{path}/entry.rs"), "receipt boundary");
+    }
+    success(&temp, &["task", "evidence", "work", "--run"]);
+    for path in &paths {
+        write(temp.path(), &format!("{path}/entry.rs"), "current boundary");
+    }
+    let view = freshness(&temp);
+    let group = delta(&view, receipt(&view, "check", None));
+    assert_eq!(group["paths"]["total"], 60);
+    assert_eq!(group["paths"]["omitted"], 10);
+    assert_eq!(view["children"]["total_available"], 60);
+    assert_eq!(view["children"]["shown"], 50);
+    assert_eq!(view["children"]["omitted_available"], 10);
+}
+
+#[cfg(unix)]
+#[test]
+fn evidence_member_manifest_tracks_only_observed_nonignored_nonsymlink_members() {
+    let temp = fixture();
+    std::os::unix::fs::symlink(
+        temp.path().join("core/app.rs"),
+        temp.path().join("core/link.rs"),
+    )
+    .unwrap();
+    write(temp.path(), "core/.git/ignored", "not tracked");
+    write(temp.path(), "elsewhere/file.rs", "not selected");
+    success(&temp, &["task", "evidence", "work", "--run"]);
+    let manifest = show(&temp)["task"]["evidence"][0]["member_manifest"].clone();
+    assert_eq!(manifest["availability"], "complete");
+    assert_eq!(
+        manifest["members"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["check.py", "core/app.rs", "core/extra.rs"]
+    );
+    assert!(
+        freshness(&temp)["limits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str().unwrap().contains("metadata-only"))
+    );
+}
+
+#[test]
+fn evidence_member_manifest_changed_root_selection_is_not_file_removal() {
+    let temp = fixture();
+    success(&temp, &["task", "evidence", "work", "--run"]);
+    success(
+        &temp,
+        &[
+            "task", "check", "work", "--model", "owner", "--input", "check.py", "--argv",
+            "python3", "check.py",
+        ],
+    );
+    let view = freshness(&temp);
+    let check = receipt(&view, "check", None);
+    assert_eq!(check["state"], "stale");
+    let children = &delta(&view, check)["paths"]["entries"][0]["children"];
+    assert_eq!(children["availability"], "baseline-unavailable");
+    assert_eq!(children["reason"], "input-selection-changed");
+    assert_eq!(children["total"], Value::Null);
+}
+
+#[test]
 fn exact_identity_filter_keeps_shared_staleness_and_invalid_claims() {
     let temp = fixture();
     complete(&temp);

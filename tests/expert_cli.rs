@@ -145,6 +145,7 @@ binding "support" { judgment "judgment::review::claim-support" roles ["worker"] 
         };
         let tree = project::snapshot(root.path(), &project.ignore);
         task.evidence.push(task::Evidence {
+            member_manifest: None,
             reuse: None,
             identity: Some(task::CheckIdentity::Argv {
                 argv: vec!["check".into()],

@@ -228,7 +228,14 @@ fn accepted_and_ready_review_reuse_keeps_original_execution_and_advances_epoch()
         assert_eq!(after["evidence"][0], run);
         let reused = &after["evidence"][1];
         for field in [
-            "identity", "command", "inputs", "unix", "log", "exit", "tree",
+            "identity",
+            "command",
+            "inputs",
+            "unix",
+            "log",
+            "exit",
+            "tree",
+            "member_manifest",
         ] {
             assert_eq!(reused[field], run[field], "{field}");
         }
@@ -236,6 +243,13 @@ fn accepted_and_ready_review_reuse_keeps_original_execution_and_advances_epoch()
         assert_eq!(reused["reuse"]["original_index"], 0);
         assert_eq!(reused["reuse"]["original_epoch"], run["acceptance_epoch"]);
         assert_eq!(reused["reuse"]["model"], "reviewer");
+        assert_eq!(run["member_manifest"]["capture"], "execution-start");
+        let original: blabla::project::task::Evidence =
+            serde_json::from_value(run.clone()).unwrap();
+        let mut digest = blabla::project::Fnv::new();
+        digest.write_str("task-memory-v1");
+        digest.write_str(&serde_json::to_string(&original).unwrap());
+        assert_eq!(reused["reuse"]["original_digest"], digest.finish());
         assert_eq!(after["state"], "accepted");
         assert!(after["challenged"].is_null());
         assert_ne!(after["review_of"], before["review_of"]);
@@ -271,6 +285,27 @@ fn changed_complete_input_map_refuses_without_writes() {
         write(t.path(), path, "changed\n");
         refused(t.path(), "reviewer");
     }
+}
+
+#[test]
+fn evidence_member_manifest_unchanged_owned_leaf_does_not_rescue_changed_broad_input() {
+    let t = fixture();
+    let root = t.path();
+    let before = record(root, "review");
+    let owned = std::fs::read(root.join("src/app.rs")).unwrap();
+    write(
+        root,
+        "src/unowned.rs",
+        "another tracked leaf under the selected root",
+    );
+    let view = ok(root, &["task", "freshness", "review"]);
+    assert_eq!(view["receipts"][0]["state"], "stale");
+    assert_eq!(
+        before["evidence"][0]["member_manifest"]["availability"],
+        "complete"
+    );
+    assert_eq!(std::fs::read(root.join("src/app.rs")).unwrap(), owned);
+    refused(root, "reviewer");
 }
 #[test]
 fn changed_check_and_uncovered_target_scope_refuse() {

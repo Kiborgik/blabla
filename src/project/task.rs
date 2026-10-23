@@ -965,6 +965,167 @@ pub struct Evidence {
     pub command: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_member_manifest"
+    )]
+    pub member_manifest: Option<serde_json::Value>,
+}
+
+fn deserialize_member_manifest<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
+}
+
+const EVIDENCE_MEMBER_BASIS: &str = "tracked-input-snapshot-v1";
+const EVIDENCE_MEMBER_LIMIT: usize = 8192;
+const EVIDENCE_MEMBER_PATH_BYTES: usize = 4096;
+const EVIDENCE_MEMBER_PAYLOAD_BYTES: usize = 1_048_576;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvidenceMemberEnvelope {
+    basis: String,
+    capture: String,
+    availability: String,
+    member_count: usize,
+    #[serde(default)]
+    members: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct EvidenceMemberBaseline {
+    pub members: BTreeMap<String, String>,
+    pub capture: &'static str,
+}
+
+fn member_payload_fits(value: &serde_json::Value) -> bool {
+    struct Budget(usize);
+    impl std::io::Write for Budget {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self
+                .0
+                .checked_sub(bytes.len())
+                .ok_or_else(|| std::io::Error::other("member payload limit"))?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    serde_json::to_writer(Budget(EVIDENCE_MEMBER_PAYLOAD_BYTES), value).is_ok()
+}
+
+fn valid_member(path: &str, digest: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\0')
+        && !Path::new(path).is_absolute()
+        && Path::new(path)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+        && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
+        && digest.len() == 16
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+pub fn capture_evidence_members(
+    inputs: &BTreeMap<String, Option<String>>,
+    tree: &BTreeMap<String, String>,
+    capture: &str,
+) -> serde_json::Value {
+    let selected = || {
+        tree.iter()
+            .filter(|(path, _)| inputs.keys().any(|root| covers(root, path)))
+    };
+    let member_count = selected().count();
+    let unavailable = |reason: &str| {
+        serde_json::json!({
+            "basis": EVIDENCE_MEMBER_BASIS, "capture": capture,
+            "availability": "unavailable", "reason": reason, "member_count": member_count
+        })
+    };
+    if member_count > EVIDENCE_MEMBER_LIMIT {
+        return unavailable("member-limit");
+    }
+    if selected().any(|(path, _)| path.len() > EVIDENCE_MEMBER_PATH_BYTES) {
+        return unavailable("path-limit");
+    }
+    if selected().any(|(path, digest)| !valid_member(path, digest)) {
+        return unavailable("invalid-member");
+    }
+    let members: BTreeMap<_, _> = selected().collect();
+    let complete = serde_json::json!({
+        "basis": EVIDENCE_MEMBER_BASIS, "capture": capture,
+        "availability": "complete", "member_count": member_count, "members": members
+    });
+    if member_payload_fits(&complete) {
+        complete
+    } else {
+        unavailable("byte-limit")
+    }
+}
+
+pub fn evidence_member_baseline(
+    evidence: &Evidence,
+) -> Result<EvidenceMemberBaseline, &'static str> {
+    let raw = evidence.member_manifest.as_ref().ok_or("legacy-absent")?;
+    if !member_payload_fits(raw) {
+        return Err("byte-limit");
+    }
+    let envelope: EvidenceMemberEnvelope =
+        serde_json::from_value(raw.clone()).map_err(|_| "malformed-manifest")?;
+    if envelope.basis != EVIDENCE_MEMBER_BASIS {
+        return Err("unsupported-basis");
+    }
+    let capture = match envelope.capture.as_str() {
+        "execution-start" => "execution-start",
+        "manual-record" => "manual-record",
+        _ => return Err("unsupported-capture"),
+    };
+    if envelope.availability == "unavailable" && envelope.members.is_none() {
+        return Err(match envelope.reason.as_deref() {
+            Some("member-limit") => "member-limit",
+            Some("path-limit") => "path-limit",
+            Some("byte-limit") => "byte-limit",
+            Some("invalid-member") => "invalid-member",
+            _ => "malformed-manifest",
+        });
+    }
+    if envelope.availability != "complete" || envelope.reason.is_some() {
+        return Err("malformed-manifest");
+    }
+    let members = envelope.members.ok_or("malformed-manifest")?;
+    if members.len() > EVIDENCE_MEMBER_LIMIT {
+        return Err("member-limit");
+    }
+    if members.len() != envelope.member_count {
+        return Err("member-count-mismatch");
+    }
+    for (path, digest) in &members {
+        if path.len() > EVIDENCE_MEMBER_PATH_BYTES {
+            return Err("path-limit");
+        }
+        if !valid_member(path, digest) {
+            return Err("invalid-member");
+        }
+        if !evidence.inputs.keys().any(|root| covers(root, path)) {
+            return Err("member-outside-inputs");
+        }
+    }
+    if evidence
+        .inputs
+        .iter()
+        .any(|(root, digest)| observed_digest(&members, root) != *digest)
+    {
+        return Err("input-digest-mismatch");
+    }
+    Ok(EvidenceMemberBaseline { members, capture })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -2291,6 +2452,267 @@ pub fn owe_path(task: &mut Task, path: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn member_evidence(tree: &BTreeMap<String, String>, roots: &[&str]) -> Evidence {
+        let inputs: BTreeMap<_, _> = roots
+            .iter()
+            .map(|root| (root.to_string(), observed_digest(tree, root)))
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "check": "check", "exit": 0, "tree": "tree", "tool": "run", "unix": 1,
+            "inputs": inputs, "member_manifest": capture_evidence_members(&inputs, tree, "execution-start")
+        })).unwrap()
+    }
+
+    #[test]
+    fn evidence_member_manifest_complete_selection_deduplicates_and_reconstructs_roots() {
+        let tree = BTreeMap::from([
+            ("core/a.rs".into(), "0000000000000001".into()),
+            ("core/b.rs".into(), "0000000000000002".into()),
+            ("core2/c.rs".into(), "0000000000000003".into()),
+            ("report.md".into(), "0000000000000004".into()),
+        ]);
+        let mut work = Task {
+            scope: vec!["core".into()],
+            check_inputs: vec!["core".into(), "core/a.rs".into(), "missing".into()],
+            ..Default::default()
+        };
+        work.deliverables.push(Deliverable {
+            path: "report.md".into(),
+            opened_digest: None,
+        });
+        let inputs = evidence_inputs(&work, &tree);
+        let raw = capture_evidence_members(&inputs, &tree, "execution-start");
+        assert_eq!(raw["member_count"], 3);
+        let evidence = member_evidence(&tree, &["core", "core/a.rs", "report.md", "missing"]);
+        assert_eq!(evidence.member_manifest.as_ref().unwrap(), &raw);
+        let baseline = evidence_member_baseline(&evidence).unwrap();
+        assert_eq!(
+            baseline
+                .members
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["core/a.rs", "core/b.rs", "report.md"]
+        );
+        for (root, digest) in &inputs {
+            assert_eq!(observed_digest(&baseline.members, root), *digest);
+        }
+        assert_eq!(inputs["missing"], None);
+    }
+
+    #[test]
+    fn evidence_member_manifest_empty_null_and_removed_root_are_not_missing_selection() {
+        let mut evidence = member_evidence(&BTreeMap::new(), &["missing"]);
+        assert!(
+            evidence_member_baseline(&evidence)
+                .unwrap()
+                .members
+                .is_empty()
+        );
+        assert_eq!(
+            evidence.member_manifest.as_ref().unwrap()["member_count"],
+            0
+        );
+        evidence
+            .inputs
+            .insert("missing".into(), Some("0000000000000001".into()));
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "input-digest-mismatch"
+        );
+        let tree = BTreeMap::from([("core/a.rs".into(), "0000000000000001".into())]);
+        let mut evidence = member_evidence(&tree, &["core"]);
+        evidence.inputs.clear();
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "member-outside-inputs"
+        );
+    }
+
+    #[test]
+    fn evidence_member_manifest_legacy_and_malformed_wire_roundtrip_without_gates() {
+        let old = r#"{"check":"check","exit":0,"tree":"old","tool":"check","unix":1,"inputs":{}}"#;
+        let evidence: Evidence = serde_json::from_str(old).unwrap();
+        assert_eq!(serde_json::to_string(&evidence).unwrap(), old);
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "legacy-absent"
+        );
+        for raw in [
+            serde_json::Value::Null,
+            serde_json::json!([1]),
+            serde_json::json!({"basis":"future","unknown":true}),
+        ] {
+            let mut wire = serde_json::to_value(&evidence).unwrap();
+            wire["member_manifest"] = raw;
+            let decoded: Evidence = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&decoded).unwrap(), wire);
+            assert_eq!(
+                evidence_member_baseline(&decoded).unwrap_err(),
+                "malformed-manifest"
+            );
+            let work = Task::default();
+            assert_eq!(
+                evidence_matches(&work, &decoded),
+                evidence_matches(&work, &evidence)
+            );
+        }
+        let mut current = evidence.clone();
+        current.acceptance_epoch = Some(1);
+        current.identity = Some(CheckIdentity::Text {
+            command: "check".into(),
+        });
+        let mut work = Task {
+            acceptance_epoch: 1,
+            check: Some("check".into()),
+            evidence: vec![current],
+            ..Default::default()
+        };
+        assert!(readiness(&work, &BTreeMap::new()).supported);
+        work.evidence[0].member_manifest = Some(serde_json::json!({"bad":"diagnostics"}));
+        assert!(readiness(&work, &BTreeMap::new()).supported);
+    }
+
+    #[test]
+    fn evidence_member_manifest_count_and_utf8_path_limits_are_all_or_unavailable() {
+        let mut tree: BTreeMap<_, _> = (0..8192)
+            .map(|n| (format!("core/{n:04}"), "0000000000000001".to_owned()))
+            .collect();
+        let evidence = member_evidence(&tree, &["core"]);
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap().members.len(),
+            8192
+        );
+        tree.insert("core/overflow".into(), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        let raw = evidence.member_manifest.as_ref().unwrap();
+        assert_eq!(raw["member_count"], 8193);
+        assert_eq!(raw["reason"], "member-limit");
+        assert!(raw.get("members").is_none());
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "member-limit"
+        );
+        for extra in [0, 1] {
+            let path = format!("core/{}{}", "é".repeat(2045), "x".repeat(1 + extra));
+            assert_eq!(path.len(), 4096 + extra);
+            let tree = BTreeMap::from([(path, "0000000000000001".into())]);
+            let evidence = member_evidence(&tree, &["core"]);
+            if extra == 0 {
+                assert!(evidence_member_baseline(&evidence).is_ok());
+            } else {
+                assert_eq!(
+                    evidence_member_baseline(&evidence).unwrap_err(),
+                    "path-limit"
+                );
+                assert!(
+                    evidence
+                        .member_manifest
+                        .as_ref()
+                        .unwrap()
+                        .get("members")
+                        .is_none()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn evidence_member_manifest_compact_byte_limit_counts_escaping_exactly() {
+        let mut tree: BTreeMap<_, _> = (0..260)
+            .map(|n| {
+                (
+                    format!("core/{n:03}/{}", "x".repeat(4000)),
+                    "0000000000000001".to_owned(),
+                )
+            })
+            .collect();
+        tree.insert("core/last".into(), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        let size = serde_json::to_vec(evidence.member_manifest.as_ref().unwrap())
+            .unwrap()
+            .len();
+        let remaining = 1_048_576 - size;
+        let base = format!(
+            "core/last{}{}",
+            "\"".repeat(remaining / 2),
+            "x".repeat(remaining % 2)
+        );
+        assert!(base.len() <= 4096);
+        tree.remove("core/last");
+        tree.insert(base.clone(), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        assert_eq!(
+            serde_json::to_vec(evidence.member_manifest.as_ref().unwrap())
+                .unwrap()
+                .len(),
+            1_048_576
+        );
+        assert!(evidence_member_baseline(&evidence).is_ok());
+        tree.remove(&base);
+        tree.insert(format!("{base}x"), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "byte-limit"
+        );
+        assert_eq!(
+            evidence.member_manifest.as_ref().unwrap()["member_count"],
+            261
+        );
+        assert!(
+            evidence
+                .member_manifest
+                .as_ref()
+                .unwrap()
+                .get("members")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn evidence_member_manifest_rejects_invalid_shape_count_path_digest_and_selection() {
+        let tree = BTreeMap::from([("core/a.rs".into(), "0000000000000001".into())]);
+        let original = member_evidence(&tree, &["core"]);
+        for (field, value, reason) in [
+            ("basis", serde_json::json!("future-v2"), "unsupported-basis"),
+            (
+                "capture",
+                serde_json::json!("completion-time"),
+                "unsupported-capture",
+            ),
+            (
+                "member_count",
+                serde_json::json!(2),
+                "member-count-mismatch",
+            ),
+            (
+                "members",
+                serde_json::json!({"../escape":"0000000000000001"}),
+                "invalid-member",
+            ),
+            (
+                "members",
+                serde_json::json!({"core/a.rs":"secret content"}),
+                "invalid-member",
+            ),
+            (
+                "members",
+                serde_json::json!({"elsewhere/a.rs":"0000000000000001"}),
+                "member-outside-inputs",
+            ),
+            (
+                "members",
+                serde_json::json!({"core/a.rs":"0000000000000002"}),
+                "input-digest-mismatch",
+            ),
+        ] {
+            let mut evidence = original.clone();
+            evidence.member_manifest.as_mut().unwrap()[field] = value;
+            assert_eq!(evidence_member_baseline(&evidence).unwrap_err(), reason);
+        }
+    }
 
     #[test]
     #[cfg(unix)]

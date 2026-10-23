@@ -520,12 +520,41 @@ history is `baseline-unavailable`. Reflection and review comparisons include
 composite receipt context; the view never guesses which historical field changed.
 A legacy check without an epoch reports `epoch_availability=baseline-unavailable`.
 
-Changed directory children are shown only when the saved opening tree reproduces
-that exact receipt's selected digest, the current projection matches too, and the
-selection is safely reconstructible. Otherwise child history is unavailable.
-`opened-tree-digest-match` is a fingerprint boundary, not semantic proof. Leaf
-changes describe tracked membership: ignored/symlink/unreadable members may be
-absent, and large files may use metadata hashing rather than content hashing.
+New check receipts capture an optional `member_manifest` from the **same observed
+tree** as their selected input digests. It contains a sorted, deduplicated union
+of every tracked leaf covered by those inputs (including deliverables), not just
+owned or changed files. Argv receipts label it `execution-start`: it is captured
+before spawning and is not resampled when the command finishes. Manual text
+receipts label it `manual-record`, a record-time observation, **not an observed
+execution**. Existing task locks, captured epochs and check identities still
+apply; this is not an atomic filesystem snapshot or proof of actual file access.
+
+For check children, a complete supported manifest must reproduce **every**
+recorded input digest, including null observations, before it supplies the
+`evidence-input-manifest` baseline. The current projection must match too. Changed
+input-root selection is not interpreted as a file addition or removal. Legacy
+receipts without this field retain the safe `opened-tree-digest-match` fallback
+only when the saved opening tree matches that exact receipt's selected digest.
+Other receipt types still use their own digest-matched opening-tree boundary;
+they never borrow a check manifest. Unsupported, malformed, inconsistent or
+unavailable metadata reports `baseline-unavailable` with a reason, not a fabricated
+empty diff or a task-load failure. Reading never fills in old receipts.
+
+Capture is all-or-unavailable: at most **8,192** unique members, **4,096 UTF-8
+bytes per path**, and **1,048,576 compact JSON bytes** per manifest, counting JSON
+escaping. Exceeding a cap stores a small unavailable envelope with the exact known
+member count and `member-limit`, `path-limit` or `byte-limit`, never a partial map.
+These are per-receipt capture bounds, not the size of a pretty-printed task or its
+history. An empty complete map and an unavailable map are distinct. Diagnostic
+availability never changes check exit, freshness, reuse eligibility or closure.
+
+Complete means the captured **tracking set**, not every filesystem file: ignored,
+symlink and unreadable members may be unobserved, and large files may use metadata
+hashing rather than content hashing. A removed member means no longer observed in
+tracking, not proven filesystem absence. Fingerprint equality is not semantic or
+cryptographic proof. Metadata stores relative paths and existing digests, not file
+contents; filenames and fingerprints still belong in the private local task
+record, not publication artifacts.
 
 Receipts, groups, selected paths and identities each have a 50-row presentation
 cap with complete total/shown/omitted counts. All displayed groups share a global
@@ -554,6 +583,6 @@ Repeat `--delivery-review-of` for additional distinct tasks. Omitted `--source` 
 
 Reuse requires the same still-permitted accepted model, exact check identity and complete observable input map, a readable original task-local log, and unchanged execution coverage of every recursive source scope, declared input, deliverable and recorded artifact. A report edit counts as an input edit. Missing paths, manual evidence, an older success behind a newer failure, falsification obligations and chained reuse refuse before recording. Current source targets remain explicit; no target is inferred.
 
-The original evidence stays intact. The appended `tool: "reuse"` entry retains its execution time, argv, input hashes, exit, tree and log, with a separate optional `reuse` object naming the zero-based original evidence index, original epoch/digests, attesting model, reason and reuse time. Text output distinguishes execution from reuse. Old records without this object remain compatible.
+The original evidence stays intact. The appended `tool: "reuse"` entry retains its execution time, argv, input hashes, exit, tree, log and optional member manifest unchanged, with a separate optional `reuse` object naming the zero-based original evidence index, original epoch/digests, attesting model, reason and reuse time. A manifest explains changed inputs; it cannot make a changed broad root reusable merely because an owned leaf is unchanged. Text output distinguishes execution from reuse. Old records without these objects remain compatible; absent member metadata stays absent. Old writers may discard unknown fields, so lossless downgrade writes are not promised.
 
 Acceptance advances the epoch and clears the challenge. Dispositions, lenses, reflections and delivery verdicts are not renewed; inspect and record them explicitly before hand-back. Both closure modes retain their existing checks, independent outcome review and Partial/Blocked residuals. Final recording reloads task, process authority, execution inputs/log and recursive review context and refuses if the inspected context changed. This is an explicit execution reuse path, not a guarantee of filesystem-wide atomicity or permission to omit report dependencies.
