@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-live.52",
+    "date": "2026-10-23",
+    "title": "Food from the hills",
+    "changes": [
+      "After Masonry and Water management, civilizations can build shared planted plots on suitable owned hills. Construction and operation both require real supplies and local workers.",
+      "Low planted strips and stone edges distinguish hillside commons. Inspection shows actual construction, staffing, shortages and Food produced."
+    ]
+  },
+  {
     "version": "0.1.0-live.51",
     "date": "2026-10-23",
     "title": "A clearer autonomous world",
@@ -15,15 +24,6 @@
     "changes": [
       "Consenting trade partners can exchange paid lessons toward four discoveries. Route details show agreed costs, completed lessons and actual research gained.",
       "Development versions start fresh worlds instead of migrating older saves. Current-version worlds still save and resume."
-    ]
-  },
-  {
-    "version": "0.1.0-live.46",
-    "date": "2026-10-23",
-    "title": "Working the shore",
-    "changes": [
-      "Build shore fisheries on owned coastal land. Each operating fishery needs a local resident and Materials to produce Food.",
-      "Net frames and fish markers identify installed sites; inspection shows construction, staffing, supplies and actual output."
     ]
   }
 ]

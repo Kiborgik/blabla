@@ -72,7 +72,11 @@ const knowledgeRelease: RegisteredRulesDefinition = {
   id: 'settlement-knowledge-compacts-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
   featureIds: [...shoreRelease.featureIds, 'knowledge-compacts'],
 };
-export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease];
+const hillsideRelease: RegisteredRulesDefinition = {
+  id: 'settlement-hillside-commonworks-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  featureIds: [...knowledgeRelease.featureIds, 'hillside-commonworks'],
+};
+export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease, hillsideRelease];
 
 function currentRelease(): RegisteredRulesDefinition {
   const release = RELEASES.find((candidate) => candidate.id === 'settlement-foundations-1');

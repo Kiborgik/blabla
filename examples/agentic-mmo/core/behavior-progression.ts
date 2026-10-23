@@ -1,3 +1,5 @@
+import { fundedPaidFoodSites, paidFoodSite } from './behavior-paid-food-sites.ts';
+import { improvementSiteBlock } from './simulation/improvements.ts';
 import { civilizationFoodUpkeep } from './simulation/food-security.ts';
 import type { BehaviorProfile } from './behavior-profiles.ts';
 import { BUILDINGS, CIVICS, IMPROVEMENTS, RESIDENT_CAPACITY_RULES, RESOURCE_IDS, SPACEFLIGHT_RULES, STRATEGIC_RESOURCE_IDS, STRATEGIC_RESOURCE_RULES, VICTORY_RULES, TECHNOLOGIES, TRADE_RECIPES } from './content.ts';
@@ -118,9 +120,23 @@ function planOperations(state: WorldState, actor: Civilization, cities: readonly
     }
     for (const improvement of Object.values(city.improvements ?? {}).toSorted((a, b) => a.tileId - b.tileId)) {
       if (improvements.has(improvementKey(city.id, improvement.tileId))) continue;
-      const residents = IMPROVEMENTS.find(definition => definition.id === improvement.improvementId)?.residentsRequired ?? 1;
-      if (available < residents) continue;
+      const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
+      if (!definition || !hasFeatures(state, definition.requiredFeatures) || improvementSiteBlock(state, city, definition, improvement.tileId, true)) continue;
+      const residents = definition.residentsRequired;
+      if (available < residents || RESOURCE_IDS.some(resource => budget[resource] < (definition.operatingInputs?.[resource] ?? 0))) continue;
       improvements.add(improvementKey(city.id, improvement.tileId)); available -= residents;
+      for (const resource of RESOURCE_IDS) budget[resource] -= definition.operatingInputs?.[resource] ?? 0;
+    }
+  }
+  if (cities.some(city => Object.values(city.improvements ?? {}).some(improvement => {
+    const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
+    return definition && paidFoodSite(definition);
+  }))) {
+    const funded = fundedPaidFoodSites(state, actor.id, desired, improvements);
+    for (const city of cities) for (const improvement of Object.values(city.improvements ?? {})) {
+      const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
+      const key = improvementKey(city.id, improvement.tileId);
+      if (definition && paidFoodSite(definition) && !funded.has(key)) improvements.delete(key);
     }
   }
 }

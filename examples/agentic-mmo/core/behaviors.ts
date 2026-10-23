@@ -1,3 +1,5 @@
+import { createPaidFoodSiteAffordability, paidFoodSite } from './behavior-paid-food-sites.ts';
+import { revealedHorseSite } from './simulation/pastoral.ts';
 import { deriveKnowledgePlan, knowledgeProtects, knowledgeReason, knowledgeWeight, type KnowledgePlan } from './behavior-knowledge.ts';
 import { FOOD_BUDGET_RULES } from './food-security-content.ts';
 import { civilizationFoodUpkeep, forecastCivilizationFoodProduction } from './simulation/food-security.ts';
@@ -138,6 +140,7 @@ interface Situation {
   diplomacy: DiplomacyPlan | null;
   relief: ReliefPlan | null;
   knowledge: KnowledgePlan | null;
+  paidFoodSiteAffordable: ReturnType<typeof createPaidFoodSiteAffordability>;
 }
 
 function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
@@ -160,7 +163,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null };
+  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null };
 }
 
 function selectPhase(context: Situation, options: readonly ActionOption[], candidates?: readonly Candidate[]): BehaviorPhase {
@@ -219,6 +222,12 @@ function constructionWeight(action: GameAction, context: Situation): number {
     const definition = IMPROVEMENTS.find(candidate => candidate.id === action.improvementId);
     if (!definition) return 0;
     const deposit = context.progression.deposits.get(action.tileId);
+    if (paidFoodSite(definition)) {
+      if (!context.paidFoodSiteAffordable(action)) return 0;
+      const value = 4 + outputValue(definition.production, context) - outputValue(definition.operatingInputs ?? {}, context);
+      const occupiedResource = deposit && deposit.remaining > 0 || revealedHorseSite(state, actor.id, action.tileId);
+      return Math.max(1, value) * profile.priorities.construction * (occupiedResource ? 0.25 : 1) / (1 + outputValue(definition.cost, context) / 80);
+    }
     return (4 + outputValue(definition.production, context) + (deposit && deposit.remaining > 0 ? 4 : 0)) * profile.priorities.construction;
   }
   if (action.type === 'build-wonder') {

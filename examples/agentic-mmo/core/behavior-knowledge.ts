@@ -77,7 +77,7 @@ function estimate(state: WorldState, terms: KnowledgeTerms, compact?: KnowledgeC
   return { kind: 'estimate', nextStudyRound, settlementRound, sciencePerRound, remainingWork, projectedRemainingWork, expectedWork, studiesRemaining };
 }
 
-function commitments(state: WorldState, seat: number, rounds: number, excludingCompactId?: string, terms?: KnowledgeTerms): Budget {
+export function exchangePromisedResources(state: WorldState, seat: number, rounds: number, excludingCompactId?: string): Budget {
   const result: Budget = { ordinary: empty(), strategic: {} };
   add(result.ordinary, knowledgePromisedResources(state, seat, excludingCompactId));
   add(result.ordinary, reliefPromisedResources(state, seat));
@@ -96,6 +96,11 @@ function commitments(state: WorldState, seat: number, rounds: number, excludingC
     add(result.ordinary, proposer ? agreement.terms.proposerUpkeep : agreement.terms.recipientUpkeep, count);
     addStrategic(result.strategic, strategicObligations(agreement.terms, proposer ? 'proposer' : 'recipient'), count);
   }
+  return result;
+}
+
+function commitments(state: WorldState, seat: number, rounds: number, excludingCompactId?: string, terms?: KnowledgeTerms): Budget {
+  const result = exchangePromisedResources(state, seat, rounds, excludingCompactId);
   for (const city of state.cities.filter(city => city.civId === seat)) {
     for (const building of BUILDINGS) {
       const selected = terms && (terms.teacherId === seat ? terms.teacherCityId === city.id && terms.teacherInstitutionId === building.id : terms.learnerCityId === city.id && terms.learnerInstitutionId === building.id);
@@ -210,12 +215,17 @@ function protectedNeeds(state: WorldState, actor: Civilization, action: GameActi
   return false;
 }
 
+export function knowledgeCommitmentHorizon(state: WorldState, seat: number): number {
+  const accepted = (state.knowledge?.active ?? []).filter(compact => compact.status === 'accepted' && (compact.terms.teacherId === seat || compact.terms.learnerId === seat));
+  return Math.max(1, ...accepted.map(compact => Math.min(compact.terms.studyCadences * compact.terms.tradeTerms.cadenceRounds, Math.max(1, (estimate(state, compact.terms, compact).settlementRound ?? state.round + 1) - state.round))));
+}
+
 export function deriveKnowledgePlan(state: WorldState, actor: Civilization, profile: BehaviorProfile, options: readonly ActionOption[]): KnowledgePlan {
   const assessments = new Map<ActionOption, Assessment>();
   if (!state.knowledge || !hasFeatures(state, [KNOWLEDGE_RULES.featureId])) return { assessments, promised: {} };
   const promised = knowledgePromisedResources(state, actor.id);
   const accepted = state.knowledge.active.filter(compact => compact.status === 'accepted' && (compact.terms.teacherId === actor.id || compact.terms.learnerId === actor.id));
-  const rounds = Math.max(1, ...accepted.map(compact => Math.min(compact.terms.studyCadences * compact.terms.tradeTerms.cadenceRounds, Math.max(1, (estimate(state, compact.terms, compact).settlementRound ?? state.round + 1) - state.round))));
+  const rounds = knowledgeCommitmentHorizon(state, actor.id);
   const held = accepted.length ? commitments(state, actor.id, rounds) : null;
   const spendingPromise = (option: ActionOption): boolean => {
     if (!held || protectedNeeds(state, actor, option.action)) return false;

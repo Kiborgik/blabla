@@ -115,7 +115,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
       const definition = IMPROVEMENTS.find(item => item.id === record.improvementId);
       if (!tile || !definition || tile.terrain === 'ocean') return [];
       return [{ id: `improvement:${city.id}:${record.tileId}:${record.instance}`, cityId: city.id, townName: city.name, civId: city.civId,
-        improvementId: record.improvementId, name: definition.name, tileId: tile.id, q: tile.q - centerQ, r: tile.r - centerR,
+        improvementId: record.improvementId, name: definition.name, tileId: tile.id, worldSeed: state.seed, q: tile.q - centerQ, r: tile.r - centerR,
         height: mapTileHeight(tile.elevation), color: town.color, status: record.construction ? 'building' : 'built',
         construction: structuredClone(record.construction), completion: structuredClone(record.completion), operation: structuredClone(record.operation),
         baseProduction: structuredClone(definition.production), residentsRequired: definition.residentsRequired }];

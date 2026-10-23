@@ -30,6 +30,7 @@ function resolvedImprovementSiteBlock(state: WorldState, city: City, definition:
   if (site.owner !== city.civId) return 'The improvement site must already belong to this civilization';
   const binding = purchasedSiteBlock(state, city, tileId); if (binding) return binding;
   if (definition.siteRequirement === 'coastal-land' && (center.owner !== city.civId || !isCoastalSite(state, site.id) || !isCoastalSite(state, center.id))) return 'The improvement requires buildable coastal land and its exact coastal town';
+  if (definition.siteRequirement === 'grassland-hill' && (center.owner !== city.civId || site.terrain !== 'grassland' || !isHillSite(site))) return 'The improvement requires an owned grassland hill and its exact owned town';
   if (definition.siteRequirement === 'hill' && !isHillSite(site)) return 'The improvement requires a buildable hill site';
   if (definition.siteRequirement === 'forest' && site.terrain !== 'forest') return 'The improvement requires a current forest site';
   if (definition.siteRequirement === 'revealed-horse-site' && (site.terrain !== 'grassland' || !revealedHorseSite(state, city.civId, tileId))) return 'The improvement requires this civilization’s revealed grassland horse site';

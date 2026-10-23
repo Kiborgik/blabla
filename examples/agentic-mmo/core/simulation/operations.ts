@@ -86,6 +86,18 @@ export function allocateOperations(state: WorldState): void {
   }
 }
 
+export function projectOperationAllocation(state: WorldState, prepare?: (projected: WorldState) => void): WorldState {
+  const projected: WorldState = {
+    ...state,
+    round: state.round + 1,
+    civilizations: state.civilizations.map(civilization => ({ ...civilization, resources: { ...civilization.resources }, ...(civilization.strategicResources ? { strategicResources: { ...civilization.strategicResources } } : {}) })),
+    cities: state.cities.map(city => ({ ...city, ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}), ...(city.improvements ? { improvements: structuredClone(city.improvements) } : {}) })),
+  };
+  prepare?.(projected);
+  allocateOperations(projected);
+  return projected;
+}
+
 export function productiveBuildings(state: WorldState, city: City): BuildingDefinition[] {
   return orderedBuildings(city).filter((building) => !paidRecipe(building) || (
     hasFeatures(state, ['building-operations']) && city.buildingOperations?.[building.id]?.lastResult?.status === 'operated'
