@@ -8,8 +8,8 @@ import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:hillside-commonworks-v1';
-export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-hillside-commonworks-1';
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:supported-studies-v1';
+export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-supported-studies-1';
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
 const EPOCH = '2000-01-01T00:00:00.000Z';
 const MAXIMUM_STEPS = 60;

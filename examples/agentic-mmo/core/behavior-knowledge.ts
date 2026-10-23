@@ -26,6 +26,9 @@ export interface KnowledgeEstimate {
   readonly projectedRemainingWork: number;
   readonly expectedWork: number;
   readonly studiesRemaining: number;
+  readonly ordinaryCompletionRound: number | null;
+  readonly assistedCompletionRound: number | null;
+  readonly savedRounds: number;
 }
 interface Assessment { weight: number | null; priority: number; reason: string; protected: boolean; estimate?: KnowledgeEstimate }
 interface Budget { ordinary: Resources; strategic: StrategicResources }
@@ -60,21 +63,33 @@ function scienceEstimate(state: WorldState, actor: Civilization): number {
   }, 0));
 }
 
+export function knowledgeCompletionTiming(remainingWork: number, sciencePerRound: number, expectedWork: number, settlementDelay: number, scienceBank = 0): { ordinaryDelay: number | null; assistedDelay: number | null; savedRounds: number } {
+  if (![remainingWork, sciencePerRound, expectedWork, scienceBank].every(value => Number.isFinite(value) && value >= 0 && Number.isSafeInteger(Math.round(value * 100))) || !Number.isSafeInteger(settlementDelay) || settlementDelay < 0)
+    return { ordinaryDelay: null, assistedDelay: null, savedRounds: 0 };
+  const remaining = Math.max(0, Math.round(remainingWork * 100) - Math.round(scienceBank * 100));
+  const science = Math.round(sciencePerRound * 100); const assistance = Math.round(expectedWork * 100);
+  const ordinaryDelay = remaining === 0 ? 0 : science > 0 ? Math.ceil(remaining / science) : null;
+  const assistedDelay = ordinaryDelay !== null && ordinaryDelay <= settlementDelay ? ordinaryDelay
+    : remaining <= assistance ? settlementDelay : science > 0 ? Math.max(settlementDelay, Math.ceil((remaining - assistance) / science)) : null;
+  return { ordinaryDelay, assistedDelay, savedRounds: ordinaryDelay !== null && assistedDelay !== null ? Math.max(0, ordinaryDelay - assistedDelay) : 0 };
+}
+
 function estimate(state: WorldState, terms: KnowledgeTerms, compact?: KnowledgeCompact): KnowledgeEstimate {
   const learner = state.civilizations.find(actor => actor.id === terms.learnerId);
   const agreement = state.routes.find(route => route.id === terms.routeId)?.agreement;
   const studiesRemaining = Math.max(0, terms.requiredStudies - (compact?.status === 'accepted' ? compact.studies.length : 0));
   const sciencePerRound = learner ? scienceEstimate(state, learner) : 0;
   const remainingWork = Math.max(0, terms.costBasis - (learner?.researchProgress ?? terms.costBasis));
-  const nextStudyRound = agreement?.enabled ? Math.max(state.round + 1, agreement.nextDeliveryRound) : null;
-  const settlementRound = nextStudyRound === null ? null : nextStudyRound + Math.max(0, studiesRemaining - 1) * terms.tradeTerms.cadenceRounds;
-  const deadline = compact?.status === 'accepted' ? compact.deadlineRound : state.round + terms.studyCadences * terms.tradeTerms.cadenceRounds;
-  const ordinary = sciencePerRound * Math.max(0, (settlementRound ?? state.round) - state.round)
-    + (!hasFeatures(state, [RESEARCH_INVESTMENT_RULES.featureId]) ? learner?.resources.science ?? 0 : 0);
+  const nextStudyRound = agreement?.enabled ? state.round + terms.studyInterval : null;
+  const settlementRound = nextStudyRound === null ? null : nextStudyRound + Math.max(0, studiesRemaining - 1) * terms.studyInterval;
+  const deadline = compact?.status === 'accepted' ? compact.deadlineRound : state.round + terms.studySeasons * terms.studyInterval;
+  const scienceBank = !hasFeatures(state, [RESEARCH_INVESTMENT_RULES.featureId]) ? learner?.resources.science ?? 0 : 0;
+  const ordinary = sciencePerRound * Math.max(0, (settlementRound ?? state.round) - state.round) + scienceBank;
   const projectedRemainingWork = quantize(Math.max(0, remainingWork - ordinary));
   const expectedWork = settlementRound !== null && settlementRound <= deadline && learner?.researchTarget === terms.technologyId
     ? Math.min(terms.nominalAmount, projectedRemainingWork) : 0;
-  return { kind: 'estimate', nextStudyRound, settlementRound, sciencePerRound, remainingWork, projectedRemainingWork, expectedWork, studiesRemaining };
+  const timing = knowledgeCompletionTiming(remainingWork, sciencePerRound, expectedWork, Math.max(0, (settlementRound ?? state.round) - state.round), scienceBank);
+  return { kind: 'estimate', nextStudyRound, settlementRound, sciencePerRound, remainingWork, projectedRemainingWork, expectedWork, studiesRemaining, ordinaryCompletionRound: timing.ordinaryDelay === null ? null : state.round + timing.ordinaryDelay, assistedCompletionRound: timing.assistedDelay === null ? null : state.round + timing.assistedDelay, savedRounds: timing.savedRounds };
 }
 
 export function exchangePromisedResources(state: WorldState, seat: number, rounds: number, excludingCompactId?: string): Budget {
@@ -139,6 +154,7 @@ function opportunity(state: WorldState, actor: Civilization, profile: BehaviorPr
   const bad = (reason: string): Opportunity => ({ estimate: projected, useful: false, gain: 0, reason });
   const identity = knowledgeCompactFailure(state, { terms }); if (identity) return bad(identity.detail);
   if (projected.expectedWork <= 0) return bad(projected.projectedRemainingWork <= 0 ? 'ordinary research is estimated to finish before the second lesson; retain self-reliant learning' : 'the remaining route window cannot fit the required fresh lessons');
+  if (projected.savedRounds <= 0) return bad('paid teaching is not estimated to complete the discovery earlier than ordinary research');
   const rounds = Math.max(1, (projected.settlementRound ?? state.round + 1) - state.round);
   for (const id of [terms.teacherId, terms.learnerId]) {
     const participant = state.civilizations.find(candidate => candidate.id === id);
@@ -217,7 +233,7 @@ function protectedNeeds(state: WorldState, actor: Civilization, action: GameActi
 
 export function knowledgeCommitmentHorizon(state: WorldState, seat: number): number {
   const accepted = (state.knowledge?.active ?? []).filter(compact => compact.status === 'accepted' && (compact.terms.teacherId === seat || compact.terms.learnerId === seat));
-  return Math.max(1, ...accepted.map(compact => Math.min(compact.terms.studyCadences * compact.terms.tradeTerms.cadenceRounds, Math.max(1, (estimate(state, compact.terms, compact).settlementRound ?? state.round + 1) - state.round))));
+  return Math.max(1, ...accepted.map(compact => Math.min(compact.terms.studySeasons * compact.terms.studyInterval, Math.max(1, (estimate(state, compact.terms, compact).settlementRound ?? state.round + 1) - state.round))));
 }
 
 export function deriveKnowledgePlan(state: WorldState, actor: Civilization, profile: BehaviorProfile, options: readonly ActionOption[]): KnowledgePlan {
@@ -253,7 +269,7 @@ export function deriveKnowledgePlan(state: WorldState, actor: Civilization, prof
         assessment.estimate = result.estimate;
         if (result.useful && partner.useful) assessment.weight = (6 + result.gain * 3) * profile.priorities.trade;
         assessment.reason = result.useful && partner.useful
-          ? `Offer optional teaching; estimate ${result.estimate.expectedWork} work after round ${result.estimate.settlementRound} exchanges, not guaranteed. Full price remains due only on settlement.`
+          ? `Offer optional teaching; estimate ${result.estimate.expectedWork} work after supported study season ${result.estimate.settlementRound}, with discovery estimated ${result.estimate.savedRounds} season(s) earlier, not guaranteed. Full price remains due only on settlement.`
           : `Do not offer teaching; ${result.useful ? partner.reason : result.reason}.`;
       }
     } else if (action.type === 'respond-knowledge' || action.type === 'withdraw-knowledge') {
@@ -266,7 +282,7 @@ export function deriveKnowledgePlan(state: WorldState, actor: Civilization, prof
         if (action.type === 'respond-knowledge' && action.accept === useful) {
           assessment.weight = useful ? (8 + result.gain) * profile.priorities.research : 18 * profile.priorities.recovery;
           assessment.reason = useful
-            ? `Accept ${compact.id}; estimate ${result.estimate.expectedWork} work by round ${result.estimate.settlementRound}, after ordinary Science. Full fixed price, no guaranteed lessons or escrow.`
+            ? `Accept ${compact.id}; estimate ${result.estimate.expectedWork} work by round ${result.estimate.settlementRound}, after ordinary Science, with discovery estimated ${result.estimate.savedRounds} season(s) earlier. Full fixed price, no guaranteed lessons or escrow.`
             : `Decline ${compact.id}; ${acceptanceFailure ?? result.reason}. Ordinary research can continue without teaching.`;
         } else if (action.type === 'withdraw-knowledge' && !useful) {
           assessment.weight = 18 * profile.priorities.recovery;

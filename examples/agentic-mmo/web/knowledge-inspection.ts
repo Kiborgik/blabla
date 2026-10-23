@@ -2,7 +2,7 @@ import { RESOURCE_IDS } from '../core/content.ts';
 import { KNOWLEDGE_TECHNOLOGY_IDS } from '../core/knowledge-content.ts';
 import { isKnowledgeCompact, isKnowledgeResult, validKnowledgeEvent } from '../core/knowledge-validation.ts';
 import type { KnowledgeCompact, KnowledgeInstitutionProof, KnowledgeResult, KnowledgeStudyAttempt, KnowledgeTerms } from '../core/knowledge-types.ts';
-import type { GameEvent, Resources, Route, StrategicResources, WorldState } from '../core/types.ts';
+import type { GameEvent, Resources, Route, WorldState } from '../core/types.ts';
 import { ICON_PATHS, METRIC_LABELS } from '../visuals/visual-language.ts';
 import type { VisualIcon } from '../visuals/visual-language.ts';
 import { exactNumber } from './number-format.ts';
@@ -43,13 +43,13 @@ function projected(compact: KnowledgeCompact, result: KnowledgeResult | null): K
     status: result ? result.outcome === 'completed' ? `Completed · Added ${exactNumber(result.amount)} research work toward ${names.technology}`
       : `${outcomeLabels[result.outcome]} · ${result.detail}`
       : compact.status === 'proposed' ? 'Offered · Learner consent not recorded'
-        : `Agreed · ${compact.studies.length} of ${compact.terms.requiredStudies} study exchanges recorded`,
+        : `Agreed · ${compact.studies.length} of ${compact.terms.requiredStudies} supported study seasons recorded`,
   };
 }
 
 export function knowledgeRouteRecords(state: WorldState, routeId: string): KnowledgeRouteRecord[] {
   const layer = state.knowledge; const route = state.routes.find(item => item.id === routeId);
-  if (!layer || layer.ruleVersion !== 1 || !route?.agreement) return [];
+  if (!layer || layer.ruleVersion !== 2 || !route?.agreement) return [];
   const results = new Map<string, KnowledgeResult>(); const conflicts = new Set<string>();
   const candidates = [...layer.lastResults, ...layer.grants.flatMap(slots => KNOWLEDGE_TECHNOLOGY_IDS.map(id => slots[id]))];
   for (const result of candidates) {
@@ -70,10 +70,6 @@ export function knowledgeRouteRecords(state: WorldState, routeId: string): Knowl
 
 function amounts(values: Partial<Resources>): string {
   return RESOURCE_IDS.filter(resource => (values[resource] ?? 0) > 0).map(resource => `${exactNumber(values[resource]!)} ${METRIC_LABELS[resource]}`).join(', ') || 'None';
-}
-
-function strategic(values: StrategicResources): string {
-  return (['iron', 'coal'] as const).filter(resource => (values[resource] ?? 0) > 0).map(resource => `${exactNumber(values[resource]!)} ${resource === 'iron' ? 'Iron' : 'Coal'}`).join(', ') || 'None';
 }
 
 export function knowledgeStory(event: GameEvent): { title: string; cause: string; consequence: string } | null {
@@ -102,16 +98,16 @@ export function knowledgeStory(event: GameEvent): { title: string; cause: string
     } : {
       title: `${names.learner} agreed to learn ${names.technology} from ${names.teacher}`,
       cause: `Both participants agreed to the teaching terms on route ${compact.terms.routeId}.`,
-      consequence: `0 of 2 study exchanges recorded. Two new successful ordinary exchanges need both named institutions to operate in the same season. No teaching payment yet. Study deadline: round ${compact.deadlineRound}, inclusive.`,
+      consequence: `0 of 2 supported study seasons recorded. Both named institutions must pay their normal operation costs in two new seasons. Ordinary shipments keep their own schedule. No teaching payment yet. Study deadline: round ${compact.deadlineRound}, inclusive.`,
     };
   }
   const study = event.knowledgeStudy;
   if (!study) return null;
   return {
-    title: study.attempt.blockers.length ? 'An ordinary exchange did not qualify for study' : `Study exchange recorded · ${study.studyCount} of 2`,
-    cause: study.attempt.blockers.length ? study.attempt.blockers.map(blocker => `${blocker.party === 'teacher' ? 'Teacher' : 'Learner'}: ${blocker.reason}`).join('; ')
-      : 'Both exact institutions operated with paid normal inputs, allocated residents and positive Science in this delivery season.',
-    consequence: `Ordinary delivery ${study.attempt.delivery.eventId}, round ${study.attempt.delivery.round}. ${study.studyCount} of 2 study exchanges recorded.${study.studyCount === 2 ? ' The second study triggered an immediate settlement attempt; its separate result records payment and work.' : ' No teaching payment yet.'} This study is not extra cargo or a Science stock transfer.`,
+    title: study.attempt.blockers.length ? 'A supported study season did not qualify' : `Supported study season recorded · ${study.studyCount} of 2`,
+    cause: study.attempt.blockers.length ? study.attempt.blockers.map(blocker => `${blocker.party === 'teacher' ? 'Teacher' : blocker.party === 'learner' ? 'Learner' : 'Route'}: ${blocker.reason}`).join('; ')
+      : 'Both exact institutions operated with paid normal inputs, allocated residents and positive Science in this season on the live consenting corridor.',
+    consequence: `Season ${study.attempt.season.round}; operation events ${study.attempt.teacher?.operationEventId ?? 'absent'} and ${study.attempt.learner?.operationEventId ?? 'absent'}. ${study.studyCount} of 2 supported study seasons recorded.${study.studyCount === 2 ? ' The second study triggered an immediate settlement attempt; its separate result records payment and work.' : ' No teaching payment yet.'} Ordinary institution costs remain paid. This study is not extra cargo or a Science stock transfer.`,
   };
 }
 
@@ -143,24 +139,20 @@ function disclosure(key: string, label: string, retained: ReadonlySet<string>): 
 function renderInstitution(host: HTMLElement, proof: KnowledgeInstitutionProof | null, terms: KnowledgeTerms, party: 'teacher' | 'learner'): void {
   const names = terms.names;
   host.append(text('h4', `${names[party]} · ${names[`${party}Institution`]} · ${names[`${party}City`]}`));
-  if (!proof) { host.append(text('p', 'No qualifying operation receipt for this exchange.', 'inspection-note')); return; }
-  host.append(text('p', `Round ${proof.result.round} · ${proof.result.status} · Town ${proof.cityId} · Tile ${proof.tileId} · Institution ${proof.institutionId}`),
+  if (!proof) { host.append(text('p', 'No qualifying operation receipt for this season.', 'inspection-note')); return; }
+  host.append(text('p', `Operation ${proof.operationEventId} · Round ${proof.result.round} · ${proof.result.status} · Town ${proof.cityId} · Tile ${proof.tileId} · Institution ${proof.institutionId}`),
     resourceRow('Ordinary institution inputs paid', proof.result.paid), resourceRow('Produced', proof.result.produced));
   const residents = proof.result.residents!;
   host.append(text('p', `Residents · ${residents.allocated} allocated of ${residents.required} required; ${residents.available} available. Opening population ${residents.openingPopulation}; community reserve ${residents.communityReserve}.`, 'inspection-note'));
 }
 
 function renderAttempt(host: HTMLElement, attempt: KnowledgeStudyAttempt, terms: KnowledgeTerms, label: string): void {
-  const delivery = attempt.delivery;
-  host.append(text('h4', `${label} · Round ${delivery.round}`),
-    text('p', `Delivery ${delivery.eventId} · Revision ${delivery.revision} · Ordinary delivery number ${delivery.deliveryCount}`, 'inspection-note'),
-    text('p', `Route ${delivery.routeId} · Agreement ${delivery.agreementOfferId} accepted round ${delivery.agreementAcceptedRound}`, 'inspection-note'));
-  const owner = terms.teacherId === delivery.owner ? terms.names.teacher : terms.names.learner;
-  const partner = terms.teacherId === delivery.partner ? terms.names.teacher : terms.names.learner;
-  host.append(resourceRow(`${owner} ordinary trade paid`, delivery.proposerPaid), resourceRow(`${partner} ordinary trade paid`, delivery.recipientPaid));
-  if (Object.keys(delivery.proposerStrategicPaid).length || Object.keys(delivery.recipientStrategicPaid).length) host.append(text('p', `${owner} strategic payment: ${strategic(delivery.proposerStrategicPaid)}. ${partner} strategic payment: ${strategic(delivery.recipientStrategicPaid)}.`));
+  const season = attempt.season;
+  host.append(text('h4', `${label} · Round ${season.round}`),
+    text('p', `Supported study season · Revision ${season.revision}. Ordinary operation costs are separate from teaching payment.`, 'inspection-note'),
+    text('p', `Route ${season.routeId} · Agreement ${season.agreementOfferId} accepted round ${season.agreementAcceptedRound}`, 'inspection-note'));
   renderInstitution(host, attempt.teacher, terms, 'teacher'); renderInstitution(host, attempt.learner, terms, 'learner');
-  for (const blocker of attempt.blockers) host.append(text('p', `${terms.names[blocker.party]}: ${blocker.reason}`, 'inspection-note'));
+  for (const blocker of attempt.blockers) host.append(text('p', `${blocker.party === 'route' ? 'Route' : terms.names[blocker.party]}: ${blocker.reason}`, 'inspection-note'));
 }
 
 export function renderKnowledgeRoute(host: HTMLElement, state: WorldState, routeId: string, retainedOpenKeys: ReadonlySet<string> = new Set()): void {
@@ -174,7 +166,7 @@ export function renderKnowledgeRoute(host: HTMLElement, state: WorldState, route
     card.append(text('span', record.kind === 'historical' ? 'Historical receipt' : 'Knowledge compact', 'eyebrow'), heading,
       text('strong', record.status, 'route-status'), text('p', `${names.teacherCity} ↔ ${names.learnerCity}`));
     if (result && result.outcome !== 'completed') card.append(text('p', 'No teaching payment or research work. Earlier ordinary trade and institution costs remain unchanged.', 'inspection-note'));
-    if (!result && compact.status === 'accepted') card.append(text('p', 'Only recorded exchanges after consent count. Both named institutions must operate in the delivery season.', 'inspection-note'));
+    if (!result && compact.status === 'accepted') card.append(text('p', 'Only supported study seasons after consent count. Both named institutions must pay their ordinary operation costs. No teaching payment is due for the first study.', 'inspection-note'));
     const stored = disclosure(`${record.key}:terms`, 'Compact terms', retainedOpenKeys);
     stored.append(text('p', `${names.teacher}: ${names.teacherInstitution} in ${names.teacherCity}. ${names.learner}: ${names.learnerInstitution} in ${names.learnerCity}.`),
       text('p', `Agreed learner research target: ${names.technology}.`),
@@ -188,14 +180,14 @@ export function renderKnowledgeRoute(host: HTMLElement, state: WorldState, route
     stored.append(text('p', `One-time maximum: ${exactNumber(terms.nominalAmount)} research work, ${terms.percent}% of the recorded ${exactNumber(terms.costBasis)} cost. Actual work is capped by remaining work.`),
       text('p', 'The full agreed price is paid even for a smaller remainder. One successful contribution uses this learner’s one-time assistance for this discovery. It does not grant a free discovery.', 'inspection-note'),
       text('p', compact.status === 'proposed' ? `Offered round ${compact.proposedRound}. Consent window ends at round ${compact.expiresRound}.`
-        : `Agreed round ${compact.acceptedRound}. Study deadline: round ${compact.deadlineRound}, inclusive. Two qualifying exchanges trigger immediate settlement or failure.`),
+        : `Agreed round ${compact.acceptedRound}. Study deadline: round ${compact.deadlineRound}, inclusive. Two qualifying supported study seasons trigger immediate settlement or failure after ordinary research.`),
       text('p', `Recorded rules: version ${terms.ruleVersion} · Release ${terms.basisReleaseId}`, 'inspection-note'));
     const receipts = disclosure(`${record.key}:receipts`, result ? 'Recorded outcome and study receipts' : 'Recorded study receipts', retainedOpenKeys);
     if (compact.status === 'accepted') {
-      for (const [index, proof] of compact.studies.entries()) renderAttempt(receipts, { ...proof, blockers: [] }, terms, `Study exchange ${index + 1} of ${terms.requiredStudies}`);
-      if (compact.lastStudyAttempt?.blockers.length) renderAttempt(receipts, compact.lastStudyAttempt, terms, 'Last exchange did not qualify');
-      if (!compact.studies.length && !compact.lastStudyAttempt) receipts.append(text('p', 'No study exchange recorded after consent.'));
-    } else receipts.append(text('p', 'No teaching consent or study exchange recorded.'));
+      for (const [index, proof] of compact.studies.entries()) renderAttempt(receipts, { ...proof, blockers: [] }, terms, `Supported study season ${index + 1} of ${terms.requiredStudies}`);
+      if (compact.lastStudyAttempt?.blockers.length) renderAttempt(receipts, compact.lastStudyAttempt, terms, 'Last season did not qualify');
+      if (!compact.studies.length && !compact.lastStudyAttempt) receipts.append(text('p', 'No supported study season recorded after consent.'));
+    } else receipts.append(text('p', 'No teaching consent or supported study season recorded.'));
     if (result) {
       receipts.append(text('h4', `${outcomeLabels[result.outcome]} · Round ${result.resolvedRound}`), text('p', result.detail),
         text('p', `Result ${result.eventId} · Revision ${result.resolvedRevision} · Reason ${result.reason}`, 'inspection-note'));

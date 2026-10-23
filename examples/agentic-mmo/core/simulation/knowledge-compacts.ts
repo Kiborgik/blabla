@@ -1,13 +1,12 @@
 import { ACTION_FEATURES, BUILDINGS, RESIDENT_CAPACITY_RULES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
 import { KNOWLEDGE_INSTITUTION_IDS, KNOWLEDGE_RULES, KNOWLEDGE_TECHNOLOGY_IDS } from '../knowledge-content.ts';
-import type { KnowledgeAction, KnowledgeBalances, KnowledgeCompact, KnowledgeInstitutionId, KnowledgeInstitutionProof, KnowledgeProposalQuote, KnowledgeReason, KnowledgeResult, KnowledgeState, KnowledgeStudyAttempt, KnowledgeTerms, ResolvedTradeDelivery } from '../knowledge-types.ts';
-import { isKnowledgeAction, isKnowledgeInstitutionProof, isKnowledgeTerms, isResolvedTradeDelivery } from '../knowledge-validation.ts';
+import type { KnowledgeAction, KnowledgeBalances, KnowledgeCompact, KnowledgeInstitutionId, KnowledgeInstitutionProof, KnowledgeProposalQuote, KnowledgeReason, KnowledgeResult, KnowledgeState, KnowledgeStudyAttempt, KnowledgeStudySeason, KnowledgeTerms } from '../knowledge-types.ts';
+import { isKnowledgeAction, isKnowledgeInstitutionProof, isKnowledgeTerms, knowledgeOperationEventMatches } from '../knowledge-validation.ts';
 import type { ActionOption, GameAction, GameEvent, Resources, WorldState } from '../types.ts';
 import { researchEligibility } from './capabilities.ts';
 import { emitEvent } from './events.ts';
 import { hasFeatures } from './history.ts';
 import { completeResearch } from './research.ts';
-import { strategicObligations } from './trade.ts';
 import { isTransportQuote, transportBlock } from './transport.ts';
 import { civilizationById } from './world.ts';
 
@@ -35,7 +34,7 @@ function commonFailure(state: WorldState, actor: number): string | null {
 }
 
 export function createKnowledgeState(state: Pick<WorldState, 'civilizations'>): KnowledgeState {
-  return { ruleVersion: 1, active: [], sequences: state.civilizations.map(() => 0), lastResults: state.civilizations.map(() => null), grants: state.civilizations.map(() => ({ engineering: null, education: null, printing: null, banking: null })) };
+  return { ruleVersion: 2, active: [], sequences: state.civilizations.map(() => 0), lastResults: state.civilizations.map(() => null), grants: state.civilizations.map(() => ({ engineering: null, education: null, printing: null, banking: null })) };
 }
 
 export function knowledgePromisedResources(state: WorldState, actor: number, excludingCompactId?: string, includeProposed = false): Partial<Resources> {
@@ -56,7 +55,7 @@ function institutionIdentityFailure(state: WorldState, civId: number, cityId: st
   return null;
 }
 
-function institutionProof(state: WorldState, civId: number, cityId: string, tileId: number, institutionId: KnowledgeInstitutionId): { proof: KnowledgeInstitutionProof | null; reason: string | null } {
+function institutionProof(state: WorldState, civId: number, cityId: string, tileId: number, institutionId: KnowledgeInstitutionId, events: readonly GameEvent[], currentRevision: boolean): { proof: KnowledgeInstitutionProof | null; reason: string | null } {
   const invalid = institutionIdentityFailure(state, civId, cityId, tileId, institutionId); if (invalid) return { proof: null, reason: invalid };
   const definition = BUILDINGS.find(building => building.id === institutionId)!; const city = state.cities.find(city => city.id === cityId)!;
   const operation = city.buildingOperations?.[institutionId]; const result = operation?.lastResult;
@@ -67,12 +66,14 @@ function institutionProof(state: WorldState, civId: number, cityId: string, tile
   if (result.shortages.length || result.strategicShortages?.length || RESOURCE_IDS.some(resource => (result.paid[resource] ?? 0) !== (definition.operatingInputs?.[resource] ?? 0)) || STRATEGIC_RESOURCE_IDS.some(resource => (result.strategicPaid?.[resource] ?? 0) !== (definition.strategicInputs?.[resource] ?? 0))) return { proof: null, reason: 'The selected institution did not pay its complete ordinary inputs' };
   const residents = result.residents;
   if (!residents || residents.ruleVersion !== RESIDENT_CAPACITY_RULES.ruleVersion || residents.communityReserve !== RESIDENT_CAPACITY_RULES.communityReserve || residents.required !== RESIDENT_CAPACITY_RULES.perPaidRecipe || residents.allocated !== residents.required || residents.available < residents.required || residents.available > Math.max(0, residents.openingPopulation - residents.communityReserve)) return { proof: null, reason: 'The selected institution did not allocate its complete local residents' };
-  const proof: KnowledgeInstitutionProof = { civId, cityId, tileId, institutionId, inputs: { ...definition.operatingInputs }, residentsRequired: RESIDENT_CAPACITY_RULES.perPaidRecipe, result: structuredClone(result) };
-  return isKnowledgeInstitutionProof(proof) ? { proof, reason: null } : { proof: null, reason: 'The selected institution receipt is malformed' };
+  const candidates = events.filter(event => event.type === 'building-operation' && event.actor === civId && event.target === civId && event.tileId === tileId && event.detail === `${cityId}/${institutionId} at strategic round ${state.round}` && event.round === state.round && (currentRevision ? event.id.startsWith(`${state.revision}:`) : Number(event.id.split(':')[0]) <= state.revision))
+    .map(event => ({ event, proof: { civId, cityId, tileId, institutionId, inputs: { ...definition.operatingInputs }, residentsRequired: RESIDENT_CAPACITY_RULES.perPaidRecipe, result: structuredClone(result), operationEventId: event.id } }))
+    .filter(candidate => isKnowledgeInstitutionProof(candidate.proof) && knowledgeOperationEventMatches(candidate.event, candidate.proof));
+  return candidates.length === 1 ? { proof: candidates[0]!.proof, reason: null } : { proof: null, reason: 'The selected institution needs one exact current paid operation event' };
 }
 
-function proofs(state: WorldState, terms: KnowledgeTerms) {
-  return { teacher: institutionProof(state, terms.teacherId, terms.teacherCityId, terms.teacherTileId, terms.teacherInstitutionId), learner: institutionProof(state, terms.learnerId, terms.learnerCityId, terms.learnerTileId, terms.learnerInstitutionId) };
+function proofs(state: WorldState, terms: KnowledgeTerms, events: readonly GameEvent[] = state.events, currentRevision = false) {
+  return { teacher: institutionProof(state, terms.teacherId, terms.teacherCityId, terms.teacherTileId, terms.teacherInstitutionId, events, currentRevision), learner: institutionProof(state, terms.learnerId, terms.learnerCityId, terms.learnerTileId, terms.learnerInstitutionId, events, currentRevision) };
 }
 
 export function knowledgeCompactFailure(state: WorldState, compact: Pick<KnowledgeCompact, 'terms'>): Failure | null {
@@ -105,6 +106,9 @@ function targetFailure(state: WorldState, terms: KnowledgeTerms): Failure | null
 function routeAvailableFailure(state: WorldState, terms: KnowledgeTerms): string | null {
   const route = state.routes.find(route => route.id === terms.routeId)!; const transport = terms.tradeTerms.transport;
   if (!transport || !isTransportQuote(transport, state.tiles.length) || transport.edges < 1 || transport.edges > KNOWLEDGE_RULES.maximumEdges || !Number.isSafeInteger(terms.tradeTerms.cadenceRounds) || terms.tradeTerms.cadenceRounds < 1 || terms.tradeTerms.cadenceRounds > KNOWLEDGE_RULES.maximumCadence) return 'Knowledge compacts need an explicit supported corridor of one to twelve edges and cadence one to six rounds';
+  const agreement = route.agreement!;
+  if (!Number.isSafeInteger(agreement.deliveryCount) || agreement.deliveryCount < 1 || !Number.isSafeInteger(agreement.lastDeliveryRound) || agreement.lastDeliveryRound! < agreement.acceptedRound + agreement.terms.cadenceRounds || agreement.lastDeliveryRound! > state.round) return 'The exact consenting corridor must have completed an ordinary shipment before teaching';
+  if (!route.active || agreement.blockedReason !== null || agreement.blockedBy !== null) return 'The exact consenting corridor has an unresolved blockage';
   if (route.damage >= terms.tradeTerms.damageDisableAt) return 'Current route damage prevents the agreed exchange';
   return transportBlock(state, transport, terms.fromTileId, terms.toTileId);
 }
@@ -135,7 +139,7 @@ export function quoteKnowledgeProposal(state: WorldState, actor: number, action:
   if (!isKnowledgeAction(action)) return refuse('Knowledge proposal fields are malformed');
   const common = commonFailure(state, actor); if (common) return refuse(common);
   const layer = state.knowledge!;
-  if (!Number.isSafeInteger(layer.sequences[actor]! + 1) || !Number.isSafeInteger(state.round + KNOWLEDGE_RULES.pendingLifetime + KNOWLEDGE_RULES.studyCadences * KNOWLEDGE_RULES.maximumCadence + KNOWLEDGE_RULES.cooldownRounds)) return refuse('Knowledge sequence or timing accounting is exhausted');
+  if (!Number.isSafeInteger(layer.sequences[actor]! + 1) || !Number.isSafeInteger(state.round + KNOWLEDGE_RULES.pendingLifetime + KNOWLEDGE_RULES.studySeasons * KNOWLEDGE_RULES.studyInterval + KNOWLEDGE_RULES.cooldownRounds)) return refuse('Knowledge sequence or timing accounting is exhausted');
   if (layer.active.length >= state.civilizations.length || layer.active.some(compact => compact.terms.teacherId === actor)) return refuse('The teacher or bounded knowledge ledger already has an active compact');
   const previous = layer.lastResults[actor]; if (previous && state.round < previous.resolvedRound + KNOWLEDGE_RULES.cooldownRounds) return refuse(`This teacher may offer again from round ${previous.resolvedRound + KNOWLEDGE_RULES.cooldownRounds}`);
   const route = state.routes.find(route => route.id === action.routeId);
@@ -148,12 +152,12 @@ export function quoteKnowledgeProposal(state: WorldState, actor: number, action:
   const teacher = civilizationById(state, actor); const learner = civilizationById(state, learnerId); const technology = TECHNOLOGIES.find(technology => technology.id === action.technologyId);
   if (!technology || !KNOWLEDGE_TECHNOLOGY_IDS.includes(action.technologyId) || cents(technology.cost) === null) return refuse('The discovery is outside the finite supported knowledge catalogue');
   const terms: KnowledgeTerms = {
-    ruleVersion: 1, routeId: route.id, agreementOfferId: route.agreement.offerId, agreementAcceptedRound: route.agreement.acceptedRound,
+    ruleVersion: 2, routeId: route.id, agreementOfferId: route.agreement.offerId, agreementAcceptedRound: route.agreement.acceptedRound,
     owner: route.owner, partner: route.partner, fromCityId: from.id, toCityId: to.id, fromTileId: from.tileId, toTileId: to.tileId, tradeTerms: structuredClone(route.agreement.terms),
     teacherId: actor, learnerId, teacherCityId: teacherCity.id, learnerCityId: learnerCity.id, teacherTileId: teacherCity.tileId, learnerTileId: learnerCity.tileId, teacherInstitutionId: action.teacherInstitutionId, learnerInstitutionId: action.learnerInstitutionId,
     technologyId: action.technologyId, costBasis: technology.cost, requiredFeatures: [...new Set([...ACTION_FEATURES.research, ...technology.requiredFeatures])], prerequisites: [...technology.requires], basisReleaseId: state.releaseId,
     learnerContribution: { ...KNOWLEDGE_RULES.learnerContribution }, teacherContribution: { ...KNOWLEDGE_RULES.teacherContribution }, transferred: { ...KNOWLEDGE_RULES.transferred }, consumed: { ...KNOWLEDGE_RULES.consumed }, percent: 10,
-    nominalAmount: Math.floor(cents(technology.cost)! / 10) / 100, requiredStudies: 2, pendingLifetime: 8, studyCadences: 3,
+    nominalAmount: Math.floor(cents(technology.cost)! / 10) / 100, requiredStudies: 2, pendingLifetime: 8, studySeasons: 3, studyInterval: 1,
     names: { teacher: teacher.name, learner: learner.name, teacherCity: teacherCity.name, learnerCity: learnerCity.name, teacherInstitution: BUILDINGS.find(building => building.id === action.teacherInstitutionId)!.name, learnerInstitution: BUILDINGS.find(building => building.id === action.learnerInstitutionId)!.name, technology: technology.name },
   };
   if (!isKnowledgeTerms(terms)) return refuse('The exact knowledge and accepted trade terms do not match their versioned catalogue');
@@ -178,14 +182,13 @@ export function knowledgeActionFailure(state: WorldState, actor: number, action:
   const target = targetFailure(state, compact.terms); if (target) return target.detail;
   const route = routeAvailableFailure(state, compact.terms); if (route) return route;
   const current = proofs(state, compact.terms); if (current.teacher.reason || current.learner.reason) return current.teacher.reason ?? current.learner.reason;
-  const agreement = state.routes.find(route => route.id === compact.terms.routeId)!.agreement!;
-  if (!Number.isSafeInteger(state.round + compact.terms.studyCadences * compact.terms.tradeTerms.cadenceRounds + KNOWLEDGE_RULES.cooldownRounds) || !Number.isSafeInteger(agreement.deliveryCount) || agreement.deliveryCount < 0) return 'Knowledge acceptance exceeds safe timing or delivery accounting';
+  if (!Number.isSafeInteger(state.round + compact.terms.studySeasons * compact.terms.studyInterval + KNOWLEDGE_RULES.cooldownRounds)) return 'Knowledge acceptance exceeds safe timing accounting';
   const funds = fundingFailure(state, compact.terms); if (funds) return funds.detail;
   const work = workQuote(state, compact.terms); return 'reason' in work ? work.detail : null;
 }
 
 function description(terms: KnowledgeTerms): string {
-  return `${terms.names.teacher} teaching ${terms.names.technology} to ${terms.names.learner}, ${terms.teacherCityId} to ${terms.learnerCityId} on ${terms.routeId}. Due: learner three Materials and four Credits; teacher two Culture. Three Credits transfer to the teacher and one Credit is consumed. Two new ordinary deliveries with both selected institutions actually producing Science permit at most ${terms.nominalAmount} research work once. The full price remains due for reduced remaining work; unused assistance is discarded. No escrow, extra cargo or free technology.`;
+  return `${terms.names.teacher} teaching ${terms.names.technology} to ${terms.names.learner}, ${terms.teacherCityId} to ${terms.learnerCityId} on ${terms.routeId}. Due: learner three Materials and four Credits; teacher two Culture. Three Credits transfer to the teacher and one Credit is consumed. Two new supported study seasons with both selected institutions actually paying their normal inputs and producing Science permit at most ${terms.nominalAmount} research work once. The full price remains due for reduced remaining work; unused assistance is discarded. No escrow, extra cargo or free technology.`;
 }
 
 export function availableKnowledgeActions(state: WorldState, actor: number): ActionOption[] {
@@ -198,7 +201,7 @@ export function availableKnowledgeActions(state: WorldState, actor: number): Act
     for (const teacherInstitutionId of KNOWLEDGE_INSTITUTION_IDS) for (const learnerInstitutionId of KNOWLEDGE_INSTITUTION_IDS) {
       const action: Extract<KnowledgeAction, { type: 'propose-knowledge' }> = { type: 'propose-knowledge', routeId: route.id, teacherCityId: route.owner === actor ? route.from : route.to, learnerCityId: route.owner === actor ? route.to : route.from, technologyId: learner.researchTarget as KnowledgeTerms['technologyId'], teacherInstitutionId, learnerInstitutionId };
       const quote = quoteKnowledgeProposal(state, actor, action);
-      if (quote.ok) options.push({ action, label: `Offer ${quote.terms.names.technology} teaching to ${quote.terms.names.learner}`, reason: `${description(quote.terms)} Consent expires after eight rounds; study lasts three existing trade cadences after acceptance.` });
+      if (quote.ok) options.push({ action, label: `Offer ${quote.terms.names.technology} teaching to ${quote.terms.names.learner}`, reason: `${description(quote.terms)} Consent expires after eight rounds; two studies must succeed within three seasons after acceptance; ordinary shipments keep their existing cadence.` });
     }
   }
   for (const compact of state.knowledge!.active) {
@@ -226,7 +229,7 @@ function finish(state: WorldState, compact: KnowledgeCompact, outcome: Knowledge
     if (work.progressAfter >= terms.costBasis) researchCompletionEventId = completeResearch(state, terms.learnerId, TECHNOLOGIES.find(technology => technology.id === terms.technologyId)!, events, `Ordinary research and ${work.amount} fully paid knowledge compact work completed the active discovery`).id;
   }
   const result: KnowledgeResult = {
-    ruleVersion: 1, compact: structuredClone(compact), outcome, reason: why.reason, detail: why.detail, actor, resolvedRound: state.round, resolvedRevision: state.revision, eventId: `${state.revision}:${events.length}`,
+    ruleVersion: 2, compact: structuredClone(compact), outcome, reason: why.reason, detail: why.detail, actor, resolvedRound: state.round, resolvedRevision: state.revision, eventId: `${state.revision}:${events.length}`,
     before, after: balances(state, terms), learnerPaid: work ? { ...terms.learnerContribution } : {}, teacherPaid: work ? { ...terms.teacherContribution } : {}, transferred: work ? { ...terms.transferred } : {}, consumed: work ? { ...terms.consumed } : {},
     nominalAmount: terms.nominalAmount, amount: work?.amount ?? 0, unusedAmount: work?.unusedAmount ?? terms.nominalAmount, progressBefore, progressAfter: work?.progressAfter ?? progressBefore, researchCompletionEventId,
   };
@@ -249,25 +252,17 @@ export function executeKnowledgeAction(state: WorldState, actor: number, action:
   if (action.type === 'withdraw-knowledge' || !action.accept) {
     finish(state, compact, action.type === 'withdraw-knowledge' ? 'withdrawn' : 'declined', action.type === 'withdraw-knowledge' ? failure('withdrawn-by-participant', `Civilization ${actor} withdrew the compact without penalty`) : failure('declined-by-learner', `Civilization ${actor} declined the compact without penalty`), actor, events); return true;
   }
-  const agreement = state.routes.find(route => route.id === compact.terms.routeId)!.agreement!;
-  const accepted: Accepted = { id: compact.id, sequence: compact.sequence, proposedRound: compact.proposedRound, proposedRevision: compact.proposedRevision, terms: structuredClone(compact.terms), status: 'accepted', acceptedRound: state.round, acceptedRevision: state.revision, baselineDeliveryCount: agreement.deliveryCount, lastSeenDeliveryCount: agreement.deliveryCount, deadlineRound: state.round + compact.terms.studyCadences * compact.terms.tradeTerms.cadenceRounds, studies: [], lastStudyAttempt: null };
+  const accepted: Accepted = { id: compact.id, sequence: compact.sequence, proposedRound: compact.proposedRound, proposedRevision: compact.proposedRevision, terms: structuredClone(compact.terms), status: 'accepted', acceptedRound: state.round, acceptedRevision: state.revision, lastAttemptRound: state.round, deadlineRound: state.round + compact.terms.studySeasons * compact.terms.studyInterval, studies: [], lastStudyAttempt: null };
   state.knowledge!.active = state.knowledge!.active.map(candidate => candidate.id === compact.id ? accepted : candidate);
-  emitEvent(state, events, { type: 'knowledge-accepted', title: `${compact.terms.names.learner} accepts ${compact.terms.names.technology} teaching`, detail: compact.id, actor, target: compact.terms.teacherId, tileId: compact.terms.learnerTileId, cause: 'The named learner accepted the full immutable teaching terms separately from trade consent', effects: [description(compact.terms), `Only new deliveries after round ${accepted.acceptedRound} and revision ${accepted.acceptedRevision} count; deadline ${accepted.deadlineRound} inclusive`], importance: 3, knowledgeCompact: structuredClone(accepted) }); return true;
+  emitEvent(state, events, { type: 'knowledge-accepted', title: `${compact.terms.names.learner} accepts ${compact.terms.names.technology} teaching`, detail: compact.id, actor, target: compact.terms.teacherId, tileId: compact.terms.learnerTileId, cause: 'The named learner accepted the full immutable teaching terms separately from trade consent', effects: [description(compact.terms), `Only new institution-operation seasons after round ${accepted.acceptedRound} and revision ${accepted.acceptedRevision} count; deadline ${accepted.deadlineRound} inclusive`], importance: 3, knowledgeCompact: structuredClone(accepted) }); return true;
 }
 
-function deliveryMatches(state: WorldState, compact: Accepted, delivery: ResolvedTradeDelivery, events: GameEvent[]): boolean {
-  if (!isResolvedTradeDelivery(delivery)) return false;
-  const terms = compact.terms; const route = state.routes.find(route => route.id === terms.routeId)!; const agreement = route.agreement!;
-  if (delivery.ruleVersion !== 1 || delivery.routeId !== terms.routeId || delivery.agreementOfferId !== terms.agreementOfferId || delivery.agreementAcceptedRound !== terms.agreementAcceptedRound || delivery.owner !== terms.owner || delivery.partner !== terms.partner || delivery.fromCityId !== terms.fromCityId || delivery.toCityId !== terms.toCityId || delivery.fromTileId !== terms.fromTileId || delivery.toTileId !== terms.toTileId || !equal(delivery.tradeTerms, terms.tradeTerms)) return false;
-  if (delivery.round !== state.round || delivery.round <= compact.acceptedRound || delivery.round > compact.deadlineRound || delivery.revision !== state.revision || delivery.revision <= compact.acceptedRevision || !delivery.eventId.startsWith(`${delivery.revision}:`) || !Number.isSafeInteger(delivery.deliveryCount) || delivery.deliveryCount <= compact.baselineDeliveryCount || delivery.deliveryCount <= compact.lastSeenDeliveryCount || delivery.deliveryCount !== agreement.deliveryCount || agreement.lastDeliveryRound !== delivery.round) return false;
-  if (compact.studies.some(study => study.delivery.round >= delivery.round || study.delivery.eventId === delivery.eventId)) return false;
-  if (!events.some(event => event.id === delivery.eventId && event.round === delivery.round && event.type === 'trade-delivered' && event.detail === terms.routeId && event.actor === terms.owner && event.target === terms.partner)) return false;
-  const trade = terms.tradeTerms;
-  if (RESOURCE_IDS.some(resource => (delivery.proposerPaid[resource] ?? 0) !== (trade.proposerCargo[resource] ?? 0) + (trade.proposerUpkeep[resource] ?? 0) || (delivery.recipientPaid[resource] ?? 0) !== (trade.recipientCargo[resource] ?? 0) + (trade.recipientUpkeep[resource] ?? 0))) return false;
-  return equal(delivery.proposerStrategicPaid, strategicObligations(trade, 'proposer')) && equal(delivery.recipientStrategicPaid, strategicObligations(trade, 'recipient'));
+function studySeason(state: WorldState, terms: KnowledgeTerms): KnowledgeStudySeason {
+  const { routeId, agreementOfferId, agreementAcceptedRound, owner, partner, fromCityId, toCityId, fromTileId, toTileId, tradeTerms } = terms;
+  return { routeId, agreementOfferId, agreementAcceptedRound, owner, partner, fromCityId, toCityId, fromTileId, toTileId, tradeTerms: structuredClone(tradeTerms), round: state.round, revision: state.revision };
 }
 
-export function resolveKnowledgeCompacts(state: WorldState, events: GameEvent[], deliveries: ResolvedTradeDelivery[] = []): void {
+export function resolveKnowledgeCompacts(state: WorldState, events: GameEvent[]): void {
   if (state.outcome || !state.knowledge) return;
   const budgets = new Map(state.civilizations.map(civ => [civ.id, { ...civ.resources }]));
   for (const compact of state.knowledge.active.toSorted((left, right) => left.terms.teacherId - right.terms.teacherId || left.sequence - right.sequence)) {
@@ -275,17 +270,20 @@ export function resolveKnowledgeCompacts(state: WorldState, events: GameEvent[],
     const invalid = targetFailure(state, compact.terms); if (invalid) { finish(state, compact, 'failed', invalid, null, events); continue; }
     if (compact.status !== 'accepted') continue;
     let ready = false;
-    for (const delivery of deliveries.toSorted((left, right) => left.deliveryCount - right.deliveryCount || left.eventId.localeCompare(right.eventId))) {
-      if (!deliveryMatches(state, compact, delivery, events)) continue;
-      compact.lastSeenDeliveryCount = delivery.deliveryCount;
-      const current = proofs(state, compact.terms);
-      const attempt: KnowledgeStudyAttempt = { delivery: structuredClone(delivery), teacher: current.teacher.proof, learner: current.learner.proof, blockers: [] };
+    if (state.round > compact.lastAttemptRound && state.round > compact.acceptedRound && state.round <= compact.deadlineRound && state.revision > compact.acceptedRevision) {
+      compact.lastAttemptRound = state.round;
+      const current = proofs(state, compact.terms, events, true);
+      const season = studySeason(state, compact.terms);
+      const attempt: KnowledgeStudyAttempt = { season, teacher: current.teacher.proof, learner: current.learner.proof, blockers: [] };
+      const routeBlock = routeAvailableFailure(state, compact.terms);
       if (current.teacher.reason) attempt.blockers.push({ party: 'teacher', reason: current.teacher.reason });
       if (current.learner.reason) attempt.blockers.push({ party: 'learner', reason: current.learner.reason });
+      if (routeBlock) attempt.blockers.push({ party: 'route', reason: routeBlock });
       compact.lastStudyAttempt = structuredClone(attempt);
-      if (attempt.teacher && attempt.learner && compact.studies.length < KNOWLEDGE_RULES.requiredStudies) compact.studies.push({ delivery: structuredClone(delivery), teacher: structuredClone(attempt.teacher), learner: structuredClone(attempt.learner) });
-      emitEvent(state, events, { type: 'knowledge-study', title: attempt.blockers.length ? 'An ordinary exchange did not qualify for study' : `${compact.terms.names.teacher} and ${compact.terms.names.learner} record a qualifying study`, detail: compact.id, actor: compact.terms.teacherId, target: compact.terms.learnerId, tileId: compact.terms.learnerTileId, cause: attempt.blockers.length ? attempt.blockers.map(blocker => `${blocker.party}: ${blocker.reason}`).join('; ') : 'Both exact institutions operated with positive Science, complete normal inputs and residents in this real delivery round', effects: [`${compact.studies.length}/2 studies; ordinary trade ${delivery.eventId}, ordinal ${delivery.deliveryCount}`, 'No extra cargo or Science stock transfer'], importance: 2, knowledgeStudy: { compactId: compact.id, attempt: structuredClone(attempt), studyCount: compact.studies.length } });
-      if (compact.studies.length === KNOWLEDGE_RULES.requiredStudies) { ready = true; break; }
+      if (!attempt.blockers.length && attempt.teacher && attempt.learner && compact.studies.length < KNOWLEDGE_RULES.requiredStudies)
+        compact.studies.push({ season: structuredClone(season), teacher: structuredClone(attempt.teacher), learner: structuredClone(attempt.learner) });
+      emitEvent(state, events, { type: 'knowledge-study', title: attempt.blockers.length ? 'A supported study season did not qualify' : `${compact.terms.names.teacher} and ${compact.terms.names.learner} record a supported study season`, detail: compact.id, actor: compact.terms.teacherId, target: compact.terms.learnerId, tileId: compact.terms.learnerTileId, cause: attempt.blockers.length ? attempt.blockers.map(blocker => `${blocker.party}: ${blocker.reason}`).join('; ') : 'Both exact institutions operated with positive Science, complete normal inputs and residents on the live consenting corridor', effects: [`${compact.studies.length}/2 supported study seasons; current operation events ${attempt.teacher?.operationEventId ?? 'absent'}, ${attempt.learner?.operationEventId ?? 'absent'}`, 'Ordinary operation costs remain paid; no extra cargo or Science stock transfer'], importance: 2, knowledgeStudy: { compactId: compact.id, attempt: structuredClone(attempt), studyCount: compact.studies.length } });
+      ready = compact.studies.length === KNOWLEDGE_RULES.requiredStudies;
     }
     if (ready) {
       const funding = fundingFailure(state, compact.terms, budgets); const work = workQuote(state, compact.terms); const blocked = funding ?? ('reason' in work ? work : null);

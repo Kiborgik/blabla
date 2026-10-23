@@ -299,10 +299,10 @@ void test('actual current Knowledge consent preserves both tuition budgets, cade
   for (const id of [1, 4]) {
     const state = structuredClone(run.state); const actor = state.civilizations[id]!;
     const action: Extract<GameAction, { type: 'improve' }> = { type: 'improve', cityId: `city-${id}`, tileId: sites.get(id)!, improvementId: 'hill-commons' };
-    const horizon = knowledgeCommitmentHorizon(state, id); assert.equal(horizon, 8);
-    const held = exchangePromisedResources(state, id, horizon);
-    assert.equal(held.ordinary.materials, id === 1 ? 0 : 9); assert.equal(held.ordinary.credits, id === 1 ? 0 : 4);
-    assert.equal(held.ordinary.culture, id === 1 ? 2 : 0); assert.equal(held.ordinary.food, id === 1 ? 8 : 0); assert.equal(held.ordinary.energy, 2);
+    const horizon = knowledgeCommitmentHorizon(state, id); assert.equal(horizon, 2);
+    const held = exchangePromisedResources(state, id, Math.max(horizon, state.routes[0]!.agreement!.nextDeliveryRound - state.round));
+    assert.equal(held.ordinary.materials, id === 1 ? 0 : 6); assert.equal(held.ordinary.credits, id === 1 ? 0 : 4);
+    assert.equal(held.ordinary.culture, id === 1 ? 2 : 0); assert.equal(held.ordinary.food, id === 1 ? 4 : 0); assert.equal(held.ordinary.energy, 1);
     actor.resources.food = held.ordinary.food; actor.resources.materials = 13 + held.ordinary.materials;
     actor.resources.credits = 7 + held.ordinary.credits; actor.resources.culture = 2 + held.ordinary.culture; actor.resources.energy = held.ordinary.energy;
     assert.ok(isWorldState(state)); const before = structuredClone(state);
@@ -318,7 +318,7 @@ void test('actual current Knowledge consent preserves both tuition budgets, cade
     assert.equal(started.state.civilizations[id]!.resources.materials, 1 + held.ordinary.materials);
     assert.equal(started.state.civilizations[id]!.resources.credits, 1 + held.ordinary.credits);
     const operated = nextBeat(started.state); assert.equal(operated.cities.find(city => city.id === action.cityId)!.buildingOperations!.academy!.lastResult!.status, 'operated');
-    const compact = operated.knowledge!.active[0]!; assert.ok(compact.status === 'accepted'); assert.equal(compact.studies.length, 0);
+    const compact = operated.knowledge!.active[0]!; assert.ok(compact.status === 'accepted'); assert.equal(compact.studies.length, 1);
   }
 });
 

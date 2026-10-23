@@ -11,7 +11,7 @@ import { isWorldState } from '../../core/validation.ts';
 
 export const TEACHER = 1;
 export const LEARNER = 4;
-export const KNOWLEDGE_TEST_RULES = 'settlement-knowledge-compacts-1';
+export const KNOWLEDGE_TEST_RULES = 'settlement-supported-studies-1';
 
 type TradeAction = Extract<GameAction, { type: 'propose-trade' | 'respond-trade' | 'withdraw-trade' | 'stop-trade' }>;
 
@@ -33,7 +33,7 @@ export function knowledgeAction(state: WorldState, actor: number, action: Knowle
   return events;
 }
 
-export function knowledgeEconomy(state: WorldState, round = state.routes[0]!.agreement!.nextDeliveryRound): GameEvent[] {
+export function knowledgeEconomy(state: WorldState, round = state.round + 1): GameEvent[] {
   assert.ok(round > state.round);
   state.round = round;
   state.revision++;
@@ -77,7 +77,7 @@ export function syntheticKnowledgeCorridor(): WorldState {
   assert.equal(state.civilizations[TEACHER]!.resources.credits, 292);
   assert.deepEqual(state.civilizations[LEARNER]!.resources, before[LEARNER]);
   assert.equal(state.routes[0]!.agreement!.deliveryCount, 0);
-  knowledgeEconomy(state);
+  while (state.routes[0]!.agreement!.deliveryCount === 0) knowledgeEconomy(state);
   assert.equal(state.routes[0]!.agreement!.deliveryCount, 1);
   assertCurrentKnowledgeWorld(state);
   return state;

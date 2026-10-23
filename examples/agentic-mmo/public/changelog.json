@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-live.53",
+    "date": "2026-10-23",
+    "title": "Learning through working institutions",
+    "changes": [
+      "Consenting partners study when both named institutions actually operate, rather than waiting for two cargo shipments. Two paid study seasons can add bounded research work.",
+      "Civilizations compare the real price and predicted completion time before offering or accepting. Route details distinguish study, payment and a completed discovery."
+    ]
+  },
+  {
     "version": "0.1.0-live.52",
     "date": "2026-10-23",
     "title": "Food from the hills",
@@ -15,15 +24,6 @@
     "changes": [
       "World notices avoid map panels and nearby labels instead of hiding behind the civilization display.",
       "The viewer opens only the current development world or the native archive. Current-version saves resume without upgrading older worlds."
-    ]
-  },
-  {
-    "version": "0.1.0-live.47",
-    "date": "2026-10-23",
-    "title": "Learning between civilizations",
-    "changes": [
-      "Consenting trade partners can exchange paid lessons toward four discoveries. Route details show agreed costs, completed lessons and actual research gained.",
-      "Development versions start fresh worlds instead of migrating older saves. Current-version worlds still save and resume."
     ]
   }
 ]

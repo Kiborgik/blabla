@@ -2,13 +2,23 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { KnowledgeResult } from '../core/knowledge-types.ts';
 import { isKnowledgeCompact, isKnowledgeResult, isKnowledgeState, validKnowledgeEvent } from '../core/knowledge-validation.ts';
+import { availableActions, sameAction } from '../core/simulation/choices.ts';
+import { executeAction } from '../core/simulation/commands.ts';
 import { commitEvents } from '../core/simulation/events.ts';
 import { executeKnowledgeAction, knowledgeActionFailure, knowledgePromisedResources, quoteKnowledgeProposal, resolveKnowledgeCompacts } from '../core/simulation/knowledge-compacts.ts';
-import { resolveTrade } from '../core/simulation/trade.ts';
 import type { GameEvent, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
 import { knowledgeRouteMatches, knowledgeRouteRecords, knowledgeStory } from '../web/knowledge-inspection.ts';
 import { acceptKnowledge, assertCurrentKnowledgeWorld, knowledgeAction, knowledgeEconomy, knowledgeProposal, LEARNER, proposeKnowledge, syntheticKnowledgeCorridor, TEACHER, tradeAction } from './fixtures/knowledge-current.ts';
+
+function setAcademy(state: WorldState, enabled: boolean): void {
+  const action = { type: 'set-building-operation', cityId: 'city-4', buildingId: 'academy', enabled } as const;
+  assert.ok(availableActions(state, LEARNER).some(option => sameAction(option.action, action)));
+  state.revision++;
+  const events: GameEvent[] = [];
+  executeAction(state, LEARNER, action, events);
+  commitEvents(state, events);
+}
 
 function result(state: WorldState): KnowledgeResult {
   const value = state.knowledge!.lastResults[TEACHER];
@@ -76,8 +86,8 @@ void test('reconstructed synthetic offer and explicit learner consent do not pay
   const accepted = state.knowledge!.active[0]!;
   assert.equal(accepted.status, 'accepted');
   assert.ok(accepted.status === 'accepted');
-  assert.equal(accepted.baselineDeliveryCount, 1);
-  assert.equal(accepted.lastSeenDeliveryCount, 1);
+  assert.equal(accepted.lastAttemptRound, accepted.acceptedRound);
+  assert.equal(accepted.deadlineRound, accepted.acceptedRound + 3);
   assert.deepEqual(accepted.studies, []);
   assert.equal(accepted.lastStudyAttempt, null);
   assert.deepEqual(state.civilizations, opening);
@@ -110,28 +120,29 @@ void test('reconstructed two fresh full-economy studies settle exact price and a
   assert.equal(state.civilizations[LEARNER]!.technologies.includes('engineering'), false);
   assert.equal(completed.researchCompletionEventId, null);
   assert.deepEqual(state.routes, control.routes);
-  assert.equal(state.routes[0]!.agreement!.deliveryCount, 3);
+  assert.equal(state.routes[0]!.agreement!.deliveryCount, 1);
   assert.equal(state.routes[0]!.volume, 7);
   assert.equal(completed.compact.status, 'accepted');
   assert.ok(completed.compact.status === 'accepted');
   const studies = completed.compact.studies;
   assert.equal(studies.length, 2);
-  assert.deepEqual(studies.map(study => study.delivery.deliveryCount), [2, 3]);
-  assert.ok(studies[0]!.delivery.round < studies[1]!.delivery.round);
+  assert.deepEqual(studies.map(study => study.season.round), [completed.compact.acceptedRound + 1, completed.compact.acceptedRound + 2]);
+  assert.ok(studies[0]!.season.round < studies[1]!.season.round);
   for (const proof of studies) {
-    assert.ok(proof.delivery.round > completed.compact.acceptedRound);
-    assert.ok(proof.delivery.revision > completed.compact.acceptedRevision);
-    assert.equal(proof.delivery.agreementOfferId, state.routes[0]!.agreement!.offerId);
+    assert.ok(proof.season.round > completed.compact.acceptedRound);
+    assert.ok(proof.season.revision > completed.compact.acceptedRevision);
+    assert.equal(proof.season.agreementOfferId, state.routes[0]!.agreement!.offerId);
     for (const party of [proof.teacher, proof.learner]) {
       assert.equal(party.institutionId, 'academy');
-      assert.equal(party.result.round, proof.delivery.round);
+      assert.equal(party.result.round, proof.season.round);
       assert.equal(party.result.status, 'operated');
       assert.deepEqual(party.result.paid, { culture: 2, credits: 1 });
       assert.ok(party.result.produced.science! > 0);
       assert.equal(party.result.residents!.allocated, 3);
       assert.equal(party.result.residents!.required, 3);
     }
-    assert.ok(state.events.some(event => event.id === proof.delivery.eventId && event.type === 'trade-delivered'));
+    assert.ok(state.events.some(event => event.id === proof.teacher.operationEventId && event.type === 'building-operation'));
+    assert.ok(state.events.some(event => event.id === proof.learner.operationEventId && event.type === 'building-operation'));
   }
   assert.deepEqual(state.knowledge!.grants[LEARNER]!.engineering, completed);
   assert.ok(events.filter(event => event.type.startsWith('knowledge-')).every(validKnowledgeEvent));
@@ -140,7 +151,7 @@ void test('reconstructed two fresh full-economy studies settle exact price and a
   resolveKnowledgeCompacts(state, repeated);
   assert.deepEqual(state, unchanged);
   assert.deepEqual(repeated, []);
-  knowledgeEconomy(state, completed.resolvedRound + 4);
+  for (let index = 0; index < 4; index++) knowledgeEconomy(state);
   const denied = quoteKnowledgeProposal(state, TEACHER, knowledgeProposal(state));
   assert.equal(denied.ok, false);
   assert.ok(!denied.ok && /one knowledge compact contribution/.test(denied.reason));
@@ -210,39 +221,39 @@ void test('reconstructed funding failure after two real paid studies keeps ordin
   noTeachingPayment(failed);
   assert.ok(failed.before.teacher.culture < 2);
   assert.deepEqual(state.cities.find(city => city.civId === TEACHER)!.buildingOperations!.academy!.lastResult!.paid, { culture: 2, credits: 1 });
-  assert.ok(events.some(event => event.type === 'trade-delivered'));
+  assert.equal(events.some(event => event.type === 'trade-delivered'), false);
   assert.equal(state.knowledge!.grants[LEARNER]!.engineering, null);
   assertCurrentKnowledgeWorld(state);
 });
 
-void test('reconstructed stale, paused and understaffed institutions cannot convert ordinary deliveries into qualifying study', () => {
-  for (const mode of ['stale', 'paused', 'residents'] as const) {
+void test('reconstructed stale, actually paused, unfunded and understaffed institutions cannot qualify for supported study', () => {
+  for (const mode of ['stale', 'paused', 'residents', 'inputs'] as const) {
     const state = syntheticKnowledgeCorridor();
     const accepted = acceptKnowledge(state);
     const city = state.cities.find(city => city.civId === LEARNER)!;
     let events: GameEvent[];
     if (mode === 'stale') {
-      state.round = state.routes[0]!.agreement!.nextDeliveryRound;
+      state.round++;
       state.revision++;
       events = [];
-      const deliveries = resolveTrade(state, events);
-      assert.equal(deliveries.length, 1);
-      resolveKnowledgeCompacts(state, events, deliveries);
+      resolveKnowledgeCompacts(state, events);
       commitEvents(state, events);
     } else {
-      if (mode === 'paused') city.buildingOperations!.academy!.enabled = false;
+      if (mode === 'paused') setAcademy(state, false);
+      else if (mode === 'inputs') state.civilizations[LEARNER]!.resources.credits = 0;
       else city.population = 3;
       events = knowledgeEconomy(state);
     }
     const active = state.knowledge!.active[0]!;
     assert.ok(active.status === 'accepted');
     assert.equal(active.studies.length, 0, mode);
-    assert.equal(active.lastSeenDeliveryCount, 2);
+    assert.equal(active.lastAttemptRound, accepted.acceptedRound + 1);
     assert.ok(active.lastStudyAttempt!.blockers.length > 0);
     assert.match(active.lastStudyAttempt!.blockers.map(blocker => blocker.reason).join(' '), mode === 'stale' ? /same-round/ : mode === 'paused' ? /paused/ : /blocked/);
-    assert.ok(events.some(event => event.type === 'trade-delivered'));
+    assert.equal(events.some(event => event.type === 'trade-delivered'), false);
     assert.equal(state.knowledge!.lastResults[TEACHER], null);
-    city.buildingOperations!.academy!.enabled = true;
+    if (mode === 'paused') setAcademy(state, true);
+    if (mode === 'inputs') state.civilizations[LEARNER]!.resources.credits = 100;
     city.population = 6;
     knowledgeEconomy(state);
     knowledgeEconomy(state);
@@ -250,12 +261,12 @@ void test('reconstructed stale, paused and understaffed institutions cannot conv
     assert.equal(completed.outcome, 'completed');
     assert.equal(completed.resolvedRound, accepted.deadlineRound);
     assert.ok(completed.compact.status === 'accepted');
-    assert.deepEqual(completed.compact.studies.map(proof => proof.delivery.deliveryCount), [3, 4]);
+    assert.deepEqual(completed.compact.studies.map(proof => proof.season.round), [accepted.acceptedRound + 2, accepted.acceptedRound + 3]);
     assertCurrentKnowledgeWorld(state);
   }
 });
 
-void test('reconstructed inclusive study deadline fails without payment when paid trade never has two qualifying institutions', () => {
+void test('reconstructed inclusive study deadline fails without payment without two qualifying institution seasons', () => {
   const state = syntheticKnowledgeCorridor();
   const accepted = acceptKnowledge(state);
   state.cities.find(city => city.civId === LEARNER)!.buildingOperations!.academy!.enabled = false;
@@ -264,7 +275,7 @@ void test('reconstructed inclusive study deadline fails without payment when pai
   assert.equal(failed.reason, 'study-window-ended');
   assert.equal(failed.resolvedRound, accepted.deadlineRound);
   noTeachingPayment(failed);
-  assert.equal(state.routes[0]!.agreement!.deliveryCount, 4);
+  assert.equal(state.routes[0]!.agreement!.deliveryCount, 1);
   assertCurrentKnowledgeWorld(state);
 });
 
@@ -280,13 +291,13 @@ void test('reconstructed same-version JSON restart after one study reproduces re
   assertCurrentKnowledgeWorld(terminal);
 });
 
-void test('reconstructed current validators reject altered payment, stale proof, delivery identity and conflicting retained result', () => {
+void test('reconstructed current validators reject altered payment, stale proof, season identity and conflicting retained result', () => {
   const state = oneStudy();
   knowledgeEconomy(state);
   const corruptions: Array<(world: WorldState) => void> = [
     world => { world.knowledge!.lastResults[TEACHER]!.learnerPaid.credits = 3; },
     world => { const compact = world.knowledge!.lastResults[TEACHER]!.compact; assert.ok(compact.status === 'accepted'); compact.studies[0]!.teacher.result.round--; },
-    world => { const compact = world.knowledge!.lastResults[TEACHER]!.compact; assert.ok(compact.status === 'accepted'); compact.studies[0]!.delivery.agreementOfferId = 'another-offer'; },
+    world => { const compact = world.knowledge!.lastResults[TEACHER]!.compact; assert.ok(compact.status === 'accepted'); compact.studies[0]!.season.agreementOfferId = 'another-offer'; },
     world => { world.knowledge!.grants[LEARNER]!.engineering!.detail = 'Conflicting independently altered receipt'; },
     world => { world.events.find(event => event.knowledgeResult)!.target = 0; },
   ];
@@ -337,10 +348,10 @@ void test('reconstructed observer records and stories distinguish offered, accep
   assert.match(offered[0]!.status, /Learner consent not recorded/);
   assert.match(knowledgeStory(offeredEvent)!.consequence, /No teaching payment or research work/);
   const acceptedEvent = knowledgeAction(state, LEARNER, { type: 'respond-knowledge', compactId: proposed.id, accept: true })[0]!;
-  assert.match(knowledgeStory(acceptedEvent)!.consequence, /0 of 2 study exchanges/);
+  assert.match(knowledgeStory(acceptedEvent)!.consequence, /0 of 2 supported study seasons/);
   assert.match(knowledgeStory(acceptedEvent)!.consequence, /No teaching payment yet/);
   const first = knowledgeEconomy(state).find(event => event.type === 'knowledge-study')!;
-  assert.match(knowledgeStory(first)!.consequence, /1 of 2 study exchanges/);
+  assert.match(knowledgeStory(first)!.consequence, /1 of 2 supported study seasons/);
   assert.match(knowledgeStory(first)!.consequence, /not extra cargo or a Science stock transfer/);
   const events = knowledgeEconomy(state);
   const completedEvent = events.find(event => event.type === 'knowledge-completed')!;
@@ -369,7 +380,7 @@ void test('reconstructed unsuccessful observer stories explicitly preserve earli
   const story = knowledgeStory(events[0]!)!;
   assert.match(story.title, /teaching withdrawn/);
   assert.equal(story.consequence, 'No teaching payment or research work. Earlier ordinary trade and institution costs remain unchanged.');
-  assert.equal(state.routes[0]!.agreement!.deliveryCount, 2);
+  assert.equal(state.routes[0]!.agreement!.deliveryCount, 1);
   noTeachingPayment(result(state));
   assertCurrentKnowledgeWorld(state);
 });

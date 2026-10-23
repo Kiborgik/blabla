@@ -4,7 +4,7 @@ state exact_registered_target: bool
 state consent_recorded: bool
 state teaching_paid: bool
 state study_count: int
-state post_acceptance_deliveries: bool
+state post_acceptance_operation_seasons: bool
 state same_round_institutions: bool
 state complete_opening_funding: bool
 state exact_contributions: bool
@@ -30,7 +30,7 @@ when respond_knowledge {
     expect "invalid-consent-has-no-effects": after.accepted or after.refused_unchanged
 }
 when resolve_knowledge {
-    expect "teaching-requires-two-fresh-supported-studies": not after.teaching_paid or after.consent_recorded and after.study_count == 2 and after.post_acceptance_deliveries and after.same_round_institutions
+    expect "teaching-requires-two-fresh-supported-studies": not after.teaching_paid or after.consent_recorded and after.study_count == 2 and after.post_acceptance_operation_seasons and after.same_round_institutions
     expect "teaching-is-fully-funded-and-conserved": not after.teaching_paid or after.complete_opening_funding and after.exact_contributions and after.credits_conserved_except_one
     expect "paid-assistance-is-bounded-and-once-only": not after.teaching_paid or after.bounded_remaining_work and after.once_only_grant
 }

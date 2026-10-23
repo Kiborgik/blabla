@@ -1,3 +1,4 @@
+import { knowledgeOperationEventMatches } from '../core/knowledge-validation.ts';
 import { isHistoricalEventSelection } from '../core/historical-selection-validation.ts';
 import { isActionPlanItems, isGameAction } from '../core/planning.ts';
 import { sameAction } from '../core/simulation/choices.ts';
@@ -83,8 +84,8 @@ function knowledgeReceiptLink(kind: string, action: GameAction | undefined, seat
   }
   for (const event of events) if (event.knowledgeStudy) {
     if (kind !== 'strategy-catchup') return corrupt();
-    const delivery = event.knowledgeStudy.attempt.delivery;
-    if (!events.some(trade => trade.id === delivery.eventId && trade.type === 'trade-delivered' && trade.detail === delivery.routeId && trade.round === delivery.round && trade.actor === delivery.owner && trade.target === delivery.partner)) return corrupt();
+    const attempt = event.knowledgeStudy.attempt;
+    for (const proof of [attempt.teacher, attempt.learner]) if (proof && events.filter(operation => knowledgeOperationEventMatches(operation, proof)).length !== 1) return corrupt();
   }
   for (const result of receipts) {
     if (result.outcome === 'declined' || result.outcome === 'withdrawn') {

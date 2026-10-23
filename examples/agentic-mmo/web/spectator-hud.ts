@@ -31,7 +31,7 @@ export function spectatorEventDestination(state: StoryWorld, event: GameEvent): 
     const civilization = state.civilizations.find(candidate => candidate.id === terms.learnerId);
     return civilization ? { kind: 'civilization', id: civilization.id, label: civilization.name } : null;
   }
-  const study = validKnowledgeEvent(event) ? event.knowledgeStudy?.attempt.delivery : undefined;
+  const study = validKnowledgeEvent(event) ? event.knowledgeStudy?.attempt.season : undefined;
   if (study) {
     const route = state.routes.find(candidate => knowledgeRouteMatches(state, candidate, study));
     if (route) return { kind: 'route', id: route.id, label: 'Recorded study route' };

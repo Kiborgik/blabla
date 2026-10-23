@@ -231,11 +231,11 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
       importance: 1,
     });
   }
-  const deliveries = resolveTrade(state, events);
+  resolveTrade(state, events);
   resolvePublicProjects(state, events);
   resolveReliefCharters(state, events);
   for (const civilization of state.civilizations) resolveResearch(state, civilization.id, researchBudgets.get(civilization.id) ?? 0, events);
-  resolveKnowledgeCompacts(state, events, deliveries);
+  resolveKnowledgeCompacts(state, events);
   for (const civilization of state.civilizations) resolveCivics(state, civilization.id, civicBudgets.get(civilization.id) ?? 0, events);
   resolveConstruction(state, openingWork, events);
   resolveGovernmentTransitions(state, events);

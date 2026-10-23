@@ -31,7 +31,7 @@ export interface ResolvedTradeDelivery {
 }
 
 export interface KnowledgeTerms {
-  ruleVersion: 1;
+  ruleVersion: 2;
   routeId: string;
   agreementOfferId: string;
   agreementAcceptedRound: number;
@@ -63,7 +63,8 @@ export interface KnowledgeTerms {
   nominalAmount: number;
   requiredStudies: 2;
   pendingLifetime: 8;
-  studyCadences: 3;
+  studySeasons: 3;
+  studyInterval: 1;
   names: { teacher: string; learner: string; teacherCity: string; learnerCity: string; teacherInstitution: string; learnerInstitution: string; technology: string };
 }
 
@@ -75,19 +76,25 @@ export interface KnowledgeInstitutionProof {
   inputs: Partial<Resources>;
   residentsRequired: number;
   result: BuildingOperationResult;
+  operationEventId: string;
+}
+
+export interface KnowledgeStudySeason extends Pick<KnowledgeTerms, 'routeId' | 'agreementOfferId' | 'agreementAcceptedRound' | 'owner' | 'partner' | 'fromCityId' | 'toCityId' | 'fromTileId' | 'toTileId' | 'tradeTerms'> {
+  round: number;
+  revision: number;
 }
 
 export interface KnowledgeStudyProof {
-  delivery: ResolvedTradeDelivery;
+  season: KnowledgeStudySeason;
   teacher: KnowledgeInstitutionProof;
   learner: KnowledgeInstitutionProof;
 }
 
 export interface KnowledgeStudyAttempt {
-  delivery: ResolvedTradeDelivery;
+  season: KnowledgeStudySeason;
   teacher: KnowledgeInstitutionProof | null;
   learner: KnowledgeInstitutionProof | null;
-  blockers: Array<{ party: 'teacher' | 'learner'; reason: string }>;
+  blockers: Array<{ party: 'teacher' | 'learner' | 'route'; reason: string }>;
 }
 
 export type KnowledgeCompact = {
@@ -98,13 +105,13 @@ export type KnowledgeCompact = {
   terms: KnowledgeTerms;
 } & (
   | { status: 'proposed'; expiresRound: number }
-  | { status: 'accepted'; acceptedRound: number; acceptedRevision: number; baselineDeliveryCount: number; lastSeenDeliveryCount: number; deadlineRound: number; studies: KnowledgeStudyProof[]; lastStudyAttempt: KnowledgeStudyAttempt | null }
+  | { status: 'accepted'; acceptedRound: number; acceptedRevision: number; lastAttemptRound: number; deadlineRound: number; studies: KnowledgeStudyProof[]; lastStudyAttempt: KnowledgeStudyAttempt | null }
 );
 
 export type KnowledgeReason = 'settled' | 'declined-by-learner' | 'withdrawn-by-participant' | 'consent-window-ended' | 'study-window-ended' | 'feature-unreleased' | 'route-missing' | 'route-consent-stopped' | 'agreement-replaced' | 'route-participants-changed' | 'route-endpoints-changed' | 'trade-terms-changed' | 'institution-identity-changed' | 'teacher-knowledge-missing' | 'target-already-completed' | 'target-changed' | 'target-ineligible' | 'cost-basis-changed' | 'entitlement-used' | 'learner-contribution-shortfall' | 'teacher-contribution-shortfall' | 'unsafe-accounting' | 'no-positive-work';
 export interface KnowledgeBalances { teacher: Resources; learner: Resources }
 export interface KnowledgeResult {
-  ruleVersion: 1;
+  ruleVersion: 2;
   compact: KnowledgeCompact;
   outcome: 'completed' | 'declined' | 'withdrawn' | 'expired' | 'failed';
   reason: KnowledgeReason;
@@ -129,7 +136,7 @@ export interface KnowledgeResult {
 
 export interface KnowledgeStudyEvent { compactId: string; attempt: KnowledgeStudyAttempt; studyCount: number }
 export interface KnowledgeState {
-  ruleVersion: 1;
+  ruleVersion: 2;
   active: KnowledgeCompact[];
   sequences: number[];
   lastResults: Array<KnowledgeResult | null>;
