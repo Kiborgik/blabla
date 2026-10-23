@@ -187,6 +187,14 @@ fn missing_and_grouped_current_receipts_are_read_only_in_text_and_json() {
         "missing"
     );
     assert_eq!(receipt(&missing, "check", None)["state"], "missing");
+    assert_eq!(
+        missing["input_reconciliation"]["reason"],
+        "missing-evidence"
+    );
+    assert_eq!(
+        missing["input_reconciliation"]["unchanged_scope_members"]["total"],
+        Value::Null
+    );
     complete(&temp);
     let before = files(temp.path());
     let view = freshness(&temp);
@@ -345,6 +353,10 @@ fn evidence_member_manifest_invalid_and_legacy_are_distinct_read_only_diagnostic
         (json!([1]), "malformed-manifest"),
         (unsupported, "unsupported-basis"),
         (inconsistent, "input-digest-mismatch"),
+        (
+            json!({"basis":"tracked-input-snapshot-v1", "capture":"execution-start", "availability":"unavailable", "reason":"member-limit", "member_count":8193}),
+            "member-limit",
+        ),
     ] {
         amend_record(&temp, |record| {
             record["evidence"][0]["member_manifest"] = manifest.clone()
@@ -357,6 +369,15 @@ fn evidence_member_manifest_invalid_and_legacy_are_distinct_read_only_diagnostic
         let view = freshness(&temp);
         let check = receipt(&view, "check", None);
         assert_eq!(check["member_manifest"]["reason"], reason);
+        assert_eq!(view["input_reconciliation"]["reason"], reason);
+        assert_eq!(
+            view["input_reconciliation"]["changed_scope_members"]["total"],
+            Value::Null
+        );
+        assert_eq!(
+            view["input_reconciliation"]["changed_dependency_members"]["omitted"],
+            Value::Null
+        );
         let children = &delta(&view, check)["paths"]["entries"][0]["children"];
         assert_eq!(children["availability"], "baseline-unavailable");
         assert_eq!(children["reason"], reason);
@@ -372,6 +393,11 @@ fn evidence_member_manifest_invalid_and_legacy_are_distinct_read_only_diagnostic
     let view = freshness(&temp);
     let check = receipt(&view, "check", None);
     assert_eq!(check["member_manifest"]["reason"], "legacy-absent");
+    assert_eq!(view["input_reconciliation"]["reason"], "legacy-absent");
+    assert_eq!(
+        view["input_reconciliation"]["unchanged_scope_members"]["total"],
+        Value::Null
+    );
     assert_eq!(
         delta(&view, check)["paths"]["entries"][0]["children"]["baseline"],
         "opened-tree-digest-match"
@@ -409,6 +435,10 @@ fn evidence_member_manifest_manual_record_is_not_an_execution() {
     assert_eq!(evidence["member_manifest"]["capture"], "manual-record");
     assert!(evidence.get("command").is_none());
     assert!(evidence.get("log").is_none());
+    assert_eq!(
+        freshness(&temp)["input_reconciliation"]["capture"],
+        "manual-record"
+    );
     let text = support::run_in(
         Some(temp.path()),
         &support::args(&["task", "freshness", "work"]),
@@ -489,6 +519,14 @@ fn evidence_member_manifest_changed_root_selection_is_not_file_removal() {
     let children = &delta(&view, check)["paths"]["entries"][0]["children"];
     assert_eq!(children["availability"], "baseline-unavailable");
     assert_eq!(children["reason"], "input-selection-changed");
+    assert_eq!(
+        view["input_reconciliation"]["reason"],
+        "input-selection-changed"
+    );
+    assert_eq!(
+        view["input_reconciliation"]["changed_dependency_members"]["total"],
+        Value::Null
+    );
     assert_eq!(children["total"], Value::Null);
 }
 
@@ -512,6 +550,7 @@ fn exact_identity_filter_keeps_shared_staleness_and_invalid_claims() {
         &["task", "freshness", "work", "--identity", "system::app"],
     );
     assert_eq!(view["receipts"].as_array().unwrap().len(), 1);
+    assert!(view.get("input_reconciliation").is_none());
     let claim = receipt(&view, "disposition", Some("system::app"));
     assert_eq!(claim["state"], "stale");
     assert_eq!(
@@ -1209,4 +1248,393 @@ fn readiness_cycle_edges_are_unique_across_roots_and_keep_invalid_graph_facts() 
         }
         assert_eq!(files(temp.path()), before);
     }
+}
+
+#[test]
+fn input_reconciliation_distinguishes_owned_members_from_changed_dependencies_read_only() {
+    let temp = fixture();
+    success(&temp, &["task", "evidence", "work", "--run"]);
+    complete(&temp);
+    open_review(&temp, "review", "work");
+    let evidence = show(&temp)["task"]["evidence"][0].clone();
+    write(temp.path(), "core/extra.rs", "changed validator dependency");
+    let before = files(temp.path());
+    let shown = show(&temp);
+    let view = freshness(&temp);
+    let reconciliation = &view["input_reconciliation"];
+    assert_eq!(reconciliation["availability"], "available");
+    assert_eq!(reconciliation["ownership"], "current-declared-scope");
+    assert_eq!(reconciliation["evidence_index"], 0);
+    assert_eq!(
+        reconciliation["recorded_epoch"],
+        evidence["acceptance_epoch"]
+    );
+    assert_eq!(reconciliation["recorded_unix"], evidence["unix"]);
+    assert_eq!(reconciliation["capture"], "execution-start");
+    assert_eq!(
+        reconciliation["shared_delta"],
+        receipt(&view, "check", None)["shared_delta"]
+    );
+    let unchanged = &reconciliation["unchanged_scope_members"];
+    assert_eq!(unchanged["total"], 1);
+    assert_eq!(unchanged["entries"][0]["path"], "core/app.rs");
+    assert_eq!(
+        unchanged["entries"][0]["recorded"],
+        evidence["member_manifest"]["members"]["core/app.rs"]
+    );
+    assert_eq!(
+        unchanged["entries"][0]["current"],
+        unchanged["entries"][0]["recorded"]
+    );
+    assert_eq!(reconciliation["changed_scope_members"]["total"], 0);
+    let dependencies = &reconciliation["changed_dependency_members"];
+    assert_eq!(dependencies["total"], 1);
+    assert_eq!(dependencies["entries"][0]["path"], "core/extra.rs");
+    assert_eq!(dependencies["entries"][0]["change"], "changed");
+    assert_eq!(
+        dependencies["entries"][0]["selected_roots"]["entries"],
+        json!(["core"])
+    );
+    assert_eq!(
+        dependencies["entries"][0]["recorded"],
+        evidence["member_manifest"]["members"]["core/extra.rs"]
+    );
+    assert_ne!(
+        dependencies["entries"][0]["current"],
+        dependencies["entries"][0]["recorded"]
+    );
+    assert_eq!(receipt(&view, "check", None)["state"], "stale");
+    assert_eq!(
+        receipt(&view, "disposition", Some("system::app"))["state"],
+        "stale"
+    );
+    assert_eq!(view["readiness_summary"], shown["readiness_summary"]);
+    assert_eq!(
+        success(&temp, &["task", "freshness", "review"])["review_current"],
+        false
+    );
+    let text = support::run_in(
+        Some(temp.path()),
+        &support::args(&["task", "freshness", "work"]),
+    );
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("input_reconciliation"));
+    assert!(text.contains("current-declared-scope"));
+    assert!(text.contains("core/app.rs"));
+    assert!(text.contains("core/extra.rs"));
+    assert_eq!(files(temp.path()), before);
+    write(temp.path(), "core/app.rs", "owned member changed");
+    let changed = freshness(&temp);
+    assert_eq!(
+        changed["input_reconciliation"]["unchanged_scope_members"]["total"],
+        0
+    );
+    assert_eq!(
+        changed["input_reconciliation"]["changed_scope_members"]["entries"][0]["path"],
+        "core/app.rs"
+    );
+}
+
+#[test]
+fn input_reconciliation_deduplicates_overlaps_and_reports_tracking_additions_and_removals() {
+    let temp = fixture();
+    amend_record(&temp, |record| {
+        record["scope"] = json!(["core", "core/app.rs"]);
+        record["check_inputs"] = json!(["core", "core/app.rs", "check.py"]);
+    });
+    success(&temp, &["task", "evidence", "work", "--run"]);
+    std::fs::remove_file(temp.path().join("core/app.rs")).unwrap();
+    write(temp.path(), "core/new.rs", "newly tracked");
+    let view = freshness(&temp);
+    let r = &view["input_reconciliation"];
+    assert_eq!(r["unchanged_scope_members"]["total"], 1);
+    assert_eq!(r["changed_scope_members"]["total"], 2);
+    assert_eq!(
+        r["changed_scope_members"]["entries"][0]["path"],
+        "core/app.rs"
+    );
+    assert_eq!(
+        r["changed_scope_members"]["entries"][0]["change"],
+        "removed"
+    );
+    assert_eq!(
+        r["changed_scope_members"]["entries"][0]["current"],
+        Value::Null
+    );
+    assert_eq!(
+        r["changed_scope_members"]["entries"][0]["selected_roots"]["entries"],
+        json!(["core", "core/app.rs"])
+    );
+    assert_eq!(
+        r["changed_scope_members"]["entries"][1]["path"],
+        "core/new.rs"
+    );
+    assert_eq!(r["changed_scope_members"]["entries"][1]["change"], "added");
+    assert_eq!(
+        r["changed_scope_members"]["entries"][1]["recorded"],
+        Value::Null
+    );
+    assert_eq!(r["unobserved_inputs"]["entries"][0]["path"], "core/app.rs");
+    assert_eq!(
+        r["unobserved_inputs"]["entries"][0]["observation"],
+        "current-unobserved"
+    );
+    assert_eq!(freshness(&temp), view);
+}
+
+#[test]
+fn input_reconciliation_reports_partial_empty_and_unobserved_scope_without_blanket_equality() {
+    let temp = fixture();
+    amend_record(&temp, |record| {
+        record["scope"] = json!(["core", "optional.txt", "missing.txt"]);
+        record["check_inputs"] = json!(["core/app.rs", "missing.txt"]);
+    });
+    success(&temp, &["task", "evidence", "work", "--run"]);
+    let view = freshness(&temp);
+    let r = &view["input_reconciliation"];
+    assert_eq!(r["availability"], "available");
+    assert_eq!(r["unchanged_scope_members"]["total"], 1);
+    assert_eq!(
+        r["scope_coverage"]["entries"][0]["state"],
+        "not-observed-by-this-check"
+    );
+    assert_eq!(
+        r["scope_coverage"]["entries"][2]["state"],
+        "not-observed-by-this-check"
+    );
+    assert_eq!(
+        r["unobserved_inputs"]["entries"],
+        json!([{"path":"missing.txt", "recorded":null, "current":null, "observation":"both-unobserved"}])
+    );
+    amend_record(&temp, |record| record["scope"] = json!([]));
+    let empty = freshness(&temp);
+    assert_eq!(empty["input_reconciliation"]["scope_coverage"]["total"], 0);
+    assert_eq!(
+        empty["input_reconciliation"]["unchanged_scope_members"]["total"],
+        0
+    );
+    assert_eq!(
+        empty["input_reconciliation"]["changed_scope_members"]["total"],
+        0
+    );
+}
+
+#[test]
+fn input_reconciliation_caps_all_partitions_at_fifty_with_full_deterministic_counts() {
+    let temp = fixture_files(40);
+    amend_record(&temp, |record| record["scope"] = json!(["core"]));
+    success(&temp, &["task", "evidence", "work", "--run"]);
+    let view = freshness(&temp);
+    let unchanged = &view["input_reconciliation"]["unchanged_scope_members"];
+    assert_eq!(unchanged["total"], 82);
+    assert_eq!(unchanged["shown"], 50);
+    assert_eq!(unchanged["omitted"], 32);
+    let paths: Vec<_> = unchanged["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["path"].as_str().unwrap())
+        .collect();
+    assert!(paths.windows(2).all(|p| p[0] < p[1]));
+    assert_eq!(freshness(&temp), view);
+    for entry in show(&temp)["task"]["evidence"][0]["member_manifest"]["members"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .filter(|p| p.starts_with("core/"))
+    {
+        write(temp.path(), entry, "changed tracked member");
+    }
+    let changed = freshness(&temp);
+    assert_eq!(
+        changed["input_reconciliation"]["changed_scope_members"]["total"],
+        82
+    );
+    assert_eq!(
+        changed["input_reconciliation"]["changed_scope_members"]["shown"],
+        50
+    );
+    assert_eq!(
+        changed["input_reconciliation"]["changed_scope_members"]["omitted"],
+        32
+    );
+    amend_record(&temp, |record| record["scope"] = json!(["optional.txt"]));
+    let dependencies = freshness(&temp);
+    assert_eq!(
+        dependencies["input_reconciliation"]["changed_dependency_members"]["total"],
+        82
+    );
+    assert_eq!(
+        dependencies["input_reconciliation"]["changed_dependency_members"]["shown"],
+        50
+    );
+    assert_eq!(
+        dependencies["input_reconciliation"]["changed_dependency_members"]["omitted"],
+        32
+    );
+}
+
+#[test]
+fn input_reconciliation_keeps_multi_source_claims_and_opaque_review_targets_adjacent() {
+    let temp = fixture();
+    write(
+        temp.path(),
+        "goals.bla",
+        "goal \"deliver\" { statement \"Deliver the entry\" expect [\"contract::entry\"] state \"active\" delivery \"required\" }\n",
+    );
+    write(
+        temp.path(),
+        "observation.txt",
+        "Synthetic outcome observation",
+    );
+    for name in ["first", "side"] {
+        success(
+            &temp,
+            &[
+                "task",
+                "open",
+                name,
+                "--role",
+                "worker",
+                "--statement",
+                "Explicit source",
+                "--scope",
+                &format!("{name}.txt"),
+                "--goal",
+                "deliver",
+                "--input",
+                "core",
+                "optional.txt",
+                "--check-argv",
+                "python3",
+                "check.py",
+            ],
+        );
+        success(&temp, &["task", "accept", name, "--model", "worker"]);
+        success(&temp, &["task", "evidence", name, "--run"]);
+        success(
+            &temp,
+            &[
+                "task",
+                "delivery",
+                name,
+                "deliver",
+                "--status",
+                "partial",
+                "--observation",
+                "Synthetic checked source, deployment remains",
+                "--observation-ref",
+                r#"{"kind":"artifact","locator":"observation.txt","context":"Synthetic fixture observation"}"#,
+                "--delivered",
+                "Source boundary",
+                "--remaining",
+                "Deployment",
+                "--owner",
+                "release-owner",
+                "--next",
+                "Authorize deployment",
+                "--model",
+                "worker",
+            ],
+        );
+    }
+    success(
+        &temp,
+        &[
+            "task",
+            "open",
+            "batch",
+            "--role",
+            "worker",
+            "--statement",
+            "Explicit multi-source review",
+            "--scope",
+            "batch.md",
+            "--review-of",
+            "first",
+            "--delivery-review-of",
+            "side",
+            "--input",
+            "core",
+            "optional.txt",
+            "observation.txt",
+            "--check-argv",
+            "python3",
+            "check.py",
+        ],
+    );
+    success(&temp, &["task", "accept", "batch", "--model", "worker"]);
+    success(&temp, &["task", "evidence", "batch", "--run"]);
+    let initial = success(&temp, &["task", "freshness", "batch"]);
+    let claims = initial["readiness_summary"]["delivery"]["entries"]
+        .as_array()
+        .unwrap();
+    assert_eq!(claims.len(), 2);
+    for (index, name) in ["first", "side"].iter().enumerate() {
+        assert_eq!(claims[index]["source_task"], *name);
+        assert_eq!(claims[index]["goal"], "goal::deliver");
+        assert!(claims[index]["claim_digest"].is_string());
+        assert_eq!(claims[index]["claim_state"], "current");
+        assert_eq!(claims[index]["no_current_accepted_review"], true);
+        assert_eq!(claims[index]["reviewers"]["entries"][0]["task"], "batch");
+    }
+    amend_named(&temp, "first", |record| {
+        record["statement"] = json!("Changed source assignment context")
+    });
+    let before = files(temp.path());
+    let fresh = success(&temp, &["task", "freshness", "batch"]);
+    let shown = success(&temp, &["task", "show", "batch"]);
+    assert_eq!(fresh["readiness_summary"], shown["readiness_summary"]);
+    assert_eq!(fresh["review_current"], false);
+    assert_eq!(fresh["input_reconciliation"]["availability"], "available");
+    assert_eq!(
+        fresh["input_reconciliation"]["changed_dependency_members"]["total"],
+        0
+    );
+    assert_eq!(receipt(&fresh, "check", None)["state"], "current");
+    let target = fresh["receipts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["kind"] == "review-target" && r["target"] == "first")
+        .unwrap();
+    let composite = delta(&fresh, target);
+    assert_eq!(composite["context"], "review-composite");
+    assert_eq!(composite["assignment"]["changed"], true);
+    assert_eq!(
+        composite["assignment"]["field_availability"],
+        "baseline-unavailable"
+    );
+    assert_eq!(composite["assignment"]["fields"], json!([]));
+    assert_eq!(composite["paths"]["total"], 0);
+    assert_eq!(
+        fresh["readiness_summary"]["delivery"]["entries"][0]["claim_digest"],
+        claims[0]["claim_digest"]
+    );
+    assert_eq!(
+        fresh["readiness_summary"]["delivery"]["entries"][0]["claim_state"],
+        "stale"
+    );
+    assert_eq!(files(temp.path()), before);
+    std::fs::remove_file(temp.path().join(".blabla/tasks/side.json")).unwrap();
+    let before = files(temp.path());
+    let unavailable = success(&temp, &["task", "freshness", "batch"]);
+    assert_eq!(unavailable["review_current"], false);
+    assert!(
+        unavailable["readiness_summary"]["review_targets"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["target_task"] == "side"
+                && r["state"] == "unavailable"
+                && r["reason"] == "target-missing")
+    );
+    assert!(
+        unavailable["readiness_summary"]["delivery"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["no_current_accepted_review"] == true)
+    );
+    assert_eq!(files(temp.path()), before);
 }

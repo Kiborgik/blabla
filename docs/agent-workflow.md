@@ -564,6 +564,24 @@ can occur in different receipt contexts. No task/status/evidence bytes, target
 pins, check predicates, claim authority or closure rules change. Follow the
 existing explicit disposition/reflect/evidence routes after inspecting the cause.
 
+Unfiltered freshness also adds `input_reconciliation`, joining the selected check's
+zero-based evidence index, epoch, time, capture and shared delta to its validated
+member baseline. Equal selected-root keys and independently reproduced current
+root digests are required. It lists exact unchanged and changed **current-declared-scope**
+members, and changed selected-input dependencies outside that scope, with their
+fingerprints and containing input roots. Ownership is current, not historical;
+these dependencies are not an inferred semantic graph.
+
+Each collection has complete counts and a deterministic 50-row cap (82 members
+means 50 shown, 32 omitted). Scope roots not fully covered by inputs report
+`not-observed-by-this-check`; null input observations remain explicit, never
+unchanged members. Missing, legacy, invalid or unavailable baselines and changed
+input selection yield null comparison totals with reasons. Manual capture remains
+`manual-record`, not observed execution. Inspect `task show NAME --json` for the
+full saved manifest and adjacent receipts/`readiness_summary` for exact claim and
+review targets. This comparison neither proves a whole scope unchanged nor
+explains every stale manual claim; it renews no claim and grants no reuse credit.
+
 ### One review of several delivery sources
 
 Declare each source explicitly when opening the review:

@@ -60,6 +60,124 @@ fn unavailable_children(reason: &str) -> Value {
 }
 
 impl<'a> Projection<'a> {
+    fn input_reconciliation(
+        &self,
+        owner: &Task,
+        evidence: Option<&task::Evidence>,
+        current_inputs: &BTreeMap<String, Option<String>>,
+        shared_delta: &Value,
+    ) -> Value {
+        let empty = BTreeMap::new();
+        let recorded_inputs = evidence.map(|e| &e.inputs).unwrap_or(&empty);
+        let selected_roots = counted(
+            recorded_inputs.keys().chain(current_inputs.keys()).collect::<BTreeSet<_>>()
+                .into_iter().map(|path| json!({
+                    "path": path, "recorded": recorded_inputs.get(path), "current": current_inputs.get(path),
+                    "recorded_selected": recorded_inputs.contains_key(path), "current_selected": current_inputs.contains_key(path)
+                })).collect(), LIMIT,
+        );
+        let scope_coverage = counted(
+            owner.scope.iter().collect::<BTreeSet<_>>().into_iter().map(|path| {
+                let roots: Vec<Value> = current_inputs.keys().filter(|root| task::covers(root, path)).map(|root| json!(root)).collect();
+                json!({"path": path, "state": if roots.is_empty() { "not-observed-by-this-check" } else { "covered-by-selected-input" }, "selected_roots": counted(roots, LIMIT)})
+            }).collect(), LIMIT,
+        );
+        let unavailable =
+            json!({"total": null, "shown": 0, "omitted": null, "limit": LIMIT, "entries": []});
+        let mut view = json!({
+            "authority": "diagnostic-only", "ownership": "current-declared-scope",
+            "availability": "baseline-unavailable", "reason": "missing-evidence",
+            "evidence_index": evidence.and_then(|e| owner.evidence.iter().position(|entry| std::ptr::eq(entry, e))),
+            "recorded_epoch": evidence.and_then(|e| e.acceptance_epoch), "recorded_unix": evidence.map(|e| e.unix),
+            "capture": null, "shared_delta": shared_delta,
+            "selected_roots": selected_roots, "scope_coverage": scope_coverage,
+            "unchanged_scope_members": unavailable, "changed_scope_members": unavailable, "changed_dependency_members": unavailable,
+            "unobserved_inputs": unavailable,
+            "inspection_routes": [format!("blabla task show {} --json", owner.name), format!("blabla task freshness {}", owner.name)],
+            "limits": ["Ownership means current declared scope, not historical attribution. Dependencies mean selected inputs outside that scope, not a semantic dependency graph.", "Only observed tracking members are compared. Unobserved roots and partially covered scope do not establish an unchanged whole scope; ignored, symlink and unreadable paths may be absent, and large-file fingerprints may be metadata-only.", "Manual-record capture is not an observed execution. Fingerprint equality is not semantic proof or an atomic snapshot.", "Inspect adjacent receipts and readiness_summary for exact claim and review targets. Input changes do not establish the cause of every stale manual claim; no claim is renewed and no evidence reuse is authorized."]
+        });
+        let Some(baseline) = self.check_baseline.as_ref() else {
+            return view;
+        };
+        let baseline = match baseline {
+            Ok(baseline) => baseline,
+            Err(reason) => {
+                view["reason"] = json!(reason);
+                return view;
+            }
+        };
+        view["capture"] = json!(baseline.capture);
+        if !recorded_inputs.keys().eq(current_inputs.keys()) {
+            view["reason"] = json!("input-selection-changed");
+            return view;
+        }
+        let current_members: BTreeMap<String, String> = self
+            .tree
+            .iter()
+            .filter(|(path, _)| current_inputs.keys().any(|root| task::covers(root, path)))
+            .map(|(path, digest)| (path.clone(), digest.clone()))
+            .collect();
+        if current_inputs
+            .iter()
+            .any(|(root, digest)| task::observed_digest(&current_members, root) != *digest)
+        {
+            view["reason"] = json!("projection-digest-mismatch");
+            return view;
+        }
+        let mut unchanged_scope = Vec::new();
+        let mut changed_scope = Vec::new();
+        let mut changed_dependencies = Vec::new();
+        for path in baseline
+            .members
+            .keys()
+            .chain(current_members.keys())
+            .collect::<BTreeSet<_>>()
+        {
+            let recorded = baseline.members.get(path);
+            let current = current_members.get(path);
+            let in_scope = owner.scope.iter().any(|root| task::covers(root, path));
+            if recorded == current && !in_scope {
+                continue;
+            }
+            let change = match (recorded, current) {
+                (None, Some(_)) => "added",
+                (Some(_), None) => "removed",
+                _ if recorded == current => "unchanged",
+                _ => "changed",
+            };
+            let roots = current_inputs
+                .keys()
+                .filter(|root| task::covers(root, path))
+                .map(|root| json!(root))
+                .collect();
+            let row = json!({"path": path, "change": change, "recorded": recorded, "current": current, "selected_roots": counted(roots, LIMIT)});
+            if change == "unchanged" {
+                unchanged_scope.push(row);
+            } else if in_scope {
+                changed_scope.push(row);
+            } else {
+                changed_dependencies.push(row);
+            }
+        }
+        let unobserved = current_inputs.iter().filter_map(|(path, current)| {
+            let recorded = &recorded_inputs[path];
+            let observation = match (recorded.is_some(), current.is_some()) {
+                (true, true) => return None,
+                (false, true) => "recorded-unobserved",
+                (true, false) => "current-unobserved",
+                (false, false) => "both-unobserved",
+            };
+            Some(json!({"path": path, "recorded": recorded, "current": current, "observation": observation}))
+        }).collect();
+        view["availability"] = json!("available");
+        view["reason"] = Value::Null;
+        view["unchanged_scope_members"] = counted(unchanged_scope, LIMIT);
+        view["changed_scope_members"] = counted(changed_scope, LIMIT);
+        view["changed_dependency_members"] = counted(changed_dependencies, LIMIT);
+        view["unobserved_inputs"] = counted(unobserved, LIMIT);
+        view
+    }
+
     fn children(
         &mut self,
         owner: &Task,
@@ -212,10 +330,12 @@ pub(in crate::cli) fn show(
         check_baseline: None,
     };
     let mut receipts = Vec::new();
+    let mut input_reconciliation = None;
     if identity.is_none() {
         let readiness =
             task::tracked_readiness(&work, &project.manifest.root, &project.ignore, &tree);
         let latest = task::latest_evidence(&work).or_else(|| work.evidence.last());
+        let current_inputs = task::evidence_inputs(&work, &tree);
         let mut row = json!({"kind": "check", "state": "missing", "recorded_unix": null, "shared_delta": null, "readiness": readiness, "tracking_error": task::tracking_error(&work, &project.manifest.root, &project.ignore)});
         if let Some(evidence) = latest {
             let baseline = task::evidence_member_baseline(evidence);
@@ -235,7 +355,7 @@ pub(in crate::cli) fn show(
             let current = task::RelevantRevision {
                 acceptance_epoch: work.acceptance_epoch,
                 task_digest: String::new(),
-                paths: task::evidence_inputs(&work, &tree),
+                paths: current_inputs.clone(),
                 identities: BTreeMap::new(),
             };
             row["state"] = json!(
@@ -259,6 +379,12 @@ pub(in crate::cli) fn show(
             row["shared_delta"] =
                 json!(projection.group(&work, "check", &recorded, &current, false, &[]));
         }
+        input_reconciliation = Some(projection.input_reconciliation(
+            &work,
+            latest,
+            &current_inputs,
+            &row["shared_delta"],
+        ));
         receipts.push(row);
     }
     if work.intent_disposition_required {
@@ -337,7 +463,7 @@ pub(in crate::cli) fn show(
     }
     let receipt_rows = counted(receipts, LIMIT);
     let delta_rows = counted(projection.deltas, LIMIT);
-    let output = json!({
+    let mut output = json!({
         "task": name, "authority": "diagnostic-only", "identity_filter": identity,
         "receipts": receipt_rows["entries"], "receipt_counts": {"total": receipt_rows["total"], "shown": receipt_rows["shown"], "omitted": receipt_rows["omitted"], "limit": LIMIT},
         "deltas": delta_rows["entries"], "delta_counts": {"total": delta_rows["total"], "shown": delta_rows["shown"], "omitted": delta_rows["omitted"], "limit": LIMIT},
@@ -346,6 +472,9 @@ pub(in crate::cli) fn show(
         "children": {"total_available": projection.child_total, "shown": projection.child_shown, "omitted_available": projection.child_total - projection.child_shown, "limit": LIMIT},
         "limits": ["Fingerprint equality does not prove semantic equivalence.", "Assignment field history is unavailable. Reflection and review digests include composite receipt context.", "Child differences are tracking-set differences; unreadable and ignored members may be absent, and large-file hashes may be metadata-only.", "Check children use validated evidence-input-manifest baselines; legacy checks and other receipts require digest-matched opening trees. Counts include changed roots beyond the presentation cap. No receipt is refreshed or target repinned."]
     });
+    if let Some(reconciliation) = input_reconciliation {
+        output["input_reconciliation"] = reconciliation;
+    }
     let result = if json_output {
         write_json(&output)
     } else {
@@ -363,6 +492,9 @@ fn render(view: &Value) -> io::Result<()> {
         view["task"].as_str().unwrap()
     )?;
     delivery::write_readiness_summary(&mut out, &view["readiness_summary"])?;
+    if let Some(reconciliation) = view.get("input_reconciliation") {
+        render_input_reconciliation(&mut out, reconciliation)?;
+    }
     for receipt in view["receipts"].as_array().unwrap() {
         writeln!(
             out,
@@ -488,4 +620,85 @@ fn render(view: &Value) -> io::Result<()> {
         out,
         "Reassess explicitly with task disposition or task reflect. This view changes no freshness, readiness or closure decision."
     )
+}
+
+fn render_input_reconciliation(out: &mut impl Write, view: &Value) -> io::Result<()> {
+    writeln!(
+        out,
+        "input_reconciliation: {} ({})",
+        view["availability"].as_str().unwrap(),
+        view["ownership"].as_str().unwrap()
+    )?;
+    writeln!(
+        out,
+        "  evidence index {} (zero-based), epoch {}, time {}; capture {}; {}",
+        view["evidence_index"],
+        view["recorded_epoch"],
+        view["recorded_unix"],
+        view["capture"].as_str().unwrap_or("unavailable"),
+        view["shared_delta"].as_str().unwrap_or("no baseline")
+    )?;
+    if let Some(reason) = view["reason"].as_str() {
+        writeln!(out, "  reason: {reason}")?;
+    }
+    for collection in [
+        "selected_roots",
+        "scope_coverage",
+        "unchanged_scope_members",
+        "changed_scope_members",
+        "changed_dependency_members",
+        "unobserved_inputs",
+    ] {
+        let section = &view[collection];
+        writeln!(
+            out,
+            "  {collection}: {} total, {} shown, {} omitted",
+            section["total"], section["shown"], section["omitted"]
+        )?;
+        for row in section["entries"].as_array().unwrap() {
+            let state = row["state"]
+                .as_str()
+                .or_else(|| row["change"].as_str())
+                .or_else(|| row["observation"].as_str())
+                .unwrap_or("selected input");
+            writeln!(out, "    {} ({state})", row["path"].as_str().unwrap())?;
+            if row.get("recorded").is_some() {
+                writeln!(
+                    out,
+                    "      recorded {} -> current {}",
+                    row["recorded"], row["current"]
+                )?;
+            }
+            if row.get("recorded_selected").is_some() {
+                writeln!(
+                    out,
+                    "      selected: recorded {}, current {}",
+                    row["recorded_selected"], row["current_selected"]
+                )?;
+            }
+            if let Some(roots) = row.get("selected_roots") {
+                let names: Vec<_> = roots["entries"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|root| root.as_str().unwrap())
+                    .collect();
+                writeln!(
+                    out,
+                    "      selected roots: {} ({} total, {} shown, {} omitted)",
+                    names.join(", "),
+                    roots["total"],
+                    roots["shown"],
+                    roots["omitted"]
+                )?;
+            }
+        }
+    }
+    for limit in view["limits"].as_array().unwrap() {
+        writeln!(out, "  {}", limit.as_str().unwrap())?;
+    }
+    for route in view["inspection_routes"].as_array().unwrap() {
+        writeln!(out, "  Inspect: {}", route.as_str().unwrap())?;
+    }
+    Ok(())
 }
