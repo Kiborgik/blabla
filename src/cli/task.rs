@@ -23,6 +23,7 @@ use std::io::{self, Write};
 struct TaskView<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     delivery: Option<serde_json::Value>,
+    readiness_summary: serde_json::Value,
     task: &'a Task,
     review_accepted: Option<bool>,
     review_current: Option<bool>,
@@ -453,6 +454,7 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
     let affected_intent = affected_intent(project, task, &tree);
     TaskView {
         delivery: delivery::task_view(project, task, &tree),
+        readiness_summary: delivery::readiness_summary(project, task, &tree),
         goal_reflection_state: goal_reflection_state(project, task, &tree),
         intent_disposition_current: task
             .intent_disposition_required
@@ -614,41 +616,76 @@ fn knowledge_fingerprints(project: &Project) -> BTreeMap<String, String> {
         .collect()
 }
 
-fn review_graph(project: &Project, review: &Task) -> Result<Vec<(Task, Task)>, String> {
+struct ReviewEdge {
+    reviewer: Task,
+    target: task::ReviewTarget,
+    relation: &'static str,
+    reviewed: Option<Task>,
+    failure: Option<(&'static str, String)>,
+}
+
+fn review_edges(project: &Project, review: &Task) -> Vec<ReviewEdge> {
     fn visit(
         project: &Project,
         current: &Task,
         active: &mut BTreeSet<String>,
         done: &mut BTreeSet<String>,
-        edges: &mut Vec<(Task, Task)>,
-    ) -> Result<(), String> {
-        if active.contains(&current.name) {
-            return Err("recursive review cycle".into());
-        }
+        edges: &mut Vec<ReviewEdge>,
+    ) {
         if done.contains(&current.name) {
-            return Ok(());
+            return;
         }
         active.insert(current.name.clone());
         let mut names = BTreeSet::new();
-        for target in current
-            .review_of
-            .iter()
-            .chain(&current.delivery_review_targets)
-        {
+        for (target, relation) in current.review_of.iter().map(|t| (t, "primary")).chain(
+            current
+                .delivery_review_targets
+                .iter()
+                .map(|t| (t, "additional")),
+        ) {
+            let mut edge = ReviewEdge {
+                reviewer: current.clone(),
+                target: target.clone(),
+                relation,
+                reviewed: None,
+                failure: None,
+            };
             if !names.insert(&target.task) {
-                return Err("duplicate review target".into());
+                edge.failure = Some(("duplicate-review-target", "duplicate review target".into()));
+            } else {
+                match task::read(&project.manifest.root, &target.task) {
+                    Ok(Some(reviewed)) => {
+                        if reviewed.state == "withdrawn" {
+                            edge.failure = Some((
+                                "target-withdrawn",
+                                format!("review target {:?} is withdrawn", target.task),
+                            ));
+                        } else if active.contains(&reviewed.name) {
+                            edge.failure = Some(("review-cycle", "recursive review cycle".into()));
+                        }
+                        edge.reviewed = Some(reviewed);
+                    }
+                    Ok(None) => {
+                        edge.failure = Some((
+                            "target-missing",
+                            format!("no review target task {:?} exists", target.task),
+                        ))
+                    }
+                    Err(message) => edge.failure = Some(("target-unreadable", message)),
+                }
             }
-            let reviewed = task::read(&project.manifest.root, &target.task)?
-                .ok_or_else(|| format!("no review target task {:?} exists", target.task))?;
-            if reviewed.state == "withdrawn" {
-                return Err(format!("review target {:?} is withdrawn", target.task));
+            let next = edge
+                .failure
+                .is_none()
+                .then(|| edge.reviewed.clone())
+                .flatten();
+            edges.push(edge);
+            if let Some(reviewed) = next {
+                visit(project, &reviewed, active, done, edges);
             }
-            edges.push((current.clone(), reviewed.clone()));
-            visit(project, &reviewed, active, done, edges)?;
         }
         active.remove(&current.name);
         done.insert(current.name.clone());
-        Ok(())
     }
     let mut edges = Vec::new();
     visit(
@@ -657,8 +694,68 @@ fn review_graph(project: &Project, review: &Task) -> Result<Vec<(Task, Task)>, S
         &mut BTreeSet::new(),
         &mut BTreeSet::new(),
         &mut edges,
-    )?;
-    Ok(edges)
+    );
+    edges
+}
+
+fn review_graph(project: &Project, review: &Task) -> Result<Vec<(Task, Task)>, String> {
+    review_edges(project, review)
+        .into_iter()
+        .map(|edge| {
+            if let Some((_, message)) = edge.failure {
+                return Err(message);
+            }
+            Ok((
+                edge.reviewer,
+                edge.reviewed.expect("validated review target"),
+            ))
+        })
+        .collect()
+}
+
+fn review_edge_view(
+    project: &Project,
+    edge: &ReviewEdge,
+    tree: &BTreeMap<String, String>,
+) -> serde_json::Value {
+    let current = edge.reviewed.as_ref().map(|source| {
+        task::review_revision(
+            &edge.reviewer,
+            source,
+            tree,
+            review_dependencies(project, &edge.reviewer, source),
+        )
+    });
+    let tracking = task::tracking_error(&edge.reviewer, &project.manifest.root, &project.ignore)
+        .or_else(|| {
+            edge.reviewed.as_ref().and_then(|source| {
+                task::tracking_error(source, &project.manifest.root, &project.ignore)
+            })
+        });
+    let fresh = edge.failure.is_none()
+        && tracking.is_none()
+        && edge.reviewed.as_ref().is_some_and(|source| {
+            task::review_current(
+                &edge.reviewer,
+                source,
+                tree,
+                review_dependencies(project, &edge.reviewer, source),
+            )
+        });
+    let unavailable = edge.reviewed.is_none()
+        || edge
+            .failure
+            .as_ref()
+            .is_some_and(|(code, _)| matches!(*code, "review-cycle" | "duplicate-review-target"));
+    serde_json::json!({
+        "reviewer_task": edge.reviewer.name, "target_task": edge.target.task,
+        "relation": edge.relation, "state": if unavailable { "unavailable" } else if fresh { "current" } else { "stale" },
+        "reason": edge.failure.as_ref().map(|(code, _)| *code).or_else(|| tracking.as_ref().map(|_| "tracking-unavailable")).or_else(|| (!fresh).then_some("stale-target-revision")),
+        "detail": edge.failure.as_ref().map(|(_, message)| message).or(tracking.as_ref()),
+        "recorded_revision_fingerprint": fingerprint(&edge.target.revision),
+        "current_revision_fingerprint": current.as_ref().map(fingerprint),
+        "route": format!("blabla task freshness {}", edge.reviewer.name)
+    })
 }
 
 fn review_target(project: &Project, name: &str, target: &str) -> Result<Task, String> {
@@ -3854,6 +3951,7 @@ fn write_task(
             )?;
         }
     }
+    delivery::write_readiness_summary(&mut output, &view.readiness_summary)?;
     writeln!(output, "\nStatement:\n  {}", task.statement)?;
     writeln!(output, "\nCarried by:\n  role::{}", task.role)?;
     if let Some(goal) = &task.goal {

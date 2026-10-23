@@ -762,3 +762,165 @@ fn unaccepted_extra_review_does_not_block_an_independently_accepted_source() {
     success(root, &close_args("core", false));
     success(root, &close_args("server", false));
 }
+
+fn readiness(root: &Path, name: &str) -> Value {
+    let shown = success(root, &["task", "show", name]);
+    let fresh = success(root, &["task", "freshness", name]);
+    assert_eq!(shown["readiness_summary"], fresh["readiness_summary"]);
+    shown["readiness_summary"].clone()
+}
+
+fn delivery_row<'a>(view: &'a Value, source: &str) -> &'a Value {
+    view["delivery"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["source_task"] == source && row["goal"] == "goal::deliver")
+        .unwrap()
+}
+
+#[test]
+fn readiness_joins_exact_sources_before_verdicts_and_owner_acceptance() {
+    let temp = sources();
+    let root = temp.path();
+    batch(root);
+    let initial = readiness(root, "batch");
+    assert_eq!(initial["authority"], "diagnostic-only");
+    assert_eq!(initial["delivery"]["total"], 2);
+    assert!(initial.get("ready").is_none());
+    let server_digest =
+        success(root, &["task", "show", "server"])["delivery"]["obligations"][0]["claim_digest"]
+            .clone();
+    let server = delivery_row(&initial, "server");
+    assert_eq!(server["claim_digest"], server_digest);
+    assert_eq!(
+        server["reviewers"]["entries"][0]["reason"],
+        "no-matching-receipt"
+    );
+    verdict(root, "batch", "deliver", "accept");
+    handback(root, "batch");
+    let before = files(root);
+    let pending = readiness(root, "batch");
+    let core = delivery_row(&pending, "core");
+    assert_eq!(core["no_current_accepted_review"], true);
+    let reviewer = &core["reviewers"]["entries"][0];
+    assert_eq!(reviewer["state"], "ready");
+    assert_eq!(reviewer["reason"], "awaiting-owner-acceptance");
+    assert_eq!(reviewer["receipts"]["entries"][0]["current"], true);
+    assert_eq!(reviewer["receipts"]["entries"][0]["verdict"], "accept");
+    assert_eq!(
+        delivery_row(&pending, "server")["reviewers"]["entries"][0]["reason"],
+        "no-matching-receipt"
+    );
+    for command in ["show", "freshness"] {
+        let text = support::run_in(Some(root), &support::args(&["task", command, "batch"]));
+        let text = String::from_utf8(text.stdout).unwrap();
+        assert!(text.contains("awaiting-owner-acceptance"), "{text}");
+        assert!(text.contains(server_digest.as_str().unwrap()), "{text}");
+    }
+    assert_eq!(files(root), before);
+    success(root, &close_args("batch", false));
+    let accepted = readiness(root, "batch");
+    assert_eq!(
+        delivery_row(&accepted, "core")["no_current_accepted_review"],
+        false
+    );
+    assert_eq!(
+        delivery_row(&accepted, "server")["no_current_accepted_review"],
+        true
+    );
+    for bounded in [false, true] {
+        refusal(root, &close_args("server", bounded));
+    }
+}
+
+#[test]
+fn readiness_keeps_reject_precedence_and_unrelated_same_goal_out_of_credit() {
+    let temp = sources();
+    let root = temp.path();
+    review(root, "accepted", "server");
+    verdict(root, "accepted", "deliver", "accept");
+    handback(root, "accepted");
+    success(root, &close_args("accepted", false));
+    batch(root);
+    success(root, &selected("core", "accept"));
+    success(root, &selected("server", "reject"));
+    handback(root, "batch");
+    success(root, &close_args("batch", false));
+    let view = readiness(root, "batch");
+    assert_eq!(
+        delivery_row(&view, "core")["no_current_accepted_review"],
+        false
+    );
+    let server = delivery_row(&view, "server");
+    assert_eq!(server["no_current_accepted_review"], true);
+    assert_eq!(server["reason"], "current-reject");
+    assert_eq!(delivery_row(&view, "core")["reviewers"]["total"], 1);
+    refusal(root, &close_args("server", false));
+}
+
+#[test]
+fn readiness_distinguishes_old_claim_digest_and_stale_evidence() {
+    let temp = sources();
+    let root = temp.path();
+    batch(root);
+    approve_both(root);
+    success(root, &["task", "accept", "server", "--model", "worker"]);
+    check(root, "server");
+    claim(root, "server", "deliver", "blocked");
+    handback(root, "server");
+    let view = readiness(root, "batch");
+    assert_eq!(
+        delivery_row(&view, "server")["reviewers"]["entries"][0]["reason"],
+        "different-claim-digest"
+    );
+    write(root, "check.py", "raise SystemExit(0)\n");
+    let view = readiness(root, "batch");
+    let core = delivery_row(&view, "core");
+    assert_eq!(core["claim_state"], "stale");
+    assert_eq!(
+        core["reviewers"]["entries"][0]["receipts"]["entries"][0]["current"],
+        false
+    );
+    assert!(
+        core["reviewers"]["entries"][0]["receipts"]["entries"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .starts_with("stale-")
+    );
+}
+
+#[test]
+fn readiness_counts_every_explicit_delivery_source_before_capping() {
+    let temp = sources();
+    let root = temp.path();
+    batch(root);
+    let source = task(root, "server");
+    let mut reviewer = task(root, "batch");
+    let pin = reviewer["delivery_review_targets"][0].clone();
+    for index in 0..55 {
+        let name = format!("source-{index:02}");
+        let mut record = source.clone();
+        record["name"] = json!(name);
+        write(
+            root,
+            &format!(".blabla/tasks/{name}.json"),
+            &record.to_string(),
+        );
+        let mut target = pin.clone();
+        target["task"] = json!(name);
+        reviewer["delivery_review_targets"]
+            .as_array_mut()
+            .unwrap()
+            .push(target);
+    }
+    write(root, ".blabla/tasks/batch.json", &reviewer.to_string());
+    let before = files(root);
+    let summary = readiness(root, "batch");
+    assert_eq!(summary["delivery"]["total"], 57);
+    assert_eq!(summary["delivery"]["shown"], 50);
+    assert_eq!(summary["delivery"]["omitted"], 7);
+    assert_eq!(summary["delivery"]["entries"][0]["source_task"], "core");
+    assert_eq!(readiness(root, "source-54")["delivery"]["total"], 1);
+    assert_eq!(files(root), before);
+}

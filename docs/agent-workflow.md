@@ -456,6 +456,49 @@ an eligible opted-in manual-receipt continuation. Batch execution and review at
 substantial feature boundaries; adding or editing a test is not itself a reason
 to rerun the suite.
 
+### Inspect delivery readiness without changing it
+
+`task show NAME` and `task freshness NAME` share a `readiness_summary` in human
+and JSON output. It is diagnostic-only: no new readiness gate, lifecycle state,
+persisted receipt or overall ready flag. Delivery rows cover the selected task's
+pinned obligations and its direct `--review-of` / `--delivery-review-of` sources,
+not inferred author subtasks or outcomes selected by broad check inputs. The
+project name and root identify the local store; another project's matching task,
+goal or claim digest contributes no review credit.
+
+Each delivery row joins the exact source task, goal and claim digest to explicitly
+assigned local reviewers. It distinguishes missing/current/stale/unavailable
+claims, absent assignments, missing or different-digest receipts, stale review
+inputs, current Reject, and a current Accept still awaiting owner acceptance.
+`no_current_accepted_review` reports the existing closure predicate, not permission
+to close; reviewer lifecycle and challenge fields explain why a receipt counts.
+Unavailable task or goal authority is not evidence of absence or completion.
+Partial and Blocked claims retain their remaining work and owner even when their
+review is accepted. Residual-resolution receipts do not become initial approval.
+A stale CLOSED reviewer needs a new assignment, not reopening or silent refresh.
+
+`review_targets` covers every explicit primary and additional recursive edge,
+including the incoming reviewers needed to explain those delivery rows. Shared
+ancestors are not cycles; missing, unreadable, withdrawn, duplicate and cyclic
+edges remain explicit. Revision fingerprints and `task freshness` routes lead to
+the existing deltas. Freshness's `review_current` uses the same full graph as
+`task show`; `--identity` still filters intent receipts, not this local summary.
+
+`confirmations` lists only actual unconfirmed during-carry records among inspected
+tasks. `orchestrator_record_index` is the zero-based position in that response's
+native `orchestrator_records`, not a stable ID or a `confirm` argument. Verb, time,
+model and carrier are recorded; historical amendment payload is not available.
+After hand-back the owner inspects and confirms all outstanding records with
+`task confirm NAME --model <id>`, or undoes them through supported owner actions.
+The carrier cannot self-confirm. These records block CLOSE, never READY.
+
+All facts are computed before deterministic per-section 50-row presentation caps;
+sections and nested reviewer/receipt lists report total, shown and omitted counts.
+Use the listed task and goal routes to inspect omitted details. An empty section
+means no obligation observed in this explicit scope, not universal delivery or
+project completion. Reading either view does not refresh, repin, execute evidence,
+write task/status/goal records or change ordinary/bounded closure refusals.
+
 ### Inspect receipt-relative freshness
 
 Use `blabla task freshness NAME` or `blabla task freshness NAME --json` before

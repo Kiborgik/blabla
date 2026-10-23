@@ -269,55 +269,30 @@ pub(in crate::cli) fn show(
             }
             receipts.push(row);
         }
-        let mut review = work.clone();
-        let mut visited = BTreeSet::new();
-        while let Some(target) = &review.review_of {
-            review_current.get_or_insert(true);
-            let mut row = json!({"kind": "review-target", "reviewer": review.name, "target": target.task, "state": "unavailable", "recorded_unix": null, "shared_delta": null});
-            if !visited.insert(review.name.clone()) {
-                row["reason"] = json!("review-cycle");
-                receipts.push(row);
-                review_current = Some(false);
-                break;
+        review_current = review_freshness(project, &work);
+        for edge in review_edges(project, &work) {
+            let detail = review_edge_view(project, &edge, &tree);
+            let mut row = json!({"kind": "review-target", "reviewer": edge.reviewer.name, "target": edge.target.task, "relation": edge.relation, "state": detail["state"], "recorded_unix": null, "shared_delta": null, "reason": detail["reason"]});
+            if let Some(("target-unreadable", message)) = &edge.failure {
+                row["reason"] = json!(format!("target-unreadable: {message}"));
             }
-            let reviewed = match task::read(&project.manifest.root, &target.task) {
-                Ok(Some(target)) => target,
-                result => {
-                    row["reason"] = json!(match result {
-                        Ok(None) => "target-missing".to_owned(),
-                        Err(message) => format!("target-unreadable: {message}"),
-                        _ => unreachable!(),
-                    });
-                    receipts.push(row);
-                    review_current = Some(false);
-                    break;
-                }
-            };
-            let dependencies = review_dependencies(project, &review, &reviewed);
-            let current = task::review_revision(&review, &reviewed, &tree, dependencies.clone());
-            let tracking = task::tracking_error(&review, &project.manifest.root, &project.ignore)
-                .or_else(|| {
-                    task::tracking_error(&reviewed, &project.manifest.root, &project.ignore)
-                });
-            let fresh =
-                tracking.is_none() && task::review_current(&review, &reviewed, &tree, dependencies);
-            row["state"] = json!(if fresh { "current" } else { "stale" });
-            row["reason"] = json!(if reviewed.state == "withdrawn" {
-                Some("target-withdrawn".to_owned())
-            } else {
-                tracking
-            });
-            row["shared_delta"] = json!(projection.group(
-                &reviewed,
-                "review-composite",
-                &target.revision,
-                &current,
-                true,
-                &review.check_inputs
-            ));
+            if let Some(reviewed) = &edge.reviewed {
+                let current = task::review_revision(
+                    &edge.reviewer,
+                    reviewed,
+                    &tree,
+                    review_dependencies(project, &edge.reviewer, reviewed),
+                );
+                row["shared_delta"] = json!(projection.group(
+                    reviewed,
+                    "review-composite",
+                    &edge.target.revision,
+                    &current,
+                    true,
+                    &edge.reviewer.check_inputs
+                ));
+            }
             receipts.push(row);
-            review_current = Some(review_current.unwrap() && fresh);
-            review = reviewed;
         }
     }
     let receipt_rows = counted(receipts, LIMIT);
@@ -327,6 +302,7 @@ pub(in crate::cli) fn show(
         "receipts": receipt_rows["entries"], "receipt_counts": {"total": receipt_rows["total"], "shown": receipt_rows["shown"], "omitted": receipt_rows["omitted"], "limit": LIMIT},
         "deltas": delta_rows["entries"], "delta_counts": {"total": delta_rows["total"], "shown": delta_rows["shown"], "omitted": delta_rows["omitted"], "limit": LIMIT},
         "review_current": review_current,
+        "readiness_summary": delivery::readiness_summary(project, &work, &tree),
         "children": {"total_available": projection.child_total, "shown": projection.child_shown, "omitted_available": projection.child_total - projection.child_shown, "limit": LIMIT},
         "limits": ["Fingerprint equality does not prove semantic equivalence.", "Assignment field history is unavailable. Reflection and review digests include composite receipt context.", "Child differences are tracking-set differences; unreadable and ignored members may be absent, and large-file hashes may be metadata-only.", "Only digest-matched opening trees can supply child baselines; counts include changed roots beyond the presentation cap. No receipt is refreshed or target repinned."]
     });
@@ -346,6 +322,7 @@ fn render(view: &Value) -> io::Result<()> {
         "task::{} freshness (diagnostic-only)",
         view["task"].as_str().unwrap()
     )?;
+    delivery::write_readiness_summary(&mut out, &view["readiness_summary"])?;
     for receipt in view["receipts"].as_array().unwrap() {
         writeln!(
             out,

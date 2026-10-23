@@ -292,6 +292,471 @@ pub(crate) fn task_view(
     )
 }
 
+fn counted(mut entries: Vec<Value>) -> Value {
+    let total = entries.len();
+    entries.truncate(50);
+    json!({"total": total, "shown": entries.len(), "omitted": total - entries.len(), "limit": 50, "entries": entries})
+}
+
+fn diagnostic_tasks(project: &Project) -> (Vec<Task>, Vec<Value>) {
+    let mut tasks = Vec::new();
+    let mut unavailable = Vec::new();
+    match std::fs::read_dir(task::directory(&project.manifest.root)) {
+        Ok(entries) => {
+            let mut names = BTreeSet::new();
+            for entry in entries {
+                match entry {
+                    Ok(entry) => {
+                        let path = entry.path();
+                        if path.extension().is_some_and(|ext| ext == "json") {
+                            if let Some(name) = path.file_stem() {
+                                names.insert(name.to_string_lossy().into_owned());
+                            }
+                        }
+                    }
+                    Err(error) => unavailable.push(
+                        json!({"reason": "task-inventory-unreadable", "detail": error.to_string()}),
+                    ),
+                }
+            }
+            for name in names {
+                match task::read(&project.manifest.root, &name) {
+                    Ok(Some(record)) => tasks.push(record),
+                    Ok(None) => {
+                        unavailable.push(json!({"task": name, "reason": "task-record-unavailable"}))
+                    }
+                    Err(error) => unavailable.push(
+                        json!({"task": name, "reason": "task-record-unreadable", "detail": error}),
+                    ),
+                }
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => unavailable
+            .push(json!({"reason": "task-inventory-unreadable", "detail": error.to_string()})),
+    }
+    tasks.sort_by(|a, b| a.name.cmp(&b.name));
+    (tasks, unavailable)
+}
+
+fn reviewer_diagnostic(
+    project: &Project,
+    reviewer: &Task,
+    source: &Task,
+    goal: &str,
+    tree: &BTreeMap<String, String>,
+) -> Value {
+    let claim_digest = source
+        .delivery_obligations
+        .get(goal)
+        .and_then(|o| o.claim.as_ref())
+        .map(fingerprint);
+    let owner_accepted = reviewer.state == "closed" && reviewer.result.is_some();
+    let challenge_current = task::challenge_current(reviewer, tree);
+    let mut receipts = Vec::new();
+    for review in reviewer
+        .delivery_reviews
+        .iter()
+        .filter(|r| r.goal == goal && review_source(reviewer, r) == Some(source.name.as_str()))
+    {
+        let problem = review_record_problem(project, reviewer, review, source, tree);
+        let matches_claim = claim_digest.as_deref() == Some(review.claim_digest.as_str());
+        let credit = problem.is_none()
+            && owner_accepted
+            && challenge_current
+            && review.resolve_origin.is_none();
+        let reason = problem.unwrap_or_else(|| {
+            if review.resolve_origin.is_some() {
+                "residual-resolution-not-initial-acceptance"
+            } else if !owner_accepted {
+                "awaiting-owner-acceptance"
+            } else if !challenge_current {
+                "stale-owner-challenge"
+            } else if review.verdict == Verdict::Reject {
+                "current-reject"
+            } else {
+                "current-owner-accepted-review"
+            }
+        });
+        receipts.push(json!({
+            "source_task": review_source(reviewer, review), "goal": review.goal, "claim_digest": review.claim_digest,
+            "matches_claim_digest": matches_claim, "verdict": review.verdict, "current": problem.is_none(),
+            "owner_accepted_current": credit, "reason": reason, "resolve_origin": review.resolve_origin,
+            "model": review.model, "unix": review.unix
+        }));
+    }
+    receipts.sort_by_key(|r| {
+        (
+            r["claim_digest"].to_string(),
+            r["resolve_origin"].to_string(),
+            r["unix"].as_u64(),
+        )
+    });
+    let initial: Vec<_> = receipts
+        .iter()
+        .filter(|r| r["resolve_origin"].is_null())
+        .collect();
+    let matching: Vec<_> = initial
+        .iter()
+        .filter(|r| r["matches_claim_digest"] == true)
+        .collect();
+    let reason = if initial.is_empty() {
+        "no-matching-receipt"
+    } else if matching.is_empty() {
+        "different-claim-digest"
+    } else if let Some(reject) = matching
+        .iter()
+        .find(|r| r["owner_accepted_current"] == true && r["verdict"] == "reject")
+    {
+        reject["reason"].as_str().unwrap()
+    } else if let Some(accepted) = matching
+        .iter()
+        .find(|r| r["owner_accepted_current"] == true)
+    {
+        accepted["reason"].as_str().unwrap()
+    } else if let Some(current) = matching.iter().find(|r| r["current"] == true) {
+        current["reason"].as_str().unwrap()
+    } else {
+        matching[0]["reason"].as_str().unwrap()
+    }
+    .to_owned();
+    json!({
+        "task": reviewer.name, "state": reviewer.state, "reason": reason,
+        "owner_accepted": owner_accepted, "challenge_current": challenge_current,
+        "review_current": review_freshness(project, reviewer), "receipts": counted(receipts),
+        "route": format!("blabla task show {}", reviewer.name),
+        "next": if reviewer.state == "closed" { "Historical CLOSED receipts are not reopened or silently refreshed; inspect and assign a new review if stale." } else { "Inspect the exact receipt, then use ordinary hand-back and owner closure guards." }
+    })
+}
+
+fn merge_review_edge(edges: &mut BTreeMap<(String, String), Value>, mut row: Value) {
+    let key = (
+        row["reviewer_task"].as_str().unwrap().to_owned(),
+        row["target_task"].as_str().unwrap().to_owned(),
+    );
+    row["relations"] = json!([row["relation"].clone()]);
+    row["reasons"] = json!(row["reason"].as_str().into_iter().collect::<Vec<_>>());
+    edges
+        .entry(key)
+        .and_modify(|previous| {
+            let union = |field: &str| {
+                previous[field]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .chain(row[field].as_array().unwrap())
+                    .filter_map(Value::as_str)
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            };
+            let relations = union("relations");
+            let reasons = union("reasons");
+            let current = previous["current_revision_fingerprint"]
+                .as_str()
+                .or_else(|| row["current_revision_fingerprint"].as_str())
+                .map(str::to_owned);
+            let rank = |value: &Value| {
+                (
+                    match value["state"].as_str() {
+                        Some("unavailable") => 2,
+                        Some("stale") => 1,
+                        _ => 0,
+                    },
+                    value["reason"].as_str().unwrap_or("").to_owned(),
+                )
+            };
+            if rank(&row) > rank(previous) {
+                *previous = row.clone();
+            }
+            previous["relations"] = json!(relations);
+            previous["reasons"] = json!(reasons);
+            if previous["current_revision_fingerprint"].is_null() {
+                previous["current_revision_fingerprint"] = json!(current);
+            }
+        })
+        .or_insert(row);
+}
+
+pub(crate) fn readiness_summary(
+    project: &Project,
+    selected: &Task,
+    tree: &BTreeMap<String, String>,
+) -> Value {
+    let (tasks, mut unavailable) = diagnostic_tasks(project);
+    let inventory_available = unavailable.is_empty();
+    let goals = declarations(project);
+    if let Err(message) = &goals {
+        unavailable.push(
+            json!({"memory": "goals", "reason": "goal-authority-unavailable", "detail": message}),
+        );
+    }
+    let mut process_available = true;
+    if let Some(entry) = &project.manifest.process {
+        let memory = memory::read(
+            &entry.path,
+            &entry.display,
+            process::build,
+            process::validate,
+        );
+        if memory.present().is_none() {
+            process_available = false;
+            unavailable.push(json!({"memory": "process", "reason": "process-authority-unavailable", "detail": memory.problems()}));
+        }
+    }
+    let mut sources = BTreeMap::from([(selected.name.clone(), selected.clone())]);
+    for target in selected
+        .review_of
+        .iter()
+        .chain(&selected.delivery_review_targets)
+    {
+        match task::read(&project.manifest.root, &target.task) {
+            Ok(Some(source)) => { sources.insert(source.name.clone(), source); }
+            result => unavailable.push(json!({"task": target.task, "reason": "source-task-unavailable", "detail": result.err()})),
+        }
+    }
+    let mut inspected = sources.clone();
+    let mut graph_roots = BTreeMap::from([(selected.name.clone(), selected.clone())]);
+    let mut delivery = Vec::new();
+    for source in sources.values() {
+        let reviewers: Vec<_> = tasks
+            .iter()
+            .filter(|r| assigned_source(r, &source.name))
+            .collect();
+        for reviewer in &reviewers {
+            graph_roots.insert(reviewer.name.clone(), (*reviewer).clone());
+            inspected.insert(reviewer.name.clone(), (*reviewer).clone());
+        }
+        for (goal, obligation) in &source.delivery_obligations {
+            let authority_available =
+                process_available && goals.as_ref().is_ok_and(|g| g.contains_key(goal));
+            if goals.as_ref().is_ok_and(|g| !g.contains_key(goal)) {
+                unavailable.push(json!({"task": source.name, "goal": goal, "reason": "goal-declaration-unavailable"}));
+            }
+            let claim = obligation.claim.as_ref();
+            let claim_state = if !authority_available {
+                "unavailable"
+            } else if claim.is_none() {
+                "missing"
+            } else if claim.is_some_and(|c| claim_current(project, source, c, tree)) {
+                "current"
+            } else {
+                "stale"
+            };
+            let review_rows: Vec<_> = reviewers
+                .iter()
+                .map(|r| reviewer_diagnostic(project, r, source, goal, tree))
+                .collect();
+            let accepted = accepted_review(project, source, goal, tree, &tasks);
+            let rejected = review_rows.iter().any(|r| r["reason"] == "current-reject");
+            let reason = if !authority_available {
+                "authority-unavailable"
+            } else if !inventory_available {
+                "reviewer-inventory-unavailable"
+            } else if rejected {
+                "current-reject"
+            } else if accepted {
+                "current-owner-accepted-review"
+            } else if review_rows.is_empty() {
+                "no-explicit-local-reviewer-observed"
+            } else {
+                "no-current-owner-accepted-review"
+            };
+            delivery.push(json!({
+                "source_task": source.name, "source_state": source.state, "goal": goal, "claim_digest": claim.map(fingerprint),
+                "claim_state": claim_state, "claim_status": claim.map(|c| &c.status), "claim": claim,
+                "no_current_accepted_review": !accepted, "reason": reason,
+                "reviewer_inventory": if inventory_available { "available" } else { "unavailable" },
+                "reviewers": counted(review_rows), "route": format!("blabla task show {}", source.name), "goal_route": format!("blabla explain {goal}")
+            }));
+        }
+    }
+    let mut edges = BTreeMap::new();
+    for root in graph_roots.values() {
+        for edge in review_edges(project, root) {
+            if let Some(source) = &edge.reviewed {
+                inspected.insert(source.name.clone(), source.clone());
+            }
+            merge_review_edge(&mut edges, review_edge_view(project, &edge, tree));
+        }
+    }
+    let edges: Vec<_> = edges.into_values().collect();
+    for row in &edges {
+        if row["state"] == "unavailable" {
+            unavailable.push(json!({"task": row["target_task"], "reviewer_task": row["reviewer_task"], "reason": row["reason"], "reasons": row["reasons"], "detail": row["detail"]}));
+        }
+    }
+    unavailable.sort_by_key(Value::to_string);
+    unavailable.dedup();
+    let mut confirmations = Vec::new();
+    for task in inspected.values() {
+        for (index, record) in task
+            .orchestrator_records
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.unconfirmed())
+        {
+            confirmations.push(json!({
+                "task": task.name, "orchestrator_record_index": index, "index_authority": "response-local-zero-based",
+                "verb": record.verb, "unix": record.unix, "model": record.model, "carried_by": record.carried_by, "confirmed": null,
+                "payload_availability": "not-recorded", "blocks_close": true, "blocks_ready": false,
+                "route": format!("blabla task show {}", task.name), "confirm_route": format!("blabla task confirm {} --model <id>", task.name),
+                "next": "After hand-back, the owner inspects and confirms all outstanding records or undoes them through supported actions; the carrier cannot self-confirm. The index is not a command argument."
+            }));
+        }
+    }
+    json!({
+        "authority": "diagnostic-only", "project": {"name": project.manifest.name, "root": project.manifest.root}, "task": selected.name,
+        "scope": "Delivery covers the selected task and direct explicitly assigned local sources only. Review edges and confirmations cover those sources, their explicit incoming reviewers and recursive review targets. No inferred children, cross-project credit or overall readiness.",
+        "delivery": counted(delivery), "review_targets": counted(edges), "confirmations": counted(confirmations), "unavailable": counted(unavailable),
+        "limits": ["All facts are computed before per-section 50-row presentation caps; nested reviewers and receipts have their own counts.", "Empty sections mean no obligation observed in this explicit scope, not project completion. Partial and Blocked acceptance does not deliver the residual.", "Unavailable records prevent exhaustive absence claims. Receipt fingerprints are not independent proof of observations. Inspect the listed task/goal routes for omitted rows."]
+    })
+}
+
+pub(crate) fn write_readiness_summary(output: &mut impl Write, summary: &Value) -> io::Result<()> {
+    writeln!(
+        output,
+        "\nReadiness summary (diagnostic-only; {} at {}):",
+        summary["project"]["name"].as_str().unwrap(),
+        summary["project"]["root"].as_str().unwrap()
+    )?;
+    for row in summary["delivery"]["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        writeln!(
+            output,
+            "  {} / {} / {}: claim {}; {}",
+            row["source_task"].as_str().unwrap(),
+            row["goal"].as_str().unwrap(),
+            row["claim_digest"].as_str().unwrap_or("unclaimed"),
+            row["claim_state"].as_str().unwrap(),
+            row["reason"].as_str().unwrap()
+        )?;
+        if !row["claim_status"].is_null() {
+            writeln!(
+                output,
+                "    status {}; remaining {}; blocker {}; owner {}; next {}",
+                row["claim_status"],
+                row["claim"]["remaining"],
+                row["claim"]["blocker"],
+                row["claim"]["owner"],
+                row["claim"]["next"]
+                    .as_str()
+                    .or_else(|| row["claim"]["unblock_when"].as_str())
+                    .unwrap_or("not recorded")
+            )?;
+        }
+        for reviewer in row["reviewers"]["entries"].as_array().into_iter().flatten() {
+            writeln!(
+                output,
+                "    {} ({}): {}; {}",
+                reviewer["task"].as_str().unwrap(),
+                reviewer["state"].as_str().unwrap(),
+                reviewer["reason"].as_str().unwrap(),
+                reviewer["route"].as_str().unwrap()
+            )?;
+            for receipt in reviewer["receipts"]["entries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+            {
+                writeln!(
+                    output,
+                    "      {} / {} / {}: {} current {}; {}",
+                    receipt["source_task"].as_str().unwrap_or("unassigned"),
+                    receipt["goal"].as_str().unwrap(),
+                    receipt["claim_digest"].as_str().unwrap(),
+                    receipt["verdict"].as_str().unwrap(),
+                    receipt["current"],
+                    receipt["reason"].as_str().unwrap()
+                )?;
+            }
+            writeln!(
+                output,
+                "      receipts: {} total, {} shown, {} omitted",
+                reviewer["receipts"]["total"],
+                reviewer["receipts"]["shown"],
+                reviewer["receipts"]["omitted"]
+            )?;
+        }
+        writeln!(
+            output,
+            "    reviewers: {} total, {} shown, {} omitted; {}; {}",
+            row["reviewers"]["total"],
+            row["reviewers"]["shown"],
+            row["reviewers"]["omitted"],
+            row["route"].as_str().unwrap(),
+            row["goal_route"].as_str().unwrap()
+        )?;
+    }
+    for edge in summary["review_targets"]["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        writeln!(
+            output,
+            "  review {} -> {} ({}): {} {}; {}",
+            edge["reviewer_task"].as_str().unwrap(),
+            edge["target_task"].as_str().unwrap(),
+            edge["relation"].as_str().unwrap(),
+            edge["state"].as_str().unwrap(),
+            edge["reason"].as_str().unwrap_or(""),
+            edge["route"].as_str().unwrap()
+        )?;
+        if edge["reasons"]
+            .as_array()
+            .is_some_and(|reasons| reasons.len() > 1)
+        {
+            writeln!(
+                output,
+                "    recorded diagnostic reasons: {}",
+                edge["reasons"]
+            )?;
+        }
+    }
+    for row in summary["confirmations"]["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        writeln!(
+            output,
+            "  {} orchestrator_records[{}] (response-local): {} at {} by {} carried by {}; blocks CLOSE, not READY",
+            row["task"].as_str().unwrap(),
+            row["orchestrator_record_index"],
+            row["verb"].as_str().unwrap(),
+            row["unix"],
+            row["model"],
+            row["carried_by"]
+        )?;
+        writeln!(
+            output,
+            "    {}; {}",
+            row["next"].as_str().unwrap(),
+            row["confirm_route"].as_str().unwrap()
+        )?;
+    }
+    for row in summary["unavailable"]["entries"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        writeln!(output, "  unavailable: {row}")?;
+    }
+    for section in ["delivery", "review_targets", "confirmations", "unavailable"] {
+        writeln!(
+            output,
+            "  {section}: {} total, {} shown, {} omitted",
+            summary[section]["total"], summary[section]["shown"], summary[section]["omitted"]
+        )?;
+    }
+    writeln!(output, "  {}", summary["scope"].as_str().unwrap())
+}
+
 pub(crate) fn claims_pending(
     project: &Project,
     task: &Task,
@@ -672,48 +1137,60 @@ fn review_source<'a>(reviewer: &'a Task, review: &'a Review) -> Option<&'a str> 
         .or_else(|| reviewer.review_of.as_ref().map(|t| t.task.as_str()))
 }
 
-fn review_record_current(
+fn review_record_problem(
     project: &Project,
     reviewer: &Task,
     review: &Review,
     source: &Task,
     tree: &BTreeMap<String, String>,
-) -> bool {
+) -> Option<&'static str> {
     if review_source(reviewer, review) != Some(source.name.as_str())
         || !assigned_source(reviewer, &source.name)
-        || !permitted(project, reviewer, &review.model)
-        || review_freshness(project, reviewer) != Some(true)
-        || !task::tracked_readiness(reviewer, &project.manifest.root, &project.ignore, tree)
-            .supported
-        || review.revision != revision(project, reviewer, tree)
-        || !refs_current(project, &review.refs, &review.artifacts)
-        || review.target_revision
-            != task::review_revision(
-                reviewer,
-                source,
-                tree,
-                review_dependencies(project, reviewer, source),
-            )
     {
-        return false;
+        return Some("source-not-assigned");
+    }
+    if !permitted(project, reviewer, &review.model) {
+        return Some("reviewer-model-not-permitted");
+    }
+    if review_freshness(project, reviewer) != Some(true) {
+        return Some("stale-review-target");
+    }
+    if !task::tracked_readiness(reviewer, &project.manifest.root, &project.ignore, tree).supported {
+        return Some("stale-reviewer-evidence");
+    }
+    if review.revision != revision(project, reviewer, tree) {
+        return Some("stale-reviewer-revision");
+    }
+    if !refs_current(project, &review.refs, &review.artifacts) {
+        return Some("stale-review-artifacts");
+    }
+    if review.target_revision
+        != task::review_revision(
+            reviewer,
+            source,
+            tree,
+            review_dependencies(project, reviewer, source),
+        )
+    {
+        return Some("stale-source-revision");
     }
     let Some(obligation) = source.delivery_obligations.get(&review.goal) else {
-        return false;
+        return Some("source-obligation-missing");
     };
     let Some(claim) = &obligation.claim else {
-        return false;
+        return Some("source-claim-missing");
     };
     if review.claim_digest != fingerprint(claim) {
-        return false;
+        return Some("different-claim-digest");
     }
     let Ok(goals) = declarations(project) else {
-        return false;
+        return Some("goal-authority-unavailable");
     };
     if review.goal_fingerprint != fingerprint(&goals.get(&review.goal)) {
-        return false;
+        return Some("stale-goal-definition");
     }
     if review.resolve_origin.is_some() {
-        source.state == "closed"
+        let current = source.state == "closed"
             && matches!(claim.status, Status::Partial | Status::Blocked)
             && review.resolution == Some(Status::Delivered)
             && review.verdict == Verdict::Accept
@@ -724,10 +1201,21 @@ fn review_record_current(
             })
             && goals.get(&review.goal).is_some_and(|g| {
                 g.delivery == Some(DeliveryRequirement::Required) && g.state != "dropped"
-            })
+            });
+        (!current).then_some("residual-origin-not-current")
     } else {
-        claim_current(project, source, claim, tree)
+        (!claim_current(project, source, claim, tree)).then_some("stale-source-claim")
     }
+}
+
+fn review_record_current(
+    project: &Project,
+    reviewer: &Task,
+    review: &Review,
+    source: &Task,
+    tree: &BTreeMap<String, String>,
+) -> bool {
+    review_record_problem(project, reviewer, review, source, tree).is_none()
 }
 
 fn accepted_review(

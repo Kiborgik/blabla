@@ -1508,3 +1508,107 @@ fn invalid_scope_applicability_refuses_the_combined_check_amendment_without_writ
         ],
     );
 }
+
+#[test]
+fn readiness_reports_only_pinned_local_obligations_and_retains_partial_limits() {
+    for status in ["partial", "blocked"] {
+        let temp = fixture(true);
+        let root = temp.path();
+        open(root, "work", "src", true);
+        success(root, &["finish"]);
+        check(root, "work");
+        reviewed(root, "work", status);
+        success(root, &close_args("work", false));
+        open(root, "broad-check-only", "report.md", false);
+        let before = files(root);
+        let summary = success(root, &["task", "show", "work"])["readiness_summary"].clone();
+        assert_eq!(summary["delivery"]["total"], 2);
+        assert!(summary.get("ready").is_none());
+        for row in summary["delivery"]["entries"].as_array().unwrap() {
+            assert_eq!(row["claim_status"], status);
+            assert_eq!(row["no_current_accepted_review"], false);
+            assert_eq!(row["claim"]["owner"], "release-owner");
+        }
+        assert_eq!(
+            success(root, &["task", "freshness", "broad-check-only"])["readiness_summary"]["delivery"]
+                ["total"],
+            0
+        );
+        assert_eq!(files(root), before);
+    }
+}
+
+#[test]
+fn readiness_unreadable_authority_is_not_an_absent_reviewer_or_missing_claim() {
+    let temp = fixture(true);
+    let root = temp.path();
+    open(root, "work", "src", true);
+    let initial = success(root, &["task", "show", "work"])["readiness_summary"].clone();
+    assert_eq!(initial["delivery"]["entries"][0]["claim_state"], "missing");
+    assert_eq!(
+        initial["delivery"]["entries"][0]["reason"],
+        "no-explicit-local-reviewer-observed"
+    );
+    write(root, ".blabla/tasks/unreadable-review.json", "invalid");
+    let before = files(root);
+    let partial = success(root, &["task", "show", "work"])["readiness_summary"].clone();
+    assert_eq!(
+        partial["delivery"]["entries"][0]["reviewer_inventory"],
+        "unavailable"
+    );
+    assert_eq!(
+        partial["delivery"]["entries"][0]["reason"],
+        "reviewer-inventory-unavailable"
+    );
+    assert_eq!(partial["unavailable"]["total"], 1);
+    assert_eq!(files(root), before);
+    write(root, "goals.bla", "invalid");
+    let unavailable = success(root, &["task", "freshness", "work"])["readiness_summary"].clone();
+    assert_eq!(
+        unavailable["delivery"]["entries"][0]["claim_state"],
+        "unavailable"
+    );
+    assert!(unavailable["unavailable"]["total"].as_u64().unwrap() >= 2);
+}
+
+#[test]
+fn readiness_does_not_import_matching_review_credit_from_another_project() {
+    let local = fixture(true);
+    let foreign = fixture(true);
+    for temp in [&local, &foreign] {
+        let root = temp.path();
+        open(root, "work", "src", true);
+        success(root, &["finish"]);
+        check(root, "work");
+    }
+    reviewed(foreign.path(), "work", "delivered");
+    let source = std::fs::read(foreign.path().join(".blabla/tasks/work.json")).unwrap();
+    write(
+        local.path(),
+        ".blabla/tasks/work.json",
+        std::str::from_utf8(&source).unwrap(),
+    );
+    let foreign_view = success(foreign.path(), &["task", "show", "work"]);
+    let before = files(local.path());
+    let local_view = success(local.path(), &["task", "show", "work"]);
+    assert_eq!(
+        local_view["delivery"]["obligations"][0]["claim_digest"],
+        foreign_view["delivery"]["obligations"][0]["claim_digest"]
+    );
+    assert_ne!(
+        local_view["readiness_summary"]["project"],
+        foreign_view["readiness_summary"]["project"]
+    );
+    assert_eq!(
+        local_view["readiness_summary"]["delivery"]["entries"][0]["no_current_accepted_review"],
+        true
+    );
+    assert_eq!(
+        local_view["readiness_summary"]["delivery"]["entries"][0]["reviewers"]["total"],
+        0
+    );
+    for bounded in [false, true] {
+        refusal(local.path(), &close_args("work", bounded));
+    }
+    assert_eq!(files(local.path()), before);
+}

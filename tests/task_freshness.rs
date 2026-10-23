@@ -723,3 +723,252 @@ fn ordinary_and_bounded_successes_keep_their_real_verification_and_result_basis(
         assert_eq!(show(&temp)["task"].get("result_basis").is_some(), bounded);
     }
 }
+
+fn amend_named(temp: &TempDir, name: &str, change: impl FnOnce(&mut Value)) {
+    let path = temp.path().join(format!(".blabla/tasks/{name}.json"));
+    let mut record: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    change(&mut record);
+    std::fs::write(path, serde_json::to_vec_pretty(&record).unwrap()).unwrap();
+}
+
+#[test]
+fn additional_only_drift_has_the_same_full_graph_currentness_and_exact_delta() {
+    let temp = fixture();
+    success(
+        &temp,
+        &[
+            "task",
+            "open",
+            "side",
+            "--role",
+            "worker",
+            "--statement",
+            "Independent secondary",
+            "--scope",
+            "side.md",
+            "--input",
+            "optional.txt",
+            "--check-argv",
+            "python3",
+            "check.py",
+        ],
+    );
+    success(&temp, &["task", "accept", "side", "--model", "worker"]);
+    success(
+        &temp,
+        &[
+            "task",
+            "open",
+            "review",
+            "--role",
+            "worker",
+            "--statement",
+            "Explicit batch",
+            "--scope",
+            "review.md",
+            "--review-of",
+            "work",
+            "--delivery-review-of",
+            "side",
+            "--input",
+            "check.py",
+            "--check-argv",
+            "python3",
+            "check.py",
+        ],
+    );
+    success(&temp, &["task", "accept", "review", "--model", "worker"]);
+    let pinned = files(temp.path());
+    assert_eq!(
+        success(&temp, &["task", "freshness", "review"])["review_current"],
+        true
+    );
+    assert_eq!(files(temp.path()), pinned);
+    write(temp.path(), "optional.txt", "secondary-only change");
+    let before = files(temp.path());
+    let shown = success(&temp, &["task", "show", "review"]);
+    let fresh = success(&temp, &["task", "freshness", "review"]);
+    assert_eq!(fresh["review_current"], shown["review_current"]);
+    assert_eq!(fresh["review_current"], false);
+    assert_eq!(fresh["readiness_summary"], shown["readiness_summary"]);
+    let edges = fresh["readiness_summary"]["review_targets"]["entries"]
+        .as_array()
+        .unwrap();
+    assert!(
+        edges
+            .iter()
+            .any(|e| e["target_task"] == "work" && e["state"] == "current")
+    );
+    assert!(edges.iter().any(|e| e["target_task"] == "side"
+        && e["state"] == "stale"
+        && e["relation"] == "additional"));
+    let receipt = fresh["receipts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["target"] == "side")
+        .unwrap();
+    assert!(
+        delta(&fresh, receipt)["paths"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["path"] == "optional.txt")
+    );
+    assert_eq!(files(temp.path()), before);
+}
+
+#[test]
+fn recursive_additional_edges_shared_ancestors_and_invalid_edges_are_explicit() {
+    let temp = fixture();
+    open_review(&temp, "left", "work");
+    open_review(&temp, "right", "work");
+    open_review(&temp, "outer", "left");
+    let right = success(&temp, &["task", "show", "right"])["task"].clone();
+    amend_named(&temp, "outer", |record| {
+        let mut pin = record["review_of"].clone();
+        pin["task"] = json!("right");
+        record["delivery_review_targets"] = json!([pin]);
+    });
+    let fresh = success(&temp, &["task", "freshness", "outer"]);
+    let edges = fresh["readiness_summary"]["review_targets"]["entries"]
+        .as_array()
+        .unwrap();
+    assert_eq!(edges.len(), 4);
+    assert!(!edges.iter().any(|r| r["reason"] == "review-cycle"));
+    assert!(
+        edges
+            .iter()
+            .any(|r| r["reviewer_task"] == "right" && r["target_task"] == "work")
+    );
+    for (name, reason) in [
+        ("missing", "target-missing"),
+        ("outer", "review-cycle"),
+        ("left", "duplicate-review-target"),
+    ] {
+        amend_named(&temp, "outer", |record| {
+            record["delivery_review_targets"][0]["task"] = json!(name)
+        });
+        let before = files(temp.path());
+        let fresh = success(&temp, &["task", "freshness", "outer"]);
+        assert_eq!(fresh["review_current"], false);
+        assert!(
+            fresh["readiness_summary"]["review_targets"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["reason"] == reason),
+            "{fresh}"
+        );
+        assert_eq!(files(temp.path()), before);
+    }
+    assert_eq!(success(&temp, &["task", "show", "right"])["task"], right);
+}
+
+#[test]
+fn graph_counts_and_currentness_include_edges_beyond_the_display_cap() {
+    let temp = fixture();
+    open_review(&temp, "outer", "work");
+    let source = show(&temp)["task"].clone();
+    let pin = success(&temp, &["task", "show", "outer"])["task"]["review_of"].clone();
+    let mut pins = Vec::new();
+    for i in 0..55 {
+        let name = format!("source-{i:02}");
+        let mut record = source.clone();
+        record["name"] = json!(name);
+        write(
+            temp.path(),
+            &format!(".blabla/tasks/{name}.json"),
+            &record.to_string(),
+        );
+        let mut target = pin.clone();
+        target["task"] = json!(name);
+        pins.push(target);
+    }
+    amend_named(&temp, "outer", |record| {
+        record["delivery_review_targets"] = json!(pins)
+    });
+    let first = success(&temp, &["task", "freshness", "outer"]);
+    assert_eq!(first["review_current"], true);
+    assert_eq!(first["readiness_summary"]["review_targets"]["total"], 56);
+    assert_eq!(first["readiness_summary"]["review_targets"]["shown"], 50);
+    assert_eq!(first["readiness_summary"]["review_targets"]["omitted"], 6);
+    assert_eq!(success(&temp, &["task", "freshness", "outer"]), first);
+    write(temp.path(), ".blabla/tasks/source-54.json", "invalid");
+    let before = files(temp.path());
+    let fresh = success(&temp, &["task", "freshness", "outer"]);
+    assert_eq!(fresh["review_current"], false);
+    assert_eq!(
+        fresh["review_current"],
+        success(&temp, &["task", "show", "outer"])["review_current"]
+    );
+    assert_eq!(fresh["readiness_summary"]["review_targets"]["total"], 56);
+    assert!(
+        fresh["readiness_summary"]["unavailable"]["total"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(files(temp.path()), before);
+}
+
+#[test]
+fn readiness_cycle_edges_are_unique_across_roots_and_keep_invalid_graph_facts() {
+    let temp = fixture();
+    open_review(&temp, "review", "work");
+    let pin = success(&temp, &["task", "show", "review"])["task"]["review_of"].clone();
+    amend_record(&temp, |record| {
+        record["review_of"] = pin;
+        record["review_of"]["task"] = json!("review");
+    });
+    for duplicate in [false, true] {
+        if duplicate {
+            amend_record(&temp, |record| {
+                record["delivery_review_targets"] = json!([record["review_of"].clone()]);
+            });
+        }
+        let before = files(temp.path());
+        for name in ["work", "review"] {
+            let shown = success(&temp, &["task", "show", name]);
+            let fresh = success(&temp, &["task", "freshness", name]);
+            assert_eq!(shown["review_current"], false);
+            assert_eq!(fresh["review_current"], false);
+            assert_eq!(fresh["readiness_summary"], shown["readiness_summary"]);
+            let section = &fresh["readiness_summary"]["review_targets"];
+            assert_eq!(section["total"], 2, "{section}");
+            let edges = section["entries"].as_array().unwrap();
+            let pairs: Vec<_> = edges
+                .iter()
+                .map(|row| {
+                    (
+                        row["reviewer_task"].as_str().unwrap(),
+                        row["target_task"].as_str().unwrap(),
+                    )
+                })
+                .collect();
+            assert_eq!(pairs, [("review", "work"), ("work", "review")]);
+            for edge in edges {
+                assert_eq!(edge["state"], "unavailable");
+                assert_eq!(edge["reason"], "review-cycle");
+                assert!(
+                    edge["reasons"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&json!("review-cycle"))
+                );
+                assert!(edge["current_revision_fingerprint"].is_string());
+            }
+            if duplicate {
+                assert!(
+                    edges[1]["reasons"]
+                        .as_array()
+                        .unwrap()
+                        .contains(&json!("duplicate-review-target"))
+                );
+                assert_eq!(edges[1]["relations"], json!(["additional", "primary"]));
+            }
+            assert_eq!(success(&temp, &["task", "freshness", name]), fresh);
+        }
+        assert_eq!(files(temp.path()), before);
+    }
+}
