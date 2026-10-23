@@ -308,10 +308,10 @@ fn diagnostic_tasks(project: &Project) -> (Vec<Task>, Vec<Value>) {
                 match entry {
                     Ok(entry) => {
                         let path = entry.path();
-                        if path.extension().is_some_and(|ext| ext == "json") {
-                            if let Some(name) = path.file_stem() {
-                                names.insert(name.to_string_lossy().into_owned());
-                            }
+                        if path.extension().is_some_and(|ext| ext == "json")
+                            && let Some(name) = path.file_stem()
+                        {
+                            names.insert(name.to_string_lossy().into_owned());
                         }
                     }
                     Err(error) => unavailable.push(
