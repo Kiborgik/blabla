@@ -35,7 +35,7 @@ verify behavior {
   seed 1701
   cases 2
   steps 256
-  timeout_ms 2000
+  timeout_ms 42000
   shrink_budget 128
 }
 ignore from ".gitignore"

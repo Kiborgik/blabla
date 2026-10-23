@@ -1,10 +1,11 @@
 import { damageCondition, damageParts } from './damage-visuals.ts';
 import { townPlanV1 } from './town-plan.ts';
+import { settlementHomeParts } from './settlement-homes.ts';
 import { allocateBuildingParts, buildingAppearance, installedBuildingBadges, placeBuildingParts } from './building-visuals.ts';
 import { settlementDevelopment, settlementConstruction, settlementOperationParts, settlementLandmarks } from './settlement-development.ts';
 import type { SettlementDevelopment, SettlementConstruction } from './settlement-development.ts';
 import type { City, WorldState } from '../core/types.ts';
-import { DETAIL_BUDGETS, civilizationIdentity } from './visual-language.ts';
+import { DETAIL_BUDGETS } from './visual-language.ts';
 import type { DetailLevel, VisualIcon, VISUAL_PALETTE } from './visual-language.ts';
 export { createEventCueTracker, eventVisual } from './event-visuals.ts';
 export type { VisualDelta, VisualEvent } from './event-visuals.ts';
@@ -54,7 +55,6 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
   const development = settlementDevelopment(city);
   const construction = settlementConstruction(city, detail);
   const appearances = settlementLandmarks(city, detail, construction.facts !== null);
-  const identity = civilizationIdentity(city.civId);
   const operations = settlementOperationParts(city, detail);
   const placed = appearances.map((appearance, index) => {
     const site = buildingSites[index] ?? plan.landmarkLot;
@@ -78,16 +78,7 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
   const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale'], rotation = 0): void => {
     parts.push({ id, shape, material, position, scale, rotation });
   };
-  const tier = city.population >= 28 ? 3 : city.population >= 14 ? 2 : city.population >= 7 ? 1 : 0;
-  for (const [index, { x, z }] of plan.homeLots.slice(0, houses).entries()) {
-    const height = (primitive ? .16 : .25) + tier * .035 + (index % 2) * .035;
-    const width = .18 + tier * .01;
-    const roofHeight = primitive ? .25 : identity.roofHeight;
-    const rotation = primitive ? 0 : identity.rotation;
-    add(`home-${index}-wall`, primitive ? 'cylinder' : 'box', primitive ? 'timber' : identity.wall, [x, height / 2, z], [width, height, width]);
-    add(`home-${index}-roof`, primitive ? 'cone' : identity.roofShape, primitive ? index % 2 ? 'grain' : identity.roof : identity.roof,
-      [x, height + roofHeight / 2, z], [width + .055, roofHeight, width + .055], rotation);
-  }
+  parts.push(...settlementHomeParts(city, development.stage, plan.homeLots.slice(0, houses)));
   if (hearth) add('home-hearth', 'cylinder', 'stone', [plan.landmarkLot.x, .045, plan.landmarkLot.z], [.23, .09, .23]);
   const buildings = installedBuildingBadges(city.buildings);
   parts.push(...allocateBuildingParts(placed, budget.parts - parts.length - 3 - constructionParts.length - operationParts.length));

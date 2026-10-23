@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.1.0-live.43",
+    "date": "2026-10-23",
+    "title": "Skylines earned by each town",
+    "changes": [
+      "Installed local industrial and launch infrastructure now gives homes a distinct, compact masonry or stepped silhouette while retaining each civilization’s material and roof identity.",
+      "Small seeded height differences stay attached to the same town lots across growth, camera detail and reload. Primitive and civic homes, exact inventory and unfinished construction remain unchanged.",
+      "This is an observational visual update: no new facilities, production, residents or simulation rules are created."
+    ]
+  },
+  {
     "version": "0.1.0-live.42",
     "date": "2026-10-23",
     "title": "Food, households and resilient supply",
