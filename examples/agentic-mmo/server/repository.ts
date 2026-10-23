@@ -32,6 +32,7 @@ function assertReply(value: unknown): asserts value is HostedReply {
 
 function assertChronicleEntry(value: unknown): asserts value is HostedChronicleEntry {
   if (!isRecord(value) || !isRecord(value.transition) || !isPublicProvenance(value.provenance) || !Array.isArray(value.events)
+    || typeof value.transition.kind !== 'string' || !['action', 'director-tick', 'clock-catchup', 'strategy-catchup', 'history-advance'].includes(value.transition.kind)
     || value.transition.kind === 'action' && (!isRecord(value.transition.command) || !isGameAction(value.transition.command.action))
     || typeof value.startRevision !== 'number' || !Number.isSafeInteger(value.startRevision) || value.startRevision < 0
     || typeof value.endRevision !== 'number' || !Number.isSafeInteger(value.endRevision) || value.endRevision <= value.startRevision) throw new RequestFailure(503, 'corrupt_history');
@@ -242,7 +243,7 @@ export class WorldRepository {
     }
   }
 
-  async mutate(operation: HostedTransition['kind'], input: Record<string, unknown>, actorUserId: string, timestamp: string): Promise<HostedReply> {
+  async mutate(operation: HostedTransition['kind'] | 'release-apply', input: Record<string, unknown>, actorUserId: string, timestamp: string): Promise<HostedReply> {
     if (operation === 'release-apply') throw new RequestFailure(409, 'pre_release_migration_disabled');
     const intent = operation === 'action' ? strategyIntent(input, timestamp) : null;
     if (intent?.kind === 'upkeep') {

@@ -3,7 +3,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { chooseCivilizationBehavior } from '../core/behaviors.ts';
 import type { GameEvent, Route } from '../core/types.ts';
-import { advanceLocalSimulation, createLocalSimulation, parseLocalSimulation, type LocalSimulation } from '../web/local-simulation.ts';
+import { advanceRegisteredSimulation as advanceLocalSimulation, createRegisteredSimulation as createLocalSimulation, parseRegisteredSimulation as parseLocalSimulation } from './fixtures/registered-simulation.ts';
+import type { LocalSimulation } from '../web/local-simulation.ts';
 
 const scratch = '.blabla/scratch/autonomous-partnership-stewardship';
 let repairCheckpoint: { run: LocalSimulation; routeId: string } | null = null;

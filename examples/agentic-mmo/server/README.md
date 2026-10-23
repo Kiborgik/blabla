@@ -14,7 +14,7 @@ Sites authenticates callers and injects `oai-authenticated-user-id`. Do not expo
 
 ## Fresh worlds only
 
-**NO MIGRATIONS BEFORE RELEASE.** Initialize an empty world with a seed, explicit UTC epoch and optional registered starting rules. Unknown rule IDs and existing worlds are refused; initialization never replaces or upgrades a saved world. `POST /api/release-apply` and the former MCP `apply_release` name return `pre_release_migration_disabled` through the existing access boundary. Tool discovery omits the migration tool. Historical release records are inert decoding support only.
+**NO MIGRATIONS BEFORE RELEASE.** Initialize an empty world with a seed, explicit UTC epoch and optional registered starting rules. Unknown rule IDs and existing worlds are refused; initialization never replaces or upgrades a saved world. `POST /api/release-apply` and the former MCP `apply_release` name return `pre_release_migration_disabled` through the existing access boundary. Tool discovery omits the migration tool. History readers accept only current action, Director, clock, strategy and calendar transitions; retired migration command records are unsupported.
 
 Do not delete external stored data to expose new content. Current-version restart and atomic writes remain required. This game policy does not remove the server's database schema setup.
 

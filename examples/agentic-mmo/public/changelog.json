@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-live.51",
+    "date": "2026-10-23",
+    "title": "A clearer autonomous world",
+    "changes": [
+      "World notices avoid map panels and nearby labels instead of hiding behind the civilization display.",
+      "The viewer opens only the current development world or the native archive. Current-version saves resume without upgrading older worlds."
+    ]
+  },
+  {
     "version": "0.1.0-live.47",
     "date": "2026-10-23",
     "title": "Learning between civilizations",
@@ -15,15 +24,6 @@
     "changes": [
       "Build shore fisheries on owned coastal land. Each operating fishery needs a local resident and Materials to produce Food.",
       "Net frames and fish markers identify installed sites; inspection shows construction, staffing, supplies and actual output."
-    ]
-  },
-  {
-    "version": "0.1.0-live.45",
-    "date": "2026-10-23",
-    "title": "Distinct choices through history",
-    "changes": [
-      "Seeded strategic temperaments give civilizations different development and trade preferences, constrained by Food needs and existing commitments.",
-      "Chronicle cards describe civic, government, research and era results plainly, with original event details still available."
     ]
   }
 ]

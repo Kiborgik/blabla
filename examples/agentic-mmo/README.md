@@ -10,7 +10,7 @@ Prioritize procedural content and the whole historical journey over pre-release 
 
 ## Watch the world
 
-The default observatory runs a separate accelerated generated world in a browser Worker. Its seed is chosen once and persisted before advancement when coordinated browser storage is available. It pauses while hidden. A clearly labeled this-tab fallback is not a durable or shared world. Read-only historical sources and the native hosted archive are separate; viewing them does not advance them.
+The default observatory runs a separate accelerated generated world in a browser Worker. Its seed is chosen once and persisted before advancement when coordinated browser storage is available. It pauses while hidden. A clearly labeled this-tab fallback is not a durable or shared world. Only the current local world is offered. The native hosted archive is separate and read-only; former browser save keys are not parsed or rewritten.
 
 Current gameplay includes:
 

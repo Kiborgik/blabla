@@ -11,12 +11,12 @@ const now = Date.parse('2026-10-16T15:00:00Z');
 const preferences = { ...DEFAULT_PREFERENCES, zoom: 1.6, x: 3, z: -8, selected: 1, selectedCity: 'frontier', theme: 'dark' as const, effects: 'calm' as const };
 
 void test('deployment carry retains source-qualified cameras without carrying a world state or exposing identities in URLs', () => {
-  const identity = { source: 'previous' as const, identity: 'private-origin-1701', body: 'earth' };
+  const identity = { source: 'shared' as const, identity: 'private-origin-1701', body: 'earth' };
   const qualified = saveWorldView(preferences, identity, preferences);
   const plan = planDeploymentUpdate(request({ preferences: { ...qualified, state: { revision: 999 } } }));
   assert.ok(plan.carry); assert.deepEqual(plan.preferences, qualified);
   const loaded = restoreDeploymentPreferences(remote.buildId, DEFAULT_PREFERENCES, plan.carry);
-  assert.equal(loaded.worldSource, 'previous'); assert.deepEqual(loaded.worldViews, qualified.worldViews);
+  assert.equal(loaded.worldSource, 'shared'); assert.deepEqual(loaded.worldViews, qualified.worldViews);
   const view = createWorldViewSession().observe(loaded, identity);
   assert.equal(view.restored, true); assert.equal(view.preferences.selectedCity, preferences.selectedCity);
   assert.doesNotMatch(plan.href ?? '', /private-origin|frontier|zoom/);

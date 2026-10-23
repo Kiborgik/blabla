@@ -22,7 +22,7 @@ void test('body selection preserves the exact Earth town but uses a separate civ
 });
 
 void test('Earth and Mars views retain independent cameras and selections across every source and genesis', () => {
-  const identities: WorldViewIdentity[] = ['one', 'two'].flatMap(identity => (['local', 'previous', 'shared'] as const).flatMap(source => ['earth', 'mars'].map(body => ({ source, identity, body }))));
+  const identities: WorldViewIdentity[] = ['one', 'two'].flatMap(identity => (['local', 'shared'] as const).flatMap(source => ['earth', 'mars'].map(body => ({ source, identity, body }))));
   let saved = { ...DEFAULT_PREFERENCES };
   const cameras: WorldCamera[] = identities.map((identity, index) => ({ zoom: .5 + index / 5, x: index - 5, z: 5 - index, selected: index % 5, selectedCity: identity.body === 'earth' ? `town-${index}` : `mars:${index % 5}` }));
   identities.forEach((identity, index) => { saved = saveWorldView(saved, identity, cameras[index]!); });
@@ -41,8 +41,8 @@ void test('body preference parsing and URLs cannot turn an unknown body into an 
   for (const invalid of ['MARS', 'moon', '', null, {}, 1]) assert.equal(parseWorldBody(invalid), null);
   assert.equal(parsePreferences({ ...DEFAULT_PREFERENCES, worldBody: 'moon' }).worldBody, undefined);
   assert.equal(parsePreferences({ ...DEFAULT_PREFERENCES, worldBody: 'mars' }).worldBody, 'mars');
-  const url = new URL(worldBodyHref('https://viewer.example/atlas?world=previous&other=keep#journey', 'mars'));
-  assert.equal(url.searchParams.get('world'), 'previous'); assert.equal(url.searchParams.get('body'), 'mars');
+  const url = new URL(worldBodyHref('https://viewer.example/atlas?world=shared&other=keep#journey', 'mars'));
+  assert.equal(url.searchParams.get('world'), 'shared'); assert.equal(url.searchParams.get('body'), 'mars');
   assert.equal(url.searchParams.get('other'), 'keep'); assert.equal(url.hash, '#journey'); assert.equal(url.origin, 'https://viewer.example');
 });
 
@@ -76,17 +76,17 @@ void test('the actual body-switch handler only changes viewing, including for te
   const start = main.indexOf('function changeWorldBody('); const end = main.indexOf('\nfunction renderWorld(', start);
   assert.ok(start >= 0 && end > start);
   const source = stripTypeScriptTypes(main.slice(start, end));
-  for (const terminal of [false, true]) {
+  for (const worldSource of ['local', 'shared'] as const) for (const terminal of [false, true]) {
     const state = createWorld(1701);
     if (terminal) state.outcome = { kind: 'mars', winners: [0], round: state.round, reason: 'Synthetic terminal presentation fixture' };
     const before = structuredClone(state); const calls: string[] = [];
-    const context = { worldBody: 'earth', worldSource: 'previous', snapshot: { state }, mode: 'previous', selectedRoute: 'old',
+    const context = { worldBody: 'earth', worldSource, snapshot: { state }, mode: worldSource === 'local' ? 'local' : 'live', selectedRoute: 'old',
       savePreferences: () => calls.push('save'), quietCues: () => calls.push('quiet'), capabilityTree: { close: () => calls.push('close-tree') },
       setInspectionOpen: (open: boolean) => calls.push(`inspection:${open}`), inspectionCamera: { release: () => calls.push('release-camera') },
       observeWorldIdentity: () => calls.push('observe-identity'), projectWorld: (value: typeof state) => { assert.equal(value, state); return projectWorld(value); },
       renderWorld: () => calls.push('render'), renderConnection: () => calls.push('connection'),
       history: { state: null, replaceState: (_state: unknown, _unused: string, url: string) => calls.push(`url:${new URL(url).searchParams.get('body')}`) },
-      window: { location: { href: 'https://viewer.example/?world=previous' } }, worldBodyHref };
+      window: { location: { href: `https://viewer.example/?world=${worldSource}` } }, worldBodyHref };
     runInNewContext(`${source}; changeWorldBody('mars'); changeWorldBody('mars');`, context);
     assert.equal(context.worldBody, 'mars'); assert.equal(context.selectedRoute, null);
     assert.equal(calls.filter(call => call === 'render').length, 1); assert.equal(calls.filter(call => call === 'save').length, 2);

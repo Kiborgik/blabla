@@ -2,82 +2,33 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { createWorld } from '../core/engine.ts';
 import { isWorldState } from '../core/validation.ts';
-import { advanceLocalSimulation, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, ACTIVE_LOCAL_RELEASE_ID, LOCAL_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY } from '../web/local-simulation.ts';
-import { createLocalWorldStorage } from '../web/local-world-storage.ts';
-import { createWorldViewSession, parseWorldSource, saveWorldView, worldSourceHref, worldViewKey } from '../web/world-view.ts';
+import { advanceLocalSimulation, createLocalSimulation, localSimulationSnapshot, parseLocalSimulation, ACTIVE_LOCAL_RELEASE_ID } from '../web/local-simulation.ts';
+import { createWorldViewSession, saveWorldView, worldViewKey } from '../web/world-view.ts';
 import { DEFAULT_PREFERENCES } from '../web/viewer-state.ts';
 import { createCueStream } from '../web/world-cues.ts';
 
-const epoch = '2000-01-01T00:00:00.000Z';
-
-void test('fresh partnership genesis has explicit content rules without altering the frozen prior genesis', () => {
-  const prior = createLocalSimulation(1701, 'settlement-interplanetary-1');
-  const original = JSON.stringify(prior);
-  const current = createLocalSimulation(1701, 'settlement-living-partnerships-1');
-  assert.equal(current.state.releaseId, 'settlement-living-partnerships-1');
+void test('fresh current genesis enables registered partnership rules before any earned progress', () => {
+  const current = createLocalSimulation(1701);
+  assert.equal(current.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.ok(current.state.unlockedFeatures.includes('partnership-stewardship'));
   assert.ok(current.state.unlockedFeatures.includes('historical-pressures'));
-  assert.equal(current.state.origin?.initialReleaseId, current.state.releaseId);
-  assert.equal(prior.state.origin?.initialReleaseId, undefined);
-  assert.equal(localSimulationSnapshot(prior).identity, `local:coherent-geography-v1:1701:${epoch}`);
-  assert.notEqual(localSimulationSnapshot(current).identity, localSimulationSnapshot(prior).identity);
-  assert.deepEqual(current.state.tiles, prior.state.tiles);
-  assert.deepEqual(current.state.cities, prior.state.cities);
-  assert.deepEqual(current.state.civilizations, prior.state.civilizations);
-  assert.deepEqual(parseLocalSimulation(JSON.parse(original)), prior);
-  assert.equal(JSON.stringify(prior), original);
-  const after = advanceLocalSimulation(prior, 2);
-  assert.equal(after.state.releaseId, 'settlement-interplanetary-1');
-  assert.ok(!after.state.unlockedFeatures.includes('partnership-stewardship'));
-  assert.ok(!after.state.unlockedFeatures.includes('historical-pressures'));
-  assert.equal(JSON.stringify(prior), original);
+  assert.equal(current.state.origin?.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID);
+  assert.deepEqual(current, createLocalSimulation(1701));
+  assert.ok(current.state.cities.every(city => city.buildings.length === 0));
+  assert.ok(current.state.civilizations.every(civilization => civilization.technologies.length === 0));
 });
 
-void test('new content checkpoint preserves both original save keys byte for byte and exposes each read-only', async () => {
-  const prior = createLocalSimulation(90210, 'settlement-interplanetary-1');
-  const first = { ...prior, version: 1, policyVersion: 'weighted-civilizations-v1', state: createWorld(1701, epoch), seed: 1701, memories: Array(6).fill(null) };
-  const priorBytes = ` \n${JSON.stringify(prior)}\n`;
-  const firstBytes = `\n${JSON.stringify(first)} `;
-  const records = new Map([[PRIOR_GENERATED_SIMULATION_STORAGE_KEY, priorBytes], [PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, firstBytes]]);
-  const writes: string[] = [];
-  const storage = createLocalWorldStorage({ read: key => records.get(key) ?? null, write: (key, value) => { writes.push(key); records.set(key, value); }, withLock: async (_key, operation) => operation(), entropy: () => 1701 });
-  assert.deepEqual(storage.priorGenerated().run, prior);
-  assert.match(storage.priorGenerated().message, /Read-only/);
-  assert.ok(storage.previous().run);
-  const fresh = await storage.restore(); assert.ok(fresh.run);
-  assert.equal(fresh.run.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
-  assert.deepEqual(writes, [LOCAL_SIMULATION_STORAGE_KEY]);
-  assert.equal(records.get(PRIOR_GENERATED_SIMULATION_STORAGE_KEY), priorBytes);
-  assert.equal(records.get(PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY), firstBytes);
-});
-
-void test('an unreadable previous generated record is not migrated, replaced or treated as the new world', async () => {
-  const raw = '{unreadable previous world';
-  const records = new Map([[PRIOR_GENERATED_SIMULATION_STORAGE_KEY, raw]]);
-  const writes: string[] = [];
-  const storage = createLocalWorldStorage({ read: key => records.get(key) ?? null, write: (key, value) => { writes.push(key); records.set(key, value); }, withLock: async (_key, operation) => operation(), entropy: () => 1701 });
-  assert.equal(storage.priorGenerated().run, null);
-  assert.match(storage.priorGenerated().message, /preserved/);
-  const fresh = await storage.restore(); assert.ok(fresh.run);
-  assert.equal(records.get(PRIOR_GENERATED_SIMULATION_STORAGE_KEY), raw);
-  assert.deepEqual(writes, [LOCAL_SIMULATION_STORAGE_KEY]);
-});
-
-void test('previous generated viewing restores its old local camera while a new genesis gets no inherited selection', () => {
-  const prior = createLocalSimulation(1701, 'settlement-interplanetary-1');
-  const current = createLocalSimulation();
+void test('same current world restores its local camera while another genesis inherits no selection', () => {
+  const current = createLocalSimulation(1701);
   const camera = { zoom: 1.7, x: 12, z: -8, selected: 3, selectedCity: 'city-3' };
-  const identity = localSimulationSnapshot(prior).identity;
+  const identity = localSimulationSnapshot(current).identity;
   const saved = saveWorldView(DEFAULT_PREFERENCES, { source: 'local', identity, body: 'earth' }, camera);
-  const recovered = createWorldViewSession().observe(saved, { source: 'prior', identity, body: 'earth' });
+  const recovered = createWorldViewSession().observe(saved, { source: 'local', identity, body: 'earth' });
   assert.equal(recovered.restored, true); assert.equal(recovered.preferences.selectedCity, 'city-3');
-  assert.equal(recovered.preferences.zoom, 1.7); assert.equal(recovered.preferences.worldSource, 'prior');
-  const fresh = createWorldViewSession().observe(saved, { source: 'local', identity: localSimulationSnapshot(current).identity, body: 'earth' });
+  assert.equal(recovered.preferences.zoom, 1.7); assert.equal(recovered.preferences.worldSource, 'local');
+  const fresh = createWorldViewSession().observe(saved, { source: 'local', identity: localSimulationSnapshot(createLocalSimulation(1702)).identity, body: 'earth' });
   assert.equal(fresh.restored, false); assert.equal(fresh.preferences.selectedCity, null);
-  assert.equal(parseWorldSource('prior'), 'prior');
-  assert.equal(new URL(worldSourceHref('https://example.test/?sample=1&other=keep', 'prior')).searchParams.get('world'), 'prior');
   assert.deepEqual(saved.worldViews?.[0]?.camera, camera);
 });
 
@@ -90,9 +41,9 @@ void test('genesis provenance is strict, immutable across advancement, and never
   assert.deepEqual(parseLocalSimulation(JSON.parse(JSON.stringify(advanced))), advanced);
   const unknown = structuredClone(current); Reflect.set(unknown.state.origin!, 'initialReleaseId', 'unknown-future-world');
   assert.equal(parseLocalSimulation(unknown), null);
-  const prior = createLocalSimulation(1701, 'settlement-interplanetary-1');
-  Reflect.set(prior.state.origin!, 'initialReleaseId', 'settlement-living-partnerships-1');
-  assert.equal(parseLocalSimulation(prior), null);
+  const mismatched = structuredClone(current);
+  mismatched.state.origin!.initialReleaseId = 'settlement-living-partnerships-1';
+  assert.equal(parseLocalSimulation(mismatched), null);
 });
 
 void test('a recorded trade fair reaches the ordinary map stream without fabricating shipment cargo', () => {
@@ -148,14 +99,14 @@ void test('actual Chronicle caller preserves same-world focus but replaces old-w
   render(); assert.equal(renders, 2); assert.deepEqual(visible, ['new-city']);
   assert.deepEqual(JSON.parse(visibleIdentity), ['local', 'genesis-b', 'earth']); navigateVisible(); assert.deepEqual(navigations, ['new-city']);
   assert.equal(JSON.stringify(context.state), before);
-  context.worldSource = 'prior';
-  render(); assert.equal(renders, 3); assert.deepEqual(JSON.parse(visibleIdentity), ['prior', 'genesis-b', 'earth']);
+  context.worldSource = 'shared';
+  render(); assert.equal(renders, 3); assert.deepEqual(JSON.parse(visibleIdentity), ['shared', 'genesis-b', 'earth']);
   context.state = { rows: ['later-record'] };
   render(); assert.equal(renders, 3); assert.deepEqual(visible, ['new-city']);
   focused = false; render(); assert.equal(renders, 4); assert.deepEqual(visible, ['later-record']);
   focused = true; context.worldBody = 'mars';
   render(); assert.equal(renders, 5); assert.deepEqual(visible, ['later-record']);
-  assert.deepEqual(JSON.parse(visibleIdentity), ['prior', 'genesis-b', 'mars']);
+  assert.deepEqual(JSON.parse(visibleIdentity), ['shared', 'genesis-b', 'mars']);
   context.state = { rows: ['new-mars-record'] };
   render(); assert.equal(renders, 5); assert.deepEqual(visible, ['later-record']);
   context.state = null; context.snapshot = null; context.worldSource = 'shared';

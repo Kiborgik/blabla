@@ -1,4 +1,4 @@
-import { LOCAL_SIMULATION_STORAGE_KEY, LIVING_SIMULATION_STORAGE_KEY, PARTNERSHIPS_SIMULATION_STORAGE_KEY, PRIOR_GENERATED_SIMULATION_STORAGE_KEY, PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY, createFreshLocalSimulation, localSimulationSnapshot, parseLocalSimulation, parseActiveLocalSimulation, parsePreviousLocalSimulation, type LocalSimulation, type PreviousLocalSimulation } from './local-simulation.ts';
+import { LOCAL_SIMULATION_STORAGE_KEY, createFreshLocalSimulation, localSimulationSnapshot, parseLocalSimulation, type LocalSimulation } from './local-simulation.ts';
 
 export interface LocalCheckpointResult {
   run: LocalSimulation | null;
@@ -14,8 +14,8 @@ export interface LocalWorldStoragePorts {
   entropy?: () => number;
 }
 
-function decode<T>(raw: string, parse: (value: unknown) => T | null): T | null {
-  try { return parse(JSON.parse(raw) as unknown); } catch { return null; }
+function decode(raw: string): LocalSimulation | null {
+  try { return parseLocalSimulation(JSON.parse(raw) as unknown); } catch { return null; }
 }
 
 function randomSeed(): number {
@@ -37,22 +37,14 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
     return result(run);
   };
   const restoreRecord = (raw: string): LocalCheckpointResult => {
-    const run = decode(raw, parseActiveLocalSimulation);
+    const run = decode(raw);
     if (run) {
       message = ephemeral ? 'This tab only · Not saved. Continuing a copy of the saved world without saving.' : `Saved through round ${run.state.round}.`;
       return result(run);
     }
     blocked = true;
-    message = 'The current-version world could not be read. Its record is preserved. Choose another world in Settings.';
+    message = 'The current-version world could not be read. Its record is preserved. Shared history remains available in Settings.';
     return result(null);
-  };
-  const historical = (key: string, label: string): { run: LocalSimulation | null; message: string } => {
-    let raw: string | null;
-    try { raw = ports.read(key); }
-    catch { return { run: null, message: `The ${label} cannot be read because browser storage is unavailable.` }; }
-    if (raw === null) return { run: null, message: `No ${label} is saved in this browser.` };
-    const run = decode(raw, parseLocalSimulation);
-    return { run, message: run ? `${label} · Read-only at round ${run.state.round}. Its original save and rules are unchanged.` : `The ${label} could not be read. Its original save is preserved.` };
   };
   return {
     async restore(): Promise<LocalCheckpointResult> {
@@ -80,23 +72,6 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
         });
       } catch { ephemeral = true; message = 'This tab only · Not saved. Browser locking is unavailable.'; return result(createFreshLocalSimulation()); }
     },
-    previous(): { run: PreviousLocalSimulation | null; message: string } {
-      let raw: string | null;
-      try { raw = ports.read(PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY); }
-      catch { return { run: null, message: 'The previous local world cannot be read because browser storage is unavailable.' }; }
-      if (raw === null) return { run: null, message: 'No previous local world is saved in this browser.' };
-      const run = decode(raw, parsePreviousLocalSimulation);
-      return { run, message: run ? `Previous local world · Read-only at round ${run.state.round}. Its original save is unchanged.` : 'The previous local world could not be read. Its original save is preserved.' };
-    },
-    living(): { run: LocalSimulation | null; message: string } {
-      return historical(LIVING_SIMULATION_STORAGE_KEY, 'Previous living world');
-    },
-    partnerships(): { run: LocalSimulation | null; message: string } {
-      return historical(PARTNERSHIPS_SIMULATION_STORAGE_KEY, 'Living partnerships world');
-    },
-    priorGenerated(): { run: LocalSimulation | null; message: string } {
-      return historical(PRIOR_GENERATED_SIMULATION_STORAGE_KEY, 'previous generated world');
-    },
     async save(current: () => LocalSimulation | null): Promise<LocalCheckpointResult> {
       if (ephemeral || blocked || !ports.withLock || !current()) return result(current());
       try {
@@ -104,9 +79,9 @@ export function createLocalWorldStorage(ports: LocalWorldStoragePorts) {
           const run = current();
           if (!run || ephemeral || blocked) return result(run);
           try {
-            if (!parseActiveLocalSimulation(run)) return refuse('Historical or unavailable world rules cannot be saved here.', run);
+            if (!parseLocalSimulation(run)) return refuse('Incompatible or corrupt world rules cannot be saved here.', run);
             const raw = ports.read(LOCAL_SIMULATION_STORAGE_KEY);
-            const stored = raw === null ? null : decode(raw, parseActiveLocalSimulation);
+            const stored = raw === null ? null : decode(raw);
             if (!stored || localSimulationSnapshot(stored).identity !== localSimulationSnapshot(run).identity)
               return refuse('A missing, different or unavailable saved world cannot be replaced.', run);
             if (stored.steps === run.steps && stored.state.revision === run.state.revision) {

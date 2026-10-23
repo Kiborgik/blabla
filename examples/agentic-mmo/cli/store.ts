@@ -41,7 +41,6 @@ import {
   type DirectorTickCommand,
   type GameAction,
   type HistoryAdvanceCommand,
-  type ReleaseApplyCommand,
   type ReplayFrame,
   type TransitionResult,
   type WorldState,
@@ -52,8 +51,7 @@ export type RecordedTransition =
   | { kind: 'director-tick'; command: DirectorTickCommand }
   | { kind: 'clock-catchup'; timestamp: string; expectedRevision: number }
   | { kind: 'strategy-catchup'; timestamp: string; expectedRevision: number }
-  | { kind: 'history-advance'; command: HistoryAdvanceCommand }
-  | { kind: 'release-apply'; command: ReleaseApplyCommand };
+  | { kind: 'history-advance'; command: HistoryAdvanceCommand };
 
 export interface ActionProvenance {
   commandId: string;
@@ -61,7 +59,7 @@ export interface ActionProvenance {
   operation: RecordedTransition['kind'];
   model: string | null;
   seat: number;
-  action: GameAction | DirectorTickCommand | HistoryAdvanceCommand | ReleaseApplyCommand | { timestamp: string };
+  action: GameAction | DirectorTickCommand | HistoryAdvanceCommand | { timestamp: string };
   revision: number;
   recordedAt: string;
   request: Record<string, unknown>;
@@ -166,25 +164,14 @@ function validateCampaign(value: unknown): asserts value is LocalCampaign {
   ) {
     throw new ProtocolError('incompatible durable campaign schema or game version');
   }
-  if (
-    value.timeline === undefined &&
-    Array.isArray(value.commands) &&
-    Array.isArray(value.provenance)
-  ) {
-    value.timeline = value.commands.map((command: unknown) => ({ kind: 'action', command }));
-    for (const entry of value.provenance)
-      if (isRecord(entry) && entry.operation === undefined) entry.operation = 'action';
-  }
   const lastFrame: unknown = Array.isArray(value.frames) ? value.frames.at(-1) : undefined;
-  const allowLegacyClock =
-    Array.isArray(value.timeline) &&
-    value.timeline.every((entry: unknown) => isRecord(entry) && entry.kind === 'action');
+  const timeline = value.timeline;
   if (
-    !isWorldState(value.state, { allowLegacyClock }) ||
-    !isWorldState(value.initial, { allowLegacyClock }) ||
+    !isWorldState(value.state) ||
+    !isWorldState(value.initial) ||
     !Array.isArray(value.frames) ||
     !value.frames.every(
-      (entry: unknown) => isRecord(entry) && isWorldState(entry.state, { allowLegacyClock }),
+      (entry: unknown) => isRecord(entry) && isWorldState(entry.state),
     )
   ) {
     throw new ProtocolError('corrupt durable world state');
@@ -217,23 +204,23 @@ function validateCampaign(value: unknown): asserts value is LocalCampaign {
         && isRecord(value.state) && integer(value.state.revision) && entry.revision <= value.state.revision
         && integer(entry.remainingTicks) && entry.remainingTicks >= 0))) ||
     typeof value.lastValid !== 'boolean' ||
-    !Array.isArray(value.timeline) ||
-    value.timeline.length !== value.provenance.length ||
-    value.timeline.length !== value.frames.length ||
-    value.commands.length > value.timeline.length ||
+    !Array.isArray(timeline) ||
+    timeline.length !== value.provenance.length ||
+    timeline.length !== value.frames.length ||
+    value.commands.length > timeline.length ||
     value.initial.revision !== 0 ||
     (value.frames.length === 0
       ? value.state.revision !== 0
       : !isRecord(lastFrame) ||
         !isRecord(lastFrame.state) ||
         lastFrame.state.revision !== value.state.revision) ||
-    !value.timeline.every(
+    !timeline.every(
       (entry: unknown) =>
         isRecord(entry) &&
         (entry.kind !== 'action' || isRecord(entry.command) && isGameAction(entry.command.action)) &&
         (entry.kind === 'action' ||
           entry.kind === 'director-tick' ||
-          entry.kind === 'clock-catchup' || entry.kind === 'strategy-catchup' || entry.kind === 'history-advance' || entry.kind === 'release-apply'),
+          entry.kind === 'clock-catchup' || entry.kind === 'strategy-catchup' || entry.kind === 'history-advance'),
     ) ||
     !value.commands.every(
       (entry: unknown) =>
@@ -246,8 +233,9 @@ function validateCampaign(value: unknown): asserts value is LocalCampaign {
       (entry: unknown) => isRecord(entry) && isRecord(entry.state) && Array.isArray(entry.events),
     ) ||
     !value.provenance.every(
-      (entry: unknown) =>
+      (entry: unknown, index: number) =>
         isRecord(entry) &&
+        isRecord(timeline[index]) && entry.operation === timeline[index].kind &&
         typeof entry.commandId === 'string' &&
         (entry.kind === 'development-agent' ||
           entry.kind === 'contract-probe' ||

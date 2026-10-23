@@ -13,7 +13,8 @@ import { improvementSiteBlock } from '../core/simulation/improvements.ts';
 import { createLandTransportPlanner, createSteamTransportPlanner, transportCadence } from '../core/simulation/transport.ts';
 import type { GameEvent, Resources, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
-import { advanceLocalSimulation, createLocalSimulation, type LocalSimulation, type LocalDecision } from '../web/local-simulation.ts';
+import type { LocalSimulation, LocalDecision } from '../web/local-simulation.ts';
+import { advanceRegisteredSimulation as advanceLocalSimulation, createRegisteredSimulation as createLocalSimulation } from './fixtures/registered-simulation.ts';
 
 const epoch = '2000-01-01T00:00:00.000Z';
 const at = (seconds: number): string => new Date(Date.parse(epoch) + seconds * 1000).toISOString();

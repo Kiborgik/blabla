@@ -1551,7 +1551,7 @@ function growthRecords(cities: City[], events: GameEvent[], features: string[], 
     const housing: unknown = settlement.housing;
     if (!record(housing) || !exactKeys(housing, ['ruleVersion', 'baseCapacity', 'establishedRound', 'origin'])
       || housing.ruleVersion !== 1 || !integer(housing.establishedRound, 0, round)
-      || !(housing.origin === 'founded' && housing.baseCapacity === 8 || housing.origin === 'initial-capital' && housing.baseCapacity === 20 && housing.establishedRound === 0 && settlement.id === `city-${settlement.civId}` || housing.origin === 'legacy-adoption' && integer(housing.baseCapacity, 20))) return false;
+      || !(housing.origin === 'founded' && housing.baseCapacity === 8 || housing.origin === 'initial-capital' && housing.baseCapacity === 20 && housing.establishedRound === 0 && settlement.id === `city-${settlement.civId}`)) return false;
   }
   for (const event of events) {
     if (!Object.hasOwn(event, 'populationGrowth')) continue;
@@ -1701,10 +1701,7 @@ function actionPlans(value: unknown, revision: number): boolean {
     && Array.from(value).every((plan: unknown) => plan === null || isPersistedActionPlan(plan, revision));
 }
 
-export function isWorldState(
-  value: unknown,
-  options: { allowLegacyClock?: boolean } = {},
-): value is WorldState {
+export function isWorldState(value: unknown): value is WorldState {
   if (
     !record(value) ||
     value.schemaVersion !== SCHEMA_VERSION ||
@@ -1745,17 +1742,11 @@ export function isWorldState(
     !outcome(value.outcome)
   )
     return false;
-  const legacyClock =
-    options.allowLegacyClock === true &&
-    value.clockEpoch === undefined &&
-    value.clockTicks === undefined &&
-    Object.keys(value.directorIntervals).length === 0;
   if (
-    !legacyClock &&
-    (!integer(value.clockTicks) ||
-      (value.clockEpoch !== null &&
-        (typeof value.clockEpoch !== 'string' || parseUtcTimestamp(value.clockEpoch) === null)) ||
-      (value.clockEpoch === null && value.clockTicks !== 0))
+    !integer(value.clockTicks) ||
+    (value.clockEpoch !== null &&
+      (typeof value.clockEpoch !== 'string' || parseUtcTimestamp(value.clockEpoch) === null)) ||
+    (value.clockEpoch === null && value.clockTicks !== 0)
   )
     return false;
   if (

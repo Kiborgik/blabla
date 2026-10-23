@@ -76,11 +76,16 @@ export function routeLabelKey(id: string): string { return `route:${id}`; }
 
 export interface RouteLabelBounds { x: number; y: number; width: number; height: number }
 
-export function routeLabelPlacement(anchor: { x: number; y: number }, occupied: readonly RouteLabelBounds[], width: number, height: number): RouteLabelBounds | null {
-  const offsets = [[0, 0], [0, -72], [0, 72], [-112, -72], [112, -72], [-112, 72], [112, 72], [-196, 0], [196, 0]] as const;
+export function routeLabelPlacement(anchor: { x: number; y: number }, occupied: readonly RouteLabelBounds[], width: number, height: number, dimensions: Pick<RouteLabelBounds, 'width' | 'height'> = { width: 180, height: 44 }): RouteLabelBounds | null {
+  const { width: labelWidth, height: labelHeight } = dimensions;
+  if (!Number.isFinite(labelWidth) || !Number.isFinite(labelHeight) || labelWidth <= 0 || labelHeight <= 0 || labelWidth + 16 > width || labelHeight + 16 > height) return null;
+  const x = Math.max(8 + labelWidth / 2, Math.min(width - 8 - labelWidth / 2, anchor.x));
+  const y = Math.max(8 + labelHeight / 2, Math.min(height - 8 - labelHeight / 2, anchor.y));
+  const vertical = labelHeight + 28; const diagonal = labelWidth / 2 + 22; const horizontal = labelWidth + 16;
+  const offsets = [[0, 0], [0, -vertical], [0, vertical], [-diagonal, -vertical], [diagonal, -vertical], [-diagonal, vertical], [diagonal, vertical], [-horizontal, 0], [horizontal, 0]] as const;
   for (const [dx, dy] of offsets) {
-    const label = { x: anchor.x + dx, y: anchor.y + dy - 22, width: 180, height: 44 };
-    if (label.x - 90 < 8 || label.x + 90 > width - 8 || label.y < 8 || label.y + 44 > height - 8) continue;
+    const label = { x: x + dx, y: y + dy - labelHeight / 2, width: labelWidth, height: labelHeight };
+    if (label.x - labelWidth / 2 < 8 || label.x + labelWidth / 2 > width - 8 || label.y < 8 || label.y + labelHeight > height - 8) continue;
     if (occupied.some((other) => Math.abs(label.x - other.x) < (label.width + other.width) / 2 + 6 && label.y < other.y + other.height + 6 && label.y + label.height + 6 > other.y)) continue;
     return label;
   }

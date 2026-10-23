@@ -1,20 +1,15 @@
 import { applyCommand, applyHistoryAdvance, catchUpClock, catchUpStrategy } from '../core/engine.ts';
-import { behaviorPolicyVersion, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, isLegacyBehaviorMemory, type LegacyBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
-import { LEGACY_BEHAVIOR_POLICY_VERSION } from '../core/behavior-profiles.ts';
+import { behaviorPolicyVersion, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, type BehaviorMemory } from '../core/behaviors.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { RELEASES } from '../core/release.ts';
 import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
-import { DIRECTOR_SEAT, type GameAction, type StrategicTemperamentVersion, type WorldState } from '../core/types.ts';
+import { DIRECTOR_SEAT, type GameAction, type WorldState } from '../core/types.ts';
 import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
 export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:knowledge-compacts-v1';
-export const LIVING_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:living-world-v1';
-export const PARTNERSHIPS_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:partnerships-v1';
 export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-knowledge-compacts-1';
-export const PRIOR_GENERATED_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v2';
-export const PREVIOUS_LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:v1';
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
 const EPOCH = '2000-01-01T00:00:00.000Z';
 const MAXIMUM_STEPS = 60;
@@ -32,33 +27,33 @@ export interface LocalSimulation {
   decisions: LocalDecision[];
 }
 
-export interface PreviousLocalSimulation extends Omit<LocalSimulation, 'version' | 'memories'> {
-  readonly version: 1;
-  readonly memories: ReadonlyArray<LegacyBehaviorMemory | null>;
-}
-
-export function createLocalSimulation(seed = 1701, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' = ACTIVE_LOCAL_RELEASE_ID, temperamentVersion?: StrategicTemperamentVersion): LocalSimulation {
-  const state = createGeneratedWorld(seed, EPOCH, initialReleaseId, initialReleaseId === ACTIVE_LOCAL_RELEASE_ID ? 'cultural-toponyms-v1' : undefined, temperamentVersion);
+export function createLocalSimulation(seed = 1701): LocalSimulation {
+  const state = createGeneratedWorld(seed, EPOCH, ACTIVE_LOCAL_RELEASE_ID, 'cultural-toponyms-v1', 'strategic-temperaments-v1');
   return { version: 2, source: 'local-procedural', policyVersion: behaviorPolicyVersion(state), seed: state.seed, timestamp: EPOCH, steps: 0, state, memories: Array.from({ length: DIRECTOR_SEAT + 1 }, () => null), decisions: [] };
 }
 
-export function createFreshLocalSimulation(seed = 1701): LocalSimulation {
-  return createLocalSimulation(seed, ACTIVE_LOCAL_RELEASE_ID, 'strategic-temperaments-v1');
-}
+export const createFreshLocalSimulation = createLocalSimulation;
 
-function parseRun(value: unknown, previous: boolean): LocalSimulation | PreviousLocalSimulation | null {
+export function parseLocalSimulation(value: unknown): LocalSimulation | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   const run = value as Record<string, unknown>;
-  if (run.version !== (previous ? 1 : 2) || run.source !== 'local-procedural'
+  if (run.version !== 2 || run.source !== 'local-procedural'
     || !Number.isSafeInteger(run.seed) || Number(run.seed) < 0 || Number(run.seed) > 0xffffffff
     || !Number.isSafeInteger(run.steps) || Number(run.steps) < 0
     || typeof run.timestamp !== 'string' || Date.parse(run.timestamp) !== Date.parse(EPOCH) + Number(run.steps) * LOCAL_SIMULATION_STEP_MS
     || !isWorldState(run.state) || run.state.seed !== run.seed || run.state.clockEpoch !== EPOCH
-    || run.policyVersion !== (previous ? LEGACY_BEHAVIOR_POLICY_VERSION : behaviorPolicyVersion(run.state))
-    || (previous ? run.state.origin !== undefined || run.state.unlockedFeatures.includes('interplanetary-logistics') : run.state.origin?.generatorVersion !== 'coherent-geography-v1')
+    || run.policyVersion !== TEMPERAMENT_BEHAVIOR_POLICY_VERSION || behaviorPolicyVersion(run.state) !== run.policyVersion
+    || run.state.origin?.generatorVersion !== 'coherent-geography-v1'
+    || run.state.origin.initialReleaseId !== ACTIVE_LOCAL_RELEASE_ID || run.state.releaseId !== ACTIVE_LOCAL_RELEASE_ID
+    || run.state.origin.namingVersion !== 'cultural-toponyms-v1' || run.state.origin.temperamentVersion !== 'strategic-temperaments-v1'
     || !Array.isArray(run.memories) || run.memories.length !== DIRECTOR_SEAT + 1
-    || !run.memories.every((memory, seat) => memory === null || (previous ? isLegacyBehaviorMemory(memory) : isBehaviorMemory(memory)) && memory.policyVersion === run.policyVersion && memory.seat === seat && memory.seed === run.seed && memory.lastDecisionRound <= (run.state as WorldState).round && memory.decisionCount <= Number(run.steps))
+    || !run.memories.every((memory, seat) => memory === null || isBehaviorMemory(memory) && memory.policyVersion === run.policyVersion && memory.seat === seat && memory.seed === run.seed && memory.lastDecisionRound <= (run.state as WorldState).round && memory.decisionCount <= Number(run.steps))
     || !Array.isArray(run.decisions) || run.decisions.length > DIRECTOR_SEAT + 1) return null;
+  const release = RELEASES.find(candidate => candidate.id === ACTIVE_LOCAL_RELEASE_ID);
+  if (!release || run.state.schemaVersion !== release.schemaVersion || run.state.gameVersion !== release.gameVersion
+    || run.state.unlockedFeatures.length !== release.featureIds.length
+    || new Set(run.state.unlockedFeatures).size !== run.state.unlockedFeatures.length
+    || !release.featureIds.every(feature => (run.state as WorldState).unlockedFeatures.includes(feature))) return null;
   const seats = new Set<number>();
   for (const value of run.decisions) {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
@@ -69,21 +64,10 @@ function parseRun(value: unknown, previous: boolean): LocalSimulation | Previous
       || !Number.isSafeInteger(decision.revision) || Number(decision.revision) < 0 || Number(decision.revision) > run.state.revision) return null;
     seats.add(Number(decision.seat));
   }
-  return structuredClone(run) as unknown as LocalSimulation | PreviousLocalSimulation;
+  return structuredClone(run) as unknown as LocalSimulation;
 }
 
-export function parseLocalSimulation(value: unknown): LocalSimulation | null { return parseRun(value, false) as LocalSimulation | null; }
-export function parseActiveLocalSimulation(value: unknown): LocalSimulation | null {
-  const run = parseLocalSimulation(value);
-  if (!run || run.state.origin?.initialReleaseId !== ACTIVE_LOCAL_RELEASE_ID
-    || run.state.releaseId !== ACTIVE_LOCAL_RELEASE_ID) return null;
-  const release = RELEASES.find(candidate => candidate.id === run.state.releaseId);
-  return release && release.schemaVersion === run.state.schemaVersion && release.gameVersion === run.state.gameVersion
-    && run.state.unlockedFeatures.length === release.featureIds.length
-    && new Set(run.state.unlockedFeatures).size === run.state.unlockedFeatures.length
-    && release.featureIds.every(feature => run.state.unlockedFeatures.includes(feature)) ? run : null;
-}
-export function parsePreviousLocalSimulation(value: unknown): PreviousLocalSimulation | null { return parseRun(value, true) as PreviousLocalSimulation | null; }
+export const parseActiveLocalSimulation = parseLocalSimulation;
 
 export function advanceLocalSimulation(run: LocalSimulation, steps = 1): LocalSimulation {
   if (!Number.isSafeInteger(steps) || steps < 1 || steps > MAXIMUM_STEPS) throw new RangeError('Local advancement needs between one and sixty virtual steps');
@@ -122,9 +106,7 @@ export function advanceLocalSimulation(run: LocalSimulation, steps = 1): LocalSi
   return next;
 }
 
-export function localSimulationSnapshot(run: LocalSimulation | PreviousLocalSimulation): LiveSnapshot {
-  const genesis = run.state.origin?.initialReleaseId;
-  const naming = run.state.origin?.namingVersion;
-  const temperament = run.state.origin?.temperamentVersion;
-  return { identity: `local:${run.state.origin?.generatorVersion ?? 'legacy-foundation-v1'}:${run.seed}:${run.state.clockEpoch}${genesis ? `:${genesis}` : ''}${naming ? `:${naming}` : ''}${temperament ? `:${temperament}` : ''}`, state: run.state };
+export function localSimulationSnapshot(run: LocalSimulation): LiveSnapshot {
+  const origin = run.state.origin!;
+  return { identity: `local:${origin.generatorVersion}:${run.seed}:${run.state.clockEpoch}:${origin.initialReleaseId}:${origin.namingVersion}:${origin.temperamentVersion}`, state: run.state };
 }

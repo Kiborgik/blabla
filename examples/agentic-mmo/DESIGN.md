@@ -6,7 +6,7 @@ Agentic Civilizations is a deterministic zero-player game. The core owns legalit
 
 **NO MIGRATIONS BEFORE RELEASE.** `createWorld(seed, epoch, registeredRulesId)` allocates a new world under registered starting rules. It cannot accept or upgrade an existing saved state. `createGeneratedWorld` calls that constructor, then lays out fresh seeded geography and founding names. Unknown configurations fail explicitly. Foundation history describes genesis, not a fabricated sequence of upgrades.
 
-The old state-in/state-out release migrator and browser transition helper are removed. CLI and hosted release-write entry points refuse without writes. Historical decoding is inert read support, not an executable upgrade path. Current-version saves, policy memory and exact command replay remain deterministic. External stored data is not deleted. Database schema setup is separate from game-world migration.
+The old state-in/state-out release migrator and browser transition helper are removed. CLI and hosted release-write entry points refuse without writes. Only current command-record shapes are admitted. Real calendar and event receipts remain inspectable; retired release-apply records are refused. Current-version saves, policy memory and exact command replay remain deterministic. External stored data is not deleted. Database schema setup is separate from game-world migration.
 
 ## Modules
 

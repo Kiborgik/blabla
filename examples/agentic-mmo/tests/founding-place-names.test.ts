@@ -183,7 +183,7 @@ void test('rejected land and coastal attempts consume neither city identities no
 });
 
 void test('earned research and timed Boat yard enable paid coastal naming whose stored bytes survive locality ownership round and restart changes', context => {
-  let state = createGeneratedWorld(1701, EPOCH, ACTIVE_LOCAL_RELEASE_ID, NAMING_VERSION);
+  let state = createLocalSimulation(1701).state;
   const capital = state.cities.find(city => isCoastalSite(state, city.tileId));
   assert.ok(capital);
   const seat = capital.civId;

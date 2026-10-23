@@ -5,11 +5,13 @@ import { HISTORICAL_MILESTONES } from '../core/content.ts';
 import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
 import { isWorldState } from '../core/validation.ts';
 import { createAutonomousState, planAutonomousWake } from '../server/autonomous-runner.ts';
-import { createLocalSimulation, advanceLocalSimulation } from '../web/local-simulation.ts';
+import { createRegisteredSimulation, advanceRegisteredSimulation as advanceLocalSimulation } from './fixtures/registered-simulation.ts';
+
+const createLocalSimulation = () => createRegisteredSimulation(1701, 'settlement-living-partnerships-1');
 
 const epoch = '2000-01-01T00:00:00.000Z';
 
-await test('real local and hosted policy progress retains earned history and once-only calendar receipts', () => {
+await test('fresh configured component and hosted policy progress retains earned history and once-only calendar receipts', () => {
   const initial = createLocalSimulation();
   assert.equal(nextEarnedHistoryAdvance(initial.state, epoch), null);
   let run = initial;

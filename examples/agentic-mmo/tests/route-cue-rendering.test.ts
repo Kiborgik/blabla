@@ -5,6 +5,7 @@ import type { RouteCueObservation, RouteResultCue } from '../visuals/route-cues.
 import { projectRouteCues } from '../visuals/route-cues.ts';
 import { createCueStream, createWorldCues, eventAnchor, latestCueEvent, routeResultPresentation } from '../web/world-cues.ts';
 import { eventVisual } from '../visuals/world-visuals.ts';
+import { routeLabelPlacement } from '../visuals/route-visuals.ts';
 import type { AtlasWorld } from '../web/atlas.ts';
 
 function fixture(): RouteCueObservation {
@@ -120,6 +121,8 @@ void test('latest charter result stays the story through a later clock while unr
 
 class NodeRecord {
   tag: string; textContent = ''; className = ''; hidden = false; clientWidth = 1188; clientHeight = 761;
+  bounds: { left: number; top: number; width: number; height: number } | null = null;
+  cueSize = { width: 172, height: 96 };
   dataset: Record<string, string> = {}; style: Record<string, string> = {}; attributes = new Map<string, string>(); children: NodeRecord[] = []; parent: NodeRecord | null = null;
   classList = { toggle: (name: string, enabled: boolean): void => { const values = new Set(this.className.split(' ')); if (enabled) values.add(name); else values.delete(name); this.className = [...values].join(' '); } };
   constructor(tag: string) { this.tag = tag; }
@@ -128,14 +131,24 @@ class NodeRecord {
   replaceChildren(...nodes: NodeRecord[]): void { this.children = []; this.append(...nodes); }
   remove(): void { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); this.parent = null; }
   querySelectorAll(): NodeRecord[] { return []; }
-  getBoundingClientRect(): DOMRect { return { x: 0, y: 0, top: 0, left: 0, bottom: this.clientHeight, right: this.clientWidth, width: this.clientWidth, height: this.clientHeight, toJSON: () => ({}) }; }
+  getBoundingClientRect(): DOMRect {
+    const route = this.className.split(' ').includes('route-result-card');
+    const cue = this.className.split(' ').includes('world-cue');
+    const width = this.hidden ? 0 : cue ? route ? 180 : this.cueSize.width : this.bounds?.width ?? this.clientWidth;
+    const height = this.hidden ? 0 : cue ? route ? 44 : this.cueSize.height : this.bounds?.height ?? this.clientHeight;
+    const origin = cue ? this.parent?.parent?.bounds : this.bounds;
+    const left = cue ? (origin?.left ?? 0) + Number.parseFloat(this.style['left'] ?? '0') - width / 2 : origin?.left ?? 0;
+    const top = cue ? (origin?.top ?? 0) + Number.parseFloat(this.style['top'] ?? '0') - (route ? 0 : height) : origin?.top ?? 0;
+    return { x: left, y: top, top, left, bottom: top + height, right: left + width, width, height, toJSON: () => ({}) };
+  }
   content(): string { return [this.textContent, ...this.children.map((child) => child.content())].join(' '); }
 }
-function recordingDocument(): { nodes: NodeRecord[]; restore: () => void } {
+function recordingDocument(obstacles: NodeRecord[] = [], cueSize = { width: 172, height: 96 }): { nodes: NodeRecord[]; restore: () => void } {
   const old = Object.getOwnPropertyDescriptor(globalThis, 'document'); const nodes: NodeRecord[] = [];
-  const make = (tag: string): NodeRecord => { const node = new NodeRecord(tag); nodes.push(node); return node; };
+  const make = (tag: string): NodeRecord => { const node = new NodeRecord(tag); node.cueSize = cueSize; nodes.push(node); return node; };
   Object.defineProperty(globalThis, 'document', { configurable: true, value: {
-    createElement: make, createElementNS: (_namespace: string, tag: string) => make(tag), querySelectorAll: () => [],
+    createElement: make, createElementNS: (_namespace: string, tag: string) => make(tag),
+    querySelectorAll: (selector: string) => obstacles.filter((node) => selector.split(',').some((part) => node.className.split(' ').includes(part.trim().slice(1)))),
     createTextNode: (text: string) => { const node = make('#text'); node.textContent = text; return node; },
   } });
   return { nodes, restore: () => { if (old) Object.defineProperty(globalThis, 'document', old); else Reflect.deleteProperty(globalThis, 'document'); } };
@@ -164,6 +177,128 @@ void test('shared DOM adapter places two stationary exact-town marks and one res
     assert.equal(dom.nodes.filter((node) => node.className.includes('route-result-mark') && node.parent).length, 0);
     cues.dispose(); assert.equal(dom.nodes.filter((node) => node.className.includes('world-cues') && node.parent).length, 0);
   } finally { dom.restore(); }
+});
+
+function obstacle(className: string, left: number, top: number, width: number, height: number): NodeRecord {
+  const node = new NodeRecord('section'); node.className = className; node.bounds = { left, top, width, height }; return node;
+}
+
+function separated(a: DOMRect, b: DOMRect): boolean {
+  return a.right + 6 <= b.left || b.right + 6 <= a.left || a.bottom + 6 <= b.top || b.bottom + 6 <= a.top;
+}
+
+void test('ordinary cues measure their full cards and reserve separate readable bounds without route results', (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const dom = recordingDocument([], { width: 260, height: 142 });
+  try {
+    const host = document.createElement('main');
+    const localWorld = { ...world, tiles: [...world.tiles, { ...world.tiles[0]!, id: 100, q: -9 }] };
+    const first = eventVisual(ordinary()); const second = eventVisual({ ...ordinary('11:3'), tileId: 100 });
+    assert.ok(first && second);
+    const cues = createWorldCues(host, localWorld, () => ({ x: 590, y: 420 }));
+    cues.show([first, second]);
+    const cards = dom.nodes.filter((node) => node.dataset['event'] && node.parent);
+    assert.equal(cards.length, 2);
+    assert.ok(cards.every((card) => !card.hidden));
+    assert.ok(separated(cards[0]!.getBoundingClientRect(), cards[1]!.getBoundingClientRect()));
+    const positions = cards.map((card) => ({ ...card.style }));
+    cues.update(); assert.deepEqual(cards.map((card) => ({ ...card.style })), positions);
+    cues.dispose();
+  } finally { dom.restore(); }
+});
+
+void test('ordinary cues avoid every active HUD and map-label boundary even when no route cue exists', (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const name of ['masthead', 'panel', 'world-heading', 'era-pill', 'map-tools', 'layer-controls', 'chronicle', 'connection-actions', 'map-hint', 'city-label', 'flat-city', 'route-map-label', 'flat-route-label']) {
+    const hud = obstacle(name, 380, 180, 240, 160);
+    const dom = recordingDocument([hud], { width: 236, height: 116 });
+    try {
+      const host = document.createElement('main');
+      const event = eventVisual(ordinary()); assert.ok(event);
+      const cues = createWorldCues(host, world, () => ({ x: 500, y: 350 }));
+      cues.show([event]);
+      const card = dom.nodes.find((node) => node.dataset['event']); assert.ok(card);
+      assert.equal(card.hidden, false, name);
+      assert.ok(separated(card.getBoundingClientRect(), hud.getBoundingClientRect()), name);
+      cues.dispose();
+    } finally { dom.restore(); }
+  }
+});
+
+void test('ordinary bottom-anchored cards stay below the masthead and inside an offset viewport edge', (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const hud = obstacle('masthead', 64, 32, 1188, 52);
+  const dom = recordingDocument([hud], { width: 254, height: 126 });
+  try {
+    const host = document.createElement('main');
+    dom.nodes[0]!.bounds = { left: 64, top: 32, width: 1188, height: 761 };
+    const event = eventVisual(ordinary()); assert.ok(event);
+    const cues = createWorldCues(host, world, () => ({ x: 12, y: 14 }));
+    cues.show([event]);
+    const card = dom.nodes.find((node) => node.dataset['event']); assert.ok(card);
+    assert.equal(card.hidden, false);
+    const bounds = card.getBoundingClientRect();
+    assert.ok(bounds.left >= 72 && bounds.top >= 40 && bounds.right <= 1244 && bounds.bottom <= 785);
+    assert.ok(separated(bounds, hud.getBoundingClientRect()));
+    assert.equal(Number.parseFloat(card.style['top']!), bounds.bottom - 32);
+    cues.dispose();
+  } finally { dom.restore(); }
+});
+
+void test('route and ordinary cards reserve one shared collision space in either arrival order', (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const routeFirst of [true, false]) {
+    const dom = recordingDocument([], { width: 248, height: 124 });
+    try {
+      const host = document.createElement('main');
+      const event = eventVisual(ordinary()); assert.ok(event);
+      const route = result();
+      const cues = createWorldCues(host, world, () => ({ x: 590, y: 420 }));
+      cues.show(routeFirst ? [route, event] : [event, route]);
+      const cards = dom.nodes.filter((node) => node.dataset['event'] && node.parent);
+      assert.equal(cards.length, 2);
+      assert.ok(cards.every((card) => !card.hidden));
+      assert.ok(separated(cards[0]!.getBoundingClientRect(), cards[1]!.getBoundingClientRect()));
+      cues.dispose();
+    } finally { dom.restore(); }
+  }
+});
+
+void test('narrow resize keeps one ordinary cue and recovers hidden cards without changing Chronicle events', (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const hud = obstacle('chronicle', 0, 0, 0, 0); hud.textContent = 'Population grew';
+  const dom = recordingDocument([hud], { width: 220, height: 100 });
+  try {
+    const host = document.createElement('main'); const hostRecord = dom.nodes[0]!;
+    const events = [ordinary(), { ...ordinary('11:3'), tileId: 100 }]; const before = structuredClone(events);
+    const visual = events.map((event) => eventVisual(event)); assert.ok(visual[0] && visual[1]);
+    const localWorld = { ...world, tiles: [...world.tiles, { ...world.tiles[0]!, id: 100, q: -9 }] };
+    let point = { x: 500, y: 380 };
+    const cues = createWorldCues(host, localWorld, () => point);
+    cues.show([visual[0], visual[1]]);
+    hostRecord.clientWidth = 360; point = { x: 180, y: 220 }; cues.update();
+    const cards = dom.nodes.filter((node) => node.dataset['event'] && node.parent);
+    assert.equal(cards.length, 1); const card = cards[0]!;
+    assert.equal(card.dataset['event'], '11:3'); assert.equal(card.hidden, false);
+    assert.ok(card.getBoundingClientRect().left >= 8 && card.getBoundingClientRect().right <= 352);
+    hud.bounds = { left: 0, top: 0, width: 360, height: 761 }; cues.update();
+    assert.equal(card.hidden, true);
+    assert.equal(hud.textContent, 'Population grew');
+    assert.deepEqual(events, before); assert.equal(latestCueEvent(events), events[1]);
+    hud.bounds = { left: 0, top: 0, width: 0, height: 0 }; hostRecord.clientWidth = 200; point.x = 100; cues.update();
+    assert.equal(card.hidden, true);
+    hostRecord.clientWidth = 360; point.x = 180; cues.update();
+    assert.equal(card.hidden, false);
+    assert.ok(card.getBoundingClientRect().left >= 8 && card.getBoundingClientRect().right <= 352);
+    cues.dispose();
+  } finally { dom.restore(); }
+});
+
+void test('placement preserves route defaults while measured oversized cards have no readable slot', () => {
+  assert.deepEqual(routeLabelPlacement({ x: 250, y: 300 }, [], 501, 761), { x: 250, y: 278, width: 180, height: 44 });
+  assert.deepEqual(routeLabelPlacement({ x: 250, y: 300 }, [], 501, 761, { width: 240, height: 120 }), { x: 250, y: 240, width: 240, height: 120 });
+  assert.equal(routeLabelPlacement({ x: 100, y: 200 }, [], 200, 761, { width: 220, height: 100 }), null);
+  assert.equal(routeLabelPlacement({ x: 250, y: 100 }, [], 501, 100, { width: 220, height: 100 }), null);
 });
 
 void test('unanchored result produces no guessed map elements and a narrow shared layer never exceeds one result', (context) => {

@@ -35,7 +35,6 @@ when competing_wakes {
     expect "competing-wakes-do-not-double-act": after.concurrent_actions >= 0 and after.concurrent_actions <= 1
 }
 
-state previous_world_preserved: bool
 state immutable_world_identity: bool
 state generated_starts_viable: bool
 state distinct_coherent_geography: bool
@@ -43,15 +42,11 @@ state checkpoint_write_allowed: bool
 state ephemeral_mode: bool
 
 action observe_generated_world()
-action observe_previous_world()
 action persist_local_world()
 
 when observe_generated_world {
     expect "fresh-geography-has-viable-distinct-starts": after.generated_starts_viable and after.distinct_coherent_geography
-    expect "new-world-never-reinterprets-previous-history": after.previous_world_preserved and after.immutable_world_identity
-}
-when observe_previous_world {
-    expect "previous-world-is-preserved-read-only": after.world_preserved and after.previous_world_preserved
+    expect "current-world-keeps-immutable-genesis": after.immutable_world_identity
 }
 when persist_local_world {
     expect "ephemeral-world-never-writes-shared-checkpoint": not after.ephemeral_mode or not after.checkpoint_write_allowed

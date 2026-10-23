@@ -121,20 +121,21 @@ export function createWorldCues(container: HTMLElement, world: AtlasWorld, proje
     const limit = container.clientWidth < 700 ? 1 : 3;
     while (cues.length > limit) { const first = cues[0]; if (first) remove(first); }
     const bounds = container.getBoundingClientRect();
-    const occupied = cues.some((cue) => cue.route) ? [...document.querySelectorAll<HTMLElement>('.panel, .world-heading, .era-pill, .map-tools, .layer-controls, .connection-actions, .map-hint, .city-label, .flat-city, .route-map-label, .flat-route-label')]
+    const occupied = cues.length ? [...document.querySelectorAll<HTMLElement>('.masthead, .panel, .world-heading, .era-pill, .map-tools, .layer-controls, .chronicle, .connection-actions, .map-hint, .city-label, .flat-city, .route-map-label, .flat-route-label')]
       .map((node) => node.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0)
       .map((rect) => ({ x: rect.left - bounds.left + rect.width / 2, y: rect.top - bounds.top, width: rect.width, height: rect.height })) : [];
     for (const cue of cues) {
       const point = project(cue.anchor.x, cue.anchor.z, cue.anchor.height);
       const outside = point.x < 0 || point.x > container.clientWidth || point.y < 0 || point.y > container.clientHeight;
-      if (cue.route) {
-        const placement = outside ? null : routeLabelPlacement({ x: point.x, y: point.y - 58 }, occupied, container.clientWidth, container.clientHeight);
-        cue.element.hidden = placement === null;
-        if (placement) { cue.element.style.left = `${placement.x}px`; cue.element.style.top = `${placement.y}px`; occupied.push(placement); }
-      } else {
-        cue.element.hidden = outside;
-        cue.element.style.left = `${Math.max(86, Math.min(container.clientWidth - 86, point.x))}px`;
-        cue.element.style.top = `${Math.max(24, point.y - 38)}px`;
+      cue.element.hidden = false;
+      const dimensions = cue.route ? undefined : cue.element.getBoundingClientRect();
+      const rise = cue.route ? 58 : 38 + (dimensions?.height ?? 0) / 2;
+      const placement = outside ? null : routeLabelPlacement({ x: point.x, y: point.y - rise }, occupied, container.clientWidth, container.clientHeight, dimensions);
+      cue.element.hidden = placement === null;
+      if (placement) {
+        cue.element.style.left = `${placement.x}px`;
+        cue.element.style.top = `${placement.y + (cue.route ? 0 : placement.height)}px`;
+        occupied.push(placement);
       }
       for (const mark of cue.marks) {
         const endpoint = project(mark.anchor.x, mark.anchor.z, mark.anchor.height);

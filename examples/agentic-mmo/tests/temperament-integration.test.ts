@@ -14,10 +14,9 @@ const epoch = '2000-01-01T00:00:00.000Z';
 
 void test('explicit temperament genesis changes only its marker and allocated starting focus', () => {
   for (const seed of [0, 73, 1701, 0xffffffff]) {
-    const prior = createLocalSimulation(seed);
+    const prior = createGeneratedWorld(seed, epoch, ACTIVE_LOCAL_RELEASE_ID, 'cultural-toponyms-v1');
     const fresh = createFreshLocalSimulation(seed);
-    assert.equal(prior.policyVersion, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION);
-    assert.equal(prior.state.origin?.temperamentVersion, undefined);
+    assert.equal(prior.origin?.temperamentVersion, undefined);
     assert.equal(fresh.policyVersion, TEMPERAMENT_BEHAVIOR_POLICY_VERSION);
     assert.equal(fresh.state.origin?.temperamentVersion, 'strategic-temperaments-v1');
     assert.ok(isWorldState(fresh.state));
@@ -25,11 +24,10 @@ void test('explicit temperament genesis changes only its marker and allocated st
     delete comparable.origin!.temperamentVersion;
     for (const city of comparable.cities) {
       assert.equal(city.focus, civilizationBehaviorProfile(seed, city.civId, TEMPERAMENT_BEHAVIOR_POLICY_VERSION).preferredFocus);
-      city.focus = prior.state.cities.find(candidate => candidate.id === city.id)!.focus;
+      city.focus = prior.cities.find(candidate => candidate.id === city.id)!.focus;
     }
-    assert.deepEqual(comparable, prior.state);
-    assert.equal(localSimulationSnapshot(prior).identity, `local:coherent-geography-v1:${seed}:${epoch}:${ACTIVE_LOCAL_RELEASE_ID}:cultural-toponyms-v1`);
-    assert.equal(localSimulationSnapshot(fresh).identity, `${localSimulationSnapshot(prior).identity}:strategic-temperaments-v1`);
+    assert.deepEqual(comparable, prior);
+    assert.equal(localSimulationSnapshot(fresh).identity, `local:coherent-geography-v1:${seed}:${epoch}:${ACTIVE_LOCAL_RELEASE_ID}:cultural-toponyms-v1:strategic-temperaments-v1`);
   }
 });
 
@@ -49,8 +47,9 @@ void test('unsupported temperament versions and non-Food genesis are refused exp
   }
 });
 
-void test('both saved Food policy versions preserve exact checkpoints and deterministic Worker continuation', () => {
-  for (const initial of [createLocalSimulation(73), createFreshLocalSimulation(73)]) {
+void test('current strategy checkpoints retain deterministic Worker continuation', () => {
+  const initial = createFreshLocalSimulation(73);
+  {
     const original = JSON.stringify(initial);
     const first = advanceLocalSimulation(initial, 2);
     const bytes = JSON.stringify(first);
@@ -89,7 +88,7 @@ void test('origin envelope and every memory bind the same policy and exact seede
   assert.equal(parseActiveLocalSimulation(removed), null);
 });
 
-void test('fresh storage chooses new temperaments once under lock while existing v3 bytes remain untouched', async () => {
+void test('current storage chooses one seeded strategy under lock and resumes its exact checkpoint', async () => {
   for (const previous of [null, createLocalSimulation(73)]) {
     const bytes = previous ? ` \n${JSON.stringify(previous)}\n` : null;
     const records = new Map<string, string>(bytes ? [[LOCAL_SIMULATION_STORAGE_KEY, bytes]] : []);
@@ -102,7 +101,7 @@ void test('fresh storage chooses new temperaments once under lock while existing
       entropy: () => { assert.equal(locked, true); draws += 1; return 73; } });
     const first = await storage.restore();
     assert.ok(first.run);
-    assert.equal(first.run.policyVersion, previous ? FOOD_BUDGET_BEHAVIOR_POLICY_VERSION : TEMPERAMENT_BEHAVIOR_POLICY_VERSION);
+    assert.equal(first.run.policyVersion, TEMPERAMENT_BEHAVIOR_POLICY_VERSION);
     assert.equal(draws, previous ? 0 : 1);
     assert.equal(writes, previous ? 0 : 1);
     assert.deepEqual((await storage.restore()).run, first.run);

@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import type { GameEvent } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
-import { advanceLocalSimulation, createLocalSimulation, parseLocalSimulation } from '../web/local-simulation.ts';
+import { advanceRegisteredSimulation as advanceLocalSimulation, createRegisteredSimulation as createLocalSimulation, parseRegisteredSimulation as parseLocalSimulation } from './fixtures/registered-simulation.ts';
 
 const scratch = '.blabla/scratch/historical-relief-experiment';
 const HISTORICAL_RELEASE_ID = 'settlement-regional-targets-1';

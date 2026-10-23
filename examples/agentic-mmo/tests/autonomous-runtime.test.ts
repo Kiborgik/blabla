@@ -161,7 +161,6 @@ void test('one wake records all six exact legal procedural commands and atomic d
     let reproduced = current.initial;
     for (const entry of history.entries) {
       const transition = entry.transition;
-      if (transition.kind === 'release-apply') assert.fail('Fresh histories cannot contain release migration.');
       const result = transition.kind === 'action' ? applyCommand(reproduced, transition.command)
         : transition.kind === 'director-tick' ? applyDirectorTick(reproduced, transition.command)
             : transition.kind === 'history-advance' ? applyHistoryAdvance(reproduced, transition.command)

@@ -1,4 +1,4 @@
-export const WORLD_SOURCES = ['local', 'living', 'partnerships', 'prior', 'previous', 'shared'] as const;
+export const WORLD_SOURCES = ['local', 'shared'] as const;
 export type WorldSource = typeof WORLD_SOURCES[number];
 export const WORLD_BODIES = ['earth', 'mars'] as const;
 export type WorldBody = typeof WORLD_BODIES[number];
@@ -32,7 +32,7 @@ function bounded(value: unknown, fallback: number, min: number, max: number): nu
 }
 
 export function parseWorldSource(value: unknown): WorldSource | null {
-  return value === 'local' || value === 'living' || value === 'partnerships' || value === 'prior' || value === 'previous' || value === 'shared' ? value : null;
+  return value === 'local' || value === 'shared' ? value : null;
 }
 
 export function parseWorldBody(value: unknown): WorldBody | null {
@@ -97,8 +97,7 @@ export function createWorldViewSession() {
     observe<T extends WorldViewPreferences>(preferences: T, identity: WorldViewIdentity): { preferences: T; changed: boolean; restored: boolean } {
       if (active && worldViewKey(active) === worldViewKey(identity)) return { preferences, changed: false, restored: true };
       const views = parseWorldViews(preferences.worldViews);
-      const saved = views.find(view => worldViewKey(view) === worldViewKey(identity))
-        ?? (identity.source === 'living' || identity.source === 'partnerships' || identity.source === 'prior' ? views.find(view => view.source === 'local' && view.identity === identity.identity && view.body === identity.body) : undefined);
+      const saved = views.find(view => worldViewKey(view) === worldViewKey(identity));
       active = { ...identity };
       const body = parseWorldBody(identity.body);
       return { preferences: { ...preferences, ...(saved?.camera ?? DEFAULT_WORLD_CAMERA), worldSource: identity.source, ...(body ? { worldBody: body } : {}) }, changed: true, restored: Boolean(saved) };

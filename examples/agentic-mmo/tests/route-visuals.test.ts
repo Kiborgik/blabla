@@ -196,7 +196,7 @@ await test('Three route adapters create one static shared segment and retain CSS
     assert.equal(line.userData['routeId'], route.id);
     assert.equal(line.material.worldUnits, false);
     assert.equal(line.material.linewidth, 3);
-    assert.equal(backing.material.linewidth, 7);
+    assert.equal(backing.material.linewidth, 5);
     assert.equal(line.material.dashed, blocked);
     assert.equal(line.material.dashOffset, 0);
     line.geometry.dispose(); line.material.dispose(); backing.material.dispose();

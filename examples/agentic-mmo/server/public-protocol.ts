@@ -1,12 +1,11 @@
-import type { BuildingOperationResult, ImprovementOperationResult, ConstructionCompletion, ConstructionOrder, GameAction, Command, DirectorTickCommand, GameEvent, HistoryAdvanceCommand, ReleaseApplyCommand, WorldState } from '../core/types.ts';
+import type { BuildingOperationResult, ImprovementOperationResult, ConstructionCompletion, ConstructionOrder, GameAction, Command, DirectorTickCommand, GameEvent, HistoryAdvanceCommand, WorldState } from '../core/types.ts';
 
 export type PublicTransition =
   | { kind: 'action'; command: Command }
   | { kind: 'director-tick'; command: DirectorTickCommand }
   | { kind: 'clock-catchup'; expectedRevision: number; timestamp: string }
   | { kind: 'strategy-catchup'; expectedRevision: number; timestamp: string }
-  | { kind: 'history-advance'; command: HistoryAdvanceCommand }
-  | { kind: 'release-apply'; command: ReleaseApplyCommand };
+  | { kind: 'history-advance'; command: HistoryAdvanceCommand };
 
 export interface ProceduralProvenance { version: string; profileId: string; phase: string; reason: string; decision: number; seed: number }
 export interface PublicProvenance { kind: 'development-agent' | 'clock-service' | 'procedural-policy'; model: string | null; seat: number; commandId: string; recordedAt: string; policy?: ProceduralProvenance }

@@ -20,14 +20,6 @@ function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'compact-cli-'));
   return { directory, store: new GameStore(join(directory, '.blabla/world.json')), cleanup: () => rmSync(directory, { recursive: true, force: true }) };
 }
-function released(store: GameStore): void {
-  assert.equal(store.initialize(17, false, epoch).ok, true);
-  for (const targetReleaseId of ['settlement-foundations-2', 'settlement-independent-1', 'settlement-production-1', 'settlement-frontiers-1', 'settlement-specialization-1', 'settlement-recovery-1', 'settlement-civics-1', 'settlement-charters-1', 'settlement-endpoints-1']) {
-    const state = store.snapshot().state;
-    const result = store.authoredTransition({ expectedRevision: state.revision, expectedFromReleaseId: state.releaseId, targetReleaseId, timestamp: epoch, model: 'test-fixture', commandId: `fixture-${targetReleaseId}` }, 'release-apply');
-    assert.equal(result.ok, true, result.error);
-  }
-}
 function processRead(directory: string, args: string[], input?: string) {
   return spawnSync(process.execPath, [cli, ...args], { cwd: directory, encoding: 'utf8', ...(input === undefined ? {} : { input }) });
 }
@@ -44,7 +36,7 @@ function compactMatches(value: Record<string, unknown>, store: GameStore): void 
 await test('separate-process explicit compact CLI returns every indexed action and canonical fact without changing save bytes', (context) => {
   const item = fixture();
   try {
-    released(item.store);
+    assert.equal(item.store.initialize(17, false, epoch, 'settlement-endpoints-1').ok, true);
     const bytes = readFileSync(item.store.path, 'utf8');
     const full = new GameProtocol(item.store).handle({ op: 'observe', seat: 0, timestamp: epoch });
     const result = processRead(item.directory, ['observe', '--state', item.store.path, '--seat', '0', '--at', epoch, '--observation-format', format]);
@@ -64,7 +56,7 @@ await test('separate-process explicit compact CLI returns every indexed action a
 await test('JSONL protocol accepts compact opt-in and keeps default responses and later requests intact', () => {
   const item = fixture();
   try {
-    released(item.store);
+    assert.equal(item.store.initialize(17, false, epoch, 'settlement-endpoints-1').ok, true);
     const bytes = readFileSync(item.store.path, 'utf8');
     const requests = [
       { id: 1, op: 'observe', seat: 0, timestamp: epoch, observationFormat: format },

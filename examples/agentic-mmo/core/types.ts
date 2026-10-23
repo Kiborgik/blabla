@@ -90,7 +90,7 @@ export interface DecisionObligation { kind: 'research' | 'construction' | 'civic
 export interface DecisionObligations { civic?: DecisionObligation; research: DecisionObligation; construction: DecisionObligation[] }
 export interface CoastalFoundingQuote { mode: 'coast'; ruleVersion: 1; tileIds: number[]; edges: number }
 export interface CoastalFoundingReceipt { ruleVersion: 1; sourceCityId: string; sourceTileId: number; destinationTileId: number; pathTileIds: number[]; population: number; paid: Partial<Resources>; foundedRound: number; eventId: string }
-export interface CityHousing { ruleVersion: 1; baseCapacity: number; establishedRound: number; origin: 'legacy-adoption' | 'initial-capital' | 'founded' }
+export interface CityHousing { ruleVersion: 1; baseCapacity: number; establishedRound: number; origin: 'initial-capital' | 'founded' }
 export interface CityGrowthFacts { cityId: string; ruleVersion: 1; population: number; baseCapacity: number; sources: Array<{ buildingId: string; capacity: number }>; capacity: number; nextGrowthFoodCost: number }
 export interface PopulationGrowthReceipt { ruleVersion: 1; cityId: string; civId: number; round: number; eventId: string; populationBefore: number; populationAfter: number; capacity: number; foodPaid: number }
 export interface City { lastFoodSupply?: FoodSupplyReceipt; localPower?: CityLocalPower; buildingHighGround?: Record<string, CampusHighGroundSite>; buildingCatchments?: Record<string, number>; housing?: CityHousing; improvements?: Record<string, CityImprovement>; districtSites?: Record<string, number>; coastalFounding?: CoastalFoundingReceipt; id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
@@ -192,6 +192,5 @@ export type HistoryCause = { kind: 'feature' | 'event' | 'milestone'; id: string
 export interface HistoryAdvanceCommand { expectedRevision: number; cause: HistoryCause; reason: string; deltaYears: number; timestamp: string }
 export interface HistoryAdvanceReceipt { cause: HistoryCause; reason: string; deltaYears: number; timestamp: string; revision: number; yearBefore: number; yearAfter: number; evidence: string[] }
 export interface RegisteredRulesDefinition extends ReleaseDefinition { schemaVersion: number }
-export interface ReleaseApplyCommand { expectedRevision: number; expectedFromReleaseId: string; targetReleaseId: string; timestamp?: string }
 
 export interface StrategyCatchupResult extends TransitionResult { remainingTicks: number }

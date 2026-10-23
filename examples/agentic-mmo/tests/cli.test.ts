@@ -1318,19 +1318,19 @@ void test('large clock catchup reports remaining work and deterministic service 
   }
 });
 
-void test('legacy action-only campaigns expose inferred timeline without rewriting original history', () => {
+void test('current record retirement: missing timelines are refused without inferred commands or writes', () => {
   const item = fixture();
   try {
-    item.store.initialize(31);
-    item.store.submit(command());
-    const legacy = parse(readFileSync(item.store.path, 'utf8'));
-    delete legacy.timeline;
-    for (const entry of array(legacy.provenance)) delete record(entry).operation;
-    const original = JSON.stringify(legacy);
+    assert.equal(item.store.initialize(31).ok, true);
+    assert.equal(item.store.submit(command()).ok, true);
+    assert.equal(item.store.replay().timeline[0]?.kind, 'action');
+    assert.equal(item.store.replay().provenance[0]?.operation, 'action');
+    const campaign = parse(readFileSync(item.store.path, 'utf8'));
+    delete campaign.timeline;
+    for (const entry of array(campaign.provenance)) delete record(entry).operation;
+    const original = JSON.stringify(campaign);
     writeFileSync(item.store.path, original);
-    const replay = item.store.replay();
-    assert.equal(replay.timeline[0]?.kind, 'action');
-    assert.equal(replay.provenance[0]?.operation, 'action');
+    assert.throws(() => item.store.replay(), ProtocolError);
     assert.equal(readFileSync(item.store.path, 'utf8'), original);
   } finally {
     item.cleanup();
@@ -1535,66 +1535,67 @@ for (const change of corruptWorldChanges) {
   });
 }
 
-void test('legacy pre-clock action-only worlds stay readable without installing a clock or rewriting bytes', () => {
+void test('current record retirement: action records without clock accounting are refused without writes', () => {
   const item = fixture();
   try {
-    item.store.initialize(31);
-    item.store.submit(command());
-    const legacy = parse(readFileSync(item.store.path, 'utf8'));
+    assert.equal(item.store.initialize(31, false, '2026-10-16T00:00:00.000Z').ok, true);
+    assert.equal(item.store.submit(command()).ok, true);
+    assert.equal(item.store.replay().timeline.length, 1);
+    const campaign = parse(readFileSync(item.store.path, 'utf8'));
     const states = [
-      record(legacy.initial),
-      record(legacy.state),
-      ...array(legacy.frames).map((frame) => record(record(frame).state)),
+      record(campaign.initial),
+      record(campaign.state),
+      ...array(campaign.frames).map((frame) => record(record(frame).state)),
     ];
     for (const state of states) {
       delete state.clockEpoch;
       delete state.clockTicks;
     }
-    const original = JSON.stringify(legacy);
+    const original = JSON.stringify(campaign);
     writeFileSync(item.store.path, original);
-    const observation = item.store.observation();
-    assert.equal(observation.revision, 1);
-    assert.equal(observation.clockEpoch, null);
-    assert.equal(observation.clockTicks, 0);
+    assert.throws(() => item.store.observation(), ProtocolError);
+    assert.throws(() => item.store.replay(), ProtocolError);
     assert.equal(readFileSync(item.store.path, 'utf8'), original);
   } finally {
     item.cleanup();
   }
 });
 
-void test('canonical validation is strict by default and legacy support never mutates its input', () => {
+void test('current record retirement: canonical validation requires clock accounting without mutation', () => {
   const item = fixture();
   try {
-    item.store.initialize(31);
+    assert.equal(item.store.initialize(31).ok, true);
     const world = record(parse(readFileSync(item.store.path, 'utf8')).state);
     assert.equal(isWorldState(world), true);
     delete world.clockEpoch;
     delete world.clockTicks;
     const before = JSON.stringify(world);
     assert.equal(isWorldState(world), false);
-    assert.equal(isWorldState(world, { allowLegacyClock: true }), true);
     assert.equal(JSON.stringify(world), before);
     world.directorIntervals = { 'clock:1': '2026-10-16T00:06:00.000Z' };
-    assert.equal(isWorldState(world, { allowLegacyClock: true }), false);
+    const withInterval = JSON.stringify(world);
+    assert.equal(isWorldState(world), false);
+    assert.equal(JSON.stringify(world), withInterval);
   } finally {
     item.cleanup();
   }
 });
 
-void test('pre-clock historical records remain readable but cannot execute current system operations', () => {
+void test('current record retirement: missing clocks refuse system operations without repairing the save', () => {
   const item = fixture();
   try {
-    item.store.initialize(31);
-    const legacy = parse(readFileSync(item.store.path, 'utf8'));
-    for (const world of [record(legacy.initial), record(legacy.state)]) {
+    assert.equal(item.store.initialize(31).ok, true);
+    const campaign = parse(readFileSync(item.store.path, 'utf8'));
+    for (const world of [record(campaign.initial), record(campaign.state)]) {
       delete world.clockEpoch;
       delete world.clockTicks;
     }
-    writeFileSync(item.store.path, JSON.stringify(legacy));
-    assert.equal(item.store.directorTick(tickCommand()).ok, false);
-    assert.equal(item.store.snapshot().state.revision, 0);
-    assert.equal(item.store.snapshot().timeline.length, 0);
-    assert.equal(item.store.observation().clockEpoch, null);
+    const original = JSON.stringify(campaign);
+    writeFileSync(item.store.path, original);
+    assert.throws(() => item.store.directorTick(tickCommand()), ProtocolError);
+    assert.throws(() => item.store.snapshot(), ProtocolError);
+    assert.throws(() => item.store.observation(), ProtocolError);
+    assert.equal(readFileSync(item.store.path, 'utf8'), original);
   } finally {
     item.cleanup();
   }

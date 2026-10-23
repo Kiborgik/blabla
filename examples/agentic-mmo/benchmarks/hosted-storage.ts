@@ -107,7 +107,6 @@ async function replay(repository: WorldRepository) {
     const page = await repository.history(after, 200);
     for (const entry of page.entries) {
       const transition = entry.transition;
-      if (transition.kind === 'release-apply') throw new Error('Pre-release world migration records are not executable benchmark transitions');
       const result = transition.kind === 'action' ? applyCommand(state, transition.command)
           : transition.kind === 'director-tick' ? applyDirectorTick(state, transition.command)
             : transition.kind === 'history-advance' ? applyHistoryAdvance(state, transition.command)

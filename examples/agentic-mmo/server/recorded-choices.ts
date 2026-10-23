@@ -157,8 +157,6 @@ function projectEntry(value: unknown): RecordedChronicleEntry {
     if (!keys(command, ['expectedRevision', 'kind', 'intervalId', 'timestamp', 'event', 'target', 'regional'], ['expectedRevision', 'kind', 'intervalId', 'timestamp', 'event', 'target']) || Object.hasOwn(command, 'regional') && (!isHistoricalEventSelection(command.regional) || command.regional.local.kind !== command.event || command.kind === 'clock') || !scalarEnum(command.kind, ['clock', 'event', 'review'])
       || !nonblank(command.intervalId, 200) || !isDirectorEvent(command.event) || !integer(command.target) || command.target > 4) return corrupt();
     regionalReceiptLink(command.regional, command.event, command.target, value.end_revision, events);
-  } else if (kind === 'release-apply') {
-    if (!keys(command, ['expectedRevision', 'expectedFromReleaseId', 'targetReleaseId', 'timestamp']) || !nonblank(command.expectedFromReleaseId, 200) || !nonblank(command.targetReleaseId, 200)) return corrupt();
   } else if (kind === 'history-advance') {
     if (!keys(command, ['expectedRevision', 'cause', 'reason', 'deltaYears', 'timestamp']) || !isRecord(command.cause) || !keys(command.cause, ['kind', 'id'])
       || !scalarEnum(command.cause.kind, ['feature', 'event']) || !nonblank(command.cause.id, 128) || !nonblank(command.reason, 1000) || !integer(command.deltaYears)) return corrupt();
