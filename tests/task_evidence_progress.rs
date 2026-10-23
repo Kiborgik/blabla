@@ -136,6 +136,7 @@ fn barrier() -> TcpListener {
 
 fn connected(listener: &TcpListener) -> TcpStream {
     let mut stream = until(|| listener.accept().ok().map(|(stream, _)| stream));
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(20)))
         .unwrap();

@@ -52,7 +52,10 @@ pub(super) fn fingerprint(value: &impl Serialize) -> String {
 
 fn directory(path: &Path, create: bool) -> io::Result<()> {
     if create {
+        #[cfg(unix)]
         let mut builder = fs::DirBuilder::new();
+        #[cfg(not(unix))]
+        let builder = fs::DirBuilder::new();
         #[cfg(unix)]
         {
             use std::os::unix::fs::DirBuilderExt;
