@@ -84,7 +84,7 @@ atomic isolation from concurrent edits to process memory.
 - Opening a task snapshots the tree. Each deliverable must change from that snapshot. A path that becomes ignored later no longer counts as a change
 - Live write scopes never overlap; reads may. A scope is project-relative: absolute, `..` and symlink paths are refused. Inputs and deliverables also refuse skipped and ignored paths
 - Evidence covers the scope and deliverables, or the `--input` list you declare. It binds the exact check, its arguments, the acceptance epoch and the input digests. A new acceptance starts a new epoch, even for the same model
-- `task evidence --run` runs an argv check from the project root with no shell and no timeout, so pick a bounded check. For a text check, run it yourself and record `--exit CODE --tool TOOL`
+- `task evidence --run` runs an argv check from the project root with no shell and no timeout, so pick a bounded check. Capture has a 64 MiB combined stdout/stderr limit; an overflow stops the owned process tree, retains bounded partial bytes and records no new evidence. For a text check, run it yourself and record `--exit CODE --tool TOOL`
 - READY needs current passing evidence, current lens assessments and a fresh challenge receipt. Relevant edits or new findings void the receipt; resolving a finding and unrelated work do not
 - Lenses: every pack the role consults, or only the packs named with `task open --lens PACK`. A pack the role does not consult is refused
 - `task show` prints the latest evidence (tool, epoch, exit, log) and every lens assessment; `task evidence --run` prints the same receipt. It also lists the falsify paths and the latest falsification, the paths changed since the task opened and, for a review, the paths its target changed
@@ -103,6 +103,61 @@ atomic isolation from concurrent edits to process memory.
 | withdraw | `task withdraw NAME --reason "…"`; changed paths stay challenged until restored or `task reconcile-withdrawal` names a CLOSED successor with current evidence whose inputs or deliverables cover them; the reconciliation then stands while that successor stays closed, and later changes belong to later tasks |
 
 Scope, check, attribution and withdrawal changes are the orchestrator's. Resolving, answering, confirming, attributing, removing a deliverable, withdrawing and reconciling need `role::orchestrator` declared in process memory, so a worker cannot settle its own obligations; without it, `task open` says so up front, and an optional `--model` on `task check`, `task scope` or `task statement` is recorded unchecked. BlaBla options go before `--argv` and `--check-argv`: everything after them is the check, and an argument there that matches a BlaBla option is kept and reported. After hand-back, the orchestrator checks records it made during the carry and runs `task confirm` once before `task close`. A task assigned to role `orchestrator` needs no confirmation: its own records never count as made during a carry.
+
+### Source-isolated verification
+
+Use separate build-output directories for different source variants or worktrees.
+Sharing registry/download caches is fine; sharing an executable output path lets
+another source build replace the CLI a running integration test invokes. Verify
+the actual tested executable identity, not just the Cargo command's working tree.
+
+### Evidence-run observations
+
+While an argv check runs, `task show NAME` (including `--json`) includes bounded,
+content-free `evidence_progress`. It reports last-observed phase, observation age,
+stdout/stderr bytes written, EOFs, typed child outcome and evidence recording.
+A persisted `running` observation is **not** proof that a process is running now;
+its outcome remains unknown. A parent that exited while a descendant retains its
+pipes is `draining`, not complete. There is no percent complete, ETA, deadline,
+automatic retry, recovery credit or new cancellation command.
+
+Each attempt gets a private `evidence-run-ID` directory in the existing task
+scratch with `stdout.partial`, `stderr.partial` and atomically replaced
+`progress.json`. On Unix, new run directories are mode 0700 and files mode 0600.
+Progress contains only allowlisted metadata and opaque pin fingerprints: no argv,
+environment, raw output or unrestricted errors. Output is not streamed to the
+console. JSON command stdout remains one document. `task show` reads at most 20
+sidecars, each at most 16 KiB, and reports omitted/unavailable observations.
+Malformed or symlinked observations provide no credit. Capture publication checks
+that the original scratch/run ancestry still matches before finalization and
+receipt recording. Unix creation, publication and cleanup use held directory
+handles without following symlinks; a redirected path grants no evidence and is
+not used for cleanup. Already-open partial spools may retain bytes after a rename.
+
+A complete log preserves exact bytes as stdout followed by stderr, including NUL
+and non-UTF-8 bytes. Both pipes drain concurrently. Counts mean successfully
+written bytes, not a power-loss durability guarantee. Successful finalization
+syncs and publishes the ordinary evidence log without replacing an existing
+file, then removes partial spools. Spools plus the concatenated temporary log
+use at most 128 MiB per attempt (twice the capture cap), excluding small metadata;
+concurrent attempts each have their own cap. Failed attempts retain useful
+partial files and can require manual scratch cleanup.
+
+Only complete capture with an observed numeric child exit can append the original
+receipt, with the original check identity, input/member pins and acceptance epoch.
+A nonzero child exit remains that exact integer; the CLI's successful storage exit
+is not the child's result. Signal termination can retain a complete log but grants
+no integer-exit evidence. Capture/read/write/sync/publication failures grant no new
+evidence. Prior evidence remains subject to the existing freshness rules.
+
+Cleanup after an observed capture failure is bounded and best effort for the owned
+process tree; a detached descendant or incomplete cleanup is not reported as
+terminated. No graceful interrupt handler or durable supervisor is installed.
+SIGKILL, wrapper death or an unhandled interruption can leave only partial bytes
+and last observations, with the child outcome unknown. Progress never fabricates
+an exit or rebuilds a receipt. The task record is authoritative even if a crash
+leaves the sidecar's recording status stale; `receipt_observed` checks for the
+exact expected receipt in that record, not just a sidecar claim.
 
 `task check` is an amendment, not an inspection command. A bare or model-only call, including an empty `--argv`, refuses without changing the task or its receipts; use `task show NAME` to inspect the saved check. Changing the command or adding scope without `--input` preserves the previous explicit input list. If no explicit list exists, the write-scope default remains in effect. `--input PATH…` replaces the whole list; `--reset-inputs` deliberately restores the write-scope default and conflicts with `--input`. Deliverables remain included either way. The resulting inputs must remain observable; a normal tracked path that does not exist yet is still admissible and its later creation stales evidence. Explicitly repeating an identical declaration remains an attested amendment. Amending a check never executes it or discards historical evidence; only a receipt for the exact current command, input map and acceptance epoch supports hand-back.
 

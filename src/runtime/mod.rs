@@ -1,4 +1,5 @@
 pub mod command;
+pub mod evidence_capture;
 mod exchange_witness;
 pub mod primitives;
 pub(crate) mod process_tree;

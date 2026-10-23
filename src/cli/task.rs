@@ -3,6 +3,7 @@ pub(crate) mod delivery;
 pub(super) mod effort;
 pub(super) mod evidence_reuse;
 pub(super) mod freshness;
+mod progress;
 mod ready_receipts;
 
 use super::{emit_error, error, recovery, write_json};
@@ -24,6 +25,7 @@ struct TaskView<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     delivery: Option<serde_json::Value>,
     readiness_summary: serde_json::Value,
+    evidence_progress: serde_json::Value,
     task: &'a Task,
     review_accepted: Option<bool>,
     review_current: Option<bool>,
@@ -453,6 +455,7 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
     };
     let affected_intent = affected_intent(project, task, &tree);
     TaskView {
+        evidence_progress: progress::summary(&project.manifest.root, task),
         delivery: delivery::task_view(project, task, &tree),
         readiness_summary: delivery::readiness_summary(project, task, &tree),
         goal_reflection_state: goal_reflection_state(project, task, &tree),
@@ -3243,76 +3246,118 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
     ));
     let identity = task::declared_check(&task);
     let acceptance_epoch = task.acceptance_epoch;
-    let scratch = task::scratch_directory(root, name);
-    if let Err(failure) = std::fs::create_dir_all(&scratch) {
-        return emit_error(
-            error(
-                "task",
-                format!("cannot create {}: {failure}", scratch.display()),
-                None,
-            ),
-            json,
-            2,
-        );
-    }
-    let log_name = format!(
-        "evidence-{}-{}-{}.log",
-        task.evidence.len() + 1,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
-    drop(initial_lock);
-    let output = match std::process::Command::new(&argv[0])
-        .args(&argv[1..])
-        .current_dir(root)
-        .output()
-    {
-        Ok(output) => output,
-        Err(failure) => {
+    let pins = progress::fingerprint(&(
+        &identity,
+        acceptance_epoch,
+        &tree,
+        &input_digests,
+        &member_manifest,
+    ));
+    let mut run = match progress::Run::create(root, &task, pins) {
+        Ok(run) => run,
+        Err(_) => {
             return emit_error(
-                error("task", format!("cannot spawn {}: {failure}", argv[0]), None),
+                error(
+                    "task",
+                    "cannot prepare private evidence capture; nothing is recorded",
+                    None,
+                ),
                 json,
                 2,
             );
         }
     };
-    let Some(exit) = output.status.code() else {
+    let streams = run
+        .stdout
+        .try_clone()
+        .and_then(|stdout| run.stderr.try_clone().map(|stderr| (stdout, stderr)));
+    let (stdout, stderr) = match streams {
+        Ok(streams) => streams,
+        Err(_) => {
+            run.recording(progress::Recording::Failed, None);
+            return emit_error(
+                error(
+                    "task",
+                    "cannot prepare evidence streams; nothing is recorded",
+                    None,
+                ),
+                json,
+                2,
+            );
+        }
+    };
+    drop(initial_lock);
+    if !json {
+        eprintln!(
+            "Evidence run {}: private capture, {} byte combined limit; inspect task show {} for last-observed progress",
+            run.id(),
+            blabla::runtime::evidence_capture::OUTPUT_LIMIT,
+            name
+        );
+    }
+    let mut command = std::process::Command::new(&argv[0]);
+    command.args(&argv[1..]).current_dir(root);
+    let mut captured =
+        blabla::runtime::evidence_capture::run(&mut command, stdout, stderr, |snapshot| {
+            run.observe(snapshot)
+        });
+    if !captured.complete {
+        run.recording(progress::Recording::Failed, None);
         return emit_error(
             error(
                 "task",
                 format!(
-                    "{} ended without an exit code; nothing is recorded",
-                    argv[0]
+                    "evidence capture incomplete ({:?}); partial bytes retained; nothing is recorded",
+                    captured.failure
                 ),
                 None,
             ),
             json,
             2,
         );
-    };
-    if let Err(failure) = std::fs::write(
-        scratch.join(&log_name),
-        [output.stdout, output.stderr].concat(),
-    ) {
+    }
+    if run.finalize(&mut captured).is_err() {
+        run.recording(progress::Recording::Failed, None);
         return emit_error(
-            error("task", format!("cannot write {log_name}: {failure}"), None),
+            error(
+                "task",
+                "cannot publish complete evidence log; partial artifacts retained; nothing is recorded",
+                None,
+            ),
             json,
             2,
         );
     }
-    let log = format!("{}/{log_name}", task::scratch_label(name));
+    let blabla::runtime::evidence_capture::ChildObservation::Exited { code: exit } = captured.child
+    else {
+        run.recording(progress::Recording::Refused, None);
+        return emit_error(
+            error(
+                "task",
+                "check ended without a numeric exit code; complete log retained; nothing is recorded",
+                None,
+            ),
+            json,
+            2,
+        );
+    };
+    let log = run.log(name);
     let _completion_lock = match task::store::lock(root) {
         Ok(lock) => lock,
-        Err(message) => return emit_error(error("task", message, None), json, 2),
+        Err(message) => {
+            run.recording(progress::Recording::Failed, None);
+            return emit_error(error("task", message, None), json, 2);
+        }
     };
     let mut reloaded = match accepted_for_evidence(project, name, json) {
         Ok(task) => task,
-        Err(exit) => return exit,
+        Err(exit) => {
+            run.recording(progress::Recording::Refused, None);
+            return exit;
+        }
     };
     if reloaded.opened_unix != task.opened_unix || reloaded.opened_tree != task.opened_tree {
+        run.recording(progress::Recording::Refused, None);
         return emit_error(
             error(
                 "task",
@@ -3337,8 +3382,38 @@ pub(super) fn evidence_run(project: &Project, name: &str, json: bool) -> i32 {
         log: Some(log),
         member_manifest,
     };
+    let receipt_fingerprint = progress::fingerprint(&evidence);
+    run.recording(
+        progress::Recording::Pending,
+        Some(receipt_fingerprint.clone()),
+    );
+    if run.ensure_current().is_err() {
+        run.recording(progress::Recording::Refused, None);
+        return emit_error(
+            error(
+                "task",
+                "evidence capture ancestry changed; nothing is recorded",
+                None,
+            ),
+            json,
+            2,
+        );
+    }
     task::apply_evidence(&mut reloaded, evidence);
     let code = store(project, &mut reloaded, json);
+    let recorded = task::read(root, name).ok().flatten().is_some_and(|task| {
+        task.evidence
+            .iter()
+            .any(|evidence| progress::fingerprint(evidence) == receipt_fingerprint)
+    });
+    run.recording(
+        if recorded {
+            progress::Recording::Recorded
+        } else {
+            progress::Recording::Failed
+        },
+        None,
+    );
     if code == 0
         && !json
         && let Some(latest) = reloaded.evidence.last()
@@ -3964,6 +4039,7 @@ fn write_task(
         }
     }
     delivery::write_readiness_summary(&mut output, &view.readiness_summary)?;
+    progress::write_summary(&mut output, &view.evidence_progress)?;
     writeln!(output, "\nStatement:\n  {}", task.statement)?;
     writeln!(output, "\nCarried by:\n  role::{}", task.role)?;
     if let Some(goal) = &task.goal {
