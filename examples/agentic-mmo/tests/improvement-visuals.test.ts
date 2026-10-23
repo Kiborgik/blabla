@@ -97,7 +97,7 @@ await test('frontier Mine instances batch at retained sites and never attach to 
   const material = new THREE.MeshBasicMaterial();
   const meshes = createImprovementMeshes(world, () => material);
   const origin = hexPosition(view.q, view.r);
-  for (const [pixels, detail] of [[30, 'mid'], [23, 'mid'], [21, 'far'], [25, 'far'], [27, 'mid'], [49, 'mid'], [53, 'close'], [45, 'close'], [43, 'mid']] as const) {
+  for (const [pixels, detail] of [[48, 'mid'], [37, 'mid'], [35, 'far'], [40, 'far'], [43, 'mid'], [80, 'mid'], [85, 'close'], [73, 'close'], [70, 'mid']] as const) {
     assert.equal(meshes.update(pixels), detail);
     const instances = meshes.group.children.filter(child => child instanceof THREE.InstancedMesh);
     const parts = improvementParts(view, detail);

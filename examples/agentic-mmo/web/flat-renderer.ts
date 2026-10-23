@@ -261,7 +261,7 @@ export function createFlatAtlasRenderer(
       for (const entry of depositNodes) { const deposit = world.deposits?.[entry.index]; if (deposit) paintParts(entry.parts, depositParts(deposit, detail), VISUAL_PALETTE.metal); }
       for (const entry of districtNodes) {
         const district = sites[entry.index];
-        if (district) paintParts(entry.parts, district.parts(district.kind === 'district' ? townDetail : detail), district.color);
+        if (district) paintParts(entry.parts, district.parts(district.kind === 'district' || district.kind === 'improvement' ? townDetail : detail), district.color);
       }
       for (const entry of settlements) {
         const city = world.cities[entry.index];

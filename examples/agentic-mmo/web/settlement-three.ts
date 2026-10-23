@@ -89,7 +89,7 @@ export function createImprovementMeshes(world: AtlasWorld, material: (color: str
       color: part.material === 'identity' ? site.color : VISUAL_PALETTE[part.material],
       part: { ...part, position: [origin.x + part.position[0], site.height + part.position[1], origin.z + part.position[2]] },
     }));
-  }), material);
+  }), material, settlementDetail);
 }
 
 export function createDepositMeshes(world: AtlasWorld, material: (color: string) => THREE.Material): ReturnType<typeof createPartMeshes> {

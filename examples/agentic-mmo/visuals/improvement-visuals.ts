@@ -1,5 +1,6 @@
 import { RESOURCE_IDS } from '../core/content.ts';
 import { METRIC_LABELS } from './visual-language.ts';
+import { workedLandCompositionV1 } from './worked-land-composition.ts';
 import type { CityImprovement, ImprovementConstructionOrder, ImprovementConstructionCompletion, Resources } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
@@ -38,6 +39,10 @@ export function improvementLastLabel(result: CityImprovement['operation']['lastR
 }
 
 export function improvementParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
+  return workedLandCompositionV1(view, improvementRecipeParts(view, detail));
+}
+
+function improvementRecipeParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
   if (view.improvementId === 'lumber-mill') return lumberParts(view, detail);
   if (view.improvementId === 'pasture') return pastureParts(view, detail);
   if (view.improvementId !== 'mine') return [];
@@ -98,8 +103,8 @@ function pastureParts(view: ImprovementView, detail: DetailLevel): VisualPart[] 
     for (const z of [-.62, .62]) add(`pasture-fence-${z}`, 'box', 'timber', [0, .25, z], [1.5, .12, .07]);
     add('pasture-fence-end', 'box', 'timber', [.74, .25, 0], [.07, .12, 1.3]);
     add('pasture-shelter-roof', 'gable', 'roof', [-.4, .55, -.36], [.7, .25, .5]);
+    add('pasture-shelter-wall', 'box', 'timber', [-.4, .22, -.36], [.6, .44, .4]);
     if (detail !== 'far') {
-      add('pasture-shelter-wall', 'box', 'timber', [-.4, .22, -.36], [.6, .44, .4]);
       for (const x of [-.7, .7]) for (const z of [-.6, .6]) add(`pasture-post-${x}-${z}`, 'box', 'timber', [x, .25, z], [.08, .5, .08]);
     }
     if (detail === 'close') add('pasture-trough', 'box', 'stone', [.35, .11, -.3], [.45, .2, .22]);
