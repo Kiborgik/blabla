@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-live.55",
+    "date": "2026-10-24",
+    "title": "Room to inspect a town",
+    "changes": [
+      "Selecting a town and using the inspection zoom puts the town in the clear map area, away from the inspector edge.",
+      "World updates keep the current inspection view. Manual panning stays in your control; closing restores the overview only when automatic framing is still active."
+    ]
+  },
+  {
     "version": "0.1.0-live.54",
     "date": "2026-10-23",
     "title": "Supplied parties at the border",
@@ -15,15 +24,6 @@
     "changes": [
       "Consenting partners study when both named institutions actually operate, rather than waiting for two cargo shipments. Two paid study seasons can add bounded research work.",
       "Civilizations compare the real price and predicted completion time before offering or accepting. Route details distinguish study, payment and a completed discovery."
-    ]
-  },
-  {
-    "version": "0.1.0-live.52",
-    "date": "2026-10-23",
-    "title": "Food from the hills",
-    "changes": [
-      "After Masonry and Water management, civilizations can build shared planted plots on suitable owned hills. Construction and operation both require real supplies and local workers.",
-      "Low planted strips and stone edges distinguish hillside commons. Inspection shows actual construction, staffing, shortages and Food produced."
     ]
   }
 ]

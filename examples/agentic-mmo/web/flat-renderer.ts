@@ -496,13 +496,13 @@ export function createFlatAtlasRenderer(
     },
     select,
     selectRoute: (id) => { if (id !== selectedRoute) { selectedRoute = id; drawRoutes(); resize(); } },
-    frameCity: (id, anchor) => {
+    frameCity: (id, anchor, policy) => {
       const city = world.cities.find((candidate) => cityKey(candidate) === id);
       if (!city) return;
       const point = flatHexPosition(city.q, city.r, tileLookup.get(`${city.q},${city.r}`)?.height ?? .4);
       const box = svg.viewBox.baseVal;
       const current = { x: (point.x - box.x) / box.width, y: (point.z - box.y) / box.height };
-      const target = unobscuredInspectionAnchor(current, anchor, { width: container.clientWidth, height: container.clientHeight }, mapHierarchyObstacles(container));
+      const target = unobscuredInspectionAnchor(current, anchor, { width: container.clientWidth, height: container.clientHeight }, mapHierarchyObstacles(container), policy);
       const shift = cameraShiftForAnchor(
         current, target, { x: 1 / box.width, y: 0 }, { x: 0, y: .72 / box.height },
       );

@@ -13,18 +13,37 @@ const overlays: ScreenBox[] = [
   { left: 842, top: 144, width: 320, height: 546 },
 ];
 
-void test('inspection keeps an already unobscured city instead of dragging land to the largest empty rectangle', () => {
+void test('inspection maintenance keeps an already unobscured city instead of dragging land to the largest empty rectangle', () => {
   const current = { x: 337 / desktop.width, y: 250 / desktop.height };
   const before = structuredClone(overlays);
   assert.strictEqual(unobscuredInspectionAnchor(current, { x: 594 / 1180, y: 420 / 756 }, desktop, overlays), current);
   assert.deepEqual(overlays, before);
 });
 
-void test('inspection pans an obscured desktop city only to the nearest clear edge with label room', () => {
+void test('inspection maintenance pans an obscured desktop city only to the nearest clear edge with label room', () => {
   const target = unobscuredInspectionAnchor({ x: 1020 / 1180, y: 420 / 756 }, { x: .5, y: .5 }, desktop, overlays);
   assert.equal(target.x * desktop.width, 792);
   assert.equal(target.y * desktop.height, 420);
   assert.strictEqual(unobscuredInspectionAnchor(target, { x: .5, y: .5 }, desktop, overlays), target);
+});
+
+void test('explicit inspection focus centers clear and obscured towns without mutating inputs', () => {
+  const preferred = { x: 594 / 1180, y: 420 / 756 };
+  const before = structuredClone(overlays);
+  for (const current of [{ x: 337 / 1180, y: 250 / 756 }, { x: 1020 / 1180, y: 420 / 756 }]) {
+    const target = unobscuredInspectionAnchor(current, preferred, desktop, overlays, 'focus');
+    assert.deepEqual(target, preferred);
+    assert.deepEqual(unobscuredInspectionAnchor(target, preferred, desktop, overlays, 'focus'), preferred);
+    assert.strictEqual(unobscuredInspectionAnchor(target, { x: .5, y: .5 }, desktop, overlays, 'maintain'), target);
+  }
+  assert.deepEqual(overlays, before);
+});
+
+void test('explicit inspection focus chooses the safe point nearest an obstructed preference rather than the current town', () => {
+  const current = { x: 337 / 1180, y: 250 / 756 };
+  const target = unobscuredInspectionAnchor(current, { x: 1020 / 1180, y: 420 / 756 }, desktop, overlays, 'focus');
+  assert.equal(target.x * desktop.width, 792);
+  assert.equal(target.y * desktop.height, 420);
 });
 
 void test('narrow inspection clears the real bottom sheet, heading, controls and civilization dock', () => {
@@ -39,6 +58,8 @@ void test('narrow inspection clears the real bottom sheet, heading, controls and
   const target = unobscuredInspectionAnchor({ x: .5, y: 600 / 844 }, { x: .4, y: .25 }, viewport, blocked);
   assert.equal(target.x, .5);
   assert.equal(target.y * viewport.height, 300);
+  const focused = unobscuredInspectionAnchor(target, { x: .4, y: .25 }, viewport, blocked, 'focus');
+  assert.deepEqual(focused, { x: .4, y: .25 });
   for (const box of blocked) assert.ok(target.x * viewport.width + 48 <= box.left || target.x * viewport.width - 48 >= box.left + box.width
     || target.y * viewport.height + 48 <= box.top || target.y * viewport.height - 48 >= box.top + box.height);
 });
@@ -55,15 +76,18 @@ void test('offscreen cities move inside the viewport without hidden or outside o
 
 void test('an unavailable viewport or fully blocked map does not invent a safe framing location', () => {
   const current = { x: .7, y: .6 };
-  assert.strictEqual(unobscuredInspectionAnchor(current, { x: .5, y: .5 }, { width: 0, height: 700 }, []), current);
-  assert.strictEqual(unobscuredInspectionAnchor(current, { x: .5, y: .5 }, desktop, [{ left: 0, top: 0, ...desktop }]), current);
+  for (const policy of ['maintain', 'focus'] as const) {
+    assert.strictEqual(unobscuredInspectionAnchor(current, { x: .5, y: .5 }, { width: 0, height: 700 }, [], policy), current);
+    assert.strictEqual(unobscuredInspectionAnchor(current, { x: .5, y: .5 }, desktop, [{ left: 0, top: 0, ...desktop }], policy), current);
+    assert.strictEqual(unobscuredInspectionAnchor(current, { x: NaN, y: .5 }, desktop, [], policy), current);
+  }
 });
 
-void test('minimal framing retains exact oblique SVG and tilted Three projection at multiple zoom levels', () => {
-  for (const viewport of [desktop, { width: 390, height: 844 }]) for (const zoom of [.65, 1, 2.2]) {
+void test('focus and maintenance retain exact oblique SVG and tilted Three projection at multiple zoom levels', () => {
+  for (const viewport of [desktop, { width: 390, height: 844 }]) for (const zoom of [.65, 1, 2.2]) for (const policy of ['maintain', 'focus'] as const) {
     const blocked = [{ left: viewport.width / 2, top: 0, width: viewport.width / 2, height: viewport.height }];
     const current = { x: .8, y: .6 };
-    const target = unobscuredInspectionAnchor(current, { x: .25, y: .5 }, viewport, blocked);
+    const target = unobscuredInspectionAnchor(current, { x: .25, y: .5 }, viewport, blocked, policy);
     const worldHeight = 32 / zoom;
     const worldWidth = worldHeight * viewport.width / viewport.height;
     const flat = cameraShiftForAnchor(current, target, { x: 1 / worldWidth, y: 0 }, { x: 0, y: .72 / worldHeight });
@@ -76,7 +100,7 @@ void test('minimal framing retains exact oblique SVG and tilted Three projection
     const point = new THREE.Vector3(8, 2, 6);
     const screen = (value: THREE.Vector3): { x: number; y: number } => { const projected = value.clone().project(camera); return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 }; };
     const start = screen(point);
-    const safe = unobscuredInspectionAnchor(start, { x: .25, y: .5 }, viewport, blocked);
+    const safe = unobscuredInspectionAnchor(start, { x: .25, y: .5 }, viewport, blocked, policy);
     const unitX = screen(point.clone().add(new THREE.Vector3(1, 0, 0)));
     const unitZ = screen(point.clone().add(new THREE.Vector3(0, 0, 1)));
     const shift = cameraShiftForAnchor(start, safe, { x: unitX.x - start.x, y: unitX.y - start.y }, { x: unitZ.x - start.x, y: unitZ.y - start.y });

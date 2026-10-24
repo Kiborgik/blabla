@@ -41,7 +41,7 @@ import { acceptsSnapshot, activityLabel, formatYear, parseWorldRead, projectWorl
 import type { LiveSnapshot } from './live-world.ts';
 import { parseRelease, releaseHistoryPage } from './viewer-state.ts';
 import { createViewerUpdates, preferencesAfterUpdate } from './viewer-updates.ts';
-import { createInspectionSession, inspectionAnchor } from './inspection-camera.ts';
+import { createInspectionSession, inspectionAnchor, type InspectionFraming } from './inspection-camera.ts';
 import { eventVisual } from '../visuals/world-visuals.ts';
 import type { RouteResultCue } from '../visuals/route-cues.ts';
 import { createCueStream, renderDeltas, routeResultPresentation, visualIcon } from './world-cues.ts';
@@ -432,7 +432,7 @@ function renderInspection(): void {
   if (RESOURCE_IDS.some((resource) => resource === focusedResource)) panel.querySelector<HTMLButtonElement>(`[data-resource="${focusedResource}"]`)?.focus({ preventScroll: true });
 }
 
-function frameInspection(): void {
+function frameInspection(policy: InspectionFraming = 'maintain'): void {
   if (!atlas || !inspectionCamera.active()) return;
   const route = displayed.routes.find((entry) => entry.id === selectedRoute);
   if (route && routeInspectionCity(route) === null) return;
@@ -442,7 +442,7 @@ function frameInspection(): void {
   const heading = element('.world-heading').getBoundingClientRect();
   const tools = element('.map-tools').getBoundingClientRect();
   const window = narrowLayout.matches ? null : mapContentWindow(map.width, map.height, mapHierarchyObstacles(element('#map')));
-  atlas.frameCity(preferences.selectedCity ?? '', window ? { x: (window.left + window.width / 2) / map.width, y: (window.top + window.height / 2) / map.height } : inspectionAnchor(map, heading.bottom, sheet.top, tools.left));
+  atlas.frameCity(preferences.selectedCity ?? '', window ? { x: (window.left + window.width / 2) / map.width, y: (window.top + window.height / 2) / map.height } : inspectionAnchor(map, heading.bottom, sheet.top, tools.left), policy);
 }
 
 function setInspectionOpen(open: boolean): void {
@@ -451,7 +451,7 @@ function setInspectionOpen(open: boolean): void {
   element('.observatory').dataset['inspection'] = String(open);
   if (open && atlas) {
     inspectionCamera.begin(atlas.snapshot());
-    frameInspection();
+    frameInspection('focus');
   } else {
     const restore = inspectionCamera.end();
     if (restore) atlas?.restoreCamera(restore);
@@ -577,28 +577,33 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
   for (const row of document.querySelectorAll<HTMLElement>('[data-civ]')) row.setAttribute('aria-pressed', String(Number(row.dataset['civ']) === preferences.selected));
   const fingerprint = JSON.stringify([worldBody, mars ?? world]);
   if (fingerprint !== mapFingerprint) {
+    const presentationCamera = worldBody === 'earth' ? atlas?.snapshot() : undefined;
     savePreferences();
     if (shift && (shift.x || shift.z)) {
       preferences = { ...preferences, x: preferences.x + shift.x, z: preferences.z + shift.z };
       const framing = inspectionCamera.active(); inspectionCamera.release();
       if (framing) inspectionCamera.begin(preferences);
     }
+    const rendererPreferences = presentationCamera ? { ...preferences, ...presentationCamera,
+      x: presentationCamera.x + (shift?.x ?? 0), z: presentationCamera.z + (shift?.z ?? 0),
+    } : preferences;
     atlas?.dispose();
     atlas = null;
     element('#city-labels').replaceChildren();
     try {
       if (!webgl) throw new Error('Use the supported 2D map');
       atlas = mars ? createMarsBodyRenderer(element('#map'), element('#city-labels'), mars, preferences, selectMarsCivilization, 'webgl')
-        : createAtlasRenderer(element('#map'), element('#city-labels'), world, preferences, selectCity, selectRoute);
+        : createAtlasRenderer(element('#map'), element('#city-labels'), world, rendererPreferences, selectCity, selectRoute);
     } catch {
       webgl = false;
       element('#map').querySelector('canvas')?.remove();
       element('#city-labels').replaceChildren();
       atlas = mars ? createMarsBodyRenderer(element('#map'), element('#city-labels'), mars, preferences, selectMarsCivilization, 'flat')
-        : createFlatAtlasRenderer(element('#map'), world, preferences, selectCity, selectRoute);
+        : createFlatAtlasRenderer(element('#map'), world, rendererPreferences, selectCity, selectRoute);
     }
     if (initialOverview && (mars || world.tiles.length)) { atlas.reset(); initialOverview = false; savePreferences(); }
     mapFingerprint = fingerprint;
+    if (shift && (shift.x || shift.z)) savePreferences();
     viewerSettings.refresh();
   }
   atlas?.selectRoute(selectedRoute);
@@ -762,7 +767,7 @@ async function readWorld(): Promise<void> {
   finally { reading = false; renderConnection(); }
 }
 
-for (const [id, factor] of [['#zoom-in', 1.2], ['#zoom-out', 1 / 1.2]] as const) element(id).addEventListener('click', () => { atlas?.zoom(factor); frameInspection(); savePreferences(); });
+for (const [id, factor] of [['#zoom-in', 1.2], ['#zoom-out', 1 / 1.2]] as const) element(id).addEventListener('click', () => { atlas?.zoom(factor); frameInspection('focus'); savePreferences(); });
 element('#reset-camera').addEventListener('click', () => { setInspectionOpen(false); inspectionCamera.release(); atlas?.reset(); savePreferences(); });
 let mapPointer: { id: number; x: number; y: number } | null = null;
 element('#map').addEventListener('pointerdown', (event) => {
@@ -774,14 +779,10 @@ element('#map').addEventListener('pointermove', (event) => {
 }, { capture: true });
 for (const type of ['pointerup', 'pointercancel']) element('#map').addEventListener(type, () => { mapPointer = null; }, { capture: true });
 element('#map').addEventListener('wheel', () => inspectionCamera.release(), { passive: true });
-const inspectionResize = new ResizeObserver(frameInspection);
+const inspectionResize = new ResizeObserver(() => frameInspection());
 inspectionResize.observe(element('#map'));
 inspectionResize.observe(element('.inspection'));
-narrowLayout.addEventListener('change', () => {
-  if (element('.observatory').dataset['inspection'] === 'true' && atlas) {
-    inspectionCamera.begin(atlas.snapshot()); frameInspection();
-  }
-});
+narrowLayout.addEventListener('change', () => frameInspection());
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-layer]')) button.addEventListener('click', () => {
   const layer = button.dataset['layer'];
   if (layer !== 'borders' && layer !== 'routes') return;

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
+import { runInNewContext } from 'node:vm';
+import { createInspectionSession, type CameraView } from '../web/inspection-camera.ts';
+import { atlasCoordinateShift, type AtlasWorld } from '../web/atlas.ts';
+import { bodySelection } from '../web/body-view.ts';
 import { createLocalSimulation, advanceLocalSimulation, localSimulationSnapshot, LOCAL_SIMULATION_STORAGE_KEY } from '../web/local-simulation.ts';
 import { createLocalWorldStorage, type LocalCheckpointResult, type LocalWorldStoragePorts } from '../web/local-world-storage.ts';
 import { DEFAULT_PREFERENCES, parsePreferences } from '../web/viewer-state.ts';
@@ -57,6 +62,109 @@ void test('switching sources saves independent views and switching back restores
   const returned = session.observe(parsePreferences(prefs), earth);
   assert.equal(returned.restored, true); assert.equal(returned.preferences.x, camera.x); assert.equal(returned.preferences.selectedCity, camera.selectedCity);
   assert.equal(returned.preferences.worldViews?.length, 2);
+});
+
+function rendererRebuildFixture() {
+  const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
+  const functions = ['savePreferences', 'renderWorld'].map(name => {
+    const source = main.match(new RegExp(`^function ${name}\\([\\s\\S]*?^}`, 'm'))?.[0];
+    assert.ok(source, `${name} production function is present`);
+    return source;
+  }).join('\n');
+  const original = { x: 2, z: -4, zoom: 1.2 };
+  const world: AtlasWorld = { tiles: [
+    { id: 1, q: 0, r: 0, owner: 0, terrain: 'grassland', height: .3 },
+    { id: 2, q: 1, r: 0, owner: 0, terrain: 'grassland', height: .3 },
+  ], cities: [], routes: [] };
+  const created: CameraView[] = [];
+  const makeRenderer = (_element: unknown, _world: unknown, preferences: CameraView) => {
+    let view = { x: preferences.x, z: preferences.z, zoom: preferences.zoom };
+    created.push({ ...view });
+    return { snapshot: () => ({ ...view }), restoreCamera: (next: CameraView) => { view = { ...next }; },
+      dispose: () => {}, selectRoute: () => {}, reset: () => { throw new Error('Restored cameras must not reset'); } };
+  };
+  const worldView = createWorldViewSession();
+  const preferences = { ...worldView.observe(DEFAULT_PREFERENCES, earth).preferences, ...original };
+  const inspectionCamera = createInspectionSession();
+  let stored = '';
+  const context = {
+    preferences, worldView, inspectionCamera, PREFERENCES_KEY: 'camera-test',
+    atlas: makeRenderer(null, world, preferences), displayed: world,
+    worldBody: 'earth', mode: 'local', snapshot: null, selectedRoute: null,
+    mapFingerprint: JSON.stringify(['earth', world]), civilizationFingerprint: '[]',
+    initialOverview: false, webgl: false, atlasCoordinateShift, bodySelection,
+    uniqueCivilizations: () => [], renderBodyControls: () => {}, renderInspection: () => {}, frameInspection: () => {},
+    document: { activeElement: null, querySelectorAll: () => [] }, HTMLElement: class {},
+    element: () => ({ hidden: false, textContent: '', title: '', querySelector: () => null, replaceChildren: () => {} }),
+    createFlatAtlasRenderer: makeRenderer, selectCity: () => {}, selectRoute: () => {},
+    viewerSettings: { refresh: () => {} }, capabilityDialog: { open: false },
+    localStorage: { setItem: (_key: string, value: string) => { stored = value; } },
+  };
+  const render = runInNewContext(stripTypeScriptTypes(`${functions}\nrenderWorld;`), context) as (world: AtlasWorld, retainCoordinates?: boolean) => void;
+  return { context, original, world, created, render, inspectionCamera, saved: () => parsePreferences(JSON.parse(stored)) };
+}
+
+void test('same-world renderer rebuild preserves inspection presentation while persisting the original overview', () => {
+  const f = rendererRebuildFixture();
+  f.inspectionCamera.begin(f.original);
+  const focused = { x: 9, z: 12, zoom: 2.4 };
+  f.context.atlas.restoreCamera(focused);
+  const changed = { ...f.world, tiles: f.world.tiles.map(tile => ({ ...tile, owner: 1 })) };
+  f.render(changed, true);
+  assert.deepEqual(f.context.atlas.snapshot(), focused);
+  assert.deepEqual(f.created.at(-1), focused);
+  assert.equal(f.created.length, 2);
+  assert.equal(f.saved().zoom, f.original.zoom);
+  assert.equal(f.saved().x, f.original.x);
+  assert.equal(f.saved().z, f.original.z);
+  assert.equal(f.saved().worldViews?.[0]?.camera.zoom, f.original.zoom);
+  f.render(changed, true);
+  assert.equal(f.created.length, 2);
+  assert.deepEqual(f.context.atlas.snapshot(), focused);
+  const restored = f.inspectionCamera.end(); assert.ok(restored);
+  f.context.atlas.restoreCamera(restored);
+  assert.deepEqual(f.context.atlas.snapshot(), f.original);
+});
+
+void test('same-world coordinate rebase moves presentation and restoration once without changing requested zoom', () => {
+  const f = rendererRebuildFixture();
+  f.inspectionCamera.begin(f.original);
+  const focused = { x: 9, z: 12, zoom: 2.4 };
+  f.context.atlas.restoreCamera(focused);
+  const changed = { ...f.world, tiles: f.world.tiles.map(tile => ({ ...tile, q: tile.q + 1, r: tile.r - 1 })) };
+  const offset = { x: Math.sqrt(3) / 2, z: -1.5 };
+  f.render(changed, true);
+  const presentation = f.context.atlas.snapshot();
+  assert.ok(Math.abs(presentation.x - focused.x - offset.x) < 1e-9);
+  assert.equal(presentation.z, focused.z + offset.z);
+  assert.equal(presentation.zoom, focused.zoom);
+  assert.ok(Math.abs(f.saved().x - f.original.x - offset.x) < 1e-9);
+  assert.equal(f.saved().z, f.original.z + offset.z);
+  assert.equal(f.saved().zoom, f.original.zoom);
+  f.render({ ...changed, tiles: changed.tiles.map(tile => ({ ...tile, owner: 1 })) }, true);
+  assert.deepEqual(f.context.atlas.snapshot(), presentation);
+  const restored = f.inspectionCamera.end(); assert.ok(restored);
+  assert.ok(Math.abs(restored.x - f.original.x - offset.x) < 1e-9);
+  assert.equal(restored.z, f.original.z + offset.z);
+  assert.equal(restored.zoom, f.original.zoom);
+  assert.equal(f.saved().zoom, f.original.zoom);
+  assert.equal(f.saved().x, restored.x);
+  assert.equal(f.saved().z, restored.z);
+});
+
+void test('released manual camera survives renderer rebuild without restoring inspection ownership', () => {
+  const f = rendererRebuildFixture();
+  f.inspectionCamera.begin(f.original);
+  f.inspectionCamera.release();
+  const manual = { x: -8, z: 13, zoom: 3 };
+  f.context.atlas.restoreCamera(manual);
+  f.render({ ...f.world, tiles: f.world.tiles.map(tile => ({ ...tile, owner: 1 })) }, true);
+  assert.deepEqual(f.context.atlas.snapshot(), manual);
+  assert.equal(f.saved().zoom, manual.zoom);
+  assert.equal(f.saved().x, manual.x);
+  assert.equal(f.saved().z, manual.z);
+  assert.equal(f.inspectionCamera.active(), false);
+  assert.equal(f.inspectionCamera.end(), null);
 });
 
 void test('sample or loading views cannot overwrite the last qualified world camera', () => {

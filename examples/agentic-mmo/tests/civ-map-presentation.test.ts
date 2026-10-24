@@ -153,6 +153,16 @@ class SvgFixtureElement {
   append(...children: SvgFixtureElement[]): void { for (const child of children) child.parentElement = this; this.children.push(...children); }
   prepend(...children: SvgFixtureElement[]): void { for (const child of children) child.parentElement = this; this.children.unshift(...children); }
   replaceChildren(...children: SvgFixtureElement[]): void { this.children = []; this.append(...children); }
+  replaceWith(replacement: SvgFixtureElement): void {
+    const parent = this.parentElement;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    if (index < 0) return;
+    replacement.remove();
+    replacement.parentElement = parent;
+    parent.children.splice(index, 1, replacement);
+    this.parentElement = null;
+  }
   addEventListener(): void {}
   remove(): void { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(child => child !== this); }
   getBoundingClientRect(): typeof this.bounds { return this.bounds; }
@@ -254,7 +264,7 @@ void test('full-viewport hierarchy includes sibling shell bars in local coordina
   assert.deepEqual(mapHierarchyObstacles(container as unknown as HTMLElement), []);
 });
 
-void test('actual fallback inspection preserves clear geography and minimally reveals an obscured city', () => withSvgFixture(() => {
+void test('actual fallback inspection separates minimal maintenance from centered focus at requested zoom', () => withSvgFixture(() => {
   const app = new SvgFixtureElement('div'); app.setAttribute('id', 'app');
   const container = new SvgFixtureElement('div'); container.clientWidth = 1180; container.clientHeight = 756; container.bounds = { left: 0, top: 0, width: 1180, height: 756 };
   const panel = new SvgFixtureElement('aside'); panel.setAttribute('class', 'inspection'); panel.bounds = { left: 842, top: 144, width: 320, height: 546 };
@@ -282,6 +292,32 @@ void test('actual fallback inspection preserves clear geography and minimally re
     assert.ok(Math.abs((point.z - box.y) / box.height * container.clientHeight - 420) < 1e-8);
     assert.equal(renderer.snapshot().zoom, home.zoom);
     const retained = renderer.snapshot(); renderer.frameCity(city.cityId, { x: .5, y: .5 }); assert.deepEqual(renderer.snapshot(), retained);
+    const preferred = { x: 594 / 1180, y: 420 / 756 };
+    const assertFocused = (): void => {
+      const box = svg.viewBox.baseVal;
+      assert.ok(Math.abs((point.x - box.x) / box.width - preferred.x) < 1e-9);
+      assert.ok(Math.abs((point.z - box.y) / box.height - preferred.y) < 1e-9);
+    };
+    renderer.frameCity(city.cityId, preferred, 'focus');
+    assertFocused();
+    assert.equal(renderer.snapshot().zoom, home.zoom);
+    renderer.zoom(1.2);
+    renderer.frameCity(city.cityId, preferred, 'focus');
+    assertFocused();
+    assert.equal(renderer.snapshot().zoom, home.zoom * 1.2);
+    const focused = renderer.snapshot();
+    renderer.frameCity(city.cityId, preferred, 'focus');
+    assertFocused();
+    assert.ok(Math.abs(renderer.snapshot().x - focused.x) < 1e-9);
+    assert.ok(Math.abs(renderer.snapshot().z - focused.z) < 1e-9);
+    renderer.frameCity(city.cityId, { x: .5, y: .5 }, 'maintain');
+    assertFocused();
+    renderer.zoom(1 / 1.2);
+    renderer.frameCity(city.cityId, preferred, 'focus');
+    assertFocused();
+    assert.equal(renderer.snapshot().zoom, home.zoom);
+    renderer.restoreCamera(home);
+    assert.deepEqual(renderer.snapshot(), home);
     assert.deepEqual(world, before);
   } finally { renderer.dispose(); }
 }));

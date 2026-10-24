@@ -263,7 +263,7 @@ await test('one camera-plane shift places both flat and tilted 3D cities at the 
 await test('inspection restores the original camera, but respects manual navigation', () => {
   const session = createInspectionSession();
   const original = { x: 2, z: -4, zoom: 1.2 };
-  const focused = { x: 9, z: 12, zoom: 1.2 };
+  const focused = { x: 9, z: 12, zoom: 2.2 };
   session.begin(original);
   session.begin(focused);
   assert.deepEqual(session.savedCamera(focused), original);
@@ -595,9 +595,22 @@ await test('small spectator layout keeps named dock and all story facts reachabl
 await test('explicit selected-town zoom reuses inspection framing while direct pan remains manual', () => {
   const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
   const zoom = main.slice(main.indexOf("for (const [id, factor]"), main.indexOf("element('#reset-camera')"));
-  assert.match(zoom, /atlas\?\.zoom\(factor\); frameInspection\(\);/);
+  assert.match(zoom, /atlas\?\.zoom\(factor\); frameInspection\('focus'\);/);
   assert.doesNotMatch(zoom, /inspectionCamera\.release/);
   assert.match(main, /Math\.hypot[\s\S]*?inspectionCamera\.release\(\)/);
+  const framing = main.slice(main.indexOf('function frameInspection('), main.indexOf('function selectRoutePage('));
+  assert.match(framing, /policy: InspectionFraming = 'maintain'/);
+  assert.match(framing, /if \(!atlas \|\| !inspectionCamera\.active\(\)\) return/);
+  assert.match(framing, /inspectionCamera\.begin\(atlas\.snapshot\(\)\);\s*frameInspection\('focus'\)/);
+  const resizing = main.slice(main.indexOf('const inspectionResize'), main.indexOf("for (const button of document.querySelectorAll<HTMLButtonElement>('[data-layer]')"));
+  assert.match(resizing, /new ResizeObserver\(\(\) => frameInspection\(\)\)/);
+  assert.match(resizing, /narrowLayout\.addEventListener\('change', \(\) => frameInspection\(\)\)/);
+  assert.doesNotMatch(resizing, /inspectionCamera\.begin/);
+  for (const file of ['renderer', 'flat-renderer']) {
+    const renderer = readFileSync(new URL(`../web/${file}.ts`, import.meta.url), 'utf8');
+    assert.match(renderer, /frameCity: \(id, anchor, policy\) =>/);
+    assert.match(renderer, /unobscuredInspectionAnchor\(current, anchor,[^\n]+mapHierarchyObstacles\(container\), policy\)/);
+  }
 });
 
 await test('overview and close zoom bounds persist with old compatible preferences', () => {

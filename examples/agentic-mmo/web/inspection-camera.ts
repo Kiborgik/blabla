@@ -2,12 +2,14 @@ import type { ScreenBox } from '../visuals/map-hierarchy.ts';
 
 export interface CameraView { x: number; z: number; zoom: number }
 export interface ScreenPoint { x: number; y: number }
+export type InspectionFraming = 'focus' | 'maintain';
 
 export function unobscuredInspectionAnchor(
   current: ScreenPoint,
   preferred: ScreenPoint,
   viewport: { width: number; height: number },
   blocked: readonly ScreenBox[],
+  policy: InspectionFraming = 'maintain',
 ): ScreenPoint {
   const { width, height } = viewport;
   if (![width, height, current.x, current.y, preferred.x, preferred.y].every(Number.isFinite) || width <= 0 || height <= 0) return current;
@@ -17,8 +19,9 @@ export function unobscuredInspectionAnchor(
     .filter(box => box.right > box.left && box.bottom > box.top);
   const clear = (x: number, y: number): boolean => x >= margin && x <= width - margin && y >= margin && y <= height - margin
     && !obstacles.some(box => x > box.left - margin && x < box.right + margin && y > box.top - margin && y < box.bottom + margin);
-  const start = { x: current.x * width, y: current.y * height };
-  if (clear(start.x, start.y)) return current;
+  const origin = policy === 'focus' ? preferred : current;
+  const start = { x: origin.x * width, y: origin.y * height };
+  if (clear(start.x, start.y)) return origin;
   const clampX = (x: number): number => Math.max(margin, Math.min(width - margin, x));
   const clampY = (y: number): number => Math.max(margin, Math.min(height - margin, y));
   const xs = [...new Set([clampX(start.x), clampX(preferred.x * width), margin, width - margin,

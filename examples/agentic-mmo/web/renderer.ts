@@ -23,7 +23,7 @@ import type { AtlasCue, AtlasWorld } from './atlas.ts';
 import type { ViewerPreferences } from './viewer-state.ts';
 import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor, unobscuredInspectionAnchor } from './inspection-camera.ts';
-import type { CameraView, ScreenPoint } from './inspection-camera.ts';
+import type { CameraView, ScreenPoint, InspectionFraming } from './inspection-camera.ts';
 import { createPartMeshes, createSettlementMeshes, createDistrictMeshes, createImprovementMeshes, createDepositMeshes, createWonderMeshes } from './settlement-three.ts';
 import { LUMBER_MARK_PATH, improvementLabel, improvementMark } from '../visuals/improvement-visuals.ts';
 import { SHORE_FISHERY_MARK_PATH } from '../visuals/shore-fishery-visuals.ts';
@@ -40,7 +40,7 @@ export interface AtlasRenderer {
   reset: () => void;
   select: (id: string) => void;
   selectRoute: (id: string | null) => void;
-  frameCity: (id: string, anchor: ScreenPoint) => void;
+  frameCity: (id: string, anchor: ScreenPoint, policy?: InspectionFraming) => void;
   restoreCamera: (camera: CameraView) => void;
   setLayer: (layer: 'borders' | 'routes', visible: boolean) => void;
   snapshot: () => Pick<ViewerPreferences, 'zoom' | 'x' | 'z'>;
@@ -638,7 +638,7 @@ export function createAtlasRenderer(
     },
     select,
     selectRoute: (id) => { if (id !== selectedRoute) { selectedRoute = id; drawRoutes(); } },
-    frameCity: (id, anchor) => {
+    frameCity: (id, anchor, policy) => {
       const city = cityLabels.find((candidate) => candidate.id === id);
       if (!city) return;
       const damping = controls.enableDamping;
@@ -650,7 +650,7 @@ export function createAtlasRenderer(
         return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 };
       };
       const current = screen(city.point);
-      const target = unobscuredInspectionAnchor(current, anchor, { width: container.clientWidth, height: container.clientHeight }, mapHierarchyObstacles(container));
+      const target = unobscuredInspectionAnchor(current, anchor, { width: container.clientWidth, height: container.clientHeight }, mapHierarchyObstacles(container), policy);
       const unitX = screen(city.point.clone().add(new THREE.Vector3(1, 0, 0)));
       const unitZ = screen(city.point.clone().add(new THREE.Vector3(0, 0, 1)));
       const shift = cameraShiftForAnchor(current, target,
