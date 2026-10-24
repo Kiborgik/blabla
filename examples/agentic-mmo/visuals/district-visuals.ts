@@ -1,4 +1,5 @@
 import type { DistrictAdjacencyFacts } from '../core/simulation/districts.ts';
+import { BUILDINGS, RESOURCE_IDS } from '../core/content.ts';
 import { METRIC_LABELS, civilizationIdentity } from './visual-language.ts';
 import { currentBuildingOperation } from './settlement-development.ts';
 import type { OperationContext } from './settlement-development.ts';
@@ -66,6 +67,36 @@ export function districtLandmarks(district: DistrictView, detail: DetailLevel): 
     : district.buildingId === 'theater-square' ? ['printing-house'] : ['observatory', 'research-lab', 'university', 'library'];
   const maximum = detail === 'close' ? 4 : detail === 'mid' || district.buildingId === 'industrial-zone' ? 2 : 1;
   return priority.filter(id => installed.has(id)).slice(0, maximum);
+}
+
+function districtActivityParts(district: DistrictView, detail: DetailLevel): VisualPart[] {
+  const buildingId = district.buildingId === 'industrial-zone' ? 'guild-workshop' : district.buildingId === 'campus' ? 'university' : null;
+  if (!buildingId || district.status !== 'built' || !district.attachments?.some(item => item.buildingId === buildingId && item.status === 'built')) return [];
+  const result = currentBuildingOperation(district, buildingId);
+  const residents = result?.residents;
+  const definition = BUILDINGS.find(building => building.id === buildingId);
+  if (!result || !residents || !definition || !Number.isInteger(residents.required) || residents.required <= 0
+    || residents.allocated !== residents.required || !Number.isFinite(residents.available) || residents.available < residents.required
+    || !RESOURCE_IDS.every(resource => (definition.operatingInputs?.[resource] ?? 0) <= 0
+      || result.paid[resource] === definition.operatingInputs?.[resource])
+    || !RESOURCE_IDS.some(resource => (definition.production[resource] ?? 0) > 0 && Number.isFinite(result.produced[resource]) && (result.produced[resource] ?? 0) > 0)) return [];
+  const key = JSON.stringify(['district-activity-v1', district.id, district.cityId, district.civId, district.tileId, buildingId]);
+  let hash = 2166136261;
+  for (let index = 0; index < key.length; index++) hash = Math.imul(hash ^ key.charCodeAt(index), 16777619);
+  const variation = (hash >>> 0) / 4294967296 - .5;
+  const parts: VisualPart[] = [];
+  const add = (id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale'], rotation = 0): void => {
+    parts.push({ id: `${district.id}:operation:${buildingId}:${id}`, shape, material, position, scale, rotation });
+  };
+  if (buildingId === 'guild-workshop') {
+    add('doorway', 'box', 'grain', [-.59, .26, .674], [.22, .24, .035]);
+    add('press', 'cylinder', 'metal', [.56 + variation * .01, .32, 0], [.2, .42, .2]);
+    if (detail !== 'far') add('press-beam', 'box', 'grain', [.56 + variation * .01, .49, 0], [.32, .08, .2], variation * .04);
+  } else {
+    add('study-window', 'box', 'studyLight', [variation * .01, .7825, -.264], [.4, .075, .012]);
+    add('study-ledge', 'box', 'metal', [variation * .01, .755, -.2475], [.44, .02, .045]);
+  }
+  return parts;
 }
 
 export function districtParts(district: DistrictView, detail: DetailLevel): VisualPart[] {
@@ -210,7 +241,9 @@ export function districtParts(district: DistrictView, detail: DetailLevel): Visu
     return id === 'site' || id === 'identity' ? 2 : 3;
   };
   const selected = new Set(parts.toSorted((left, right) => priority(left) - priority(right)).slice(0, DISTRICT_PART_BUDGETS[detail]).map(part => part.id));
-  return parts.filter(part => selected.has(part.id)).map(part => ({ ...part,
+  const installed = parts.filter(part => selected.has(part.id));
+  const activity = districtActivityParts(district, detail).slice(0, DISTRICT_PART_BUDGETS[detail] - installed.length);
+  return [...installed, ...activity].map(part => ({ ...part,
     position: [part.position[0] * .72, part.position[1], part.position[2] * .72],
     scale: [part.scale[0] * .72, part.scale[1], part.scale[2] * .72],
   }));
