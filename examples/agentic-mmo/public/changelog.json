@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-build.67",
+    "date": "2026-10-24",
+    "title": "Compare the real cost of a reform",
+    "changes": [
+      "Civilizations compare a government change with keeping their current arrangement, including actual reform prices, transition losses, paid work and household needs. The same accounting applies to empty and occupied policy slots.",
+      "Income from existing work can fund later costs only after it is earned. Accepted promises and finite local resources stay protected; choices with unresolved dependencies are left unquoted rather than treated as free gains."
+    ]
+  },
+  {
     "version": "0.1.0-build.66",
     "date": "2026-10-24",
     "title": "Make room for working places",
@@ -15,15 +24,6 @@
     "changes": [
       "Routine river-flow and woodland-season accounting no longer crowd out founding, reform and discovery in the Chronicle. Their full recorded facts remain available in Events; blocked work stays prominent.",
       "State workforce now explains its released Learning patronage alternative to Urban planning. This is a presentation update; paid simulation rules are unchanged."
-    ]
-  },
-  {
-    "version": "0.1.0-build.64",
-    "date": "2026-10-24",
-    "title": "Learning or building",
-    "changes": [
-      "Civilizations that complete State workforce can choose Learning patronage instead of Urban planning, even when a wildcard slot is available. Existing reform prices, commitments and government transitions still apply.",
-      "A fully paid and staffed Library, House of learning or University earns 25% more of its actual Science under patronage. Construction keeps its separate priority; receipts show the exact earned contribution. New worlds start fresh."
     ]
   }
 ]

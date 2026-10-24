@@ -446,7 +446,7 @@ function actionWeight(option: ActionOption, context: Situation): number {
       const previous = current ? governmentValue(current.governmentId, current.assignments, context) : 0;
       const priority = context.patronage?.(action);
       if (priority && !priority.supported) return 0;
-      const gain = value - previous + (priority?.priorityGain ?? 0);
+      const gain = priority ? priority.netArrangementGain : value - previous;
       return gain > 0.5 ? 15 + gain : 0;
     }
     case 'apply-research-boost': return 30;

@@ -12,3 +12,17 @@ when observe_learning_patronage {
     expect "supported-priorities-preserve-costs-locks-and-independent-choice": all(after.civic_priority_observations, o => o.commitment_errors == 0 and o.choice_errors == 0)
     expect "current-restart-and-observer-preserve-earned-policy-facts": all(after.civic_priority_observations, o => o.restart_errors == 0 and o.observer_errors == 0)
 }
+
+type ArrangementCashflowObservation {
+    paired_quotes: int, empty_arrangements: int, priority_arrangements: int,
+    immediate_price_errors: int, opening_timing_errors: int, baseline_errors: int,
+    transition_errors: int, protected_obligation_errors: int, finite_resource_errors: int,
+    horizon_errors: int, mutation_errors: int, boundedness_errors: int
+}
+state arrangement_cashflow_observations: [ArrangementCashflowObservation]
+action observe_arrangement_cashflows()
+when observe_arrangement_cashflows {
+    expect "paired-empty-and-priority-quotes-use-incremental-chronology": count(after.arrangement_cashflow_observations) > 0 and all(after.arrangement_cashflow_observations, o => o.paired_quotes > 0 and o.empty_arrangements > 0 and o.priority_arrangements > 0 and o.immediate_price_errors == 0 and o.opening_timing_errors == 0 and o.baseline_errors == 0)
+    expect "transition-and-accepted-obligations-remain-fully-accounted": all(after.arrangement_cashflow_observations, o => o.transition_errors == 0 and o.protected_obligation_errors == 0 and o.finite_resource_errors == 0)
+    expect "cashflow-assessment-is-finite-pure-and-horizon-honest": all(after.arrangement_cashflow_observations, o => o.horizon_errors == 0 and o.mutation_errors == 0 and o.boundedness_errors == 0)
+}
