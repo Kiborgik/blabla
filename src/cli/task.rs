@@ -1181,19 +1181,21 @@ fn write_record(
             2,
         );
     }
-    let mut shown = view(project, task);
-    shown.swallowed_check_argv = swallowed.to_vec();
-    let result = if json {
-        write_json(&shown)
-    } else if whole_view {
-        write_task(
-            task,
-            &project.manifest.root,
-            role_floor(project, &task.role),
-            &shown,
-        )
-    } else {
+    let result = if !json && !whole_view {
         write_task_line(task)
+    } else {
+        let mut shown = view(project, task);
+        shown.swallowed_check_argv = swallowed.to_vec();
+        if json {
+            write_json(&shown)
+        } else {
+            write_task(
+                task,
+                &project.manifest.root,
+                role_floor(project, &task.role),
+                &shown,
+            )
+        }
     };
     if result.is_ok() { 0 } else { 4 }
 }
