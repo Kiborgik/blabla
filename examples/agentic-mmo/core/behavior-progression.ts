@@ -11,7 +11,7 @@ import { paidRecipe } from './simulation/operations.ts';
 import { railEdgeId } from './simulation/rail.ts';
 import { strategicObligations } from './simulation/trade.ts';
 import { createLandTransportPlanner, createSteamTransportPlanner, transportCadence } from './simulation/transport.ts';
-import type { ActionOption, BuildingDefinition, City, Civilization, Resource, Resources, SteamTransportQuote, StrategicDeposit, TradeTerms, WorldState } from './types.ts';
+import type { ActionOption, BuildingDefinition, City, Civilization, GameAction, Resource, Resources, SteamTransportQuote, StrategicDeposit, TradeTerms, WorldState } from './types.ts';
 
 export interface ProgressionPlan {
   coastalNeeded: boolean;
@@ -214,6 +214,13 @@ export function deriveProgressionPlan(state: WorldState, actor: Civilization, pr
   return plan;
 }
 
+export function progressionAcquisitionPurpose(action: GameAction, actor: Civilization, plan: ProgressionPlan): 'strategic-extraction' | 'rail' | null {
+  if (action.type !== 'acquire-tile') return null;
+  const deposit = plan.deposits.get(action.tileId);
+  if (deposit && deposit.remaining > 0 && (actor.strategicResources?.[deposit.resource] ?? 0) < 8) return 'strategic-extraction';
+  return plan.usefulRailTiles.has(action.tileId) ? 'rail' : null;
+}
+
 export function progressionWeight(option: ActionOption, base: number, state: WorldState, actor: Civilization, profile: BehaviorProfile, plan: ProgressionPlan): number {
   const action = option.action;
   const city = 'cityId' in action ? plan.cityById.get(action.cityId ?? '') : undefined;
@@ -246,9 +253,9 @@ export function progressionWeight(option: ActionOption, base: number, state: Wor
     }
     case 'acquire-tile': {
       if (base <= 0) return 0;
-      const deposit = plan.deposits.get(action.tileId);
-      if (deposit && deposit.remaining > 0 && (actor.strategicResources?.[deposit.resource] ?? 0) < 8) return Math.max(base, 80);
-      if (plan.usefulRailTiles.has(action.tileId)) return Math.max(base, 60);
+      const purpose = progressionAcquisitionPurpose(action, actor, plan);
+      if (purpose === 'strategic-extraction') return Math.max(base, 80);
+      if (purpose === 'rail') return Math.max(base, 60);
       return base * (actor.resources.credits > 80 ? 0.5 : 0.05);
     }
     case 'build-rail': return plan.usefulRailEdges.has(railEdgeId(action.fromTileId, action.toTileId)) ? Math.max(base, 120) : base * 0.02;

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-live.56",
+    "date": "2026-10-24",
+    "title": "Buying land for useful work",
+    "changes": [
+      "Civilizations compare exact improvements and districts before ordinary land purchases, including construction costs, local workers and operating supplies.",
+      "A short look ahead can follow work already paid for. Existing obligations stay protected, and a useful owned site can take priority over another purchase. These are plans, not promised income."
+    ]
+  },
+  {
     "version": "0.1.0-live.55",
     "date": "2026-10-24",
     "title": "Room to inspect a town",
@@ -15,15 +24,6 @@
     "changes": [
       "Civilizations can send small paid resident parties toward an exact unworked rival plot. They carry Food, move across adjacent land, and leave room for people to return.",
       "A defender can yield or fund a response. One bounded clash can change control; inspection keeps the original purchase, current control, casualties and returns distinct."
-    ]
-  },
-  {
-    "version": "0.1.0-live.53",
-    "date": "2026-10-23",
-    "title": "Learning through working institutions",
-    "changes": [
-      "Consenting partners study when both named institutions actually operate, rather than waiting for two cargo shipments. Two paid study seasons can add bounded research work.",
-      "Civilizations compare the real price and predicted completion time before offering or accepting. Route details distinguish study, payment and a completed discovery."
     ]
   }
 ]

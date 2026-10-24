@@ -5,16 +5,22 @@ import type { Focus, Resource, WorldState } from './types.ts';
 export const LEGACY_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v1';
 export const BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v2';
 export const FOOD_BUDGET_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v3-food-budget';
+export const FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v5-funded-landwork';
 export { behaviorSeed, TEMPERAMENT_BEHAVIOR_POLICY_VERSION };
-export type BehaviorPolicyVersion = typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION | typeof TEMPERAMENT_BEHAVIOR_POLICY_VERSION;
+export type BehaviorPolicyVersion = typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION | typeof TEMPERAMENT_BEHAVIOR_POLICY_VERSION | typeof FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION;
+
+export function usesStrategicTemperaments(policyVersion: BehaviorPolicyVersion): boolean {
+  return policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION;
+}
 
 export function behaviorPolicyVersion(state: Pick<WorldState, 'unlockedFeatures' | 'origin'>): BehaviorPolicyVersion {
   if (!state.unlockedFeatures.includes(FOOD_BUDGET_RULES.featureId)) return BEHAVIOR_POLICY_VERSION;
+  if (state.origin?.temperamentVersion === STRATEGIC_TEMPERAMENT_VERSION && state.unlockedFeatures.includes('funded-landwork-planning')) return FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION;
   return state.origin?.temperamentVersion === STRATEGIC_TEMPERAMENT_VERSION ? TEMPERAMENT_BEHAVIOR_POLICY_VERSION : FOOD_BUDGET_BEHAVIOR_POLICY_VERSION;
 }
 
 export function behaviorDrawVersion(policyVersion: BehaviorPolicyVersion): typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION {
-  return policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION ? FOOD_BUDGET_BEHAVIOR_POLICY_VERSION : policyVersion;
+  return policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION ? FOOD_BUDGET_BEHAVIOR_POLICY_VERSION : policyVersion;
 }
 
 export type BehaviorPhase = 'survival' | 'recovery' | 'development' | 'expansion' | 'trade' | 'consolidation' | 'director';
@@ -75,7 +81,7 @@ export const BEHAVIOR_PROFILES: readonly BehaviorProfile[] = [
 ];
 
 export function civilizationBehaviorProfile(seed: number, seat: number, policyVersion: BehaviorPolicyVersion = BEHAVIOR_POLICY_VERSION): BehaviorProfile {
-  if (policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION) {
+  if (usesStrategicTemperaments(policyVersion)) {
     const allocation = strategicTemperament(seed, seat);
     const template = BEHAVIOR_PROFILES[allocation.templateIndex]!;
     const domain = `${STRATEGIC_TEMPERAMENT_VERSION}/jitter/${seed >>> 0}/${seat}/${allocation.archetypeId}`;

@@ -10,11 +10,11 @@ import { createPastoralSites } from './simulation/pastoral.ts';
 import { createLandTransportPlanner } from './simulation/transport.ts';
 import { generatePlaceName } from './place-names.ts';
 import { isCoastalSite } from './simulation/coastal.ts';
-import { civilizationBehaviorProfile, TEMPERAMENT_BEHAVIOR_POLICY_VERSION } from './behavior-profiles.ts';
+import { civilizationBehaviorProfile, behaviorPolicyVersion } from './behavior-profiles.ts';
 
-export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' | 'settlement-hillside-commonworks-1' | 'settlement-supported-studies-1' | 'settlement-supplied-borders-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion, temperamentVersion?: StrategicTemperamentVersion): WorldState {
+export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' | 'settlement-hillside-commonworks-1' | 'settlement-supported-studies-1' | 'settlement-supplied-borders-1' | 'settlement-funded-landwork-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion, temperamentVersion?: StrategicTemperamentVersion): WorldState {
   if (namingVersion !== undefined && namingVersion !== 'cultural-toponyms-v1') throw new RangeError('Generated worlds require a supported naming version');
-  if (temperamentVersion !== undefined && (temperamentVersion !== 'strategic-temperaments-v1' || !['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1'].includes(initialReleaseId))) throw new RangeError('Strategic temperaments require their supported version and Food-budget genesis');
+  if (temperamentVersion !== undefined && (temperamentVersion !== 'strategic-temperaments-v1' || !['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1', 'settlement-funded-landwork-1'].includes(initialReleaseId))) throw new RangeError('Strategic temperaments require their supported version and Food-budget genesis');
   if (parseUtcTimestamp(clockEpoch) === null) throw new RangeError('Generated worlds require an explicit UTC clock epoch');
   const geography = generateGeography(seed);
   const state = createWorld(seed, clockEpoch, initialReleaseId);
@@ -40,7 +40,7 @@ export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialRel
       occupied.push(city.name);
     }
   }
-  if (temperamentVersion) for (const city of state.cities) city.focus = civilizationBehaviorProfile(state.seed, city.civId, TEMPERAMENT_BEHAVIOR_POLICY_VERSION).preferredFocus;
+  if (temperamentVersion) for (const city of state.cities) city.focus = civilizationBehaviorProfile(state.seed, city.civId, behaviorPolicyVersion(state)).preferredFocus;
   state.strategicDeposits = createStrategicDeposits(state);
   state.pastoralSites = createPastoralSites(state);
   state.coalDeposits = createCoalDeposits(state);

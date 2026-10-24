@@ -1,14 +1,15 @@
+import { createLandworkPlanner, type FundedLandworkQuote } from './behavior-landwork.ts';
 import { deriveBorderPlan, borderWeight, borderPriority, borderReason, borderProtects, type BorderPlan } from './behavior-border.ts';
 import { createPaidFoodSiteAffordability, paidFoodSite } from './behavior-paid-food-sites.ts';
 import { revealedHorseSite } from './simulation/pastoral.ts';
 import { deriveKnowledgePlan, knowledgeProtects, knowledgeReason, knowledgeWeight, type KnowledgePlan } from './behavior-knowledge.ts';
 import { FOOD_BUDGET_RULES } from './food-security-content.ts';
 import { civilizationFoodUpkeep, forecastCivilizationFoodProduction } from './simulation/food-security.ts';
-import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, behaviorDrawVersion, behaviorPolicyVersion, type BehaviorPolicyVersion, LEGACY_BEHAVIOR_POLICY_VERSION, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
+import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, usesStrategicTemperaments, behaviorDrawVersion, behaviorPolicyVersion, type BehaviorPolicyVersion, LEGACY_BEHAVIOR_POLICY_VERSION, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
 import { isStrategicDevelopment, isStrategicExchange, ordinaryPhaseWeight } from './strategic-temperaments.ts';
 import { deriveReliefPlan, reliefPriority, reliefProtects, reliefReason, reliefWeight, type ReliefPlan } from './behavior-relief.ts';
 import { deriveDiplomacyPlan, diplomacyPriority, diplomacyProtects, diplomacyReason, diplomacyWeight, type DiplomacyPlan } from './behavior-diplomacy.ts';
-import { deriveProgressionPlan, progressionOperationalPriority, progressionTransportPriority, progressionWeight, type ProgressionPlan } from './behavior-progression.ts';
+import { deriveProgressionPlan, progressionAcquisitionPurpose, progressionOperationalPriority, progressionTransportPriority, progressionWeight, type ProgressionPlan } from './behavior-progression.ts';
 import { BUILDINGS, CIVICS, ECONOMY_RULES, FOCUS_IDS, GOVERNMENTS, IMPROVEMENTS, POLICIES, RESOURCE_IDS, TECHNOLOGIES, TRADE_RECIPES, WONDERS } from './content.ts';
 import { legalActions } from './engine.ts';
 import { decisionObligations } from './simulation/decisions.ts';
@@ -21,7 +22,7 @@ import { siteProduction } from './simulation/sites.ts';
 import { cityProductivity } from './simulation/world.ts';
 import { DIRECTOR_SEAT, type ActionOption, type City, type Civilization, type Focus, type GameAction, type Resources, type TradeTerms, type WorldState } from './types.ts';
 
-export { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion };
+export { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion };
 export type { BehaviorPhase, BehaviorProfile };
 
 export interface BehaviorMemory {
@@ -93,7 +94,7 @@ function validMemoryFields(value: unknown, legacy = false): boolean {
 }
 
 export function isBehaviorMemory(value: unknown): value is BehaviorMemory {
-  return record(value) && value.version === 2 && (value.policyVersion === BEHAVIOR_POLICY_VERSION || value.policyVersion === FOOD_BUDGET_BEHAVIOR_POLICY_VERSION || value.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION) && validMemoryFields(value);
+  return record(value) && value.version === 2 && (value.policyVersion === BEHAVIOR_POLICY_VERSION || value.policyVersion === FOOD_BUDGET_BEHAVIOR_POLICY_VERSION || value.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || value.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION) && validMemoryFields(value);
 }
 
 export function isLegacyBehaviorMemory(value: unknown): value is LegacyBehaviorMemory {
@@ -125,6 +126,8 @@ function noDecision(memory: BehaviorMemory, reason: string): BehaviorDecision {
   return { action: null, memory, explanation: { profileId: memory.profileId, phase: memory.phase, reason, required: false } };
 }
 
+interface ScoredLandwork { quote: FundedLandworkQuote; weight: number }
+
 interface Situation {
   state: WorldState;
   actor: Civilization;
@@ -142,6 +145,7 @@ interface Situation {
   relief: ReliefPlan | null;
   knowledge: KnowledgePlan | null;
   border: BorderPlan | null;
+  fundedLandwork: ReadonlyMap<string, ScoredLandwork> | null;
   paidFoodSiteAffordable: ReturnType<typeof createPaidFoodSiteAffordability>;
 }
 
@@ -165,7 +169,9 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
+  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, fundedLandwork: null, paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
+  if (memory.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION) context.fundedLandwork = deriveFundedLandworkPlan(context, options);
+  return context;
 }
 
 function selectPhase(context: Situation, options: readonly ActionOption[], candidates?: readonly Candidate[]): BehaviorPhase {
@@ -192,6 +198,53 @@ function selectPhase(context: Situation, options: readonly ActionOption[], candi
 
 function outputValue(outputs: Partial<Resources>, context: Situation): number {
   return RESOURCE_IDS.reduce((sum, resource) => sum + (outputs[resource] ?? 0) * context.weights[resource], 0);
+}
+
+function landworkValue(quote: FundedLandworkQuote, context: Situation): number {
+  const net = outputValue(quote.marginalOutput, context) - outputValue(quote.operatingInputs, context);
+  const cost = outputValue(quote.acquisitionCost, context) + outputValue(quote.setupCost, context);
+  const weight = 2 * net * context.profile.priorities.expansion / (1 + cost / 80) / (1 + quote.firstOperationBeat);
+  return Number.isFinite(weight) && weight > 0 ? weight : 0;
+}
+
+function deriveFundedLandworkPlan(context: Situation, options: readonly ActionOption[]): ReadonlyMap<string, ScoredLandwork> {
+  const result = new Map<string, ScoredLandwork>();
+  if (context.foodRisk) return result;
+  const planner = createLandworkPlanner(context.state, context.actor.id);
+  const ownedValues = new Map<string, number>();
+  const towns = new Map<string, ScoredLandwork>();
+  const compare = (left: ScoredLandwork, right: ScoredLandwork): number => right.weight - left.weight
+    || left.quote.tileId - right.quote.tileId || stableKey(left.quote.action).localeCompare(stableKey(right.quote.action));
+  for (const option of options) {
+    const action = option.action;
+    if (action.type !== 'acquire-tile' || progressionAcquisitionPurpose(action, context.actor, context.progression)
+      || context.actor.resources.credits < (option.territoryQuote?.paid.credits ?? 0) + 12 || protectedCandidate(option, context)) continue;
+    let ownedValue = ownedValues.get(action.cityId);
+    if (ownedValue === undefined) {
+      ownedValue = planner.owned(action.cityId).reduce((best, quote) => Math.max(best, landworkValue(quote, context)), 0);
+      ownedValues.set(action.cityId, ownedValue);
+    }
+    const ownedBest = ownedValue;
+    const choices = planner.quote(action.cityId, action.tileId).quotes.map(quote => ({ quote, weight: landworkValue(quote, context) }))
+      .filter(choice => choice.weight > 0 && choice.weight > ownedBest).toSorted(compare);
+    const choice = choices[0]; const previous = towns.get(action.cityId);
+    if (choice && (!previous || compare(choice, previous) < 0)) towns.set(action.cityId, choice);
+  }
+  for (const [cityId, choice] of towns) result.set(`${cityId}/${choice.quote.tileId}`, choice);
+  return result;
+}
+
+function fundedLandworkReason(action: GameAction, context: Situation): string | null {
+  if (action.type !== 'acquire-tile') return null;
+  const quote = context.fundedLandwork?.get(`${action.cityId}/${action.tileId}`)?.quote;
+  if (!quote) return null;
+  const nextAction = quote.action;
+  const use = nextAction.type === 'improve' ? IMPROVEMENTS.find(item => item.id === nextAction.improvementId)?.name
+    : BUILDINGS.find(item => item.id === nextAction.project)?.name;
+  const admissionSlack = Math.max(0, quote.startDelayBeats - quote.waitBeats);
+  const wait = quote.orderId ? `retain paid work for ${quote.waitBeats} beats, then ` : '';
+  const admission = admissionSlack > 0 ? `allow up to ${admissionSlack} beat${admissionSlack === 1 ? '' : 's'} for command admission, then ` : '';
+  return `Plan ${use ?? 'exact work'} at tile ${quote.tileId} for ${quote.cityId}; ${wait}${admission}${quote.workBeats} construction beats. Conditional first operation within ${quote.firstOperationBeat} beats if this work is chosen next and conditions hold; purchase produces nothing and next work is not automatic.`;
 }
 
 function constructionWeight(action: GameAction, context: Situation): number {
@@ -310,6 +363,8 @@ function actionWeight(option: ActionOption, context: Situation): number {
     }
     case 'acquire-tile': {
       if (context.foodRisk || actor.resources.credits < (option.territoryQuote?.paid.credits ?? 0) + 12) return 0;
+      if (context.fundedLandwork && !progressionAcquisitionPurpose(action, actor, context.progression))
+        return context.fundedLandwork.get(`${action.cityId}/${action.tileId}`)?.weight ?? 0;
       const tile = state.tiles.find(candidate => candidate.id === action.tileId);
       if (!tile) return 0;
       let potential = outputValue(siteProduction(state, tile), context);
@@ -490,13 +545,13 @@ function scoreCandidates(context: Situation, options: readonly ActionOption[], l
     const relief = context.relief ? reliefWeight(option, diplomatic, context.relief) : diplomatic;
     const knowledgeable = context.knowledge ? knowledgeWeight(option, relief, context.knowledge) : relief;
     const assessed = context.border ? borderWeight(option, knowledgeable, context.border) : knowledgeable;
-    const weight = context.memory.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION && protectedCandidate(option, context) ? 0 : assessed;
+    const weight = usesStrategicTemperaments(context.memory.policyVersion) && protectedCandidate(option, context) ? 0 : assessed;
     return { option, weight, ...classify(option.action), lane: laneOf(option.action, lanes) };
   });
 }
 
 function assessSituation(context: Situation, options: readonly ActionOption[], lanes: Map<string, Set<string>>): Candidate[] {
-  if (context.memory.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION) {
+  if (usesStrategicTemperaments(context.memory.policyVersion)) {
     context.phase = 'development';
     const neutral = scoreCandidates(context, options, lanes);
     context.phase = selectPhase(context, options, neutral);
@@ -515,7 +570,7 @@ export function assessCivilizationBehavior(state: WorldState, seat: number, prev
   return { phase: context.phase, foodRisk: context.foodRisk, severeFoodRisk: context.severeFoodRisk, upkeep: context.upkeep,
     commitmentUntilRound: (context.phase === memory.phase ? memory.phaseSinceRound : state.round) + profile.commitmentRounds,
     candidates: candidates.map(candidate => ({ ...candidate, protected: protectedCandidate(candidate.option, context), urgent: urgent(candidate, context),
-      ordinaryWeight: memory.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION ? ordinaryPhaseWeight(candidate.option.action, candidate.weight, context.phase) : candidate.weight })) };
+      ordinaryWeight: usesStrategicTemperaments(memory.policyVersion) ? ordinaryPhaseWeight(candidate.option.action, candidate.weight, context.phase) : candidate.weight })) };
 }
 
 function ordinaryReason(context: Situation): string {
@@ -575,9 +630,9 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
     pool = required.filter(candidate => candidate.lane === next).map(candidate => ({ ...candidate, weight: Math.max(0.1, candidate.weight) }));
     reason = `Start the next required ${next?.startsWith('construction:') ? 'town construction' : next} commitment.`;
   } else {
-    pool = candidates.filter(candidate => candidate.weight > 0).map(candidate => memory.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION
+    pool = candidates.filter(candidate => candidate.weight > 0).map(candidate => usesStrategicTemperaments(memory.policyVersion)
       ? { ...candidate, weight: ordinaryPhaseWeight(candidate.option.action, candidate.weight, context.phase) } : candidate);
-    reason = memory.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION ? ordinaryReason(context) : `${profile.name} favor ${context.phase === 'trade' ? 'useful exchanges' : context.phase === 'expansion' ? 'careful expansion' : context.phase === 'survival' ? 'food security' : context.phase === 'recovery' ? 'recovery' : 'steady development'}.`;
+    reason = usesStrategicTemperaments(memory.policyVersion) ? ordinaryReason(context) : `${profile.name} favor ${context.phase === 'trade' ? 'useful exchanges' : context.phase === 'expansion' ? 'careful expansion' : context.phase === 'survival' ? 'food security' : context.phase === 'recovery' ? 'recovery' : 'steady development'}.`;
   }
   if (!pool.length) return noDecision(memory, 'No useful legal action is available; existing commitments remain unchanged.');
   const choice = weightedChoice(pool, behaviorSeed(`${behaviorDrawVersion(memory.policyVersion)}:${state.seed}:${seat}:${memory.decisionCount}`));
@@ -591,6 +646,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   if (context.relief) reason = reliefReason(choice.option, context.relief) ?? reason;
   if (context.knowledge) reason = knowledgeReason(choice.option, context.knowledge) ?? reason;
   if (context.border) reason = borderReason(choice.option, context.border) ?? reason;
+  reason = fundedLandworkReason(choice.option.action, context) ?? reason;
   return committedDecision(state, memory, choice, context.phase, reason, profile, isUrgent);
 }
 

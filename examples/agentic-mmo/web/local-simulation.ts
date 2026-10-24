@@ -1,5 +1,6 @@
 import { applyCommand, applyHistoryAdvance, catchUpClock, catchUpStrategy } from '../core/engine.ts';
-import { behaviorPolicyVersion, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, type BehaviorMemory } from '../core/behaviors.ts';
+import { behaviorPolicyVersion, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
+import { FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION } from '../core/behavior-profiles.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { RELEASES } from '../core/release.ts';
 import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
@@ -8,8 +9,9 @@ import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:supplied-borders-v1';
-export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-supplied-borders-1';
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:funded-landwork-v1';
+export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-funded-landwork-1';
+export const ACTIVE_LOCAL_POLICY_VERSION = FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION;
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
 const EPOCH = '2000-01-01T00:00:00.000Z';
 const MAXIMUM_STEPS = 60;
@@ -42,7 +44,7 @@ export function parseLocalSimulation(value: unknown): LocalSimulation | null {
     || !Number.isSafeInteger(run.steps) || Number(run.steps) < 0
     || typeof run.timestamp !== 'string' || Date.parse(run.timestamp) !== Date.parse(EPOCH) + Number(run.steps) * LOCAL_SIMULATION_STEP_MS
     || !isWorldState(run.state) || run.state.seed !== run.seed || run.state.clockEpoch !== EPOCH
-    || run.policyVersion !== TEMPERAMENT_BEHAVIOR_POLICY_VERSION || behaviorPolicyVersion(run.state) !== run.policyVersion
+    || run.policyVersion !== ACTIVE_LOCAL_POLICY_VERSION || behaviorPolicyVersion(run.state) !== run.policyVersion
     || run.state.origin?.generatorVersion !== 'coherent-geography-v1'
     || run.state.origin.initialReleaseId !== ACTIVE_LOCAL_RELEASE_ID || run.state.releaseId !== ACTIVE_LOCAL_RELEASE_ID
     || run.state.origin.namingVersion !== 'cultural-toponyms-v1' || run.state.origin.temperamentVersion !== 'strategic-temperaments-v1'

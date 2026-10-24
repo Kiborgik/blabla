@@ -6,7 +6,7 @@ import { createBehaviorMemory } from '../core/behaviors.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { StrategicTemperamentVersion } from '../core/types.ts';
 import { createAutonomousState } from '../server/autonomous-runner.ts';
-import { ACTIVE_LOCAL_RELEASE_ID, LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, createFreshLocalSimulation, advanceLocalSimulation, parseActiveLocalSimulation, localSimulationSnapshot } from '../web/local-simulation.ts';
+import { ACTIVE_LOCAL_RELEASE_ID, ACTIVE_LOCAL_POLICY_VERSION, LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, createFreshLocalSimulation, advanceLocalSimulation, parseActiveLocalSimulation, localSimulationSnapshot } from '../web/local-simulation.ts';
 import { createLocalWorldStorage } from '../web/local-world-storage.ts';
 import { processLocalSimulationRequest } from '../web/local-simulation-worker.ts';
 
@@ -17,7 +17,7 @@ void test('explicit temperament genesis changes only its marker and allocated st
     const prior = createGeneratedWorld(seed, epoch, ACTIVE_LOCAL_RELEASE_ID, 'cultural-toponyms-v1');
     const fresh = createFreshLocalSimulation(seed);
     assert.equal(prior.origin?.temperamentVersion, undefined);
-    assert.equal(fresh.policyVersion, TEMPERAMENT_BEHAVIOR_POLICY_VERSION);
+    assert.equal(fresh.policyVersion, ACTIVE_LOCAL_POLICY_VERSION);
     assert.equal(fresh.state.origin?.temperamentVersion, 'strategic-temperaments-v1');
     assert.ok(isWorldState(fresh.state));
     const comparable = structuredClone(fresh.state);
@@ -101,7 +101,7 @@ void test('current storage chooses one seeded strategy under lock and resumes it
       entropy: () => { assert.equal(locked, true); draws += 1; return 73; } });
     const first = await storage.restore();
     assert.ok(first.run);
-    assert.equal(first.run.policyVersion, TEMPERAMENT_BEHAVIOR_POLICY_VERSION);
+    assert.equal(first.run.policyVersion, ACTIVE_LOCAL_POLICY_VERSION);
     assert.equal(draws, previous ? 0 : 1);
     assert.equal(writes, previous ? 0 : 1);
     assert.deepEqual((await storage.restore()).run, first.run);

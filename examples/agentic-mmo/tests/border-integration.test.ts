@@ -29,11 +29,11 @@ function recordedDatabase(events: GameEvent[], action: GameAction, start: number
   return { prepare(sql): D1Statement { return { bind() { return this; }, async all() { return { results: sql.startsWith('SELECT revision') ? [{ revision: end }] : sql.includes('detail_bytes') ? [{ end_revision: end, detail_bytes: Buffer.byteLength(JSON.stringify(row)) }] : [row], meta: { changes: 0 } }; }, async run() { throw new Error('Read-only synthetic row'); } }; }, async batch() { throw new Error('Read-only synthetic row'); } };
 }
 
-void test('fresh border genesis has one current key and exact current restart without released migration actions', () => {
+void test('fresh current genesis includes border state and exact restart without migration actions', () => {
   const initial = createLocalSimulation(73);
   assert.equal(initial.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
-  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-supplied-borders-1');
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:supplied-borders-v1');
+  assert.match(LOCAL_SIMULATION_STORAGE_KEY, /^civitas:procedural-observatory:/);
+  assert.ok(initial.state.unlockedFeatures.includes('supplied-borders'));
   assert.deepEqual(initial.state.border?.active, []);
   assert.deepEqual(parseLocalSimulation(JSON.parse(JSON.stringify(initial))), initial);
   assert.equal(isGameAction({ type: 'dispatch-border', sourceCityId: 'city-0', tileId: 30, people: 2 }), true);

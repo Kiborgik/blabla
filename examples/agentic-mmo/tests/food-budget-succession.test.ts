@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion, createBehaviorMemory } from '../core/behaviors.ts';
-import { ACTIVE_LOCAL_RELEASE_ID, LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, advanceLocalSimulation, parseLocalSimulation, parseActiveLocalSimulation } from '../web/local-simulation.ts';
+import { FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion, createBehaviorMemory } from '../core/behaviors.ts';
+import { ACTIVE_LOCAL_RELEASE_ID, ACTIVE_LOCAL_POLICY_VERSION, LOCAL_SIMULATION_STORAGE_KEY, createLocalSimulation, advanceLocalSimulation, parseLocalSimulation, parseActiveLocalSimulation } from '../web/local-simulation.ts';
 import { processLocalSimulationRequest } from '../web/local-simulation-worker.ts';
 
 void test('fresh current genesis retains current temperament policy with version-two checkpoint and memory envelopes', () => {
@@ -10,7 +10,7 @@ void test('fresh current genesis retains current temperament policy with version
   assert.equal(fresh.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.match(LOCAL_SIMULATION_STORAGE_KEY, /^civitas:procedural-observatory:/);
   assert.equal(fresh.version, 2);
-  assert.equal(fresh.policyVersion, TEMPERAMENT_BEHAVIOR_POLICY_VERSION);
+  assert.equal(fresh.policyVersion, ACTIVE_LOCAL_POLICY_VERSION);
   assert.equal(behaviorPolicyVersion(fresh.state), fresh.policyVersion);
   assert.equal(fresh.state.origin?.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.equal(fresh.state.origin?.namingVersion, 'cultural-toponyms-v1');
@@ -24,7 +24,7 @@ void test('fresh current genesis retains current temperament policy with version
 
 void test('world checkpoint and every civilization or Director memory must agree on the original policy', () => {
   const run = createLocalSimulation(1701);
-  const expected = TEMPERAMENT_BEHAVIOR_POLICY_VERSION;
+  const expected = ACTIVE_LOCAL_POLICY_VERSION;
   const other = FOOD_BUDGET_BEHAVIOR_POLICY_VERSION;
   run.memories = run.memories.map((_, seat) => createBehaviorMemory(run.state, seat));
   assert.equal(run.policyVersion, expected);
@@ -67,7 +67,7 @@ void test('current advancement and JSON restart agree with the Worker without ch
   const response = processLocalSimulationRequest({ id: 4, run: restored, steps: 2 });
   assert.ok(response.ok);
   assert.deepEqual(response.run, continuation);
-  assert.ok(continuation.memories.every(memory => memory?.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION));
+  assert.ok(continuation.memories.every(memory => memory?.policyVersion === ACTIVE_LOCAL_POLICY_VERSION));
   assert.equal(JSON.stringify(initial), bytes);
   assert.equal(continuation.state.origin?.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.equal(continuation.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);

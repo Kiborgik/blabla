@@ -51,3 +51,17 @@ when observe_generated_world {
 when persist_local_world {
     expect "ephemeral-world-never-writes-shared-checkpoint": not after.ephemeral_mode or not after.checkpoint_write_allowed
 }
+
+state land_quote_read_only: bool
+state exact_use_eligible: bool
+state opening_budget_funded: bool
+state retained_operations_funded: bool
+state owned_alternative_preferred: bool
+
+action quote_landwork()
+
+when quote_landwork {
+    expect "landwork-forecast-does-not-commit-or-credit-output": after.land_quote_read_only
+    expect "funded-landwork-keeps-exact-site-and-opening-obligations": not after.accepted or after.exact_use_eligible and after.opening_budget_funded and after.retained_operations_funded
+    expect "equivalent-funded-owned-site-precedes-another-purchase": after.owned_alternative_preferred
+}

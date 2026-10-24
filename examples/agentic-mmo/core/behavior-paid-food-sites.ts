@@ -17,7 +17,7 @@ function exchangeReserve(state: WorldState, civId: number): ReturnType<typeof ex
   return exchangePromisedResources(state, civId, horizon);
 }
 
-function selectedInstitutionsFunded(state: WorldState, civId: number): boolean {
+export function selectedInstitutionsFunded(state: WorldState, civId: number): boolean {
   return (state.knowledge?.active ?? []).every(compact => {
     if (compact.status !== 'accepted' || compact.terms.teacherId !== civId && compact.terms.learnerId !== civId) return true;
     const teacher = compact.terms.teacherId === civId;
@@ -27,7 +27,7 @@ function selectedInstitutionsFunded(state: WorldState, civId: number): boolean {
   });
 }
 
-function foodAllocation(state: WorldState, civId: number): { total: number; producers: Set<string> } {
+export function foodAllocation(state: WorldState, civId: number): { total: number; producers: Set<string> } {
   let total = 0;
   const producers = new Set<string>();
   for (const city of state.cities.filter(candidate => candidate.civId === civId)) {
