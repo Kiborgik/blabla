@@ -119,10 +119,16 @@ fn inspect(
     }
     let delivery_context = delivery::close_context(&project, &task, json)?;
     let verification = std::fs::read(status::record_path(root)).map_err(|failure| {
-        refuse(
-            format!("cannot read prior canonical verification: {failure}"),
-            json,
-        )
+        let message = format!("cannot read prior canonical verification: {failure}");
+        let message = if failure.kind() == io::ErrorKind::NotFound {
+            format!(
+                "{message}. No prior canonical verification record was found for this project ({}). Bounded close requires prior overall canonical GREEN; READY and review receipts are not that record. Owner: inspect `blabla status` first, with the shown root passed as the single `--project` value. Keep the hand-back pending; perform this project's canonical finish only when authorized and no verification is already running. After canonical GREEN, use ordinary close and satisfy its remaining checks.",
+                root.display()
+            )
+        } else {
+            message
+        };
+        refuse(message, json)
     })?;
     let record: status::Record = serde_json::from_slice(&verification).map_err(|failure| {
         refuse(
@@ -333,8 +339,8 @@ mod tests {
         assert_eq!(super::super::ready(project, name, false), 0);
     }
 
-    fn fixture(review_depth: usize) -> (TempDir, Project, String) {
-        let temp = TempDir::new().unwrap();
+    fn unverified_fixture(review_depth: usize, prefix: &str) -> (TempDir, Project, String) {
+        let temp = tempfile::Builder::new().prefix(prefix).tempdir().unwrap();
         let root = temp.path();
         write(
             root,
@@ -395,11 +401,20 @@ mod tests {
             open_work(&project, &review, &format!("{review}.md"), Some(&name));
             name = review;
         }
+        (temp, project, name)
+    }
+
+    fn fixture(review_depth: usize) -> (TempDir, Project, String) {
+        let (temp, project, name) = unverified_fixture(review_depth, "bounded-");
         assert_eq!(
             super::super::super::project::finish(&project, false, false),
             0
         );
-        write(root, "reports/other.md", "concurrent report\n");
+        write(
+            &project.manifest.root,
+            "reports/other.md",
+            "concurrent report\n",
+        );
         (temp, project, name)
     }
 
@@ -465,6 +480,170 @@ mod tests {
                 runstate::Classification::Interrupted
             }
         );
+    }
+
+    #[test]
+    fn bounded_close_refusal_child() {
+        let Some(root) = std::env::var_os("BLABLA_BOUNDED_CLOSE_TEST_ROOT") else {
+            return;
+        };
+        let project = load_project(Path::new(&root));
+        let json = std::env::var("BLABLA_BOUNDED_CLOSE_TEST_JSON").unwrap() == "true";
+        std::process::exit(close(
+            &project,
+            "work",
+            "owner",
+            "Current bounded result only",
+            json,
+        ));
+    }
+
+    fn refusal_message(root: &Path, json: bool) -> String {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "cli::task::bounded::tests::bounded_close_refusal_child",
+                "--nocapture",
+            ])
+            .env("BLABLA_BOUNDED_CLOSE_TEST_ROOT", root)
+            .env("BLABLA_BOUNDED_CLOSE_TEST_JSON", json.to_string())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        if json {
+            assert!(output.stderr.is_empty(), "{output:?}");
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let value: Value =
+                serde_json::from_str(stdout.lines().find(|line| line.starts_with('{')).unwrap())
+                    .unwrap();
+            assert_eq!(value["status"], "error");
+            assert_eq!(value["category"], "task");
+            value["message"].as_str().unwrap().to_owned()
+        } else {
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .strip_prefix("ERROR [task]: ")
+                .unwrap()
+                .trim_end()
+                .to_owned()
+        }
+    }
+
+    #[test]
+    fn bounded_close_missing_record_preserves_ready_live_marker_and_hostile_root() {
+        for (prefix, live) in [
+            ("bounded-", false),
+            ("bounded-", true),
+            ("bounded-$HOME-`unused`-$(unused)-", false),
+            ("bounded-$HOME-`unused`-$(unused)-", true),
+        ] {
+            let (_temp, project, name) = unverified_fixture(0, prefix);
+            let root = &project.manifest.root;
+            write(
+                root,
+                "app.py",
+                &format!(
+                    "from pathlib import Path\nPath({}).touch()\nraise SystemExit(99)\n",
+                    serde_json::to_string(root.join(".blabla/verifier-called").to_str().unwrap())
+                        .unwrap()
+                ),
+            );
+            if live {
+                start_marker(root, true);
+            }
+            let task_path = root.join(".blabla/tasks/work.json");
+            let task_before = std::fs::read(&task_path).unwrap();
+            let marker_before = std::fs::read(runstate::marker_path(root)).ok();
+            let failure = std::fs::read(status::record_path(root)).unwrap_err();
+            assert_eq!(failure.kind(), io::ErrorKind::NotFound);
+            for json in [false, true] {
+                let message = refusal_message(root, json);
+                assert!(
+                    message.starts_with(&format!(
+                        "cannot read prior canonical verification: {failure}"
+                    )),
+                    "{message}"
+                );
+                assert!(
+                    message.contains(&format!(
+                        "No prior canonical verification record was found for this project ({}).",
+                        root.display()
+                    )),
+                    "{message}"
+                );
+                assert!(
+                    message.contains("requires prior overall canonical GREEN"),
+                    "{message}"
+                );
+                assert!(
+                    message.contains("READY and review receipts are not that record"),
+                    "{message}"
+                );
+                assert!(
+                    message.contains("Owner: inspect `blabla status` first, with the shown root passed as the single `--project` value."),
+                    "{message}"
+                );
+                assert!(
+                    message.contains("only when authorized and no verification is already running"),
+                    "{message}"
+                );
+                assert!(
+                    message.contains("ordinary close and satisfy its remaining checks"),
+                    "{message}"
+                );
+                assert!(!message.contains("`blabla --project"), "{message}");
+                assert_eq!(
+                    message.matches(root.to_str().unwrap()).count(),
+                    1,
+                    "{message}"
+                );
+                assert!(!message.contains("--bounded"), "{message}");
+                assert_eq!(std::fs::read(&task_path).unwrap(), task_before);
+                assert!(!status::record_path(root).exists());
+                assert_eq!(
+                    std::fs::read(runstate::marker_path(root)).ok(),
+                    marker_before
+                );
+                assert!(!root.join(".blabla/verifier-called").exists());
+                let work = task::read(root, &name).unwrap().unwrap();
+                assert_eq!(work.state, "ready");
+                assert!(work.result_basis.is_none());
+            }
+            assert_eq!(super::super::close(&project, &name, "owner", false), 2);
+            assert_eq!(std::fs::read(&task_path).unwrap(), task_before);
+        }
+    }
+
+    #[test]
+    fn bounded_close_preserves_distinct_record_errors() {
+        let (_temp, project, _) = unverified_fixture(0, "bounded-");
+        let root = &project.manifest.root;
+        let task_path = root.join(".blabla/tasks/work.json");
+        let task_before = std::fs::read(&task_path).unwrap();
+        let record_path = status::record_path(root);
+        write(root, ".blabla/status.json", "not JSON");
+        let decode_failure = serde_json::from_slice::<status::Record>(b"not JSON").unwrap_err();
+        for json in [false, true] {
+            assert_eq!(
+                refusal_message(root, json),
+                format!("cannot decode prior canonical verification: {decode_failure}")
+            );
+            assert_eq!(std::fs::read(&record_path).unwrap(), b"not JSON");
+            assert_eq!(std::fs::read(&task_path).unwrap(), task_before);
+        }
+        std::fs::remove_file(&record_path).unwrap();
+        std::fs::create_dir(&record_path).unwrap();
+        let read_failure = std::fs::read(&record_path).unwrap_err();
+        assert_ne!(read_failure.kind(), io::ErrorKind::NotFound);
+        for json in [false, true] {
+            assert_eq!(
+                refusal_message(root, json),
+                format!("cannot read prior canonical verification: {read_failure}")
+            );
+            assert!(record_path.is_dir());
+            assert_eq!(std::fs::read(&task_path).unwrap(), task_before);
+            assert!(!runstate::marker_path(root).exists());
+        }
     }
 
     #[test]
