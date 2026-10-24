@@ -1,4 +1,5 @@
 import { createCharcoalClearingPolicy } from './behavior-charcoal.ts';
+import { createProductiveFrontierAssessment } from './behavior-frontier.ts';
 import { createLandworkPlanner, type FundedLandworkQuote } from './behavior-landwork.ts';
 import { deriveBorderPlan, borderWeight, borderPriority, borderReason, borderProtects, type BorderPlan } from './behavior-border.ts';
 import { createPaidFoodSiteAffordability, paidFoodSite } from './behavior-paid-food-sites.ts';
@@ -149,6 +150,7 @@ interface Situation {
   fundedLandwork: ReadonlyMap<string, ScoredLandwork> | null;
   paidFoodSiteAffordable: ReturnType<typeof createPaidFoodSiteAffordability>;
   charcoal: ReturnType<typeof createCharcoalClearingPolicy>;
+  frontier: ReturnType<typeof createProductiveFrontierAssessment> | null;
 }
 
 function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
@@ -171,7 +173,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, fundedLandwork: null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
+  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, fundedLandwork: null, frontier: hasFeatures(state, ['productive-frontier-founding']) ? createProductiveFrontierAssessment(state, actor.id) : null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
   if (memory.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION) context.fundedLandwork = deriveFundedLandworkPlan(context, options);
   return context;
 }
@@ -247,6 +249,26 @@ function fundedLandworkReason(action: GameAction, context: Situation): string | 
   const wait = quote.orderId ? `retain paid work for ${quote.waitBeats} beats, then ` : '';
   const admission = admissionSlack > 0 ? `allow up to ${admissionSlack} beat${admissionSlack === 1 ? '' : 's'} for command admission, then ` : '';
   return `Plan ${use ?? 'exact work'} at tile ${quote.tileId} for ${quote.cityId}; ${wait}${admission}${quote.workBeats} construction beats. Conditional first operation within ${quote.firstOperationBeat} beats if this work is chosen next and conditions hold; purchase produces nothing and next work is not automatic.`;
+}
+
+function frontierWeight(action: GameAction, base: number, context: Situation): number {
+  if (!context.frontier || base <= 0) return base;
+  if (action.type === 'settle') return base * (context.frontier.founding(action).quote?.locationMultiplier ?? 0);
+  if (action.type === 'build' && action.project === 'farm' && action.cityId && context.frontier.farm(action.cityId).quote) return base * 2;
+  return base;
+}
+
+function frontierReason(action: GameAction, context: Situation): string | null {
+  if (!context.frontier) return null;
+  if (action.type === 'settle') {
+    const quote = context.frontier.founding(action).quote;
+    return quote ? `Transfer 3 residents. If Farm is independently chosen within ${quote.admissionAllowanceBeats} beat, stocks cover setup and conditional Food within ${quote.firstOperationBeat} beats. Founding does not build Farm; work must finish. Land/contact are opportunities, not ownership, consent or income.` : null;
+  }
+  if (action.type === 'build' && action.project === 'farm' && action.cityId) {
+    const quote = context.frontier.farm(action.cityId).quote;
+    return quote ? `Choose Farm independently for a new town. Current stocks cover setup and conditional Food within ${quote.firstOperationBeat} beats. Setup starts construction, not harvest; Food follows completion if conditions hold. Other buildings remain possible.` : null;
+  }
+  return null;
 }
 
 function constructionWeight(action: GameAction, context: Situation): number {
@@ -541,7 +563,8 @@ function protectedCandidate(option: ActionOption, context: Situation): boolean {
 function scoreCandidates(context: Situation, options: readonly ActionOption[], lanes: Map<string, Set<string>>): Candidate[] {
   return options.map(option => {
     const action = option.action;
-    const base = progressionWeight(option, actionWeight(option, context), context.state, context.actor, context.profile, context.progression);
+    const progressed = progressionWeight(option, actionWeight(option, context), context.state, context.actor, context.profile, context.progression);
+    const base = frontierWeight(action, progressed, context);
     const replacing = action.type === 'stop-trade' && context.progression.replaceableRoutes.has(action.routeId)
       && !context.state.publicProjects?.some(project => project.routeId === action.routeId && project.status === 'committed');
     const diplomatic = context.diplomacy && !replacing ? diplomacyWeight(option, base, context.diplomacy) : base;
@@ -650,7 +673,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   if (context.relief) reason = reliefReason(choice.option, context.relief) ?? reason;
   if (context.knowledge) reason = knowledgeReason(choice.option, context.knowledge) ?? reason;
   if (context.border) reason = borderReason(choice.option, context.border) ?? reason;
-  reason = fundedLandworkReason(choice.option.action, context) ?? reason;
+  reason = fundedLandworkReason(choice.option.action, context) ?? frontierReason(choice.option.action, context) ?? reason;
   return committedDecision(state, memory, choice, context.phase, reason, profile, isUrgent);
 }
 

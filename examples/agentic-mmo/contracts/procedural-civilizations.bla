@@ -65,3 +65,20 @@ when quote_landwork {
     expect "funded-landwork-keeps-exact-site-and-opening-obligations": not after.accepted or after.exact_use_eligible and after.opening_budget_funded and after.retained_operations_funded
     expect "equivalent-funded-owned-site-precedes-another-purchase": after.owned_alternative_preferred
 }
+
+state frontier_quote_read_only: bool
+state home_allocations_preserved: bool
+state automatic_growth_funded: bool
+state no_future_income_financing: bool
+state farm_choice_independent: bool
+
+action quote_frontier_founding()
+action choose_frontier_farm()
+
+when quote_frontier_founding {
+    expect "frontier-assessment-never-founds-or-promises-income": after.frontier_quote_read_only and after.no_future_income_financing
+    expect "funded-frontier-keeps-households-growth-and-home-work": not after.accepted or after.opening_budget_funded and after.home_allocations_preserved and after.automatic_growth_funded
+}
+when choose_frontier_farm {
+    expect "new-town-farm-remains-a-separate-paid-choice": after.farm_choice_independent
+}

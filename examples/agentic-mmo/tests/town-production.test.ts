@@ -83,6 +83,7 @@ class ElementRecord {
   type = '';
   value = '';
   focused = false;
+  disabled = false;
   dataset: Record<string, string> = {};
   children: ElementRecord[] = [];
   parent: ElementRecord | null = null;
@@ -209,5 +210,36 @@ await test('the integrated Overview row selects the exact Work receipt before re
     button.listeners.get('click')?.();
     assert.equal(opened, 2);
     assert.equal(host.dataset['selectedWork'], 'kiln');
+  });
+});
+
+await test('empty town inspection has no fabricated building and clears a retained work selection', () => {
+  withDocument(() => {
+    const city: City = { id: 'empty-town', name: 'New town', civId: 0, tileId: 1, population: 3, wellbeing: 50, infrastructure: 1, focus: 'industry', damage: 0, buildings: [], construction: { active: null, lastCompleted: null } };
+    const before = structuredClone(city);
+    const host = document.createElement('section');
+    assert.ok(host instanceof ElementRecord);
+    host.dataset['selectedWork'] = 'kiln';
+    renderSettlementInspection(host, [city], city.id, () => undefined);
+    const picker = host.all().find(node => node.className === 'work-picker');
+    const detail = host.all().find(node => node.className === 'work-detail');
+    assert.ok(picker && detail);
+    assert.equal(picker.disabled, true);
+    assert.equal(picker.value, '');
+    assert.equal(picker.children.length, 1);
+    assert.equal(picker.children[0]?.value, '');
+    assert.equal(host.dataset['selectedWork'], '');
+    assert.match(detail.content(), /No built or active work/);
+    assert.equal(detail.all().filter(node => node.className === 'work-preview' || node.className.includes('work-full-record')).length, 0);
+    assert.doesNotMatch(detail.content(), /Built|Production records are separate|Under construction/);
+    assert.deepEqual(city, before);
+    const built = { ...city, ...town() };
+    renderSettlementInspection(host, [built], city.id, () => undefined);
+    assert.equal(host.all().find(node => node.className === 'work-picker')?.disabled, false);
+    assert.match(host.all().find(node => node.className === 'work-preview')?.content() ?? '', /Built.*13.25 Materials/);
+    renderSettlementInspection(host, [city], city.id, () => undefined);
+    assert.equal(host.dataset['selectedWork'], '');
+    assert.equal(host.all().find(node => node.className === 'work-picker')?.disabled, true);
+    assert.equal(host.all().filter(node => node.className === 'work-preview').length, 0);
   });
 });

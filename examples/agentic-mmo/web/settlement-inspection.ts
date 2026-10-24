@@ -370,7 +370,6 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     } else card.append(text('p', 'No operating result has been recorded yet. Output requires a later season with local support.', 'building-summary'));
     host.append(card);
   }
-  if (!city.buildings.length && !Object.keys(city.improvements ?? {}).length && !activeDistrict) host.append(text('p', 'No buildings yet', 'settlement-facts'));
   for (const id of city.buildings) {
     const definition = BUILDINGS.find((entry) => entry.id === id);
     const appearance = buildingAppearance(id, 'far');
@@ -461,6 +460,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     card.dataset['workId'] = key;
     const option = text('option', card.querySelector('h4')?.textContent ?? 'No buildings yet'); option.value = key; picker.append(option);
   }
+  if (!cards.length) { const option = text('option', 'No buildings yet'); option.value = ''; picker.append(option); picker.disabled = true; }
   picker.value = cards.some(card => card.dataset['workId'] === retainedWork) ? retainedWork : cards[0]?.dataset['workId'] ?? '';
   const choose = (): void => {
     const selected = cards.find(card => card.dataset['workId'] === picker.value);

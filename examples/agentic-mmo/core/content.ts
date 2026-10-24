@@ -86,6 +86,7 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'productive-frontier-founding', name: 'Productive frontier towns', description: 'Civilizations assess affordable three-person satellites while protecting home work, households and commitments. A new town may independently choose paid Terraced fields; founding itself creates no farm, promised trade or future income.' },
   { id: 'charcoal-clearing', name: 'Charcoal clearings', description: 'Kiln firing opens paid working pads within retained owned forest near their town. One opening Material and one remaining resident make one base ordinary Energy on later beats; no forest removal, local Power or ecological inventory is implied.' },
   { id: 'supplied-borders', name: 'Supplied border parties', description: 'Small paid resident parties can contest exact unworked purchased rival land. Supplies, committed travel, limited clashes and finite home returns are recorded; no armies or town capture.' },
   { id: 'funded-landwork-planning', name: 'Funded land use', description: 'Civilizations compare exact affordable improvements and districts before ordinary land purchases. Conditional plans protect existing work and supplies; ownership alone produces nothing.' },

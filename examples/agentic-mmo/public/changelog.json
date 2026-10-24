@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-live.58",
+    "date": "2026-10-24",
+    "title": "Preparing useful new towns",
+    "changes": [
+      "Civilizations can compare new town locations with room for later work and shorter possible contact, while protecting the people and supplies needed at home.",
+      "A new empty town may favor paid Terraced fields. Founding and construction remain separate choices: three residents move, every cost is paid, and Food appears only after actual work is completed."
+    ]
+  },
+  {
     "version": "0.1.0-live.57",
     "date": "2026-10-24",
     "title": "Small forest charcoal clearings",
@@ -15,15 +24,6 @@
     "changes": [
       "Civilizations compare exact improvements and districts before ordinary land purchases, including construction costs, local workers and operating supplies.",
       "A short look ahead can follow work already paid for. Existing obligations stay protected, and a useful owned site can take priority over another purchase. These are plans, not promised income."
-    ]
-  },
-  {
-    "version": "0.1.0-live.55",
-    "date": "2026-10-24",
-    "title": "Room to inspect a town",
-    "changes": [
-      "Selecting a town and using the inspection zoom puts the town in the clear map area, away from the inspector edge.",
-      "World updates keep the current inspection view. Manual panning stays in your control; closing restores the overview only when automatic framing is still active."
     ]
   }
 ]
