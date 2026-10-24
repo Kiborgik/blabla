@@ -1,3 +1,4 @@
+import { validateDrainage } from './drainage.ts';
 import { isBorderState, validBorderEvent } from './border-validation.ts';
 import { isKnowledgeState, validKnowledgeEvent } from './knowledge-validation.ts';
 import { FOOD_BUDGET_RULES, type FoodSupplyReceipt } from './food-security-content.ts';
@@ -1787,6 +1788,7 @@ export function isWorldState(value: unknown): value is WorldState {
   const width = value.width;
   const height = value.height;
   const tiles = value.tiles;
+  if (value.origin === undefined ? Object.hasOwn(value, 'drainage') : !validateDrainage(value.drainage, tiles, width, height)) return false;
   const cities = value.cities;
   const round = value.round;
   const features = value.unlockedFeatures;

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-live.61",
+    "date": "2026-10-24",
+    "title": "Rivers shaped by the land",
+    "changes": [
+      "New worlds retain connected downhill drainage through their actual terrain, from inland valleys to the sea. Narrow channels join at confluences and remain part of the shared map surface.",
+      "Terrain and starting opportunities may change. River geography does not yet supply irrigation, navigation or production; this version starts a fresh autonomous world without upgrading older saves."
+    ]
+  },
+  {
     "version": "0.1.0-live.60",
     "date": "2026-10-24",
     "title": "Work and study in the districts",
@@ -15,15 +24,6 @@
     "changes": [
       "Paid Terraced fields use low stepped beds beside the town, clear of its crest. Homes and other selected buildings remain visible.",
       "Construction shows unfinished beds and stakes; completed fields show broad crop strips. The new shapes stay inside the town tile and do not change Food, land ownership or the simulation."
-    ]
-  },
-  {
-    "version": "0.1.0-live.58",
-    "date": "2026-10-24",
-    "title": "Preparing useful new towns",
-    "changes": [
-      "Civilizations can compare new town locations with room for later work and shorter possible contact, while protecting the people and supplies needed at home.",
-      "A new empty town may favor paid Terraced fields. Founding and construction remain separate choices: three residents move, every cost is paid, and Food appears only after actual work is completed."
     ]
   }
 ]

@@ -46,7 +46,7 @@ export interface GeneratedControllerContinuation {
 
 export function inspectGeneratedSample(seed: number, run: LocalSimulation, repeat: LocalSimulation): GeneratedControllerSample {
   const state = run.state;
-  const expectedOrigin = { kind: 'generated', generatorVersion: 'coherent-geography-v1', seed: seed >>> 0, clockEpoch: EPOCH, namingVersion: 'cultural-toponyms-v1', temperamentVersion: 'strategic-temperaments-v1', initialReleaseId: RELEASE };
+  const expectedOrigin = { kind: 'generated', generatorVersion: 'drainage-geography-v2', seed: seed >>> 0, clockEpoch: EPOCH, namingVersion: 'cultural-toponyms-v1', temperamentVersion: 'strategic-temperaments-v1', initialReleaseId: RELEASE };
   let errors = 0;
   const check = (condition: boolean): void => { if (!condition) errors += 1; };
   check(isDeepStrictEqual(state.origin, expectedOrigin));
@@ -69,10 +69,24 @@ export function inspectGeneratedSample(seed: number, run: LocalSimulation, repea
   for (const [index, tile] of state.tiles.entries()) {
     check(tile.id === index);
     check(tile.q === index % state.width && tile.r === Math.floor(index / state.width));
-    check(Number.isInteger(tile.elevation) && tile.elevation >= 0 && tile.elevation <= 100);
+    check(Number.isSafeInteger(tile.elevation * 4096) && tile.elevation >= 0 && tile.elevation <= 100);
     check(TERRAINS.includes(tile.terrain));
     check(tile.terrain !== 'ocean' || tile.elevation < 30);
     check(tile.terrain !== 'mountain' || tile.elevation > 88);
+  }
+  const drainage = state.drainage ?? undefined;
+  check(drainage !== undefined && drainage.ruleVersion === 1 && drainage.width === state.width && drainage.height === state.height);
+  check(Array.isArray(drainage?.terrainBasis) && drainage.terrainBasis.length === state.tiles.length);
+  check(Array.isArray(drainage?.downstreamTileIds) && drainage.downstreamTileIds.length === state.tiles.length);
+  for (const tile of state.tiles) {
+    const basis = drainage?.terrainBasis?.[tile.id];
+    check(Array.isArray(basis) && basis.length === 2 && basis[0] === tile.terrain && basis[1] === tile.elevation * 4096);
+    const downstream = drainage?.downstreamTileIds?.[tile.id];
+    if (tile.terrain === 'ocean') check(downstream === null);
+    else {
+      const neighbor = Number.isSafeInteger(downstream) ? state.tiles[downstream as number] : undefined;
+      check(neighbor !== undefined && distance(tile, neighbor) === 1 && neighbor.elevation < tile.elevation);
+    }
   }
   check(state.civilizations.length === 5 && new Set(state.civilizations.map(civ => civ.id)).size === 5);
   for (const [seat, civ] of state.civilizations.entries()) {
@@ -97,6 +111,15 @@ export function inspectGeneratedSample(seed: number, run: LocalSimulation, repea
   check(foundation?.id === '0:foundation' && foundation.round === 0 && foundation.type === 'world-founded' && foundation.actor === null && foundation.target === null && foundation.tileId === null);
   check(isDeepStrictEqual(state.eventCounts, { 'world-founded': 1 }));
   const byCoordinate = new Map(state.tiles.map(tile => [`${tile.q},${tile.r}`, tile]));
+  const openSea = new Set<number>();
+  const seaQueue = state.tiles.filter(tile => tile.terrain === 'ocean' && (tile.q === 0 || tile.r === 0 || tile.q === state.width - 1 || tile.r === state.height - 1));
+  for (const tile of seaQueue) openSea.add(tile.id);
+  for (let head = 0; head < seaQueue.length; head += 1) for (const [dq, dr] of DIRECTIONS) {
+    const tile = seaQueue[head]!;
+    const neighbor = byCoordinate.get(`${tile.q + dq},${tile.r + dr}`);
+    if (neighbor?.terrain === 'ocean' && !openSea.has(neighbor.id)) { openSea.add(neighbor.id); seaQueue.push(neighbor); }
+  }
+  check(openSea.size > 0 && state.tiles.filter(tile => tile.terrain === 'ocean').every(tile => openSea.has(tile.id)));
   const capitals = state.cities.map(city => state.tiles.find(tile => tile.id === city.tileId));
   const connected = new Set<number>();
   const first = capitals[0];

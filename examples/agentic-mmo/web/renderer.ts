@@ -66,16 +66,16 @@ export function routeLineMeshes(route: RouteView, selected: boolean): readonly [
   return [backing, line];
 }
 
-export function createTerritoryMeshes(world: Pick<AtlasWorld, 'tiles' | 'cities'>): THREE.Group {
+export function createTerritoryMeshes(world: Pick<AtlasWorld, 'tiles' | 'cities' | 'drainage'>): THREE.Group {
   const group = new THREE.Group();
-  const landscape = projectLandscape(world.tiles, [], 'far');
-  const terrain = new Map(projectTerrainSurface(world.tiles).map(tile => [tile.key, tile]));
+  const landscape = projectLandscape(world.tiles, [], 'far', world.drainage);
+  const terrain = new Map(projectTerrainSurface(world.tiles, world.drainage).map(tile => [tile.key, tile]));
   for (const owner of new Map(world.cities.map(city => [city.id, city])).values()) {
     const territories = landscape.territories.filter(tile => tile.owner === owner.id);
     if (!territories.length) continue;
     const wash = new THREE.BufferGeometry();
-    wash.setAttribute('position', new THREE.Float32BufferAttribute(territories.flatMap(tile => (terrain.get(tile.key)?.faces ?? []).flatMap(face =>
-      face.points.flatMap(point => [point[0], point[1] + .018, point[2]]))), 3));
+    wash.setAttribute('position', new THREE.Float32BufferAttribute(territories.flatMap(tile => (terrain.get(tile.key)?.faces ?? []).filter(face => !face.kind || face.kind === 'ground').flatMap(face =>
+      Array.from({ length: face.points.length - 2 }, (_, index) => [face.points[0]!, face.points[index + 1]!, face.points[index + 2]!]).flatMap(points => points.flatMap(point => [point[0], point[1] + .018, point[2]])))), 3));
     const surface = new THREE.Mesh(wash, new THREE.MeshBasicMaterial({ color: owner.color, transparent: true,
       opacity: TERRITORY_STYLE.washOpacity, depthWrite: false, side: THREE.DoubleSide }));
     surface.userData['territories'] = territories.map(tile => tile.key);
@@ -249,7 +249,7 @@ export function createAtlasRenderer(
     scene.add(mesh);
     return mesh;
   };
-  const landscape = projectLandscape(world.tiles, world.cities, 'far');
+  const landscape = projectLandscape(world.tiles, world.cities, 'far', world.drainage);
   const shorePositions = landscape.coast.flatMap(edge => {
     const dx = edge.to[0] - edge.from[0]; const dz = edge.to[1] - edge.from[1];
     const length = Math.hypot(dx, dz) || 1;
@@ -261,7 +261,7 @@ export function createAtlasRenderer(
   const shoreGeometry = new THREE.BufferGeometry();
   shoreGeometry.setAttribute('position', new THREE.Float32BufferAttribute(shorePositions, 3));
   const shore = new THREE.Mesh(shoreGeometry, new THREE.MeshBasicMaterial({ color: LANDSCAPE_COLORS.shallow, transparent: true, opacity: .8, side: THREE.DoubleSide }));
-  scene.add(shore, createTerrainMeshes(world.tiles));
+  scene.add(shore, createTerrainMeshes(world.tiles, world.drainage));
   borders.visible = preferences.borders;
   scene.add(borders);
   const cityLabels: Array<{ element: HTMLButtonElement; point: THREE.Vector3; id: string }> = [];

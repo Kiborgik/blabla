@@ -5,14 +5,14 @@ import { VISUAL_PALETTE } from '../visuals/world-visuals.ts';
 import { createPartMeshes } from './settlement-three.ts';
 
 export function createLandscapeMeshes(world: AtlasWorld, material: (color: string) => THREE.Material): ReturnType<typeof createPartMeshes> {
-  return createPartMeshes(detail => projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? []), ...(world.improvements ?? []), ...(world.wonders ?? [])], detail).parts.map(part => ({
+  return createPartMeshes(detail => projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? []), ...(world.improvements ?? []), ...(world.wonders ?? [])], detail, world.drainage).parts.map(part => ({
     part, color: part.material === 'identity' ? VISUAL_PALETTE.stone : VISUAL_PALETTE[part.material],
   })), material);
 }
 
-export function createTerrainMeshes(tiles: Parameters<typeof projectTerrainSurface>[0]): THREE.Group {
+export function createTerrainMeshes(tiles: Parameters<typeof projectTerrainSurface>[0], drainage?: Parameters<typeof projectTerrainSurface>[1]): THREE.Group {
   const group = new THREE.Group();
-  const surface = projectTerrainSurface(tiles);
+  const surface = projectTerrainSurface(tiles, drainage);
   for (const faces of [surface.flatMap(tile => tile.faces), surface.flatMap(tile => tile.cliffs)]) {
     const positions: number[] = []; const colors: number[] = [];
     for (const face of faces) {

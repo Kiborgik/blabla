@@ -1,3 +1,4 @@
+import { conditionDrainage, drainageFacts, RIVER_MINIMUM_CONTRIBUTING_LAND_TILES, type DrainageLayerV1 } from './drainage.ts';
 import { CIV_COUNT, type HexTile, type Terrain } from './types.ts';
 import { INDUSTRIAL_RULES } from './content.ts';
 import { hexDistance } from './simulation/geography.ts';
@@ -6,13 +7,14 @@ import { normalizeSeed, randomStep } from './simulation/random.ts';
 import { createCoastalPlanner, coastalPathBlock } from './simulation/coastal.ts';
 import { createLandTransportPlanner, landTransportCadence } from './simulation/transport.ts';
 
-export const GENERATED_GEOGRAPHY_VERSION = 'coherent-geography-v1';
+export const GENERATED_GEOGRAPHY_VERSION = 'drainage-geography-v2';
 
 export interface GeneratedGeography {
   version: typeof GENERATED_GEOGRAPHY_VERSION;
   width: number;
   height: number;
   tiles: HexTile[];
+  drainage: DrainageLayerV1;
   capitalTileIds: number[];
   rng: number;
 }
@@ -142,16 +144,37 @@ function startingSites(tiles: HexTile[], width: number, height: number, seed: nu
   return null;
 }
 
-export function generateGeography(seed: number, width = 18, height = 24): GeneratedGeography {
+function riverOpportunities(tiles: HexTile[], drainage: DrainageLayerV1, capitalTileIds: number[], width: number, height: number): boolean {
+  const facts = drainageFacts(drainage, tiles);
+  const lengths = Array<number>(tiles.length).fill(0);
+  for (const tile of tiles.toSorted((a, b) => a.elevation - b.elevation || a.id - b.id)) {
+    const fact = facts[tile.id]!;
+    if (fact.downstreamTileId !== null && fact.contributingLandTiles >= RIVER_MINIMUM_CONTRIBUTING_LAND_TILES) lengths[tile.id] = lengths[fact.downstreamTileId]! + 1;
+  }
+  return lengths.some(length => length >= 4) && capitalTileIds.some(id => adjacent(tiles, tiles[id]!, width, height)
+    .some(tile => tile.terrain !== 'ocean' && tile.terrain !== 'mountain' && facts[tile.id]!.contributingLandTiles >= RIVER_MINIMUM_CONTRIBUTING_LAND_TILES));
+}
+
+function generateFromCandidates(seed: number, width: number, height: number, candidate: (seed: number, width: number, height: number) => HexTile[]): GeneratedGeography {
   const normalized = normalizeSeed(seed);
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 18 || height < 24 || width * height > 4096)
-    throw new RangeError('Coherent geography requires integer dimensions of at least 18 × 24 and at most 4096 tiles');
+    throw new RangeError('Drainage geography requires integer dimensions of at least 18 × 24 and at most 4096 tiles');
   for (let attempt = 0; attempt < MAXIMUM_ATTEMPTS; attempt++) {
     const candidateSeed = hash(normalized ^ 0x434f4e54, attempt, width * height);
-    const tiles = landscape(candidateSeed, width, height);
+    const conditioned = conditionDrainage(candidate(candidateSeed, width, height), width, height);
+    if (!conditioned) continue;
+    const { tiles, drainage } = conditioned;
     const capitalTileIds = startingSites(tiles, width, height, candidateSeed);
-    if (!capitalTileIds) continue;
-    return { version: GENERATED_GEOGRAPHY_VERSION, width, height, tiles, capitalTileIds, rng: randomStep(candidateSeed).seed };
+    if (!capitalTileIds || !riverOpportunities(tiles, drainage, capitalTileIds, width, height)) continue;
+    return { version: GENERATED_GEOGRAPHY_VERSION, width, height, tiles, drainage, capitalTileIds, rng: randomStep(candidateSeed).seed };
   }
   throw new RangeError(`No viable ${GENERATED_GEOGRAPHY_VERSION} geography for seed ${normalized} within ${MAXIMUM_ATTEMPTS} attempts`);
+}
+
+export function generateGeography(seed: number, width = 18, height = 24): GeneratedGeography {
+  return generateFromCandidates(seed, width, height, landscape);
+}
+
+export function generateGeographyWithCandidateForTest(seed: number, width: number, height: number, candidate: (seed: number, width: number, height: number) => HexTile[]): GeneratedGeography {
+  return generateFromCandidates(seed, width, height, candidate);
 }

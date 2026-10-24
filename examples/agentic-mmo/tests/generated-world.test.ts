@@ -13,6 +13,7 @@ import { createCoalDeposits, createStrategicDeposits } from '../core/simulation/
 import { createPastoralSites } from '../core/simulation/pastoral.ts';
 import { createCoastalPlanner, coastalPathBlock, foundingSiteEligible, isCoastalSite } from '../core/simulation/coastal.ts';
 import { createLandTransportPlanner, createSteamTransportPlanner, landTransportCadence, transportCadence } from '../core/simulation/transport.ts';
+import { createLocalSimulation, parseLocalSimulation } from '../web/local-simulation.ts';
 import { railEdgeId, railSiteBlock } from '../core/simulation/rail.ts';
 
 const EPOCH = '2000-01-01T00:00:00.000Z';
@@ -42,6 +43,7 @@ for (const seed of seeds) void test(`seed ${seed}: fresh current-rules foundatio
   assert.equal(state.cities.length, CIV_COUNT);
   const geography = generateGeography(seed);
   assert.equal(state.rng, geography.rng);
+  assert.deepEqual(state.drainage, geography.drainage);
   assert.deepEqual(state.cities.map(city => city.tileId), geography.capitalTileIds);
   for (const city of state.cities) {
     const previous = before.cities.find(candidate => candidate.id === city.id)!;
@@ -113,6 +115,7 @@ for (const seed of seeds) void test(`seed ${seed}: actual paid initial founding 
     assert.deepEqual(state, before);
     assert.ok(isWorldState(result.state));
     assert.deepEqual(applyCommand(JSON.parse(JSON.stringify(state)), command), result);
+    assert.deepEqual(result.state.drainage, state.drainage);
     assert.equal(result.state.cities.reduce((sum, city) => sum + city.population, 0), before.cities.reduce((sum, city) => sum + city.population, 0));
     const founded = result.state.cities.at(-1)!;
     assert.equal(founded.housing?.baseCapacity, 8);
@@ -191,4 +194,44 @@ void test('fresh factory rejects missing or malformed epochs and normalizes the 
   assert.throws(() => createGeneratedWorld(1701, undefined as unknown as string), RangeError);
   assert.deepEqual(createGeneratedWorld(-1, EPOCH), createGeneratedWorld(0xffffffff, EPOCH));
   assert.deepEqual(createGeneratedWorld(undefined, EPOCH), createGeneratedWorld(1701, EPOCH));
+});
+
+void test('current generated worlds require their retained layer and originless fixed fixtures forbid it', () => {
+  const state = createGeneratedWorld(73, EPOCH);
+  assert.ok(state.drainage);
+  assert.equal(state.origin!.generatorVersion, 'drainage-geography-v2');
+  assert.deepEqual(JSON.parse(JSON.stringify(state)).drainage, state.drainage);
+  const fixed = fixedGeography(73);
+  assert.equal(Object.hasOwn(fixed, 'drainage'), false);
+  fixed.drainage = structuredClone(state.drainage);
+  assert.equal(isWorldState(fixed), false);
+  const missing = structuredClone(state);
+  delete missing.drainage;
+  assert.equal(isWorldState(missing), false);
+  const old = JSON.parse(JSON.stringify(state));
+  old.origin.generatorVersion = 'coherent-geography-v1';
+  assert.equal(isWorldState(old), false);
+  const stale = structuredClone(state);
+  const land = stale.tiles.find(tile => tile.terrain !== 'ocean')!;
+  land.elevation += 1 / 4096;
+  assert.equal(isWorldState(stale), false);
+  const wrongTerrain = structuredClone(state);
+  wrongTerrain.tiles.find(tile => tile.terrain === 'forest')!.terrain = 'grassland';
+  assert.equal(isWorldState(wrongTerrain), false);
+});
+
+void test('current local parser preserves exact retained drainage and refuses old or malformed geography without upgrade', () => {
+  const run = createLocalSimulation(73);
+  const bytes = JSON.stringify(run);
+  assert.deepEqual(parseLocalSimulation(JSON.parse(bytes)), run);
+  const old = JSON.parse(bytes);
+  old.state.origin.generatorVersion = 'coherent-geography-v1';
+  assert.equal(parseLocalSimulation(old), null);
+  const missing = JSON.parse(bytes);
+  delete missing.state.drainage;
+  assert.equal(parseLocalSimulation(missing), null);
+  const stale = JSON.parse(bytes);
+  stale.state.drainage.terrainBasis[0][1] += 1;
+  assert.equal(parseLocalSimulation(stale), null);
+  assert.equal(JSON.stringify(run), bytes);
 });

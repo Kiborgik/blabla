@@ -1,3 +1,4 @@
+import { projectDrainage } from '../visuals/drainage-visuals.ts';
 import { projectBorderIncidents } from '../visuals/border-visuals.ts';
 import { projectAcquiredLand } from '../visuals/territory-visuals.ts';
 import { projectPastoralSites, projectCatchmentSites } from '../visuals/pastoral-visuals.ts';
@@ -52,6 +53,7 @@ export function presentationColor(value: string): string {
 }
 
 export function projectWorld(state: WorldState): AtlasWorld {
+  const drainage = projectDrainage(state);
   const centerQ = (state.width - 1) / 2;
   const centerR = (state.height - 1) / 2;
   const civilizations = new Map(state.civilizations.map((civ) => [civ.id, civ]));
@@ -131,6 +133,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
   }));
   return {
     illustrative: false,
+    drainage,
     acquiredLand: projectAcquiredLand(state),
     borderIncidents: projectBorderIncidents(state),
     cities,

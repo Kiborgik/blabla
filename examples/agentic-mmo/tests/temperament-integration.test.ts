@@ -27,7 +27,7 @@ void test('explicit temperament genesis changes only its marker and allocated st
       city.focus = prior.cities.find(candidate => candidate.id === city.id)!.focus;
     }
     assert.deepEqual(comparable, prior);
-    assert.equal(localSimulationSnapshot(fresh).identity, `local:coherent-geography-v1:${seed}:${epoch}:${ACTIVE_LOCAL_RELEASE_ID}:cultural-toponyms-v1:strategic-temperaments-v1`);
+    assert.equal(localSimulationSnapshot(fresh).identity, `local:drainage-geography-v2:${seed}:${epoch}:${ACTIVE_LOCAL_RELEASE_ID}:cultural-toponyms-v1:strategic-temperaments-v1`);
   }
 });
 

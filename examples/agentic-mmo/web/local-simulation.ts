@@ -9,7 +9,7 @@ import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:productive-frontiers-v1';
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:drainage-v2';
 export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-productive-frontiers-1';
 export const ACTIVE_LOCAL_POLICY_VERSION = FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION;
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
@@ -45,7 +45,7 @@ export function parseLocalSimulation(value: unknown): LocalSimulation | null {
     || typeof run.timestamp !== 'string' || Date.parse(run.timestamp) !== Date.parse(EPOCH) + Number(run.steps) * LOCAL_SIMULATION_STEP_MS
     || !isWorldState(run.state) || run.state.seed !== run.seed || run.state.clockEpoch !== EPOCH
     || run.policyVersion !== ACTIVE_LOCAL_POLICY_VERSION || behaviorPolicyVersion(run.state) !== run.policyVersion
-    || run.state.origin?.generatorVersion !== 'coherent-geography-v1'
+    || run.state.origin?.generatorVersion !== 'drainage-geography-v2'
     || run.state.origin.initialReleaseId !== ACTIVE_LOCAL_RELEASE_ID || run.state.releaseId !== ACTIVE_LOCAL_RELEASE_ID
     || run.state.origin.namingVersion !== 'cultural-toponyms-v1' || run.state.origin.temperamentVersion !== 'strategic-temperaments-v1'
     || !Array.isArray(run.memories) || run.memories.length !== DIRECTOR_SEAT + 1

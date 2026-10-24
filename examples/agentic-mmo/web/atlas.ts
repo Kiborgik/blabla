@@ -1,3 +1,4 @@
+import type { DrainageView } from '../visuals/drainage-visuals.ts';
 import type { BorderIncidentView } from '../visuals/border-visuals.ts';
 import type { AcquiredLandView } from '../visuals/territory-visuals.ts';
 import { retainedCoordinateShift } from '../visuals/map-hierarchy.ts';
@@ -43,6 +44,7 @@ export interface AtlasTile {
 }
 
 export interface AtlasWorld {
+  drainage?: DrainageView | null;
   borderIncidents?: BorderIncidentView[];
   acquiredLand?: AcquiredLandView[];
   tiles: AtlasTile[];

@@ -1,7 +1,8 @@
+import type { DrainageEdgeView, DrainageView } from './drainage-visuals.ts';
 import { populationFootprint, SETTLEMENT_RENDER_SCALE } from './world-visuals.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
-export interface LandscapeTile { q: number; r: number; owner: number | null; terrain: 'grassland' | 'forest' | 'desert' | 'mountain' | 'tundra'; height: number }
+export interface LandscapeTile { id?: number; q: number; r: number; owner: number | null; terrain: 'grassland' | 'forest' | 'desert' | 'mountain' | 'tundra'; height: number }
 export interface LandscapeTown { q: number; r: number; population?: number; improvementId?: string; tileId?: number; worldSeed?: number }
 export interface LandscapeEdge { key: string; owner: number | null; from: readonly [number, number]; to: readonly [number, number]; height: number; fromHeight?: number; toHeight?: number }
 export interface LandscapeTerritory { key: string; owner: number; height: number; points: Array<readonly [number, number]> }
@@ -39,14 +40,86 @@ export function territoryEdgeTriangles(edge: LandscapeEdge): number[] {
 }
 
 export type TerrainPoint = readonly [number, number, number];
-export interface TerrainFace { key: string; points: TerrainPoint[]; color: string }
-export interface TerrainSurface { key: string; center: TerrainPoint; rim: TerrainPoint[]; faces: TerrainFace[]; cliffs: TerrainFace[] }
+export interface TerrainFace { key: string; points: TerrainPoint[]; color: string; kind?: 'ground' | 'bank' | 'channel'; drainageEdgeId?: string }
+export interface TerrainSurface { key: string; center: TerrainPoint; rim: TerrainPoint[]; edgeRims: TerrainPoint[][]; faces: TerrainFace[]; cliffs: TerrainFace[] }
 
 function shadeColor(color: string, amount: number): string {
   return `#${[1, 3, 5].map(offset => Math.max(0, Math.min(255, Math.round(Number.parseInt(color.slice(offset, offset + 2), 16) * amount))).toString(16).padStart(2, '0')).join('')}`;
 }
 
-export function projectTerrainSurface(tiles: readonly LandscapeTile[]): TerrainSurface[] {
+export const DRAINAGE_STYLE = { depth: .055, minHalfWidth: .055, maxHalfWidth: .11, bankWidth: .045, forestSetback: .025, water: '#477e7c', bank: '#5a6551' } as const;
+
+function drainageWidth(count: number): number {
+  return Math.max(DRAINAGE_STYLE.minHalfWidth, Math.min(DRAINAGE_STYLE.maxHalfWidth, DRAINAGE_STYLE.minHalfWidth + Math.log2(Math.max(8, count) / 8) * .018));
+}
+
+function cutTerrainSurfaces(surfaces: TerrainSurface[], tiles: readonly LandscapeTile[], drainage: DrainageView | null | undefined): TerrainSurface[] {
+  if (drainage?.kind !== 'retained' || !drainage.edges.length) return surfaces;
+  const byKey = new Map(surfaces.map(surface => [surface.key, surface]));
+  const byId = new Map(tiles.flatMap(tile => tile.id === undefined ? [] : [[tile.id, { tile, surface: byKey.get(key(tile))! }] as const]));
+  type Cut = { edge: DrainageEdgeView; rim: TerrainPoint[]; width: number };
+  const cuts = new Map<string, Map<number, Cut>>();
+  const setCut = (surface: TerrainSurface, direction: number, cut: Cut): void => {
+    const local = cuts.get(surface.key) ?? new Map<number, Cut>();
+    local.set(direction, cut); cuts.set(surface.key, local); surface.edgeRims[direction] = cut.rim;
+  };
+  for (const edge of drainage.edges) {
+    const source = byId.get(edge.fromTileId); const target = byId.get(edge.toTileId);
+    if (!source || (!edge.mouth && !target)) continue;
+    const [start, end] = edge.points;
+    const direction = (Math.round(Math.atan2(end[2] - start[2], end[0] - start[0]) / (Math.PI / 3)) + 6) % 6;
+    const a = source.surface.rim[(direction + 5) % 6]!; const b = source.surface.rim[direction]!;
+    const width = drainageWidth(edge.contributingLandTiles);
+    const height = edge.mouth ? 0 : (start[1] + end[1]) / 2 - DRAINAGE_STYLE.depth;
+    const point = (t: number, y?: number): TerrainPoint => [a[0] + (b[0] - a[0]) * t, y ?? a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+    const rim = [a, point(.5 - width - DRAINAGE_STYLE.bankWidth), point(.5 - width, height), point(.5 + width, height), point(.5 + width + DRAINAGE_STYLE.bankWidth), b];
+    setCut(source.surface, direction, { edge, rim, width });
+    if (target) setCut(target.surface, (direction + 3) % 6, { edge, rim: rim.toReversed(), width });
+  }
+  for (const surface of surfaces) {
+    const local = cuts.get(surface.key);
+    if (!local?.size) continue;
+    const [x, height, z] = surface.center;
+    const radius = Math.max(...[...local.values()].map(cut => cut.width));
+    const waterCenter: TerrainPoint = [x, height - DRAINAGE_STYLE.depth, z];
+    const inner: TerrainPoint[] = surface.rim.map(point => [x + (point[0] - x) * radius, waterCenter[1], z + (point[2] - z) * radius]);
+    const outer: TerrainPoint[] = surface.rim.map(point => [x + (point[0] - x) * (radius + DRAINAGE_STYLE.bankWidth), height, z + (point[2] - z) * (radius + DRAINAGE_STYLE.bankWidth)]);
+    const original = surface.faces;
+    surface.faces = [];
+    const face = (id: string, points: TerrainPoint[], kind: NonNullable<TerrainFace['kind']>, color: string, edge?: DrainageEdgeView): void => {
+      surface.faces.push({ key: `${surface.key}:${id}`, points, kind, color, ...(edge ? { drainageEdgeId: edge.id } : {}) });
+    };
+    for (let direction = 0; direction < 6; direction++) {
+      const a = (direction + 5) % 6; const b = direction;
+      const cut = local.get(direction);
+      const color = original[a]!.color;
+      face(`join:${direction}`, [waterCenter, inner[a]!, inner[b]!], 'channel', DRAINAGE_STYLE.water);
+      if (cut) {
+        const [, leftBank, leftWater, rightWater, rightBank] = cut.rim;
+        face(`channel:${direction}`, [inner[a]!, leftWater!, rightWater!, inner[b]!], 'channel', DRAINAGE_STYLE.water, cut.edge);
+        face(`bank:${direction}:left`, [inner[a]!, outer[a]!, leftBank!, leftWater!], 'bank', DRAINAGE_STYLE.bank, cut.edge);
+        face(`bank:${direction}:right`, [inner[b]!, rightWater!, rightBank!, outer[b]!], 'bank', DRAINAGE_STYLE.bank, cut.edge);
+        face(`land:${direction}:left`, [outer[a]!, surface.rim[a]!, leftBank!], 'ground', color);
+        face(`land:${direction}:right`, [outer[b]!, rightBank!, surface.rim[b]!], 'ground', color);
+      } else {
+        face(`bank:${direction}`, [inner[a]!, outer[a]!, outer[b]!, inner[b]!], 'bank', DRAINAGE_STYLE.bank);
+        face(`land:${direction}`, [outer[a]!, surface.rim[a]!, surface.rim[b]!, outer[b]!], 'ground', color);
+      }
+    }
+    surface.cliffs = surface.cliffs.flatMap(cliff => {
+      const direction = Number(cliff.key.split(':').at(-1));
+      const rim = surface.edgeRims[direction]!;
+      return rim.slice(0, -1).flatMap((a, index): TerrainFace[] => {
+        const b = rim[index + 1]!;
+        if (a[1] === 0 && b[1] === 0) return [];
+        return [{ key: `${cliff.key}:cut:${index}`, points: [a, b, [b[0], 0, b[2]], [a[0], 0, a[2]]], color: cliff.color }];
+      });
+    });
+  }
+  return surfaces;
+}
+
+export function projectTerrainSurface(tiles: readonly LandscapeTile[], drainage?: DrainageView | null): TerrainSurface[] {
   const ordered = tiles.toSorted(order);
   const lookup = new Set(ordered.map(key));
   const corners = new Map<string, { x: number; z: number; heights: number[] }>();
@@ -61,7 +134,7 @@ export function projectTerrainSurface(tiles: readonly LandscapeTile[]): TerrainS
       corner.heights.push(tile.height); corners.set(id, corner);
     }
   }
-  return ordered.map(tile => {
+  const surfaces = ordered.map(tile => {
     const { x, z } = hexPosition(tile.q, tile.r);
     const center: TerrainPoint = [x, tile.height, z];
     const rim: TerrainPoint[] = Array.from({ length: 6 }, (_, index) => {
@@ -78,8 +151,9 @@ export function projectTerrainSurface(tiles: readonly LandscapeTile[]): TerrainS
       return a && b ? [{ key: `${key(tile)}:${index}`, points: [a, b, [b[0], 0, b[2]], [a[0], 0, a[2]]],
         color: shadeColor('#a6a17b', .82 + Math.cos(index * Math.PI / 3 + 2.4) * .13) }] : [];
     });
-    return { key: key(tile), center, rim, faces, cliffs };
+    return { key: key(tile), center, rim, edgeRims: NEIGHBORS.map((_, index) => [rim[(index + 5) % 6]!, rim[index]!]), faces, cliffs };
   });
+  return cutTerrainSurfaces(surfaces, ordered, drainage);
 }
 
 function terrainParts(tile: LandscapeTile, detail: DetailLevel): VisualPart[] {
@@ -124,10 +198,43 @@ function charcoalForestParts(tile: LandscapeTile, site: LandscapeTown, detail: D
   });
 }
 
-export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonly LandscapeTown[], detail: DetailLevel): LandscapeProjection {
+function forestOutsideChannels(tile: LandscapeTile, parts: VisualPart[], surfaces: ReadonlyMap<string, TerrainSurface>): VisualPart[] {
+  const corridor = [[0, 0], ...NEIGHBORS].flatMap(([dq, dr]) => surfaces.get(`${tile.q + dq!},${tile.r + dr!}`)?.faces.filter(face => face.kind === 'channel' || face.kind === 'bank') ?? []);
+  if (!corridor.length) return parts;
+  const clear = (x: number, z: number, radius: number): boolean => !corridor.some(face => {
+    let inside = false;
+    for (let index = 0, previous = face.points.length - 1; index < face.points.length; previous = index++) {
+      const a = face.points[previous]!; const b = face.points[index]!;
+      if ((a[2] > z) !== (b[2] > z) && x < (b[0] - a[0]) * (z - a[2]) / (b[2] - a[2]) + a[0]) inside = !inside;
+      const dx = b[0] - a[0]; const dz = b[2] - a[2];
+      const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[2]) * dz) / (dx * dx + dz * dz || 1)));
+      if (Math.hypot(x - a[0] - t * dx, z - a[2] - t * dz) < radius) return true;
+    }
+    return inside;
+  });
+  const groups = new Map<string, VisualPart[]>();
+  for (const part of parts) {
+    const id = `${part.position[0]},${part.position[2]}`;
+    const group = groups.get(id) ?? []; group.push(part); groups.set(id, group);
+  }
+  const center = hexPosition(tile.q, tile.r);
+  return [...groups.values()].flatMap((group, index) => {
+    const first = group[0]!;
+    const radius = Math.max(...group.map(part => Math.max(part.scale[0], part.scale[2]) / 2)) + DRAINAGE_STYLE.forestSetback;
+    if (clear(first.position[0], first.position[2], radius)) return group;
+    const angle = noise(tile.q, tile.r, index + 31) * Math.PI * 2;
+    const candidates = [.46, .58, .7, .82].flatMap(distance => Array.from({ length: 24 }, (_, step) => ({ x: center.x + Math.cos(angle + step * Math.PI / 12) * distance, z: center.z + Math.sin(angle + step * Math.PI / 12) * distance })))
+      .sort((a, b) => Math.hypot(a.x - first.position[0], a.z - first.position[2]) - Math.hypot(b.x - first.position[0], b.z - first.position[2]));
+    const target = candidates.find(point => NEIGHBORS.every((_, direction) => (point.x - center.x) * Math.cos(direction * Math.PI / 3) + (point.z - center.z) * Math.sin(direction * Math.PI / 3) + radius - DRAINAGE_STYLE.forestSetback <= Math.sqrt(3) / 2) && clear(point.x, point.z, radius));
+    if (!target) return [];
+    return group.map(part => ({ ...part, position: [target.x, part.position[1], target.z] as const }));
+  });
+}
+
+export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonly LandscapeTown[], detail: DetailLevel, drainage?: DrainageView | null): LandscapeProjection {
   const ordered = tiles.toSorted(order);
   const lookup = new Map(ordered.map(tile => [key(tile), tile]));
-  const surfaces = new Map(projectTerrainSurface(ordered).map(tile => [tile.key, tile]));
+  const surfaces = new Map(projectTerrainSurface(ordered, drainage).map(tile => [tile.key, tile]));
   const townSites = new Set(towns.map(key));
   const charcoalSites = new Map(towns.filter(site => site.improvementId === 'charcoal-clearing').map(site => [key(site), site]));
   const coast: LandscapeEdge[] = [];
@@ -146,11 +253,23 @@ export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonl
       const b = a + Math.PI / 3;
       const edge: LandscapeEdge = { key: `${key(tile)}:${index}`, owner: tile.owner,
         from: [x + Math.cos(a), z + Math.sin(a)], to: [x + Math.cos(b), z + Math.sin(b)], height: Math.max(tile.height, neighbor?.height ?? 0) + .035 };
-      if (!neighbor) coast.push(edge);
-      if (tile.owner !== null && neighbor?.owner !== tile.owner) borders.push({ ...edge,
-        from: [x + Math.cos(a) * .98, z + Math.sin(a) * .98], to: [x + Math.cos(b) * .98, z + Math.sin(b) * .98],
-        fromHeight: (surfaces.get(key(tile))?.rim[(index + 5) % 6]?.[1] ?? tile.height) * .98 + tile.height * .02 + .035,
-        toHeight: (surfaces.get(key(tile))?.rim[index]?.[1] ?? tile.height) * .98 + tile.height * .02 + .035 });
+      if (!neighbor) {
+        const rim = surfaces.get(key(tile))?.edgeRims[index] ?? [];
+        if (rim.length > 2) {
+          for (const [part, from, to] of [[0, rim[0]!, rim[2]!], [1, rim[3]!, rim[5]!]] as const) coast.push({ ...edge,
+            key: `${edge.key}:${part}`, from: [from[0], from[2]], to: [to[0], to[2]] });
+        } else coast.push(edge);
+      }
+      if (tile.owner !== null && neighbor?.owner !== tile.owner) {
+        const rim = surfaces.get(key(tile))?.edgeRims[index] ?? [];
+        for (let part = 0; part < rim.length - 1; part++) {
+          if (rim.length > 2 && part >= 1 && part <= 3) continue;
+          const start = rim[part]!; const end = rim[part + 1]!;
+          borders.push({ ...edge, key: rim.length === 2 ? edge.key : `${edge.key}:${part}`,
+            from: [x + (start[0] - x) * .98, z + (start[2] - z) * .98], to: [x + (end[0] - x) * .98, z + (end[2] - z) * .98],
+            fromHeight: start[1] * .98 + tile.height * .02 + .035, toHeight: end[1] * .98 + tile.height * .02 + .035 });
+        }
+      }
     }
   }
   const parts: VisualPart[] = towns.toSorted(order).flatMap((town): VisualPart[] => {
@@ -162,7 +281,8 @@ export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonl
   }).slice(0, LANDSCAPE_BUDGETS[detail]);
   const groups = ordered.flatMap(tile => {
     const charcoal = charcoalSites.get(key(tile));
-    return charcoal && tile.terrain === 'forest' ? [charcoalForestParts(tile, charcoal, detail)] : !townSites.has(key(tile)) ? [terrainParts(tile, detail)] : [];
+    const parts = charcoal && tile.terrain === 'forest' ? charcoalForestParts(tile, charcoal, detail) : !townSites.has(key(tile)) ? terrainParts(tile, detail) : [];
+    return [tile.terrain === 'forest' ? forestOutsideChannels(tile, parts, surfaces) : parts];
   });
   for (let index = 0; index < 14 && parts.length < LANDSCAPE_BUDGETS[detail]; index++) {
     for (const group of groups) {

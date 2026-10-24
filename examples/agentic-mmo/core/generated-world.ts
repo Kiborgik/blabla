@@ -21,6 +21,7 @@ export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialRel
   state.width = geography.width;
   state.height = geography.height;
   state.tiles = geography.tiles;
+  state.drainage = geography.drainage;
   state.rng = geography.rng;
   state.origin = { kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed: state.seed, clockEpoch, ...(namingVersion ? { namingVersion } : {}), ...(temperamentVersion ? { temperamentVersion } : {}), ...(initialReleaseId !== 'settlement-interplanetary-1' ? { initialReleaseId } : {}) };
   for (const city of state.cities) {

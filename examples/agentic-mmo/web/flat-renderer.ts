@@ -9,7 +9,7 @@ import { visibleRoutePaths } from '../visuals/route-paths.ts';
 import { routeLabelKey, routeTitle, routeVisual, routeMapLabel } from '../visuals/route-visuals.ts';
 import { damageMapLabel } from '../visuals/damage-visuals.ts';
 import { cityKey, selectedCity } from './city-selection.ts';
-import { projectTerrainSurface, projectLandscape, LANDSCAPE_COLORS, TERRITORY_STYLE } from '../visuals/landscape.ts';
+import { projectTerrainSurface, projectLandscape, LANDSCAPE_COLORS, DRAINAGE_STYLE, TERRITORY_STYLE } from '../visuals/landscape.ts';
 import { hexPosition, routeMapPositions, routeMapAnchor } from './atlas.ts';
 import type { RouteView } from '../visuals/route-visuals.ts';
 import type { AtlasWorld } from './atlas.ts';
@@ -60,14 +60,48 @@ function node<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<s
   return element;
 }
 
-export function createFlatTerritoryLayer(world: Pick<AtlasWorld, 'tiles' | 'cities'>): SVGGElement {
+export function createFlatTerrainLayer(tiles: Parameters<typeof projectTerrainSurface>[0], drainage?: Parameters<typeof projectTerrainSurface>[1]): SVGGElement {
+  const land = node('g', { class: 'terrain-surfaces' });
+  const surfaces = projectTerrainSurface(tiles, drainage);
+  const tops = surfaces.flatMap(tile => tile.faces);
+  const terrainByKey = new Map(tiles.map(tile => [`${tile.q},${tile.r}`, tile.terrain]));
+  const coverage = [
+    { kind: 'cliff', color: LANDSCAPE_COLORS.shore, faces: surfaces.flatMap(tile => tile.cliffs) },
+    ...(['grassland', 'forest', 'desert', 'mountain', 'tundra'] as const).map(terrain => ({ kind: `ground:${terrain}`, color: LANDSCAPE_COLORS[terrain],
+      faces: surfaces.filter(tile => terrainByKey.get(tile.key) === terrain).flatMap(tile => tile.faces.filter(face => !face.kind || face.kind === 'ground')) })),
+    { kind: 'bank', color: DRAINAGE_STYLE.bank, faces: tops.filter(face => face.kind === 'bank') },
+    { kind: 'channel', color: DRAINAGE_STYLE.water, faces: tops.filter(face => face.kind === 'channel') },
+  ];
+  for (const layer of coverage) {
+    if (!layer.faces.length) continue;
+    const d = layer.faces.map(face => {
+      const points = face.points.map(([x, height, z]) => flatMapPoint(x, z, height));
+      const area = points.reduce((sum, point, index) => { const next = points[(index + 1) % points.length]!; return sum + point.x * next.z - next.x * point.z; }, 0);
+      return `M${(area < 0 ? points.toReversed() : points).map(point => `${point.x},${point.z}`).join('L')}Z`;
+    }).join('');
+    land.append(node('path', { d, fill: layer.color, 'fill-rule': 'nonzero', 'data-terrain-coverage': layer.kind }));
+  }
+  const faces = surfaces.flatMap(tile => [...tile.cliffs, ...tile.faces]).toSorted((a, b) => {
+    const depth = (face: typeof a): number => face.points.reduce((sum, point) => sum + point[2] * .85 + point[1] * .72, 0) / face.points.length;
+    return depth(a) - depth(b);
+  });
+  for (const face of faces) land.append(node('polygon', { points: flatPoints(face.points), fill: face.color, 'data-terrain-face': face.key,
+    ...(face.kind ? { 'data-surface-kind': face.kind } : {}), ...(face.drainageEdgeId ? { 'data-drainage-edge': face.drainageEdgeId } : {}) }));
+  return land;
+}
+
+export function createFlatTerritoryLayer(world: Pick<AtlasWorld, 'tiles' | 'cities' | 'drainage'>): SVGGElement {
   const group = node('g', { 'pointer-events': 'none', class: 'territory-layer' });
-  const landscape = projectLandscape(world.tiles, [], 'far');
-  const surface = new Map(projectTerrainSurface(world.tiles).map(tile => [tile.key, tile]));
+  const landscape = projectLandscape(world.tiles, [], 'far', world.drainage);
+  const surface = new Map(projectTerrainSurface(world.tiles, world.drainage).map(tile => [tile.key, tile]));
   for (const territory of landscape.territories) {
     const owner = world.cities.find(city => city.id === territory.owner);
-    if (owner) group.append(node('polygon', { points: flatPoints((surface.get(territory.key)?.rim ?? []).map(([x, height, z]) => [x, height + .012, z])),
-      fill: owner.color, 'fill-opacity': String(TERRITORY_STYLE.washOpacity), 'data-territory': territory.key, 'data-owner': String(territory.owner) }));
+    if (owner) {
+      const tile = surface.get(territory.key);
+      const polygons = tile?.faces.some(face => face.kind === 'channel') ? tile.faces.filter(face => face.kind === 'ground').map(face => face.points) : [tile?.rim ?? []];
+      for (const points of polygons) group.append(node('polygon', { points: flatPoints(points.map(([x, height, z]) => [x, height + .012, z])),
+        fill: owner.color, 'fill-opacity': String(TERRITORY_STYLE.washOpacity), 'data-territory': territory.key, 'data-owner': String(territory.owner) }));
+    }
   }
   for (const edge of landscape.borders) {
     const owner = world.cities.find(city => city.id === edge.owner);
@@ -144,7 +178,7 @@ export function createFlatAtlasRenderer(
   definitions.append(waves);
   ocean.append(node('rect', { x: '-500', y: '-500', width: '1000', height: '1000', fill: LANDSCAPE_COLORS.water }), node('rect', { x: '-500', y: '-500', width: '1000', height: '1000', fill: 'url(#atlas-wave-pattern)' }));
   const coast = node('g', { 'pointer-events': 'none' });
-  const land = node('g', {});
+  const land = createFlatTerrainLayer(world.tiles, world.drainage);
   const terrain = node('g', { 'pointer-events': 'none', class: 'landscape-parts' });
   const borders = createFlatTerritoryLayer(world);
   const acquired = node('g', { class: 'acquired-land', 'pointer-events': 'none' });
@@ -175,17 +209,11 @@ export function createFlatAtlasRenderer(
   let x = preferences.x;
   let z = preferences.z;
   const tileLookup = new Map(world.tiles.map(tile => [`${tile.q},${tile.r}`, tile]));
-  const surfaces = projectTerrainSurface(world.tiles);
-  const landscape = projectLandscape(world.tiles, world.cities, 'far');
+  const landscape = projectLandscape(world.tiles, world.cities, 'far', world.drainage);
   const coastPath = landscape.coast.map(edge => `M${flatPoints([[edge.from[0], 0, edge.from[1]], [edge.to[0], 0, edge.to[1]]]).replace(' ', 'L')}`).join(' ');
   coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shallow, 'stroke-opacity': '.42', 'stroke-width': '.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
   coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shallow, 'stroke-width': '.38', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
   coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shore, 'stroke-width': '.08', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
-  const surfaceFaces = surfaces.flatMap(tile => [...tile.cliffs, ...tile.faces]).toSorted((a, b) => {
-    const depth = (face: typeof a): number => face.points.reduce((sum, point) => sum + point[2] * .85 + point[1] * .72, 0) / face.points.length;
-    return depth(a) - depth(b);
-  });
-  for (const face of surfaceFaces) land.append(node('polygon', { points: flatPoints(face.points), fill: face.color, stroke: face.color, 'stroke-width': '.045', 'data-terrain-face': face.key }));
   borders.append(acquired);
   const paintParts = (host: SVGGElement, parts: Parameters<typeof flatSceneFaces>[0], identity: string): void => {
     host.replaceChildren();
@@ -321,7 +349,7 @@ export function createFlatAtlasRenderer(
       townDetail = nextTownDetail;
       svg.dataset['townDetail'] = townDetail;
       svg.dataset['detail'] = detail;
-      paintParts(terrain, projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? []), ...(world.improvements ?? []), ...(world.wonders ?? [])], detail).parts, VISUAL_PALETTE.stone);
+      paintParts(terrain, projectLandscape(world.tiles, [...world.cities, ...(world.districts ?? []), ...(world.improvements ?? []), ...(world.wonders ?? [])], detail, world.drainage).parts, VISUAL_PALETTE.stone);
       for (const entry of depositNodes) { const deposit = world.deposits?.[entry.index]; if (deposit) paintParts(entry.parts, depositParts(deposit, detail), VISUAL_PALETTE.metal); }
       for (const entry of districtNodes) {
         const district = sites[entry.index];

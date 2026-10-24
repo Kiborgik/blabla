@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { generateGeography, GENERATED_GEOGRAPHY_VERSION } from '../core/generated-geography.ts';
+import { generateGeography, GENERATED_GEOGRAPHY_VERSION, generateGeographyWithCandidateForTest } from '../core/generated-geography.ts';
 import { hexDistance } from '../core/simulation/geography.ts';
 import { isHillSite } from '../core/simulation/improvements.ts';
 import { createLandTransportPlanner, landTransportBlock, landTransportCadence } from '../core/simulation/transport.ts';
@@ -13,7 +13,7 @@ void test('versioned geography is canonical, deterministic, detached and seed-se
   const starts = new Set<string>();
   for (const seed of seeds) {
     const map = generateGeography(seed);
-    assert.equal(map.version, 'coherent-geography-v1');
+    assert.equal(map.version, 'drainage-geography-v2');
     assert.equal(map.version, GENERATED_GEOGRAPHY_VERSION);
     assert.equal(map.width, 18);
     assert.equal(map.height, 24);
@@ -25,7 +25,7 @@ void test('versioned geography is canonical, deterministic, detached and seed-se
       assert.equal(tile.id, tile.r * map.width + tile.q);
       assert.equal(tile.owner, null);
       assert.equal(tile.resource, null);
-      assert.ok(Number.isInteger(tile.elevation) && tile.elevation >= 0 && tile.elevation <= 100);
+      assert.ok(Number.isSafeInteger(tile.elevation * 4096) && tile.elevation >= 0 && tile.elevation <= 100);
       if (tile.terrain === 'ocean') assert.ok(tile.elevation < 30);
       if (tile.terrain === 'mountain') assert.ok(tile.elevation > 88);
     }
@@ -92,4 +92,53 @@ void test('generation bounds reject unsupported inputs rather than silently fall
   const larger = generateGeography(73, 24, 30);
   assert.equal(larger.tiles.length, 720);
   assert.deepEqual(generateGeography(73, 24, 30), larger);
+});
+
+void test('drainage courses retain four consecutive land edges to a genuine mouth and a river-adjacent capital', () => {
+  for (const [seed, width, height] of [...seeds.map(seed => [seed, 18, 24]), [73, 24, 30]]) {
+    const map = generateGeography(seed!, width, height);
+    const incoming = Array<number>(map.tiles.length).fill(0);
+    const lengths = Array<number>(map.tiles.length).fill(0);
+    const ocean = new Set(map.tiles.filter(tile => tile.terrain === 'ocean' && (tile.q === 0 || tile.r === 0 || tile.q === map.width - 1 || tile.r === map.height - 1)).map(tile => tile.id));
+    const pending = [...ocean];
+    for (const id of pending) for (const tile of map.tiles) if (tile.terrain === 'ocean' && !ocean.has(tile.id) && hexDistance(map.tiles[id]!, tile) === 1) { ocean.add(tile.id); pending.push(tile.id); }
+    for (const tile of map.tiles) {
+      assert.deepEqual(map.drainage.terrainBasis[tile.id], [tile.terrain, tile.elevation * 4096]);
+      if (tile.terrain === 'ocean') { assert.equal(map.drainage.downstreamTileIds[tile.id], null); continue; }
+      const seen = new Set<number>();
+      let id = tile.id;
+      while (map.tiles[id]!.terrain !== 'ocean') {
+        assert.ok(!seen.has(id));
+        seen.add(id);
+        incoming[id]! += 1;
+        const next = map.drainage.downstreamTileIds[id];
+        assert.notEqual(next, null);
+        const destination = map.tiles[next!]!;
+        assert.equal(hexDistance(map.tiles[id]!, destination), 1);
+        assert.ok(destination.elevation < map.tiles[id]!.elevation);
+        const lower = map.tiles.filter(other => hexDistance(map.tiles[id]!, other) === 1 && other.elevation < map.tiles[id]!.elevation).sort((a, b) => a.elevation - b.elevation || a.id - b.id);
+        assert.equal(next, lower[0]!.id);
+        id = next!;
+      }
+      assert.ok(ocean.has(id));
+    }
+    for (const tile of map.tiles.toSorted((a, b) => a.elevation - b.elevation || a.id - b.id)) {
+      const next = map.drainage.downstreamTileIds[tile.id];
+      if (next !== null && incoming[tile.id]! >= 8) lengths[tile.id] = lengths[next!]! + 1;
+    }
+    assert.ok(Math.max(...lengths) >= 4, `seed ${seed} has a four-edge river course`);
+    assert.ok(map.capitalTileIds.some(id => map.tiles.some(tile => tile.terrain !== 'ocean' && tile.terrain !== 'mountain' && incoming[tile.id]! >= 8 && hexDistance(map.tiles[id]!, tile) === 1)));
+  }
+});
+
+void test('test-only rejected candidate seam uses the real hard 96-attempt loop without fallback', () => {
+  const seen = new Set<number>();
+  let calls = 0;
+  assert.throws(() => generateGeographyWithCandidateForTest(73, 18, 24, (seed, width, height) => {
+    calls += 1;
+    seen.add(seed);
+    return Array.from({ length: width * height }, (_, id) => ({ id, q: id % width, r: Math.floor(id / width), terrain: 'grassland', elevation: 50, owner: null, resource: null }));
+  }), /within 96 attempts/);
+  assert.equal(calls, 96);
+  assert.equal(seen.size, 96);
 });
