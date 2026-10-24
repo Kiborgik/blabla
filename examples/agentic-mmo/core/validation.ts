@@ -1,3 +1,4 @@
+import { isBorderState, validBorderEvent } from './border-validation.ts';
 import { isKnowledgeState, validKnowledgeEvent } from './knowledge-validation.ts';
 import { FOOD_BUDGET_RULES, type FoodSupplyReceipt } from './food-security-content.ts';
 import { isReliefState, validReliefEvent } from './relief-validation.ts';
@@ -1586,7 +1587,8 @@ function sameTerritoryReceipt(left: TileAcquisitionReceipt, right: TileAcquisiti
     && left.pathTileIds.length === right.pathTileIds.length && left.pathTileIds.every((id, index) => id === right.pathTileIds[index]);
 }
 
-function territoryRecords(present: boolean, value: unknown, cities: City[], tiles: HexTile[], events: GameEvent[], features: string[], round: number, revision: number, wonders: unknown): boolean {
+function territoryRecords(present: boolean, value: unknown, cities: City[], tiles: HexTile[], events: GameEvent[], features: string[], round: number, revision: number, wonders: unknown, border: unknown): boolean {
+  const controls = record(border) && record(border.controls) ? border.controls : {};
   const enabled = features.includes('owned-territory');
   if (!enabled) return !present && events.every(event => !Object.hasOwn(event, 'territoryAcquisition'));
   if (!present || !record(value) || Object.keys(value).length > tiles.length) return false;
@@ -1597,7 +1599,9 @@ function territoryRecords(present: boolean, value: unknown, cities: City[], tile
   for (const [key, raw] of Object.entries(value)) {
     if (!territoryReceipt(raw, revision, round, tiles.length) || key !== String(raw.tileId)) return false;
     const center = tileIndex.get(raw.cityTileId); const target = tileIndex.get(raw.tileId); const settlement = cityIndex.get(raw.cityId);
-    if (!center || !target || target.owner !== raw.civId || centers.has(raw.tileId) || hexDistance(center, target) !== raw.distance
+    const control = controls[String(raw.tileId)];
+    const currentOwner = record(control) && control.purchaseId === raw.id ? control.civId : raw.civId;
+    if (!center || !target || target.owner !== currentOwner || centers.has(raw.tileId) || hexDistance(center, target) !== raw.distance
       || settlement && (settlement.civId !== raw.civId || settlement.tileId !== raw.cityTileId)) return false;
     for (const [index, tileId] of raw.pathTileIds.entries()) {
       const site = tileIndex.get(tileId); const previous = tileIndex.get(raw.pathTileIds[index - 1] ?? -1);
@@ -1615,7 +1619,10 @@ function territoryRecords(present: boolean, value: unknown, cities: City[], tile
     if (receipt.priorCivilizationPurchases !== count) return false;
     counts.set(receipt.civId, count + 1);
   }
-  const bound = (cityId: string, tileId: number): boolean => !receipts.has(tileId) || receipts.get(tileId)?.cityId === cityId;
+  const bound = (cityId: string, tileId: number): boolean => {
+    const control = controls[String(tileId)];
+    return !receipts.has(tileId) || (record(control) ? control.cityId : receipts.get(tileId)?.cityId) === cityId;
+  };
   for (const settlement of cities) {
     if (!Object.values(settlement.districtSites ?? {}).every(tileId => bound(settlement.id, tileId))
       || !Object.values(settlement.improvements ?? {}).every(improvement => bound(settlement.id, improvement.tileId))) return false;
@@ -1634,7 +1641,7 @@ function territoryRecords(present: boolean, value: unknown, cities: City[], tile
 
 export function isGameEvent(value: unknown): value is GameEvent {
   return (
-    record(value) && validMarsEvent(value) && validReliefEvent(value) && validKnowledgeEvent(value) &&
+    record(value) && validMarsEvent(value) && validReliefEvent(value) && validKnowledgeEvent(value) && validBorderEvent(value) &&
     (!Object.hasOwn(value, 'regionalEvent') || isHistoricalEventReceipt(value.regionalEvent) && value.regionalEvent.eventId === value.id && value.regionalEvent.round === value.round && value.regionalEvent.eventKind === value.type && value.actor === DIRECTOR_SEAT && value.target === value.regionalEvent.civId && value.tileId === value.regionalEvent.selection.local.tileId) &&
     ['id', 'type', 'title', 'cause'].every((field) => text(value[field])) &&
     typeof value.detail === 'string' &&
@@ -1808,7 +1815,7 @@ export function isWorldState(value: unknown): value is WorldState {
     !waterLandRecords(Object.hasOwn(value, 'pastoralSites'), value.pastoralSites, cities, tiles, value.events, features, value.seed, value.strategicDeposits) ||
     !coastalRecords(cities, value.events, tiles, features, round, value.revision) ||
     !wonderRecords(Object.hasOwn(value, 'wonders'), value.wonders, cities, value.civilizations, tiles, value.events, features, value.revision, round) ||
-    !territoryRecords(Object.hasOwn(value, 'tileAcquisitions'), value.tileAcquisitions, cities, tiles, value.events, features, round, value.revision, value.wonders) ||
+    !territoryRecords(Object.hasOwn(value, 'tileAcquisitions'), value.tileAcquisitions, cities, tiles, value.events, features, round, value.revision, value.wonders, value.border) ||
     !value.civilizations.every((item) =>
       cities.some((settlement) => settlement.civId === item.id),
     ) ||
@@ -1831,6 +1838,9 @@ export function isWorldState(value: unknown): value is WorldState {
     (value.outcome !== null && value.outcome.round > round)
   )
     return false;
+  const borderEnabled = features.includes('supplied-borders');
+  if (borderEnabled !== Object.hasOwn(value, 'border') || borderEnabled && !isBorderState(value.border, value as unknown as WorldState)
+    || !borderEnabled && value.events.some(event => Object.hasOwn(event, 'border') || event.type.startsWith('border-'))) return false;
   const knowledgeEnabled = features.includes('knowledge-compacts');
   if (knowledgeEnabled !== Object.hasOwn(value, 'knowledge') || knowledgeEnabled && !isKnowledgeState(value.knowledge, value as unknown as WorldState)
     || !knowledgeEnabled && value.events.some(event => Object.hasOwn(event, 'knowledgeCompact') || Object.hasOwn(event, 'knowledgeStudy') || Object.hasOwn(event, 'knowledgeResult') || event.type.startsWith('knowledge-'))) return false;

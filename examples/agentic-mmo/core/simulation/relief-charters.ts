@@ -1,3 +1,4 @@
+import { borderDealFailure } from './border-incidents.ts';
 import { FOOD_BUDGET_RULES } from '../food-security-content.ts';
 import { foodRuleId, foodUpkeepPerResident, householdFoodUpkeep } from './food-security.ts';
 import { RELIEF_RULES } from '../relief-content.ts';
@@ -98,6 +99,7 @@ export function quoteReliefProposal(state: WorldState, actor: number, action: Ex
   const route = state.routes.find(route => route.id === action.routeId);
   if (!route?.agreement?.enabled || route.owner !== actor && route.partner !== actor) return refuse('Only a participant of an enabled consenting route can propose relief');
   const recipientId = route.owner === actor ? route.partner : route.owner;
+  const border = borderDealFailure(state, actor, recipientId); if (border) return refuse(border);
   if (layer.active.some(charter => pair(charter.terms.donorId, charter.terms.recipientId) === pair(actor, recipientId))) return refuse('These partners already have an active relief charter');
   const source = state.cities.find(city => city.id === action.sourceCityId && city.civId === actor);
   const recipient = state.cities.find(city => city.id === action.recipientCityId && city.civId === recipientId);
@@ -132,6 +134,7 @@ export function reliefActionFailure(state: WorldState, actor: number, action: Ga
   if (actor !== charter.terms.recipientId) return 'Only the named recipient can respond to relief';
   if (charter.status !== 'proposed' || state.round >= charter.expiresRound) return 'This charter is no longer awaiting consent';
   if (!action.accept) return null;
+  const border = borderDealFailure(state, charter.terms.donorId, charter.terms.recipientId); if (border) return border;
   if (!Number.isSafeInteger(state.round + charter.terms.travelRounds)) return 'Relief due round would exceed safe accounting';
   return targetFailure(state, charter.terms) ?? fundingFailure(state, charter, charter.terms.travelRounds);
 }

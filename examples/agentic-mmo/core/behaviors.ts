@@ -1,3 +1,4 @@
+import { deriveBorderPlan, borderWeight, borderPriority, borderReason, borderProtects, type BorderPlan } from './behavior-border.ts';
 import { createPaidFoodSiteAffordability, paidFoodSite } from './behavior-paid-food-sites.ts';
 import { revealedHorseSite } from './simulation/pastoral.ts';
 import { deriveKnowledgePlan, knowledgeProtects, knowledgeReason, knowledgeWeight, type KnowledgePlan } from './behavior-knowledge.ts';
@@ -140,6 +141,7 @@ interface Situation {
   diplomacy: DiplomacyPlan | null;
   relief: ReliefPlan | null;
   knowledge: KnowledgePlan | null;
+  border: BorderPlan | null;
   paidFoodSiteAffordable: ReturnType<typeof createPaidFoodSiteAffordability>;
 }
 
@@ -163,7 +165,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null };
+  return { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
 }
 
 function selectPhase(context: Situation, options: readonly ActionOption[], candidates?: readonly Candidate[]): BehaviorPhase {
@@ -365,6 +367,7 @@ function actionWeight(option: ActionOption, context: Situation): number {
       const route = state.routes.find(candidate => candidate.id === project?.routeId);
       return action.accept === ((route?.damage ?? 0) > 0) ? 12 : 0;
     }
+    case 'dispatch-border': case 'respond-border': case 'withdraw-border':
     case 'propose-knowledge': case 'respond-knowledge': case 'withdraw-knowledge':
     case 'propose-relief': case 'respond-relief': case 'withdraw-relief': return 0;
     case 'cancel-public-project': case 'trade': case 'event': return 0;
@@ -411,6 +414,7 @@ function laneOf(action: GameAction, lanes: Map<string, Set<string>>): string | n
 
 function urgent(candidate: Candidate, context: Situation): boolean {
   const action = candidate.option.action;
+  if (context.border && borderPriority(candidate.option, context.border) > 0) return true;
   if (context.relief && reliefPriority(candidate.option, context.relief) > 0) return true;
   if (context.diplomacy && diplomacyPriority(candidate.option, context.diplomacy) > 0) return true;
   if (!context.foodRisk && (progressionOperationalPriority(candidate.option, context.progression) || progressionTransportPriority(candidate.option, context.state, context.progression))) return true;
@@ -473,7 +477,7 @@ function committedDecision(state: WorldState, memory: BehaviorMemory, candidate:
 
 
 function protectedCandidate(option: ActionOption, context: Situation): boolean {
-  return !!context.diplomacy && diplomacyProtects(option, context.diplomacy) || !!context.relief && reliefProtects(option, context.relief) || !!context.knowledge && knowledgeProtects(option, context.knowledge);
+  return !!context.diplomacy && diplomacyProtects(option, context.diplomacy) || !!context.relief && reliefProtects(option, context.relief) || !!context.knowledge && knowledgeProtects(option, context.knowledge) || !!context.border && borderProtects(option, context.border);
 }
 
 function scoreCandidates(context: Situation, options: readonly ActionOption[], lanes: Map<string, Set<string>>): Candidate[] {
@@ -484,7 +488,8 @@ function scoreCandidates(context: Situation, options: readonly ActionOption[], l
       && !context.state.publicProjects?.some(project => project.routeId === action.routeId && project.status === 'committed');
     const diplomatic = context.diplomacy && !replacing ? diplomacyWeight(option, base, context.diplomacy) : base;
     const relief = context.relief ? reliefWeight(option, diplomatic, context.relief) : diplomatic;
-    const assessed = context.knowledge ? knowledgeWeight(option, relief, context.knowledge) : relief;
+    const knowledgeable = context.knowledge ? knowledgeWeight(option, relief, context.knowledge) : relief;
+    const assessed = context.border ? borderWeight(option, knowledgeable, context.border) : knowledgeable;
     const weight = context.memory.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION && protectedCandidate(option, context) ? 0 : assessed;
     return { option, weight, ...classify(option.action), lane: laneOf(option.action, lanes) };
   });
@@ -532,7 +537,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   const context = situation(state, actor, profile, memory, options);
   const lanes = requiredLanes(state, seat);
   const candidates = assessSituation(context, options, lanes);
-  const required = candidates.filter(candidate => candidate.lane !== null && (!context.diplomacy || !diplomacyProtects(candidate.option, context.diplomacy)) && (!context.relief || !reliefProtects(candidate.option, context.relief)));
+  const required = candidates.filter(candidate => candidate.lane !== null && (!context.diplomacy || !diplomacyProtects(candidate.option, context.diplomacy)) && (!context.relief || !reliefProtects(candidate.option, context.relief)) && (!context.border || !borderProtects(candidate.option, context.border)));
   let emergencies = candidates.filter(candidate => candidate.weight > 0 && urgent(candidate, context));
   if (context.relief) {
     const priorityOf = (candidate: Candidate): number => Math.max(reliefPriority(candidate.option, context.relief!), context.diplomacy ? diplomacyPriority(candidate.option, context.diplomacy) : 0);
@@ -542,11 +547,18 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
     const priority = Math.max(0, ...emergencies.map(candidate => diplomacyPriority(candidate.option, context.diplomacy!)));
     if (priority > 0) emergencies = emergencies.filter(candidate => diplomacyPriority(candidate.option, context.diplomacy!) === priority);
   }
+  if (context.border) {
+    const urgentBorders = candidates.filter(candidate => candidate.weight > 0 && borderPriority(candidate.option, context.border!) >= 4);
+    if (urgentBorders.length) {
+      const priority = Math.max(...urgentBorders.map(candidate => borderPriority(candidate.option, context.border!)));
+      emergencies = urgentBorders.filter(candidate => borderPriority(candidate.option, context.border!) === priority);
+    }
+  }
   let pool: Candidate[];
   let reason: string;
   let isUrgent = false;
   let reliefCompetition = false;
-  if (emergencies.length && (memory.urgentStreak < 2 || required.length === 0)) {
+  if (emergencies.length && (memory.urgentStreak < 2 || required.length === 0 || !!context.border && emergencies.some(candidate => borderPriority(candidate.option, context.border!) >= 4))) {
     pool = emergencies; isUrgent = true;
     reason = context.foodRisk ? 'Food is low; protect the towns before expanding.' : 'Repair serious damage to restore town production and exchanges.';
     if (context.relief && pool.every(candidate => candidate.option.action.type === 'propose-relief')) {
@@ -578,6 +590,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   if (context.diplomacy && !(choice.option.action.type === 'stop-trade' && context.progression.replaceableRoutes.has(choice.option.action.routeId))) reason = diplomacyReason(choice.option, context.diplomacy) ?? reason;
   if (context.relief) reason = reliefReason(choice.option, context.relief) ?? reason;
   if (context.knowledge) reason = knowledgeReason(choice.option, context.knowledge) ?? reason;
+  if (context.border) reason = borderReason(choice.option, context.border) ?? reason;
   return committedDecision(state, memory, choice, context.phase, reason, profile, isUrgent);
 }
 

@@ -109,8 +109,15 @@ export function renderTerritoryInspection(host: HTMLElement, territory: TownTerr
   for (const [button, key] of [[previous, 'land-previous'], [next, 'land-next']] as const) { button.type = 'button'; button.dataset['inspectionFocus'] = key; }
   navigation.append(previous, position, next);
   const meaning = townDisclosure('land-meaning', 'How acquired land works');
-  meaning.append(text('p', 'Outlined plots are this town’s recorded purchases. A retained ownership connection is not a road. Buying land does not construct a worked site, add residents or make supplies.'));
-  details.append(selector, context, list, navigation, meaning); host.append(details);
+  meaning.append(text('p', 'Outlined plots are currently controlled by this town. Purchase and border-control records remain distinct. A retained ownership connection is not a road. Buying land does not construct a worked site, add residents or make supplies.'));
+  details.append(selector, context, list, navigation, meaning);
+  for (const control of territory.controls ?? []) {
+    const receipt = townDisclosure(`land-control:${control.tileId}`, `Current control · Tile ${control.tileId}`);
+    receipt.append(text('p', `${territory.cityName ?? 'This town'} gained current control in round ${control.round}. The original paid purchase is unchanged.`),
+      text('p', `Border incident ${control.incidentId} · Event ${control.eventId}`, 'territory-note'));
+    details.append(receipt);
+  }
+  host.append(details);
   let page = retained.page;
   const draw = (): void => {
     list.replaceChildren(); details.dataset['landView'] = selector.value;

@@ -1,3 +1,4 @@
+import { borderFieldPopulation } from './border-incidents.ts';
 import { industrialEvidenceComplete } from './industrial-evidence.ts';
 import { HISTORICAL_MILESTONES } from '../content.ts';
 import type { GameEvent, HistoricalMilestone, MilestoneCondition, WorldState } from '../types.ts';
@@ -32,7 +33,7 @@ function conditionMet(
         condition.minimum
       );
     case 'total-population':
-      return state.cities.reduce((total, city) => total + city.population, 0) >= condition.minimum;
+      return state.cities.reduce((total, city) => total + city.population, 0) + state.civilizations.reduce((total, actor) => total + borderFieldPopulation(state, actor.id), 0) >= condition.minimum;
     case 'active-routes':
       return state.routes.filter((route) => route.active).length >= condition.minimum;
     case 'event':

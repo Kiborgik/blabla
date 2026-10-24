@@ -1,3 +1,4 @@
+import { borderReturnReservations } from './simulation/border-incidents.ts';
 import { BUILDINGS, RESOURCE_IDS } from './content.ts';
 import { HISTORICAL_DIRECTOR_EVENTS, HISTORICAL_EVENT_RULES, type HistoricalEventId } from './historical-event-content.ts';
 import type { City, Resources, Route, WorldState } from './types.ts';
@@ -101,7 +102,7 @@ export function historicalEventCandidates(state: WorldState, eventId: string, ta
         if (city.population >= HISTORICAL_EVENT_RULES.migrants + 1 && (city.damage >= HISTORICAL_EVENT_RULES.migrationSourceDamage || city.wellbeing <= HISTORICAL_EVENT_RULES.migrationSourceWellbeing)) {
           locals = cities.filter(other => other.id !== city.id && other.housing !== undefined
             && other.damage <= HISTORICAL_EVENT_RULES.migrationDestinationDamage && other.wellbeing >= HISTORICAL_EVENT_RULES.migrationDestinationWellbeing
-            && cityGrowthFacts(state, other).capacity - other.population >= HISTORICAL_EVENT_RULES.migrants)
+            && cityGrowthFacts(state, other).capacity - other.population - borderReturnReservations(state, other.id) >= HISTORICAL_EVENT_RULES.migrants)
             .map(destination => ({ ...site, kind: eventId, destinationCityId: destination.id, destinationTileId: destination.tileId }));
         }
         break;

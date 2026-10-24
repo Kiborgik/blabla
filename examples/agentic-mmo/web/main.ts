@@ -6,6 +6,8 @@ import { createWorldViewSession, parseWorldBody, parseWorldSource, worldSourceHr
 import { bodySelection, bodyViewContext, bodyViewDescription, worldBodyHref } from './body-view.ts';
 import { projectMarsBody, marsSelectionId } from '../visuals/mars-body.ts';
 import { createMarsBodyRenderer } from './mars-body-renderer.ts';
+import { renderBorderInspection } from './border-inspection.ts';
+import { borderClashCues } from '../visuals/border-visuals.ts';
 import { renderMarsBodyInspection } from './mars-body-inspection.ts';
 import './spectator-hud.css';
 import './mars-observation.css';
@@ -383,6 +385,7 @@ function renderInspection(): void {
     for (const site of installed) { const row = document.createElement('li'); row.textContent = `${site.name}${site.tileId === null ? '' : ` · Tile ${site.tileId}`}`; list.append(row); }
     record.append(summary, note, list); panel.insertBefore(record, panel.querySelector('.research-records') ?? capabilityOpener);
   }
+  if (selectedCity) renderBorderInspection(panel, displayed.borderIncidents ?? [], selectedCity.id);
   if (localChoice) panel.insertBefore(renderRecordedPolicyChoice(localChoice), panel.querySelector('.city-details'));
   if (pastoral) renderPastoralInspection(panel, pastoral);
   if (snapshot && actual) renderStrategicInspection(panel, observedStrategicResources(snapshot.state, actual.id));
@@ -710,7 +713,7 @@ function observeLocalSimulation(): void {
   lastRead = '';
   const world = projectWorld(snapshot.state);
   const quiet = worldBody === 'mars' || document.hidden || dialogs.get('events')?.open || dialogs.get('journey')?.open || capabilityDialog?.open;
-  const cues = eventCues.observe({ identity: observedWorldKey(), revision: snapshot.state.revision, mode: quiet ? 'history' : 'live', events: snapshot.state.events, routes: world.routes }, element('#map').clientWidth < 700 ? 1 : 3);
+  const cues = eventCues.observe({ identity: observedWorldKey(), revision: snapshot.state.revision, mode: quiet ? 'history' : 'live', events: snapshot.state.events, routes: world.routes, clashes: borderClashCues(snapshot.state) }, element('#map').clientWidth < 700 ? 1 : 3);
   if (cues.routeResults.length) observedRouteResults = [...cues.routeResults, ...observedRouteResults].slice(0, 3);
   renderWorld(world, true);
   if (!quiet) atlas?.showEvents(cues.events);
@@ -750,7 +753,7 @@ async function readWorld(): Promise<void> {
       lastRead = new Date(observedAt).toLocaleTimeString('en-GB', { timeZone: 'UTC', hour12: false }) + ' UTC';
       const world = projectWorld(snapshot.state);
       const quiet = worldBody === 'mars' || document.hidden || dialogs.get('events')?.open || dialogs.get('journey')?.open || capabilityDialog?.open;
-      const cues = eventCues.observe({ identity: observedWorldKey(), revision: snapshot.state.revision, mode: quiet ? 'history' : 'live', events: snapshot.state.events, routes: world.routes }, element('#map').clientWidth < 700 ? 1 : 3);
+      const cues = eventCues.observe({ identity: observedWorldKey(), revision: snapshot.state.revision, mode: quiet ? 'history' : 'live', events: snapshot.state.events, routes: world.routes, clashes: borderClashCues(snapshot.state) }, element('#map').clientWidth < 700 ? 1 : 3);
       if (cues.routeResults.length) observedRouteResults = [...cues.routeResults, ...observedRouteResults].slice(0, 3);
       renderWorld(world, retainCoordinates);
       if (!quiet) atlas?.showEvents(cues.events);

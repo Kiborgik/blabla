@@ -1,0 +1,47 @@
+state admitted: bool
+state exact_unworked_rival_plot: bool
+state paid_departure: bool
+state conserved_people_and_cargo: bool
+state home_reserve_and_promises: bool
+state at_most_one_adjacent_step: bool
+state finite_resolution: bool
+state at_most_one_casualty: bool
+state purchase_unchanged: bool
+state separate_current_control: bool
+state physical_return: bool
+state no_returned_opening_labor: bool
+state no_new_incident_while_draining: bool
+state outcome_recomputed: bool
+state refused_unchanged: bool
+state restart_exact: bool
+state observer_matches_receipts: bool
+
+action dispatch_border()
+action respond_border()
+action resolve_border()
+action return_border()
+action restart_border()
+action inspect_border()
+
+when dispatch_border {
+    expect "departure-binds-exact-unworked-rival-purchase": not after.admitted or after.exact_unworked_rival_plot
+    expect "departure-pays-people-supplies-and-protects-promises": not after.admitted or after.paid_departure and after.conserved_people_and_cargo and after.home_reserve_and_promises
+    expect "refused-departure-is-atomic": after.admitted or after.refused_unchanged
+}
+when respond_border {
+    expect "response-preserves-residents-and-funding": not after.admitted or after.conserved_people_and_cargo and after.home_reserve_and_promises
+}
+when resolve_border {
+    expect "finite-physical-movement-and-one-bounded-clash": after.at_most_one_adjacent_step and after.finite_resolution and after.at_most_one_casualty
+    expect "current-control-never-rewrites-historical-purchase": after.purchase_unchanged and after.separate_current_control
+}
+when return_border {
+    expect "living-residents-return-physically-with-actual-unused-cargo": after.physical_return and after.conserved_people_and_cargo and after.no_returned_opening_labor
+    expect "terminal-drain-is-finite-and-rechecks-current-facts": after.no_new_incident_while_draining and after.outcome_recomputed
+}
+when restart_border {
+    expect "current-version-parties-and-receipts-restart-exactly": after.restart_exact
+}
+when inspect_border {
+    expect "observer-shows-only-recorded-movement-losses-and-control": after.observer_matches_receipts
+}

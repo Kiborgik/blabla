@@ -1,3 +1,4 @@
+import { executeBorderAction } from './border-incidents.ts';
 import { executeKnowledgeAction } from './knowledge-compacts.ts';
 import { executeReliefAction } from './relief-charters.ts';
 import type { HistoricalEventSelection } from '../historical-selection.ts';
@@ -60,6 +61,10 @@ export function executeAction(
   action: GameAction,
   events: GameEvent[],
 ): void {
+  if (action.type === 'dispatch-border' || action.type === 'respond-border' || action.type === 'withdraw-border') {
+    executeBorderAction(state, seat, action, events);
+    return;
+  }
   if (action.type === 'propose-knowledge' || action.type === 'respond-knowledge' || action.type === 'withdraw-knowledge') {
     executeKnowledgeAction(state, seat, action, events);
     return;

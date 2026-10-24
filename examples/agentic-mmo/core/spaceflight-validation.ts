@@ -114,6 +114,7 @@ export function spaceflightRecords(world: WorldState): boolean {
     if (world.events.some(event => event.id === departure.eventId && JSON.stringify(event.marsDeparture) !== JSON.stringify(departure) || event.id === arrival.eventId && JSON.stringify(event.marsArrival) !== JSON.stringify(arrival) || event.id === upkeep.eventId && JSON.stringify(event.marsUpkeep) !== JSON.stringify(upkeep) || work !== null && isMarsHabitat(work) && event.id === work.eventId && JSON.stringify(event.marsHabitat) !== JSON.stringify(work))) return false;
     if (upkeep.round === world.round && upkeep.status === 'supplied' && upkeep.habitableBefore && civ.marsProgress >= VICTORY_RULES.mars.progress && civ.marsPopulation >= VICTORY_RULES.mars.population && civ.marsSupplyStreak >= VICTORY_RULES.mars.suppliedRounds && civ.era >= VICTORY_RULES.mars.minEra && civ.technologies.includes(VICTORY_RULES.mars.requiredTechnology)) eligible.push(seat);
   }
+  if (world.border?.active.length && world.border.draining && world.outcome === null) return true;
   return eligible.length ? world.outcome?.kind === 'mars' && world.outcome.round === world.round && JSON.stringify(world.outcome.winners) === JSON.stringify(eligible) : world.outcome?.kind !== 'mars';
 }
 
@@ -122,15 +123,16 @@ export function generatedHistoryRecords(world: WorldState): boolean {
     const origin: unknown = world.origin;
     if (!record(origin) || !keys(origin, ['kind', 'generatorVersion', 'seed', 'clockEpoch', ...(Object.hasOwn(origin, 'initialReleaseId') ? ['initialReleaseId'] : []), ...(Object.hasOwn(origin, 'namingVersion') ? ['namingVersion'] : []), ...(Object.hasOwn(origin, 'temperamentVersion') ? ['temperamentVersion'] : [])])
       || Object.hasOwn(origin, 'namingVersion') && origin.namingVersion !== 'cultural-toponyms-v1'
-      || Object.hasOwn(origin, 'temperamentVersion') && (origin.temperamentVersion !== 'strategic-temperaments-v1' || !['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1'].includes(String(origin.initialReleaseId)) || !world.unlockedFeatures.includes('food-budget'))
+      || Object.hasOwn(origin, 'temperamentVersion') && (origin.temperamentVersion !== 'strategic-temperaments-v1' || !['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1'].includes(String(origin.initialReleaseId)) || !world.unlockedFeatures.includes('food-budget'))
       || origin.kind !== 'generated' || origin.generatorVersion !== 'coherent-geography-v1' || origin.seed !== world.seed || origin.clockEpoch !== world.clockEpoch
-      || Object.hasOwn(origin, 'initialReleaseId') && (typeof origin.initialReleaseId !== 'string' || !['settlement-living-partnerships-1', 'settlement-relief-charters-1', 'settlement-regional-targets-1', 'settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1'].includes(origin.initialReleaseId)
+      || Object.hasOwn(origin, 'initialReleaseId') && (typeof origin.initialReleaseId !== 'string' || !['settlement-living-partnerships-1', 'settlement-relief-charters-1', 'settlement-regional-targets-1', 'settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1'].includes(origin.initialReleaseId)
         || !world.unlockedFeatures.includes('partnership-stewardship') || !world.unlockedFeatures.includes('historical-pressures')
         || origin.initialReleaseId !== 'settlement-living-partnerships-1' && !world.unlockedFeatures.includes('consented-relief')
-        || ['settlement-regional-targets-1', 'settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1'].includes(origin.initialReleaseId) && !world.unlockedFeatures.includes('procedural-regional-targets')
-        || ['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1'].includes(String(origin.initialReleaseId)) && !world.unlockedFeatures.includes('food-budget')
-        || ['settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1'].includes(String(origin.initialReleaseId)) && (!world.unlockedFeatures.includes('knowledge-compacts') || !world.unlockedFeatures.includes('shore-fisheries'))
-        || ['settlement-hillside-commonworks-1', 'settlement-supported-studies-1'].includes(origin.initialReleaseId) && !world.unlockedFeatures.includes('hillside-commonworks'))) return false;
+        || ['settlement-regional-targets-1', 'settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1'].includes(origin.initialReleaseId) && !world.unlockedFeatures.includes('procedural-regional-targets')
+        || ['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1'].includes(String(origin.initialReleaseId)) && !world.unlockedFeatures.includes('food-budget')
+        || ['settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1'].includes(String(origin.initialReleaseId)) && (!world.unlockedFeatures.includes('knowledge-compacts') || !world.unlockedFeatures.includes('shore-fisheries'))
+        || ['settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1'].includes(origin.initialReleaseId) && !world.unlockedFeatures.includes('hillside-commonworks')
+        || origin.initialReleaseId === 'settlement-supplied-borders-1' && !world.unlockedFeatures.includes('supplied-borders'))) return false;
   }
   if (!world.unlockedFeatures.includes('earned-history')) return !Object.hasOwn(world, 'milestoneProofs');
   const proofs: unknown = world.milestoneProofs;

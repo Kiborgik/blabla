@@ -32,10 +32,10 @@ function recordedDatabase(events: GameEvent[], start: number, end: number): D1Da
   };
 }
 
-void test('current supported-study genesis uses a fresh current key and deterministic same-version restart', () => {
+void test('current genesis retains supported-study rules and deterministic same-version restart', () => {
   const initial = createLocalSimulation(73);
-  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-supported-studies-1');
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:supported-studies-v1');
+  assert.equal(initial.state.origin?.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID);
+  assert.match(LOCAL_SIMULATION_STORAGE_KEY, /^civitas:procedural-observatory:[a-z-]+-v[1-9]\d*$/);
   assert.equal(initial.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.equal(initial.state.knowledge?.ruleVersion, 2);
   assert.ok(initial.state.unlockedFeatures.includes('hillside-commonworks'));

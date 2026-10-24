@@ -86,6 +86,7 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'supplied-borders', name: 'Supplied border parties', description: 'Small paid resident parties can contest exact unworked purchased rival land. Supplies, committed travel, limited clashes and finite home returns are recorded; no armies or town capture.' },
   { id: 'hillside-commonworks', name: 'Communal hillside plots', description: 'Masonry and Water management open exact owned grassland hills near their town. One opening Material and one remaining local resident maintain three base Food on later beats; no housing, water source or universal service.' },
   { id: 'shore-fisheries', name: 'Maintained shore fisheries', description: 'Water management opens exact owned coastal land near a coastal town. One opening Material and one remaining local resident fund three base Food on later beats; no boats, fish stocks or free shoreline goods.' },
   { id: 'food-budget', name: 'Household food security', description: 'Earth households require 1.25 Food per resident each working season. Food responds to wellbeing, damage, geography and staffed facilities rather than infrastructure amplification; other resources and off-world supplies keep their own rules.' },
@@ -155,6 +156,7 @@ export const FEATURES: FeatureDefinition[] = [
 ];
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  'dispatch-border': ['supplied-borders'], 'respond-border': ['supplied-borders'], 'withdraw-border': ['supplied-borders'],
   'propose-knowledge': ['knowledge-compacts'], 'respond-knowledge': ['knowledge-compacts'], 'withdraw-knowledge': ['knowledge-compacts'],
   'propose-relief': ['consented-relief'], 'respond-relief': ['consented-relief'], 'withdraw-relief': ['consented-relief'],
   'build-rail': ['industrial-steam', 'recurring-decisions', 'owned-territory'],

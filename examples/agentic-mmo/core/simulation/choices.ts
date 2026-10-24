@@ -1,3 +1,4 @@
+import { availableBorderActions } from './border-incidents.ts';
 import { availableKnowledgeActions } from './knowledge-compacts.ts';
 import { availableReliefActions } from './relief-charters.ts';
 import { selectHistoricalEventTarget } from '../historical-selection.ts';
@@ -235,7 +236,7 @@ export function availableActions(
   }
   choices.push(...availableRailActions(state, seat));
   choices.push(...availableCoastalActions(state, seat));
-  choices.push(...availableTradeActions(state, seat, tradePresentation), ...availablePublicProjectActions(state, seat), ...availableReliefActions(state, seat), ...availableKnowledgeActions(state, seat));
+  choices.push(...availableTradeActions(state, seat, tradePresentation), ...availablePublicProjectActions(state, seat), ...availableReliefActions(state, seat), ...availableKnowledgeActions(state, seat), ...availableBorderActions(state, seat));
   if (actionFeatureAvailable(state, 'repair-city') && canAfford(civilization.resources, ECONOMY_RULES.repair.cost)) {
     for (const city of cities.filter((candidate) => candidate.damage > 0)) {
       choices.push({
@@ -327,6 +328,8 @@ export function sameAction(left: GameAction, right: unknown): boolean {
         left.offerId === right.offerId &&
         left.accept === right.accept
       );
+    case 'dispatch-border': case 'respond-border': case 'withdraw-border':
+      return exactFields(left, right);
     case 'propose-knowledge':
       return 'routeId' in right && 'teacherCityId' in right && 'learnerCityId' in right && 'technologyId' in right && 'teacherInstitutionId' in right && 'learnerInstitutionId' in right && left.routeId === right.routeId && left.teacherCityId === right.teacherCityId && left.learnerCityId === right.learnerCityId && left.technologyId === right.technologyId && left.teacherInstitutionId === right.teacherInstitutionId && left.learnerInstitutionId === right.learnerInstitutionId;
     case 'respond-knowledge':

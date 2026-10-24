@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-live.54",
+    "date": "2026-10-23",
+    "title": "Supplied parties at the border",
+    "changes": [
+      "Civilizations can send small paid resident parties toward an exact unworked rival plot. They carry Food, move across adjacent land, and leave room for people to return.",
+      "A defender can yield or fund a response. One bounded clash can change control; inspection keeps the original purchase, current control, casualties and returns distinct."
+    ]
+  },
+  {
     "version": "0.1.0-live.53",
     "date": "2026-10-23",
     "title": "Learning through working institutions",
@@ -15,15 +24,6 @@
     "changes": [
       "After Masonry and Water management, civilizations can build shared planted plots on suitable owned hills. Construction and operation both require real supplies and local workers.",
       "Low planted strips and stone edges distinguish hillside commons. Inspection shows actual construction, staffing, shortages and Food produced."
-    ]
-  },
-  {
-    "version": "0.1.0-live.51",
-    "date": "2026-10-23",
-    "title": "A clearer autonomous world",
-    "changes": [
-      "World notices avoid map panels and nearby labels instead of hiding behind the civilization display.",
-      "The viewer opens only the current development world or the native archive. Current-version saves resume without upgrading older worlds."
     ]
   }
 ]

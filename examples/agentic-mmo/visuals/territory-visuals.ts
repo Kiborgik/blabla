@@ -1,3 +1,4 @@
+import type { BorderControlReceipt } from '../core/border-types.ts';
 import { IMPROVEMENTS } from '../core/content.ts';
 import { isImprovementOrder } from '../core/simulation/improvements.ts';
 import { mapTileHeight } from './route-paths.ts';
@@ -9,6 +10,7 @@ export interface AcquiredLandView {
   receipt: TileAcquisitionReceipt;
   point: TerritoryPoint | null;
   currentOwner: number | null;
+  control?: BorderControlReceipt;
   townName: string | null;
 }
 export const TERRITORY_PAGE_SIZE = 6;
@@ -17,13 +19,16 @@ export function projectAcquiredLand(state: WorldState): AcquiredLandView[] {
   const tiles = new Map(state.tiles.map(tile => [tile.id, tile]));
   const towns = new Map(state.cities.map(city => [city.id, city]));
   return Object.values(state.tileAcquisitions ?? {}).toSorted((left, right) => left.tileId - right.tileId).map(receipt => {
-    const tile = tiles.get(receipt.tileId); const town = towns.get(receipt.cityId);
-    return { receipt: structuredClone(receipt), currentOwner: tile?.owner ?? null, townName: town?.civId === receipt.civId ? town.name : null,
+    const tile = tiles.get(receipt.tileId);
+    const control = state.border?.controls[String(receipt.tileId)];
+    const exact = control?.purchaseId === receipt.id && control.civId === tile?.owner ? control : undefined;
+    const town = towns.get(exact?.cityId ?? receipt.cityId);
+    return { receipt: structuredClone(receipt), currentOwner: tile?.owner ?? null, townName: town?.civId === (exact?.civId ?? receipt.civId) ? town.name : null, ...(exact ? { control: structuredClone(exact) } : {}),
       point: tile ? { tileId: tile.id, q: tile.q - (state.width - 1) / 2, r: tile.r - (state.height - 1) / 2, height: mapTileHeight(tile.elevation) } : null };
   });
 }
 export function selectedAcquiredLand(plots: readonly AcquiredLandView[], cityId: string): AcquiredLandView[] {
-  return plots.filter(plot => plot.receipt.cityId === cityId && plot.townName && plot.point && plot.currentOwner === plot.receipt.civId).slice(0, TERRITORY_OUTLINE_LIMIT);
+  return plots.filter(plot => (plot.control?.cityId ?? plot.receipt.cityId) === cityId && plot.townName && plot.point && plot.currentOwner === (plot.control?.civId ?? plot.receipt.civId)).slice(0, TERRITORY_OUTLINE_LIMIT);
 }
 export function territoryPage<T>(rows: readonly T[], page: number): { rows: T[]; page: number; pages: number; total: number } {
   const pages = Math.max(1, Math.ceil(rows.length / TERRITORY_PAGE_SIZE));
@@ -57,6 +62,7 @@ export interface TownTerritoryView {
   cityName: string | null;
   civilizationId: number;
   purchases: TerritoryPurchaseView[];
+  controls?: BorderControlReceipt[];
   available: TerritoryQuoteView[];
   blocked: Array<{ tileId: number; reason: string }>;
 }
@@ -69,6 +75,8 @@ export function projectTownTerritory(state: WorldState, projection: CapabilityPr
   const city = state.cities.find(candidate => candidate.id === projection.cityId && candidate.civId === projection.civilizationId);
   if (!city) { result.reason = 'The exact town is unavailable.'; return result; }
   result.cityName = city.name;
+  result.controls = Object.values(state.border?.controls ?? {}).filter(control => control.cityId === city.id && control.civId === city.civId
+    && state.tiles.find(tile => tile.id === control.tileId)?.owner === city.civId).map(control => structuredClone(control)).toSorted((a, b) => a.tileId - b.tileId);
   if (!projection.territory) { result.status = 'planned'; result.reason = 'Land acquisition is not included in this world release.'; return result; }
   result.status = 'available';
   const tiles = new Map(state.tiles.map(tile => [tile.id, tile]));

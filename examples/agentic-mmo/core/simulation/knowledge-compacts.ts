@@ -1,3 +1,4 @@
+import { borderDealFailure } from './border-incidents.ts';
 import { ACTION_FEATURES, BUILDINGS, RESIDENT_CAPACITY_RULES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
 import { KNOWLEDGE_INSTITUTION_IDS, KNOWLEDGE_RULES, KNOWLEDGE_TECHNOLOGY_IDS } from '../knowledge-content.ts';
 import type { KnowledgeAction, KnowledgeBalances, KnowledgeCompact, KnowledgeInstitutionId, KnowledgeInstitutionProof, KnowledgeProposalQuote, KnowledgeReason, KnowledgeResult, KnowledgeState, KnowledgeStudyAttempt, KnowledgeStudySeason, KnowledgeTerms } from '../knowledge-types.ts';
@@ -145,6 +146,7 @@ export function quoteKnowledgeProposal(state: WorldState, actor: number, action:
   const route = state.routes.find(route => route.id === action.routeId);
   if (!route?.agreement?.enabled || route.owner !== actor && route.partner !== actor) return refuse('Only a participant of an enabled consenting route can offer knowledge');
   const learnerId = route.owner === actor ? route.partner : route.owner;
+  const border = borderDealFailure(state, actor, learnerId); if (border) return refuse(border);
   if (learnerId === actor || layer.active.some(compact => compact.terms.learnerId === learnerId || unorderedPair(compact.terms.teacherId, compact.terms.learnerId) === unorderedPair(actor, learnerId))) return refuse('The learner or this pair already has an active compact');
   const from = state.cities.find(city => city.id === route.from && city.civId === route.owner); const to = state.cities.find(city => city.id === route.to && city.civId === route.partner);
   const teacherCity = route.owner === actor ? from : to; const learnerCity = route.owner === actor ? to : from;
@@ -179,6 +181,7 @@ export function knowledgeActionFailure(state: WorldState, actor: number, action:
   if (action.type === 'withdraw-knowledge') return actor === compact.terms.teacherId || compact.status === 'accepted' && actor === compact.terms.learnerId ? null : 'Only the teacher or a consenting learner can withdraw';
   if (actor !== compact.terms.learnerId || compact.status !== 'proposed') return 'Only the named learner can respond to a pending knowledge offer';
   if (!action.accept) return null;
+  const border = borderDealFailure(state, compact.terms.teacherId, compact.terms.learnerId); if (border) return border;
   const target = targetFailure(state, compact.terms); if (target) return target.detail;
   const route = routeAvailableFailure(state, compact.terms); if (route) return route;
   const current = proofs(state, compact.terms); if (current.teacher.reason || current.learner.reason) return current.teacher.reason ?? current.learner.reason;

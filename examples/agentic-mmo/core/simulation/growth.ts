@@ -1,3 +1,4 @@
+import { borderReturnReservations } from './border-incidents.ts';
 import { BUILDINGS, ECONOMY_RULES, LOCAL_GROWTH_RULES } from '../content.ts';
 import type { City, CityGrowthFacts, CityHousing, WorldState } from '../types.ts';
 import { hasFeatures } from './history.ts';
@@ -20,6 +21,7 @@ export function cityGrowthFacts(state: WorldState, city: City): CityGrowthFacts 
   const baseCapacity = released && housing ? housing.baseCapacity : ECONOMY_RULES.growth.cityPopulationCap;
   const sources = released ? BUILDINGS.flatMap(building => city.buildings.includes(building.id) && hasFeatures(state, building.requiredFeatures) && building.housing !== undefined ? [{ buildingId: building.id, capacity: building.housing }] : []) : [];
   return {
+    ...(state.border ? { reservedReturning: borderReturnReservations(state, city.id) } : {}),
     cityId: city.id, ruleVersion: LOCAL_GROWTH_RULES.ruleVersion, population: city.population, baseCapacity, sources,
     capacity: baseCapacity + sources.reduce((total, source) => total + source.capacity, 0),
     nextGrowthFoodCost: released ? LOCAL_GROWTH_RULES.baseFoodCost + Math.floor(city.population / LOCAL_GROWTH_RULES.populationPerFoodCost) : ECONOMY_RULES.growth.foodCost,

@@ -1,3 +1,4 @@
+import { borderFieldPopulation, borderReturnReservations, resolveBorderIncidents } from './border-incidents.ts';
 import { resolveKnowledgeCompacts } from './knowledge-compacts.ts';
 import { FOOD_BUDGET_RULES } from '../food-security-content.ts';
 import { allocatedCityFoodProduction, householdFoodUpkeep } from './food-security.ts';
@@ -102,7 +103,7 @@ function supplyCity(state: WorldState, city: City, events: GameEvent[], produced
     civilization.resources.food = quantize(civilization.resources.food - upkeep);
     city.wellbeing = clamp(city.wellbeing + ECONOMY_RULES.suppliedWellbeingGain, 0, 100);
     if (
-      city.population < growth.capacity &&
+      city.population + borderReturnReservations(state, city.id) < growth.capacity &&
       city.wellbeing >= ECONOMY_RULES.growth.wellbeing &&
       civilization.resources.food >=
         ECONOMY_RULES.growth.foodReserve + growth.nextGrowthFoodCost
@@ -209,11 +210,10 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
     civilization.influence = quantize(clamp(civilization.influence + culture, 0));
     if (suppliedCities === cities.length)
       civilization.legitimacy = quantize(clamp(civilization.legitimacy + culture / 20, 0, 100));
-    civilization.score = Math.floor(
-      civilization.influence +
-        cities.reduce((total, city) => total + city.population * 5 + city.infrastructure * 2, 0) +
-        civilization.technologies.length * 10,
-    );
+
+    civilization.score = Math.floor(civilization.influence
+      + cities.reduce((total, city) => total + city.population * 5 + city.infrastructure * 2, 0)
+      + borderFieldPopulation(state, civilization.id) * 5 + civilization.technologies.length * 10);
     emitEvent(state, events, {
       type: 'settlement-production',
       title: `${civilization.name} completes a working season`,
@@ -239,5 +239,9 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   for (const civilization of state.civilizations) resolveCivics(state, civilization.id, civicBudgets.get(civilization.id) ?? 0, events);
   resolveConstruction(state, openingWork, events);
   resolveGovernmentTransitions(state, events);
+  resolveBorderIncidents(state, events);
+  if (state.border) for (const civilization of state.civilizations) civilization.score = Math.floor(civilization.influence
+    + state.cities.filter(city => city.civId === civilization.id).reduce((total, city) => total + city.population * 5 + city.infrastructure * 2, 0)
+    + borderFieldPopulation(state, civilization.id) * 5 + civilization.technologies.length * 10);
   resolveSpaceflight(state, events);
 }

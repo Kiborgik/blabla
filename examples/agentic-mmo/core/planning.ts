@@ -1,3 +1,5 @@
+import { isBorderAction } from './border-validation.ts';
+import { borderActionFailure } from './simulation/border-incidents.ts';
 import { isKnowledgeAction } from './knowledge-validation.ts';
 import { knowledgeActionFailure } from './simulation/knowledge-compacts.ts';
 import { isReliefAction } from './relief-validation.ts';
@@ -72,6 +74,7 @@ function integer(value: unknown, maximum = Number.MAX_SAFE_INTEGER): value is nu
 export function isGameAction(value: unknown): value is GameAction {
   if (!record(value)) return false;
   switch (value.type) {
+    case 'dispatch-border': case 'respond-border': case 'withdraw-border': return isBorderAction(value);
     case 'propose-knowledge':
     case 'respond-knowledge':
     case 'withdraw-knowledge':
@@ -202,6 +205,10 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
   if (specialized && (action.type === 'focus' || action.type === 'build') && !cities.some((city) => city.id === action.cityId))
     return invalidated('This release requires an explicit existing owned city target; review and choose the exact city');
   switch (action.type) {
+    case 'dispatch-border': case 'respond-border': case 'withdraw-border': {
+      const failure = borderActionFailure(state, seat, action);
+      return failure ? blocked(failure) : null;
+    }
     case 'propose-knowledge': {
       const route = state.routes.find(candidate => candidate.id === action.routeId);
       const teacher = cities.find(city => city.id === action.teacherCityId);
@@ -381,6 +388,7 @@ function unavailableReason(state: WorldState, seat: number, action: GameAction):
   if (action.type === 'settle-coast') { const block = coastalSourceBlock(state, seat, action.sourceCityId); if (block) return block; }
   const decisionBlock = decisionActionBlock(state, seat, action);
   if (decisionBlock) return decisionBlock;
+  if (action.type === 'dispatch-border' || action.type === 'respond-border' || action.type === 'withdraw-border') return borderActionFailure(state, seat, action) ?? 'Review the exact border party and target';
   if (action.type === 'propose-knowledge' || action.type === 'respond-knowledge' || action.type === 'withdraw-knowledge') return knowledgeActionFailure(state, seat, action) ?? 'Review the exact knowledge commitment and admission';
   if (action.type === 'propose-relief' || action.type === 'respond-relief' || action.type === 'withdraw-relief') return reliefActionFailure(state, seat, action) ?? 'Review the exact relief commitment and admission';
   if (action.type === 'propose-public-project' || action.type === 'respond-public-project' || action.type === 'cancel-public-project') return publicProjectActionFailure(state, seat, action) ?? 'Review the current charter and admission';

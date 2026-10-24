@@ -1,3 +1,4 @@
+import { borderFieldPopulation, createBorderState } from './simulation/border-incidents.ts';
 import { observedRail } from './simulation/rail.ts';
 import { observedGovernment } from './simulation/government.ts';
 import { observedTerritory } from './simulation/territory.ts';
@@ -167,6 +168,7 @@ export function createWorld(seed: number, clockEpoch?: string, registeredRulesId
   if (hasFeatures(state, ['public-projects'])) state.publicProjects = [];
   if (hasFeatures(state, ['consented-relief'])) state.relief = createReliefState(state);
   if (hasFeatures(state, ['knowledge-compacts'])) state.knowledge = createKnowledgeState(state);
+  if (hasFeatures(state, ['supplied-borders'])) state.border = createBorderState(state);
   const event: GameEvent = {
     id: '0:foundation',
     round: 0,
@@ -222,7 +224,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
         id: candidate.id,
         name: candidate.name,
         era: candidate.era,
-        population: totalPopulation(state, candidate.id),
+        population: totalPopulation(state, candidate.id) + borderFieldPopulation(state, candidate.id),
         objective: candidate.objective,
       })),
     routes: state.routes.filter(
@@ -238,6 +240,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
         (director || offer.proposer === seat || offer.recipient === seat),
     ),
     ...(hasFeatures(state, ['consented-relief']) ? { relief: state.relief } : {}),
+    ...(hasFeatures(state, ['supplied-borders']) ? { border: structuredClone(state.border) } : {}),
     ...(hasFeatures(state, ['knowledge-compacts']) ? { knowledge: structuredClone(state.knowledge) } : {}),
     ...(hasFeatures(state, ['public-projects']) ? { publicProjects: (state.publicProjects ?? []).filter((project) => director || project.proposer === seat || project.recipient === seat) } : {}),
     recentEvents: state.events.slice(-12),

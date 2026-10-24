@@ -12,7 +12,7 @@ import { boundedInteger, canonical, isRecord, parseJson, RequestFailure } from '
 
 export const RECORDED_CHOICE_LIMITS = { rows: 200, rowBytes: 512 * 1024, pageBytes: 1024 * 1024, snapshotBytes: 8 * 1024 * 1024 } as const;
 const encoder = new TextEncoder();
-const eventFields = new Set<string>(['id', 'round', 'type', 'title', 'detail', 'actor', 'target', 'tileId', 'cause', 'effects', 'importance', 'publicProjectResult', 'coastalFounding', 'strategicExtraction', 'strategicShipment', 'wonderCompletion', 'wonderLoss', 'researchBoost', 'populationGrowth', 'territoryAcquisition', 'railCompletion', 'industrialFoundry', 'steamDelivery', 'localPower', 'marsDeparture', 'marsArrival', 'marsUpkeep', 'marsHabitat', 'reliefResult', 'regionalEvent', 'knowledgeCompact', 'knowledgeStudy', 'knowledgeResult']);
+const eventFields = new Set<string>(['border', 'id', 'round', 'type', 'title', 'detail', 'actor', 'target', 'tileId', 'cause', 'effects', 'importance', 'publicProjectResult', 'coastalFounding', 'strategicExtraction', 'strategicShipment', 'wonderCompletion', 'wonderLoss', 'researchBoost', 'populationGrowth', 'territoryAcquisition', 'railCompletion', 'industrialFoundry', 'steamDelivery', 'localPower', 'marsDeparture', 'marsArrival', 'marsUpkeep', 'marsHabitat', 'reliefResult', 'regionalEvent', 'knowledgeCompact', 'knowledgeStudy', 'knowledgeResult']);
 
 function corrupt(): never { throw new RequestFailure(503, 'corrupt_history'); }
 function integer(value: unknown, minimum = 0): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum; }
@@ -102,6 +102,32 @@ function knowledgeReceiptLink(kind: string, action: GameAction | undefined, seat
   }
 }
 
+function borderReceiptLink(kind: string, action: GameAction | undefined, seat: unknown, events: GameEvent[]): void {
+  const rows = events.filter(event => event.border);
+  if (kind !== 'action') {
+    if (rows.length && kind !== 'strategy-catchup' || rows.some(event => event.border?.kind === 'departure' || event.border?.kind === 'response' && event.border.actorId !== null)) return corrupt();
+    return;
+  }
+  if (action?.type === 'dispatch-border') {
+    const row = rows[0]; const payload = row?.border;
+    if (rows.length !== 1 || payload?.kind !== 'departure' || payload.party.side !== 'initiator' || row?.actor !== seat
+      || payload.party.departure.sourceCityId !== action.sourceCityId || payload.party.departure.tileId !== action.tileId || payload.party.departure.people !== action.people) return corrupt();
+  } else if (action?.type === 'respond-border') {
+    const response = rows.find(event => event.border?.kind === 'response'); const payload = response?.border;
+    if (payload?.kind !== 'response' || payload.incidentId !== action.incidentId || payload.actorId !== seat || payload.response !== action.response
+      || rows.length !== (action.response === 'defend' ? 2 : 1)) return corrupt();
+    if (action.response === 'defend') {
+      const departure = rows.find(event => event.border?.kind === 'departure'); const party = departure?.border;
+      if (party?.kind !== 'departure' || party.incidentId !== action.incidentId || departure?.actor !== seat || party.party.side !== 'defender'
+        || party.party.departure.sourceCityId !== action.sourceCityId || party.party.departure.people !== action.people) return corrupt();
+    }
+  } else if (action?.type === 'withdraw-border') {
+    const row = rows[0]; const payload = row?.border;
+    if (rows.length !== 1 || !payload || !('incidentId' in payload) || payload.incidentId !== action.incidentId || row?.actor !== seat
+      || !(payload.kind === 'resolution' && payload.resolution.outcome === 'withdrawn' || payload.kind === 'response' && payload.response === 'yield' && payload.actorId === seat)) return corrupt();
+  } else if (rows.length) return corrupt();
+}
+
 function reliefReceiptLink(kind: string, action: GameAction | undefined, seat: unknown, events: GameEvent[]): void {
   const receipts = events.flatMap(event => event.reliefResult ? [event.reliefResult] : []);
   if (new Set(receipts.map(result => result.charter.id)).size !== receipts.length) return corrupt();
@@ -133,6 +159,7 @@ function projectEntry(value: unknown): RecordedChronicleEntry {
     regionalReceiptLink(undefined, undefined, undefined, value.end_revision, events);
     reliefReceiptLink(kind, undefined, undefined, events);
     knowledgeReceiptLink(kind, undefined, undefined, events);
+    borderReceiptLink(kind, undefined, undefined, events);
     return { ...base, kind, action: null };
   }
   if (!keys(transition, ['kind', 'command']) || !isRecord(transition.command) || transition.command.expectedRevision !== value.start_revision) return corrupt();
@@ -150,6 +177,7 @@ function projectEntry(value: unknown): RecordedChronicleEntry {
     regionalReceiptLink(action.type === 'event' ? action.regional : undefined, action.type === 'event' ? action.event : undefined, action.type === 'event' ? action.target : undefined, value.end_revision, events);
     reliefReceiptLink(kind, action, command.seat, events);
     knowledgeReceiptLink(kind, action, command.seat, events);
+    borderReceiptLink(kind, action, command.seat, events);
     const recordedReason = provenance.kind === 'procedural-policy' ? provenance.policy?.reason ?? null : head?.reason ?? null;
     return { ...base, kind, action: structuredClone(command.action), recordedReason };
   }
@@ -165,6 +193,7 @@ function projectEntry(value: unknown): RecordedChronicleEntry {
   if (kind !== 'director-tick') regionalReceiptLink(undefined, undefined, undefined, value.end_revision, events);
   reliefReceiptLink(kind, undefined, undefined, events);
   knowledgeReceiptLink(kind, undefined, undefined, events);
+  borderReceiptLink(kind, undefined, undefined, events);
   return { ...base, kind, action: null };
 }
 

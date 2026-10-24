@@ -1,3 +1,4 @@
+import { borderDealFailure } from './border-incidents.ts';
 import type { ResolvedTradeDelivery } from '../knowledge-types.ts';
 import { ACTION_FEATURES, INDUSTRIAL_RULES, METAL_RULES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TRADE_RECIPES, TRADE_RULES } from '../content.ts';
 import type {
@@ -96,7 +97,7 @@ export function availableTradeActions(state: WorldState, seat: number, presentat
   if (hasFeatures(state, ACTION_FEATURES['propose-trade'])) {
     for (const partner of state.civilizations) {
       if (
-        partner.id === seat ||
+        partner.id === seat || borderDealFailure(state, seat, partner.id) !== null ||
         !citiesOf(state, seat).length ||
         !citiesOf(state, partner.id).length ||
         activeAgreements(state, seat, partner.id) >= TRADE_RULES.maxActivePerPair ||
@@ -159,6 +160,7 @@ export function availableTradeActions(state: WorldState, seat: number, presentat
       if (
         endpointsExist(state, offer) &&
         offeredTransportBlock(state, offer) === null &&
+        borderDealFailure(state, offer.proposer, offer.recipient) === null &&
         activeAgreements(state, offer.proposer, offer.recipient) < TRADE_RULES.maxActivePerPair &&
         canAfford(civilizationById(state, offer.proposer).resources, offer.terms.constructionCost)
       ) {
@@ -203,6 +205,8 @@ export function executeTradeAction(
 ): void {
   const actor = civilizationById(state, seat);
   if (action.type === 'propose-trade') {
+    const border = borderDealFailure(state, seat, action.partner);
+    if (border) throw new RangeError(border);
     const recipe = TRADE_RECIPES.find((candidate) => candidate.id === action.recipeId);
     const exact = hasFeatures(state, ['exact-trade-endpoints']);
     const from = exact ? citiesOf(state, seat).find((city) => city.id === action.sourceCityId) : citiesOf(state, seat)[0];
@@ -290,6 +294,8 @@ export function executeTradeAction(
     });
     return;
   }
+  const border = borderDealFailure(state, offer.proposer, offer.recipient);
+  if (border) throw new RangeError(border);
   const currentTransportBlock = offeredTransportBlock(state, offer);
   if (currentTransportBlock) throw new RangeError(currentTransportBlock);
   transferCost(civilizationById(state, offer.proposer).resources, offer.terms.constructionCost);

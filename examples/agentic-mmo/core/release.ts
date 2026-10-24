@@ -80,7 +80,11 @@ const studiesRelease: RegisteredRulesDefinition = {
   id: 'settlement-supported-studies-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
   featureIds: [...hillsideRelease.featureIds],
 };
-export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease, hillsideRelease, studiesRelease];
+const borderRelease: RegisteredRulesDefinition = {
+  id: 'settlement-supplied-borders-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  featureIds: [...studiesRelease.featureIds, 'supplied-borders'],
+};
+export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease, hillsideRelease, studiesRelease, borderRelease];
 
 function currentRelease(): RegisteredRulesDefinition {
   const release = RELEASES.find((candidate) => candidate.id === 'settlement-foundations-1');

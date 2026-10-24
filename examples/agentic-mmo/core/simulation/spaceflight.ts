@@ -213,8 +213,27 @@ export function resolveSpaceflight(state: WorldState, events: GameEvent[]): void
       && civilization.marsProgress >= VICTORY_RULES.mars.progress && civilization.marsPopulation >= VICTORY_RULES.mars.population
       && civilization.marsSupplyStreak >= VICTORY_RULES.mars.suppliedRounds;
   }).map(civilization => civilization.id);
-  if (!winners.length) return;
   const reason = `Paid delivered cargo and conserved settlers supported completed Mars habitats for ${VICTORY_RULES.mars.suppliedRounds} consecutive strategic rounds`;
+  if (state.border?.active.length) {
+    if (winners.length && !state.border.draining) {
+      state.border.draining = { round: state.round, candidate: { kind: 'mars', winners, round: state.round, reason } };
+      emitEvent(state, events, {
+        type: 'outcome-draining', title: 'Field parties must return before the final outcome', detail: reason,
+        actor: null, target: null, tileId: null, cause: 'A current outcome candidate coexists with already departed resident parties',
+        effects: ['No winner is final yet', 'New border incidents are blocked while bounded returns finish', 'Actual outcome requirements will be checked again after return'], importance: 4,
+      });
+    }
+    return;
+  }
+  if (state.border?.draining) {
+    state.border.draining = null;
+    if (!winners.length) emitEvent(state, events, {
+      type: 'outcome-drain-ended', title: 'All field parties have returned', detail: 'The current world continues without a terminal outcome',
+      actor: null, target: null, tileId: null, cause: 'Current paid outcome conditions were checked again after bounded physical returns',
+      effects: ['The earlier candidate no longer satisfies every current outcome condition', 'No stale winner was declared'], importance: 3,
+    });
+  }
+  if (!winners.length) return;
   state.outcome = { kind: 'mars', winners, round: state.round, reason };
   emitEvent(state, events, {
     type: 'mars-victory', title: 'A sustained human presence on Mars', detail: reason,

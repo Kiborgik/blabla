@@ -24,13 +24,16 @@ import type { ViewerPreferences } from './viewer-state.ts';
 import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor, unobscuredInspectionAnchor } from './inspection-camera.ts';
 import type { CameraView, ScreenPoint } from './inspection-camera.ts';
-import { createSettlementMeshes, createDistrictMeshes, createImprovementMeshes, createDepositMeshes, createWonderMeshes } from './settlement-three.ts';
+import { createPartMeshes, createSettlementMeshes, createDistrictMeshes, createImprovementMeshes, createDepositMeshes, createWonderMeshes } from './settlement-three.ts';
 import { LUMBER_MARK_PATH, improvementLabel, improvementMark } from '../visuals/improvement-visuals.ts';
 import { SHORE_FISHERY_MARK_PATH } from '../visuals/shore-fishery-visuals.ts';
 import { HILLSIDE_COMMONWORKS_MARK_PATH } from '../visuals/hillside-commonworks-visuals.ts';
 import { districtAdjacencySummary, districtMark, districtLabel } from '../visuals/district-visuals.ts';
 import { createWorldCues } from './world-cues.ts';
 import { mapHierarchyAnchors, mapHierarchyObstacles } from './map-labels.ts';
+import { borderPartyAnchor, borderPartyBadgeOffsets, borderPartyLabel, borderPartyWorldParts, borderTargetOutline, projectBorderParties } from '../visuals/border-visuals.ts';
+import type { BorderIncidentView, BorderPartyMarker } from '../visuals/border-visuals.ts';
+import type { DetailLevel } from '../visuals/world-visuals.ts';
 
 export interface AtlasRenderer {
   zoom: (factor: number) => void;
@@ -87,6 +90,70 @@ export function createTerritoryMeshes(world: Pick<AtlasWorld, 'tiles' | 'cities'
     group.add(surface, boundary);
   }
   return group;
+}
+
+export function createBorderPartyMeshes(views: readonly BorderIncidentView[], material: (color: string) => THREE.Material): ReturnType<typeof createPartMeshes> {
+  const parties = projectBorderParties(views);
+  return createPartMeshes(detail => borderPartyWorldParts(parties, detail), material);
+}
+
+export function createBorderTargetMeshes(views: readonly BorderIncidentView[]): THREE.Group {
+  const group = new THREE.Group();
+  for (const view of views) {
+    const points = borderTargetOutline(view);
+    if (!points.length) continue;
+    const geometry = new LineGeometry().setPositions(points.flat());
+    const line = new Line2(geometry, new LineMaterial({ color: view.currentController?.color ?? '#f5e6bc', linewidth: 2, dashed: true, dashSize: .15, gapSize: .1, depthTest: false }));
+    line.computeLineDistances();
+    line.renderOrder = 4;
+    line.userData['borderTarget'] = view.incident.id;
+    group.add(line);
+  }
+  return group;
+}
+
+export interface BorderPartyLabel {
+  element: HTMLButtonElement;
+  leader: HTMLSpanElement;
+  party: BorderPartyMarker;
+}
+
+export function createBorderPartyLabels(views: readonly BorderIncidentView[], labels: HTMLElement, onSelect: (cityId: string) => void): BorderPartyLabel[] {
+  return projectBorderParties(views).map(party => {
+    const element = document.createElement('button');
+    element.type = 'button'; element.className = 'border-party-label';
+    element.dataset['borderParty'] = party.party.id; element.dataset['positionTile'] = String(party.party.positionTileId);
+    element.setAttribute('aria-label', borderPartyLabel(party)); element.title = borderPartyLabel(party);
+    element.disabled = party.sourceCityName === null;
+    element.style.position = 'absolute'; element.style.transform = 'translate(-50%, -50%)'; element.style.pointerEvents = 'auto';
+    element.style.borderRadius = '50%'; element.style.padding = '0'; element.style.lineHeight = '18px'; element.style.zIndex = '2';
+    element.style.color = '#fff5d8'; element.style.fontSize = '12px';
+    element.addEventListener('click', () => onSelect(party.sourceCityId));
+    const leader = document.createElement('span'); leader.className = 'border-party-leader';
+    leader.setAttribute('aria-hidden', 'true'); leader.style.position = 'absolute'; leader.style.pointerEvents = 'none';
+    leader.style.height = '1px'; leader.style.background = party.identity.color; leader.style.transformOrigin = '0 50%'; leader.style.zIndex = '1';
+    labels.append(leader, element);
+    return { element, leader, party };
+  });
+}
+
+export function updateBorderPartyLabels(markers: readonly BorderPartyLabel[], detail: DetailLevel, project: (point: { x: number; z: number; height: number }) => { x: number; y: number; visible: boolean }): void {
+  const offsets = borderPartyBadgeOffsets(markers.map(marker => marker.party));
+  for (const marker of markers) {
+    const anchor = detail === 'far' ? { ...hexPosition(marker.party.point.q, marker.party.point.r), height: marker.party.point.height } : borderPartyAnchor(marker.party);
+    const point = project({ ...anchor, height: anchor.height + (detail === 'far' ? .18 : .28) });
+    const offset = detail === 'far' ? offsets.get(marker.party.party.id)! : { x: 0, y: 0 };
+    marker.element.hidden = !point.visible;
+    marker.element.style.left = `${point.x + offset.x}px`; marker.element.style.top = `${point.y + offset.y}px`;
+    marker.element.style.width = detail === 'far' ? '22px' : '32px'; marker.element.style.height = detail === 'far' ? '22px' : '32px';
+    marker.element.style.background = detail === 'far' ? '#173a3c' : 'transparent';
+    marker.element.style.border = detail === 'far' ? `2px solid ${marker.party.identity.color}` : '0';
+    marker.element.textContent = detail === 'far' ? String(marker.party.party.people) : '';
+    marker.leader.hidden = !point.visible || !(offset.x || offset.y);
+    marker.leader.style.left = `${point.x}px`; marker.leader.style.top = `${point.y}px`;
+    marker.leader.style.width = `${Math.hypot(offset.x, offset.y)}px`;
+    marker.leader.style.transform = `rotate(${Math.atan2(offset.y, offset.x)}rad)`;
+  }
 }
 
 export function createAtlasRenderer(
@@ -278,6 +345,9 @@ export function createAtlasRenderer(
   const improvementMeshes = createImprovementMeshes(world, material);
   const depositMeshes = createDepositMeshes(world, material);
   const wonderMeshes = createWonderMeshes(world, material);
+  const borderMeshes = createBorderPartyMeshes(world.borderIncidents ?? [], material);
+  const borderTargets = createBorderTargetMeshes(world.borderIncidents ?? []);
+  const borderMarkers = createBorderPartyLabels(world.borderIncidents ?? [], labels, onSelect);
   const sites = [
     ...(world.catchments ?? []).map(site => ({ ...site, mark: 'catchment' as const, label: `Aqueduct mountain source${site.status === 'building' ? ' · Building' : ''}` })),
     ...(world.districts ?? []).map(site => ({ ...site, mark: districtMark(site), label: districtLabel(site) })),
@@ -324,7 +394,7 @@ export function createAtlasRenderer(
     labels.append(element); return { element, caption, id: site.id, point: new THREE.Vector3(point.x, site.height + .6, point.z) };
   });
   const landscapeMeshes = createLandscapeMeshes(world, material);
-  scene.add(landscapeMeshes.group, settlements.group, districtMeshes.group, improvementMeshes.group, depositMeshes.group, wonderMeshes.group);
+  scene.add(landscapeMeshes.group, settlements.group, districtMeshes.group, improvementMeshes.group, depositMeshes.group, wonderMeshes.group, borderMeshes.group, borderTargets);
   const cues = createWorldCues(container, world, (x, z, height) => {
     const point = new THREE.Vector3(x, height, z).project(camera);
     return { x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight };
@@ -433,6 +503,7 @@ export function createAtlasRenderer(
     if (!width || !height) return;
     renderer.setSize(width, height, false);
     for (const appearance of acquiredMaterials) appearance.resolution.set(width, height);
+    for (const line of borderTargets.children) if (line instanceof Line2) line.material.resolution.set(width, height);
     const aspect = width / height;
     const halfHeight = width < 700 ? 24 : 17.3;
     camera.left = -halfHeight * aspect;
@@ -461,6 +532,12 @@ export function createAtlasRenderer(
     improvementMeshes.update(tilePixels);
     depositMeshes.update(tilePixels);
     wonderMeshes.update(tilePixels);
+    const borderDetail = borderMeshes.update(tilePixels);
+    updateBorderPartyLabels(borderMarkers, borderDetail, anchor => {
+      const point = new THREE.Vector3(anchor.x, anchor.height, anchor.z).project(camera);
+      return { x: (point.x + 1) * container.clientWidth / 2, y: (1 - point.y) * container.clientHeight / 2,
+        visible: Math.abs(point.x) <= 1 && Math.abs(point.y) <= 1 && point.z >= -1 && point.z <= 1 };
+    });
     const project = (q: number, r: number, height: number): { x: number; y: number } => {
       const ground = hexPosition(q, r); const point = new THREE.Vector3(ground.x, height, ground.z).project(camera);
       return { x: (point.x + 1) * container.clientWidth / 2, y: (1 - point.y) * container.clientHeight / 2 };
@@ -614,6 +691,7 @@ export function createAtlasRenderer(
       improvementMeshes.dispose();
       depositMeshes.dispose();
       wonderMeshes.dispose();
+      borderMeshes.dispose();
       landscapeMeshes.dispose();
       cues.dispose();
       const geometries = new Set<THREE.BufferGeometry>();

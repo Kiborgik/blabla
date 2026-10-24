@@ -50,19 +50,24 @@ export function eventAnchor(world: AtlasWorld, event: VisualEvent): { x: number;
   return city ? { ...hexPosition(city.q, city.r), height: .6, key: `city:${city.cityId ?? city.id}` } : null;
 }
 
-export function createCueStream(): { observe: (observation: RouteCueObservation, slots: number) => { events: AtlasCue[]; routeResults: RouteResultCue[] } } {
+export function createCueStream(): { observe: (observation: RouteCueObservation & { clashes?: readonly VisualEvent[] }, slots: number) => { events: AtlasCue[]; routeResults: RouteResultCue[] } } {
   let cursor: RouteCueCursor | null = null;
   const ordinary = createEventCueTracker();
+  let clashIdentity: string | null = null;
+  let seenClashes = new Set<string>();
   return { observe: (observation, slots) => {
     const previous = cursor;
+    const clashes = clashIdentity === observation.identity ? (observation.clashes ?? []).filter(cue => !seenClashes.has(cue.eventId)) : [];
+    clashIdentity = observation.identity;
+    seenClashes = new Set((observation.clashes ?? []).map(cue => cue.eventId));
     const batch = projectRouteCues(cursor, observation, 3);
     cursor = batch.cursor;
     if (observation.mode === 'history' || (previous?.identity === observation.identity && observation.revision <= previous.revision)) return { events: [], routeResults: [] };
-    const events = ordinary.observe(observation.identity, observation.events.filter((event) => (!event.type.startsWith('trade-') || event.type === 'trade-fair')));
+    const events = ordinary.observe(observation.identity, observation.events.filter((event) => (!event.type.startsWith('trade-') || event.type === 'trade-fair') && !event.type.startsWith('border-')));
     if (observation.mode !== 'live' || previous?.resumeBaseline) return { events: [], routeResults: [] };
     const order = new Map(observation.events.map((event, index) => [event.id, { importance: event.importance, index }]));
     const limit = Number.isFinite(slots) ? Math.min(3, Math.max(0, Math.floor(slots))) : 0;
-    return { events: [...events, ...batch.cues].toSorted((a, b) => (order.get(b.eventId)?.importance ?? 0) - (order.get(a.eventId)?.importance ?? 0)
+    return { events: [...events, ...batch.cues, ...clashes].toSorted((a, b) => (order.get(b.eventId)?.importance ?? 0) - (order.get(a.eventId)?.importance ?? 0)
       || (order.get(b.eventId)?.index ?? 0) - (order.get(a.eventId)?.index ?? 0)).slice(0, limit), routeResults: batch.cues };
   } };
 }

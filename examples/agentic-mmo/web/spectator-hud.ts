@@ -88,10 +88,12 @@ export function spectatorChronicle(state: StoryWorld & Pick<WorldState, 'events'
   return candidates.filter((_candidate, index) => chosen.has(index)).map(({ event, source, destination }) => ({ event, display: storyLanguage(state, source, event), destination }));
 }
 
-export function civilizationSummary(state: Pick<WorldState, 'cities'>, id: number): string {
+export function civilizationSummary(state: Pick<WorldState, 'cities' | 'border'>, id: number): string {
   const cities = state.cities.filter(city => city.civId === id);
-  const population = cities.reduce((sum, city) => sum + city.population, 0);
-  return `${cities.length} ${cities.length === 1 ? 'town' : 'towns'} · ${population.toLocaleString('en-US')} people`;
+  const settled = cities.reduce((sum, city) => sum + city.population, 0);
+  const field = (state.border?.active ?? []).flatMap(incident => [incident.initiator, ...(incident.defender ? [incident.defender] : [])])
+    .filter(party => party.departure.actorId === id && party.returned === null).reduce((sum, party) => sum + party.people, 0);
+  return `${cities.length} ${cities.length === 1 ? 'town' : 'towns'} · ${(settled + field).toLocaleString('en-US')} people${field ? ` · ${field} away` : ''}`;
 }
 
 export function constructionCommitment(city: Pick<City, 'construction'> | undefined): { name: string; done: number; required: number } | null {

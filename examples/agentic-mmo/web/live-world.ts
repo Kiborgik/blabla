@@ -1,3 +1,4 @@
+import { projectBorderIncidents } from '../visuals/border-visuals.ts';
 import { projectAcquiredLand } from '../visuals/territory-visuals.ts';
 import { projectPastoralSites, projectCatchmentSites } from '../visuals/pastoral-visuals.ts';
 import { projectWonderSites } from '../visuals/wonder-visuals.ts';
@@ -131,6 +132,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
   return {
     illustrative: false,
     acquiredLand: projectAcquiredLand(state),
+    borderIncidents: projectBorderIncidents(state),
     cities,
     districts,
     pastoralSites: projectPastoralSites(state),

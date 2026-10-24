@@ -1,3 +1,4 @@
+import { borderDealFailure } from './border-incidents.ts';
 import { PUBLIC_PROJECT_RECIPES, PUBLIC_PROJECT_RULES, RESOURCE_IDS } from '../content.ts';
 import type { ActionOption, GameAction, GameEvent, PublicProject, PublicProjectResult, PublicProjectTerms, Resources, WorldState } from '../types.ts';
 import { emitEvent } from './events.ts';
@@ -48,6 +49,7 @@ export function publicProjectActionFailure(state: WorldState, seat: number, acti
     if (!Number.isSafeInteger(state.round + recipe.terms.pendingLifetimeRounds)) return 'The charter expiry would exceed safe round accounting';
     if (route.owner !== seat && route.partner !== seat) return 'Only a route participant can propose this charter';
     const recipient = route.owner === seat ? route.partner : route.owner;
+    const border = borderDealFailure(state, seat, recipient); if (border) return border;
     const failure = targetFailure(state, { routeId: route.id, agreementOfferId: route.agreement.offerId, proposer: seat, recipient, terms: recipe.terms });
     if (failure) return failure;
     if (route.damage <= 0) return 'The route already needs no repair';
@@ -65,6 +67,7 @@ export function publicProjectActionFailure(state: WorldState, seat: number, acti
   if (project.status !== 'pending' || state.round >= project.expiresRound) return 'The charter is no longer awaiting consent';
   if (seat !== project.recipient) return 'Only the named recipient can respond';
   if (!action.accept) return null;
+  const border = borderDealFailure(state, project.proposer, project.recipient); if (border) return border;
   if (!Number.isSafeInteger(state.round + project.terms.completionDelayRounds)) return 'The charter due round would exceed safe round accounting';
   const failure = targetFailure(state, project);
   if (failure) return failure;

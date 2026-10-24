@@ -1,3 +1,4 @@
+import type { BorderIncidentView } from '../visuals/border-visuals.ts';
 import type { AcquiredLandView } from '../visuals/territory-visuals.ts';
 import { retainedCoordinateShift } from '../visuals/map-hierarchy.ts';
 import type { PastoralSiteView, CatchmentSiteView } from '../visuals/pastoral-visuals.ts';
@@ -42,6 +43,7 @@ export interface AtlasTile {
 }
 
 export interface AtlasWorld {
+  borderIncidents?: BorderIncidentView[];
   acquiredLand?: AcquiredLandView[];
   tiles: AtlasTile[];
   cities: AtlasCivilization[];

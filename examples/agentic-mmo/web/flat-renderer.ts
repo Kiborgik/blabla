@@ -27,6 +27,8 @@ import { LUMBER_MARK_PATH, improvementLabel, improvementMark, improvementParts }
 import { SHORE_FISHERY_MARK_PATH } from '../visuals/shore-fishery-visuals.ts';
 import { HILLSIDE_COMMONWORKS_MARK_PATH } from '../visuals/hillside-commonworks-visuals.ts';
 import { districtAdjacencySummary, districtMark, districtLabel, districtParts } from '../visuals/district-visuals.ts';
+import { borderPartyAnchor, borderPartyBadgeOffsets, borderPartyLabel, borderPartyWorldParts, borderTargetOutline, projectBorderParties } from '../visuals/border-visuals.ts';
+import type { BorderIncidentView } from '../visuals/border-visuals.ts';
 
 export function cityScreenMetrics(pixelsPerUnit: number): { targetRadius: number; markerRadius: number; markerFont: number; labelFont: number; labelY: number } {
   const scale = Math.max(0.01, pixelsPerUnit);
@@ -75,6 +77,58 @@ export function createFlatTerritoryLayer(world: Pick<AtlasWorld, 'tiles' | 'citi
   return group;
 }
 
+export function createFlatBorderLayer(views: readonly BorderIncidentView[], detail: DetailLevel, pixelsPerUnit = 24, onSelect?: (cityId: string) => void): SVGGElement {
+  const group = node('g', { class: 'flat-border-parties' });
+  const parties = projectBorderParties(views);
+  const outlines = node('g', { class: 'border-targets', 'pointer-events': 'none' });
+  for (const view of views) {
+    const points = borderTargetOutline(view);
+    if (!points.length) continue;
+    const outline = node('polyline', { points: flatPoints(points), fill: 'none', stroke: view.currentController?.color ?? VISUAL_PALETTE.neutral,
+      'stroke-width': '2', 'stroke-dasharray': '4 3', 'vector-effect': 'non-scaling-stroke', 'data-border-target': view.incident.id,
+      role: 'img', 'aria-label': `Disputed plot ${view.incident.tileId}. Current control: ${view.currentController?.name ?? (view.currentControllerKnown ? 'unclaimed' : 'unavailable')}.` });
+    outlines.append(outline);
+  }
+  const geometry = node('g', { class: 'border-resident-parts', 'pointer-events': 'none' });
+  const recipe = borderPartyWorldParts(parties, detail);
+  const colors = new Map(recipe.map(row => [row.part.id, row.color]));
+  for (const face of flatSceneFaces(recipe.map(row => row.part), .72)) {
+    const color = colors.get(face.part.id) ?? VISUAL_PALETTE.neutral;
+    const shaded = `#${[1, 3, 5].map((offset, index) => Math.round(Number.parseInt(color.slice(offset, offset + 2), 16) * (1 - face.shade) + ([24, 56, 46][index] ?? 0) * face.shade).toString(16).padStart(2, '0')).join('')}`;
+    geometry.append(node('polygon', { 'data-border-part': face.part.id, points: face.points, fill: shaded }));
+  }
+  group.append(outlines, geometry);
+  const scale = Number.isFinite(pixelsPerUnit) ? Math.max(.01, pixelsPerUnit) : 24;
+  const badgeOffsets = borderPartyBadgeOffsets(parties);
+  for (const party of parties) {
+    const anchor = borderPartyAnchor(party);
+    const tile = hexPosition(party.point.q, party.point.r);
+    const point = detail === 'far' ? flatMapPoint(tile.x, tile.z, party.point.height + .18) : flatMapPoint(anchor.x, anchor.z, anchor.height + .28);
+    const offset = detail === 'far' ? badgeOffsets.get(party.party.id)! : { x: 0, y: 0 };
+    const inspectable = !!onSelect && party.sourceCityName !== null;
+    const marker = node('g', { class: 'flat-border-party', 'data-border-party': party.party.id, 'data-position-tile': String(party.party.positionTileId),
+      'data-border-x': String(point.x), 'data-border-z': String(point.z),
+      'data-screen-offset-x': String(offset.x), 'data-screen-offset-y': String(offset.y),
+      transform: `translate(${point.x} ${point.z}) scale(${1 / scale})`, role: inspectable ? 'button' : 'img', tabindex: inspectable ? '0' : '-1', 'aria-label': borderPartyLabel(party) });
+    const title = node('title', {}); title.textContent = borderPartyLabel(party); marker.append(title);
+    if (offset.x || offset.y) marker.append(node('line', { x1: '0', y1: '0', x2: String(offset.x), y2: String(offset.y), stroke: party.identity.color, 'stroke-width': '1', 'pointer-events': 'none', 'aria-hidden': 'true' }),
+      node('circle', { r: '1.5', fill: '#fff5d8', 'pointer-events': 'none', 'aria-hidden': 'true', 'data-border-tile-anchor': String(party.point.tileId) }));
+    const badge = node('g', { class: 'border-count-badge', transform: `translate(${offset.x} ${offset.y})` });
+    badge.append(node('circle', { r: detail === 'far' ? '10' : '16', fill: detail === 'far' ? '#173a3c' : 'transparent', stroke: detail === 'far' ? party.identity.color : 'none', 'stroke-width': '2' }));
+    if (detail === 'far') {
+      const count = node('text', { y: '4', fill: '#fff5d8', 'font-size': '12', 'font-family': 'Arial, sans-serif', 'text-anchor': 'middle' });
+      count.textContent = String(party.party.people); badge.append(count);
+    }
+    marker.append(badge);
+    if (inspectable) {
+      marker.addEventListener('click', () => onSelect?.(party.sourceCityId));
+      marker.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect?.(party.sourceCityId); } });
+    }
+    group.append(marker);
+  }
+  return group;
+}
+
 export function createFlatAtlasRenderer(
   container: HTMLElement,
   world: AtlasWorld,
@@ -100,6 +154,7 @@ export function createFlatAtlasRenderer(
   const cities = node('g', {});
   const settlementShapes = node('g', { class: 'flat-settlement-shapes', 'pointer-events': 'none' });
   const districts = node('g', { class: 'flat-districts' });
+  let borderParties = createFlatBorderLayer(world.borderIncidents ?? [], 'far', 24, onSelect);
   const deposits = node('g', { class: 'flat-deposits', 'pointer-events': 'none' });
   const pastoralNodes: Array<{ element: SVGGElement; mark: SVGGElement; label: SVGTextElement; id: string; q: number; r: number; revealedTo: number[] }> = [];
   const depositNodes: Array<{ parts: SVGGElement; mark: SVGGElement; label: SVGTextElement; index: number }> = [];
@@ -239,7 +294,7 @@ export function createFlatAtlasRenderer(
   }
   borders.style.display = preferences.borders ? '' : 'none';
   routes.style.display = preferences.routes ? '' : 'none';
-  svg.append(definitions, ocean, coast, land, borders, terrain, routes, deposits, settlementShapes, districts, cities);
+  svg.append(definitions, ocean, coast, land, borders, terrain, routes, deposits, settlementShapes, districts, borderParties, cities);
   container.prepend(svg);
   const cues = createWorldCues(container, world, (px, pz, height) => {
     const point = flatMapPoint(px, pz, height);
@@ -254,6 +309,13 @@ export function createFlatAtlasRenderer(
     const pixelsPerUnit = container.clientHeight / (halfHeight * 2);
     const nextDetail = visualDetail(pixelsPerUnit * 2, detail);
     const nextTownDetail = settlementDetail(pixelsPerUnit * 2, townDetail);
+    if (nextDetail !== detail) {
+      const focused = document.activeElement?.getAttribute('data-border-party');
+      const nextBorderParties = createFlatBorderLayer(world.borderIncidents ?? [], nextDetail, pixelsPerUnit, onSelect);
+      borderParties.replaceWith(nextBorderParties);
+      borderParties = nextBorderParties;
+      if (focused) for (const marker of borderParties.querySelectorAll<SVGGElement>('.flat-border-party')) if (marker.getAttribute('data-border-party') === focused) marker.focus();
+    } else for (const marker of borderParties.querySelectorAll('.flat-border-party')) marker.setAttribute('transform', `translate(${marker.getAttribute('data-border-x')} ${marker.getAttribute('data-border-z')}) scale(${1 / pixelsPerUnit})`);
     if (nextDetail !== detail || nextTownDetail !== townDetail) {
       detail = nextDetail;
       townDetail = nextTownDetail;
@@ -409,7 +471,7 @@ export function createFlatAtlasRenderer(
   select(selected);
   let pointer: { id: number; x: number; y: number; originX: number; originZ: number } | null = null;
   svg.addEventListener('pointerdown', (event) => {
-    if (event.target instanceof Element && event.target.closest('.flat-city, .flat-route, .flat-district')) return;
+    if (event.target instanceof Element && event.target.closest('.flat-city, .flat-route, .flat-district, .flat-border-party')) return;
     pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, originX: x, originZ: z };
     svg.setPointerCapture(event.pointerId);
   });
