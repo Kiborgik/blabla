@@ -480,6 +480,47 @@ Record necessary exceptions with an explicit `policy::development-time-budget` t
 correctness/release reason, accountable owner and next reduction action. Time accounting never waives
 a failing check, independent review, delivery obligation, closure guard or publication permission.
 
+### Prepare a one-pass hand-back
+
+Prepare one coherent packet; a new defect or changed claim still requires recovery.
+This order uses existing guards, not a new readiness or acceptance authority.
+
+1. **Settle the assignment first.** The owner declares actual deliverables and
+   check inputs and settles known assignment changes and findings. Read
+   `task show NAME` for the accepted model, consulted lenses, affected identities
+   and pinned delivery goals before preparing final receipts.
+2. **Freeze source and current evidence.** Inspect
+   [receipt-relative freshness](#inspect-receipt-relative-freshness). Run the
+   declared check only when evidence is missing, failed or superseded; read its
+   complete child log. Do not replace current evidence for a metadata handoff.
+3. **Finish explicit claims.** Record required
+   [intent dispositions](#account-for-affected-intent-when-required), then
+   [delivery claims](#required-user-outcome-delivery) with JSON `--observation-ref`
+   objects, not bare paths. Record required
+   [reflection](#reflect-on-the-next-goal-decision-when-required) after evidence
+   and dispositions; `successor` also needs `--recommendation`, `--owner` and
+   `--observable-outcome`. Assess every consulted lens, and no unconsulted lens,
+   then [challenge and hand back](#the-loop). Claims remain inspected judgments,
+   never automatic confirmations.
+4. **Pin the final review packet.** The independently assigned reviewer inspects
+   the final explicit source/goal/claim-digest set before its final acceptance
+   pin. Use [guarded review reuse](#reusing-an-unchanged-review-execution) only
+   when eligible; unchanged source alone does not establish eligibility. The
+   review still needs its own current evidence, required claims/lenses, challenge
+   and READY hand-back.
+5. **Let the owner accept.** Inspect [delivery readiness](#inspect-delivery-readiness-without-changing-it)
+   for exact outstanding receipts and during-carry records. After hand-back the
+   owner confirms actual carry records where required, accepts the reviewer,
+   then accepts each source. READY or a current Accept receipt is not owner
+   acceptance, and bounded closure is not project completion.
+
+If the packet changes, [recover the specific invalidation](#recover-a-ready-hand-back)
+without reflexive reacceptance or suite repetition. Eligible manual-only READY
+updates use [explicit refresh](#refresh-manual-receipts-after-ready); changed
+source/check inputs and changed reviewed claims retain their execution/inspection
+requirements. A stale CLOSED review needs a new assignment. Stop after accepted
+handback; do not manufacture another receipt cycle merely to repeat the summary.
+
 ### Recover a READY hand-back
 
 READY is a recorded lifecycle state, not a claim that its evidence is still current.
