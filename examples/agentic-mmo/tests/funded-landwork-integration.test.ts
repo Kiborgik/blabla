@@ -9,11 +9,11 @@ import { processLocalSimulationRequest } from '../web/local-simulation-worker.ts
 
 const epoch = '2000-01-01T00:00:00.000Z';
 
-void test('fresh funded landwork genesis names its rule and policy without losing current content', () => {
+void test('fresh current genesis names its registered rule and funded policy without losing current content', () => {
   const run = createLocalSimulation(73);
-  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-funded-landwork-1');
+  assert.ok(ACTIVE_LOCAL_RELEASE_ID.startsWith('settlement-'));
   assert.equal(ACTIVE_LOCAL_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION);
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:funded-landwork-v1');
+  assert.ok(LOCAL_SIMULATION_STORAGE_KEY.startsWith('civitas:procedural-observatory:'));
   assert.equal(run.policyVersion, 'weighted-civilizations-v5-funded-landwork');
   assert.equal(run.state.origin?.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.equal(run.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);

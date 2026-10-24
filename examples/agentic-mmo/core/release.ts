@@ -88,7 +88,11 @@ const fundedLandworkRelease: RegisteredRulesDefinition = {
   id: 'settlement-funded-landwork-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
   featureIds: [...borderRelease.featureIds, 'funded-landwork-planning'],
 };
-export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease, hillsideRelease, studiesRelease, borderRelease, fundedLandworkRelease];
+const charcoalRelease: RegisteredRulesDefinition = {
+  id: 'settlement-charcoal-clearing-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  featureIds: [...fundedLandworkRelease.featureIds, 'charcoal-clearing'],
+};
+export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease, hillsideRelease, studiesRelease, borderRelease, fundedLandworkRelease, charcoalRelease];
 
 function currentRelease(): RegisteredRulesDefinition {
   const release = RELEASES.find((candidate) => candidate.id === 'settlement-foundations-1');

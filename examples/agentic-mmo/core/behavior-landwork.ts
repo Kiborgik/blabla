@@ -41,6 +41,11 @@ export interface FundedLandworkQuote {
   readonly retainedOperations: readonly string[];
   readonly allocations: readonly { key: string; required: number; available: number; allocated: number }[];
 }
+export interface FundedCharcoalOperationQuote extends Omit<FundedLandworkQuote, 'action'> {
+  readonly targetOperationBeats: number;
+  readonly requiredByBorder: boolean;
+  readonly action: Extract<GameAction, { type: 'set-improvement-operation' }>;
+}
 export interface LandworkAssessment { readonly quotes: readonly FundedLandworkQuote[]; readonly reason: string | null }
 interface Footprint { key: string; cityId: string; ordinary: Partial<Resources>; strategic: StrategicResources }
 interface PendingUse { cityId: string; order: ConstructionOrder; definition: BuildingDefinition | ImprovementDefinition; footprint: Footprint | null }
@@ -90,7 +95,7 @@ function withoutPendingOutput(state: WorldState, pending: readonly PendingUse[])
   });
   return { ...state, cities };
 }
-function output(state: WorldState, civId: number): Resources {
+export function projectedLandworkOutput(state: WorldState, civId: number): Resources {
   const total = empty();
   for (const city of state.cities.filter(city => city.civId === civId)) {
     const government = governmentModifiers(state, civId); const productivity = cityProductivity(city);
@@ -114,11 +119,15 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
   const actor = state.civilizations.find(actor => actor.id === civId);
   const territory = createTerritoryPlanner(state);
   const quotes = new Map<string, LandworkAssessment>(); const ownedQuotes = new Map<string, readonly FundedLandworkQuote[]>();
-  let prepared: { baseline: WorldState; retained: Map<string, Footprint>; pending: PendingUse[]; horizon: number; failure: string | null } | undefined;
-  const prepare = () => {
-    if (prepared) return prepared;
-    const baseline = projectOperationAllocation(state); const retained = operated(baseline, civId); const pending: PendingUse[] = [];
-    prepared = { baseline, retained, pending, horizon: 1, failure: null };
+  const preparations = new Map<string, { baseline: WorldState; retained: Map<string, Footprint>; pending: PendingUse[]; horizon: number; targetOperationBeats: number; requiredByBorder: boolean; failure: string | null }>();
+  const prepare = (installed?: { cityId: string; tileId: number }) => {
+    const key = installed ? siteKey(installed.cityId, installed.tileId) : 'construction';
+    const existing = preparations.get(key); if (existing) return existing;
+    const baseline = projectOperationAllocation(state, opening => {
+      if (installed) opening.cities.find(city => city.id === installed.cityId)!.improvements![String(installed.tileId)]!.operation.enabled = false;
+    }); const retained = operated(baseline, civId); const pending: PendingUse[] = [];
+    const prepared = { baseline, retained, pending, horizon: 1, targetOperationBeats: 2, requiredByBorder: false, failure: null as string | null };
+    preparations.set(key, prepared);
     const reject = (reason: string) => { prepared!.failure ??= reason; };
     if (!actor || !safe(actor.resources, actor.strategicResources)) reject('unsafe-accounting: opening resources are not safely representable');
     if (actor?.government?.pending) reject('government-transition: pending modifiers are not quoted');
@@ -135,7 +144,13 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
       prepared.horizon = Math.max(prepared.horizon, party.departure.returnByRound - state.round);
       for (const obligation of party.departure.operationForecast) {
         const key = obligation.kind === 'building' ? buildingKey(obligation.cityId, obligation.id) : siteKey(obligation.cityId, obligation.tileId!);
-        const current = retained.get(key);
+        const target = installed && obligation.kind === 'improvement' && key === siteKey(installed.cityId, installed.tileId);
+        const targetDefinition = target ? IMPROVEMENTS.find(definition => definition.id === 'charcoal-clearing') : undefined;
+        const current: Footprint | undefined = targetDefinition ? { key, cityId: installed!.cityId, ordinary: targetDefinition.operatingInputs ?? {}, strategic: {} } : retained.get(key);
+        if (targetDefinition) {
+          prepared.requiredByBorder = true; prepared.targetOperationBeats = Math.max(prepared.targetOperationBeats, party.departure.returnByRound - state.round);
+          if (obligation.id !== targetDefinition.id || obligation.residents !== targetDefinition.residentsRequired) reject('border-operation-unfunded: retained clearing recipe does not match its exact forecast');
+        }
         if (!current || RESOURCE_IDS.some(id => (current.ordinary[id] ?? 0) !== (obligation.inputs[id] ?? 0)) || STRATEGIC_RESOURCE_IDS.some(id => (current.strategic[id] ?? 0) !== (obligation.strategicInputs[id] ?? 0))) reject('border-operation-unfunded: retained exact operation footprint is unavailable');
       }
     }
@@ -164,33 +179,37 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
     if (!Number.isSafeInteger(prepared.horizon) || !Number.isSafeInteger(state.round + prepared.horizon)) reject('unsafe-accounting: protected horizon exceeds safe rounds');
     return prepared;
   };
-  const assess = (cityId: string, tileId: number): LandworkAssessment => {
-    const key = `${cityId}/${tileId}`; const cached = quotes.get(key); if (cached) return cached;
+  const assess = (cityId: string, tileId: number, operationOnly = false): LandworkAssessment => {
+    const key = `${cityId}/${tileId}/${operationOnly}`; const cached = quotes.get(key); if (cached) return cached;
     const save = (result: LandworkAssessment) => { const observation = freeze(result); quotes.set(key, observation); return observation; };
     const refuse = (reason: string) => save({ quotes: [], reason });
     const city = state.cities.find(city => city.id === cityId && city.civId === civId); const tile = state.tiles.find(tile => tile.id === tileId);
     if (!actor || !city || !tile) return refuse('missing-exact-site: existing civilization, town and tile are required');
-    const shared = prepare(); if (shared.failure) return refuse(shared.failure);
+    const installed = operationOnly ? city.improvements?.[String(tileId)] : undefined;
+    if (operationOnly && installed?.improvementId !== 'charcoal-clearing') return refuse('missing-installed-charcoal: operation requires its exact completed clearing');
+    const shared = prepare(operationOnly ? { cityId, tileId } : undefined); if (shared.failure) return refuse(shared.failure);
     let acquisitionCost: Partial<Resources> = {}; let ownedState = state;
     if (tile.owner !== civId) {
       const purchase = territory.assess(civId, cityId, tileId); if (!purchase.quote || purchase.blocker) return refuse(`acquisition-ineligible: ${purchase.blocker}`);
       acquisitionCost = { ...purchase.quote.paid };
       ownedState = { ...state, tiles: state.tiles.map(item => item.id === tileId ? { ...item, owner: civId } : item), tileAcquisitions: { ...state.tileAcquisitions, [String(tileId)]: { ...purchase.quote, id: 'conditional-landwork', acquiredRound: state.round, eventId: 'conditional-landwork' } } };
     }
-    const work = constructionWork(state, city);
+    const work = operationOnly ? 1 : constructionWork(state, city);
     if (!Number.isFinite(work) || work <= 0) return refuse('zero-construction-work: current town cannot progress a paid order');
-    const active = city.construction?.active;
+    const active = operationOnly ? null : city.construction?.active;
     const waitBeats = active ? Math.max(1, Math.ceil(quantize(active.workRequired - active.workDone) / work)) : 0;
     if (!Number.isSafeInteger(waitBeats) || waitBeats > 2) return refuse('wait-horizon: retained paid order needs more than two beats');
     const acquisitionDelayBeats = tile.owner === civId ? 0 : usesIndependentTurns(state) ? Math.ceil(TURN_RULES.tacticalWindowMs / TURN_RULES.strategyIntervalMs) : 1;
     const startDelayBeats = Math.max(waitBeats, acquisitionDelayBeats);
     const candidates: Candidate[] = [];
-    for (const definition of IMPROVEMENTS.toSorted((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
+    for (const original of IMPROVEMENTS.toSorted((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
+      if (original.id === 'charcoal-clearing' && tile.owner !== civId || operationOnly && original.id !== installed!.improvementId) continue;
+      const definition = operationOnly ? { ...original, cost: {}, requiredWork: 0 } : original;
       const eligibility = improvementEligibility(ownedState, civId, definition, cityId);
-      if (eligibility.blockers.some(blocker => blocker.kind !== 'active-commitment') || improvementSiteBlock(ownedState, city, definition, tileId)) continue;
+      if ((operationOnly ? !hasFeatures(state, definition.requiredFeatures) : eligibility.blockers.some(blocker => blocker.kind !== 'active-commitment')) || improvementSiteBlock(ownedState, city, definition, tileId, operationOnly)) continue;
       candidates.push({ action: { type: 'improve', cityId, tileId, improvementId: definition.id }, definition, work: definition.requiredWork, footprint: { key: siteKey(cityId, tileId), cityId, ordinary: { ...definition.operatingInputs }, strategic: {} } });
     }
-    for (const definition of BUILDINGS.filter(item => item.district).toSorted((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
+    for (const definition of BUILDINGS.filter(item => !operationOnly && item.district).toSorted((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
       if (active && !('kind' in active) && active.buildingId === definition.id || definition.effects.length) continue;
       const eligibility = buildingEligibility(ownedState, civId, definition, cityId);
       if (eligibility.completed || eligibility.blockers.some(blocker => blocker.kind !== 'active-commitment') || districtSiteBlock(ownedState, city, definition, tileId)) continue;
@@ -199,7 +218,7 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
     const results: FundedLandworkQuote[] = []; let reason = 'no-eligible-use: no exact currently released improvement or district fits';
     for (const candidate of candidates) {
       const workBeats = Math.ceil(candidate.work / work); const firstOperationBeat = startDelayBeats + workBeats + 1; const horizon = Math.max(firstOperationBeat + 1, shared.horizon);
-      if (!Number.isSafeInteger(workBeats) || workBeats < 1 || firstOperationBeat > 8) { reason = 'first-operation-horizon: candidate cannot operate within eight beats'; continue; }
+      if (!Number.isSafeInteger(workBeats) || workBeats < (operationOnly ? 0 : 1) || firstOperationBeat > 8) { reason = 'first-operation-horizon: candidate cannot operate within eight beats'; continue; }
       if (!Number.isSafeInteger(horizon) || !Number.isSafeInteger(state.round + horizon)) { reason = 'unsafe-accounting: protected horizon exceeds safe rounds'; continue; }
       const external = exchangePromisedResources(state, civId, horizon);
       const ordinary = { ...external.ordinary }; const strategic = { ...external.strategic };
@@ -207,7 +226,7 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
       ordinary.food = quantize(ordinary.food + state.cities.filter(city => city.civId === civId).reduce((total, city) => total + householdFoodUpkeep(state, city.population + borderReturnReservations(state, city.id)), 0) * horizon);
       const allocationOrdinary = empty(); const allocationStrategic: StrategicResources = {};
       for (const footprint of shared.retained.values()) { add(ordinary, footprint.ordinary, horizon); addStrategic(strategic, footprint.strategic, horizon); add(allocationOrdinary, footprint.ordinary); addStrategic(allocationStrategic, footprint.strategic); }
-      if (candidate.footprint) { add(ordinary, candidate.footprint.ordinary, 2); addStrategic(strategic, candidate.footprint.strategic, 2); add(allocationOrdinary, candidate.footprint.ordinary); addStrategic(allocationStrategic, candidate.footprint.strategic); }
+      if (candidate.footprint) { add(ordinary, candidate.footprint.ordinary, operationOnly ? shared.targetOperationBeats : 2); addStrategic(strategic, candidate.footprint.strategic, operationOnly ? shared.targetOperationBeats : 2); add(allocationOrdinary, candidate.footprint.ordinary); addStrategic(allocationStrategic, candidate.footprint.strategic); }
       if (!safe(ordinary, strategic)) { reason = 'unsafe-accounting: protected costs exceed safe resource units'; continue; }
       if (RESOURCE_IDS.some(id => Math.round(actor.resources[id] * 100) < Math.round(ordinary[id] * 100)) || STRATEGIC_RESOURCE_IDS.some(id => (actor.strategicResources?.[id] ?? 0) < (strategic[id] ?? 0))) { reason = 'opening-budget: purchase, setup, households and protected operations or promises are not funded'; continue; }
       const projected = projectOperationAllocation(ownedState, opening => {
@@ -235,15 +254,19 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
         if (candidateAction.type === 'build') return { ...town, buildings: town.buildings.filter(id => id !== candidateAction.project) };
         const improvements = { ...town.improvements }; delete improvements[String(tileId)]; return { ...town, improvements };
       }) };
-      const before = output(withoutCandidate, civId); const after = output(actualOutput, civId); const marginalOutput = empty();
+      const before = projectedLandworkOutput(withoutCandidate, civId); const after = projectedLandworkOutput(actualOutput, civId); const marginalOutput = empty();
       for (const id of RESOURCE_IDS) marginalOutput[id] = quantize(after[id] - before[id]);
       if (!RESOURCE_IDS.every(id => Number.isSafeInteger(Math.round(marginalOutput[id] * 100))) || !RESOURCE_IDS.some(id => marginalOutput[id] > 0)) { reason = 'no-marginal-output: the exact funded use adds no safe current output'; continue; }
-      results.push({ kind: 'conditional-landwork', revision: state.revision, cityId, tileId, action: candidate.action, orderId: active?.id ?? null, acquisitionCost, setupCost: { ...candidate.definition.cost }, operatingInputs: { ...candidate.definition.operatingInputs }, strategicInputs: { ...candidate.footprint?.strategic }, waitBeats, acquisitionDelayBeats, startDelayBeats, workBeats, firstOperationBeat, protectedHorizon: horizon, protectedBudget: { ordinary, strategic }, marginalOutput, retainedOperations: [...shared.retained.keys()].sort(), allocations: localAllocations });
+      results.push({ kind: 'conditional-landwork', revision: state.revision, cityId, tileId, action: candidate.action, orderId: active?.id ?? null, acquisitionCost, setupCost: { ...candidate.definition.cost }, operatingInputs: { ...candidate.definition.operatingInputs }, strategicInputs: { ...candidate.footprint?.strategic }, waitBeats, acquisitionDelayBeats, startDelayBeats, workBeats, firstOperationBeat, protectedHorizon: horizon, protectedBudget: { ordinary, strategic }, marginalOutput, retainedOperations: [...shared.retained.keys(), ...(operationOnly && shared.requiredByBorder ? [siteKey(cityId, tileId)] : [])].sort(), allocations: localAllocations });
     }
     return save({ quotes: results, reason: results.length ? null : reason });
   };
   return {
-    quote: assess,
+    quote: (cityId: string, tileId: number): LandworkAssessment => assess(cityId, tileId),
+    charcoalOperation(cityId: string, tileId: number): FundedCharcoalOperationQuote | null {
+      const quote = assess(cityId, tileId, true).quotes[0];
+      return quote ? freeze({ ...quote, targetOperationBeats: prepare({ cityId, tileId }).targetOperationBeats, requiredByBorder: prepare({ cityId, tileId }).requiredByBorder, action: { type: 'set-improvement-operation', cityId, tileId, improvementId: 'charcoal-clearing', enabled: true } }) : null;
+    },
     owned(cityId: string): readonly FundedLandworkQuote[] {
       const existing = ownedQuotes.get(cityId); if (existing) return existing;
       const city = state.cities.find(city => city.id === cityId && city.civId === civId);

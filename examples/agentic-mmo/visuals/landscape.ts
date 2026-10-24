@@ -2,7 +2,7 @@ import { populationFootprint, SETTLEMENT_RENDER_SCALE } from './world-visuals.ts
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
 export interface LandscapeTile { q: number; r: number; owner: number | null; terrain: 'grassland' | 'forest' | 'desert' | 'mountain' | 'tundra'; height: number }
-export interface LandscapeTown { q: number; r: number; population?: number }
+export interface LandscapeTown { q: number; r: number; population?: number; improvementId?: string; tileId?: number; worldSeed?: number }
 export interface LandscapeEdge { key: string; owner: number | null; from: readonly [number, number]; to: readonly [number, number]; height: number; fromHeight?: number; toHeight?: number }
 export interface LandscapeTerritory { key: string; owner: number; height: number; points: Array<readonly [number, number]> }
 export interface LandscapeProjection { coast: LandscapeEdge[]; borders: LandscapeEdge[]; territories: LandscapeTerritory[]; parts: VisualPart[] }
@@ -105,11 +105,31 @@ function terrainParts(tile: LandscapeTile, detail: DetailLevel): VisualPart[] {
   return parts;
 }
 
+function charcoalForestParts(tile: LandscapeTile, site: LandscapeTown, detail: DetailLevel): VisualPart[] {
+  const text = JSON.stringify(['charcoal-forest-v1', site.worldSeed ?? 0, site.tileId ?? key(tile)]);
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
+  const orientation = (hash >>> 0) / 4294967296 * Math.PI;
+  const { x, z } = hexPosition(tile.q, tile.r);
+  return [0, 1].flatMap((index): VisualPart[] => {
+    const angle = orientation + index * Math.PI;
+    const px = x + Math.cos(angle) * .73; const pz = z + Math.sin(angle) * .73;
+    const height = .4 + noise(tile.q, tile.r, index + 11) * .1;
+    const width = .27 + noise(tile.q, tile.r, index + 17) * .04;
+    const parts: VisualPart[] = [{ id: `charcoal-forest:${key(tile)}:${index}`, shape: 'canopy', material: index ? 'canopyLight' : 'canopy',
+      position: [px, tile.height + height / 2, pz], scale: [width, height, width * .9], rotation: angle }];
+    if (detail !== 'far') parts.push({ id: `charcoal-forest:${key(tile)}:trunk:${index}`, shape: 'box', material: 'timber',
+      position: [px, tile.height + .1, pz], scale: [.045, .2, .045], rotation: angle });
+    return parts;
+  });
+}
+
 export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonly LandscapeTown[], detail: DetailLevel): LandscapeProjection {
   const ordered = tiles.toSorted(order);
   const lookup = new Map(ordered.map(tile => [key(tile), tile]));
   const surfaces = new Map(projectTerrainSurface(ordered).map(tile => [tile.key, tile]));
   const townSites = new Set(towns.map(key));
+  const charcoalSites = new Map(towns.filter(site => site.improvementId === 'charcoal-clearing').map(site => [key(site), site]));
   const coast: LandscapeEdge[] = [];
   const borders: LandscapeEdge[] = [];
   const territories: LandscapeTerritory[] = [];
@@ -135,12 +155,15 @@ export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonl
   }
   const parts: VisualPart[] = towns.toSorted(order).flatMap((town): VisualPart[] => {
     const tile = lookup.get(key(town));
-    if (!tile) return [];
+    if (!tile || town.improvementId === 'charcoal-clearing') return [];
     const { x, z } = hexPosition(town.q, town.r);
     const radius = populationFootprint(town.population ?? 1) * (town.population === undefined ? 1 : SETTLEMENT_RENDER_SCALE);
     return [{ id: `ground:${key(town)}`, shape: 'cylinder', material: 'settled', position: [x, tile.height + .016, z], scale: [radius * 2.3, .025, radius * 1.9], rotation: .15 }];
   }).slice(0, LANDSCAPE_BUDGETS[detail]);
-  const groups = ordered.filter(tile => !townSites.has(key(tile))).map(tile => terrainParts(tile, detail));
+  const groups = ordered.flatMap(tile => {
+    const charcoal = charcoalSites.get(key(tile));
+    return charcoal && tile.terrain === 'forest' ? [charcoalForestParts(tile, charcoal, detail)] : !townSites.has(key(tile)) ? [terrainParts(tile, detail)] : [];
+  });
   for (let index = 0; index < 14 && parts.length < LANDSCAPE_BUDGETS[detail]; index++) {
     for (const group of groups) {
       const part = group[index];

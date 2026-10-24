@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-live.57",
+    "date": "2026-10-24",
+    "title": "Small forest charcoal clearings",
+    "changes": [
+      "Civilizations can build a paid clearing on an owned forest site after Kiln firing. Later seasons use one resident and Materials to make ordinary Energy; the forest remains.",
+      "Autonomous choices weigh useful Energy, operating supplies and other forest uses. The map keeps the low charcoal mound, wood stacks and surrounding trees; paused or short-supplied sites show no operating cue."
+    ]
+  },
+  {
     "version": "0.1.0-live.56",
     "date": "2026-10-24",
     "title": "Buying land for useful work",
@@ -15,15 +24,6 @@
     "changes": [
       "Selecting a town and using the inspection zoom puts the town in the clear map area, away from the inspector edge.",
       "World updates keep the current inspection view. Manual panning stays in your control; closing restores the overview only when automatic framing is still active."
-    ]
-  },
-  {
-    "version": "0.1.0-live.54",
-    "date": "2026-10-23",
-    "title": "Supplied parties at the border",
-    "changes": [
-      "Civilizations can send small paid resident parties toward an exact unworked rival plot. They carry Food, move across adjacent land, and leave room for people to return.",
-      "A defender can yield or fund a response. One bounded clash can change control; inspection keeps the original purchase, current control, casualties and returns distinct."
     ]
   }
 ]

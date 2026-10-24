@@ -50,7 +50,7 @@ function usefulSite(state: WorldState, actorId: number, cityId: string, tileId: 
     if (value > result.value) { result.value = value; result.use = name; }
   };
   for (const definition of IMPROVEMENTS) {
-    if (availableResidents < definition.residentsRequired || improvementSiteBlock(state, city, definition, tileId)
+    if (definition.id === 'charcoal-clearing' || availableResidents < definition.residentsRequired || improvementSiteBlock(state, city, definition, tileId)
       || improvementEligibility(state, actorId, definition, cityId).blockers.length
       || RESOURCE_IDS.some(resource => actor.resources[resource] < (definition.cost[resource] ?? 0) + (definition.operatingInputs?.[resource] ?? 0) * BORDER_RULES.householdReserveBeats)) continue;
     retain(definition.production, definition.operatingInputs ?? {}, definition.cost, definition.name);

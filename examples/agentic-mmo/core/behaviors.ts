@@ -1,3 +1,4 @@
+import { createCharcoalClearingPolicy } from './behavior-charcoal.ts';
 import { createLandworkPlanner, type FundedLandworkQuote } from './behavior-landwork.ts';
 import { deriveBorderPlan, borderWeight, borderPriority, borderReason, borderProtects, type BorderPlan } from './behavior-border.ts';
 import { createPaidFoodSiteAffordability, paidFoodSite } from './behavior-paid-food-sites.ts';
@@ -147,6 +148,7 @@ interface Situation {
   border: BorderPlan | null;
   fundedLandwork: ReadonlyMap<string, ScoredLandwork> | null;
   paidFoodSiteAffordable: ReturnType<typeof createPaidFoodSiteAffordability>;
+  charcoal: ReturnType<typeof createCharcoalClearingPolicy>;
 }
 
 function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
@@ -169,7 +171,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, fundedLandwork: null, paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
+  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, fundedLandwork: null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
   if (memory.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION) context.fundedLandwork = deriveFundedLandworkPlan(context, options);
   return context;
 }
@@ -221,7 +223,7 @@ function deriveFundedLandworkPlan(context: Situation, options: readonly ActionOp
       || context.actor.resources.credits < (option.territoryQuote?.paid.credits ?? 0) + 12 || protectedCandidate(option, context)) continue;
     let ownedValue = ownedValues.get(action.cityId);
     if (ownedValue === undefined) {
-      ownedValue = planner.owned(action.cityId).reduce((best, quote) => Math.max(best, landworkValue(quote, context)), 0);
+      ownedValue = planner.owned(action.cityId).filter(quote => quote.action.type !== 'improve' || quote.action.improvementId !== 'charcoal-clearing').reduce((best, quote) => Math.max(best, landworkValue(quote, context)), 0);
       ownedValues.set(action.cityId, ownedValue);
     }
     const ownedBest = ownedValue;
@@ -276,6 +278,7 @@ function constructionWeight(action: GameAction, context: Situation): number {
   if (action.type === 'improve') {
     const definition = IMPROVEMENTS.find(candidate => candidate.id === action.improvementId);
     if (!definition) return 0;
+    if (definition.id === 'charcoal-clearing') return context.foodRisk ? 0 : context.charcoal(action)?.weight ?? 0;
     const deposit = context.progression.deposits.get(action.tileId);
     if (paidFoodSite(definition)) {
       if (!context.paidFoodSiteAffordable(action)) return 0;
@@ -545,7 +548,8 @@ function scoreCandidates(context: Situation, options: readonly ActionOption[], l
     const relief = context.relief ? reliefWeight(option, diplomatic, context.relief) : diplomatic;
     const knowledgeable = context.knowledge ? knowledgeWeight(option, relief, context.knowledge) : relief;
     const assessed = context.border ? borderWeight(option, knowledgeable, context.border) : knowledgeable;
-    const weight = usesStrategicTemperaments(context.memory.policyVersion) && protectedCandidate(option, context) ? 0 : assessed;
+    const refusedCharcoal = action.type === 'set-improvement-operation' && action.improvementId === 'charcoal-clearing' && action.enabled && !context.charcoal(action);
+    const weight = refusedCharcoal || usesStrategicTemperaments(context.memory.policyVersion) && protectedCandidate(option, context) ? 0 : assessed;
     return { option, weight, ...classify(option.action), lane: laneOf(option.action, lanes) };
   });
 }
@@ -592,7 +596,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   const context = situation(state, actor, profile, memory, options);
   const lanes = requiredLanes(state, seat);
   const candidates = assessSituation(context, options, lanes);
-  const required = candidates.filter(candidate => candidate.lane !== null && (!context.diplomacy || !diplomacyProtects(candidate.option, context.diplomacy)) && (!context.relief || !reliefProtects(candidate.option, context.relief)) && (!context.border || !borderProtects(candidate.option, context.border)));
+  const required = candidates.filter(candidate => candidate.lane !== null && (candidate.option.action.type !== 'improve' || candidate.option.action.improvementId !== 'charcoal-clearing' || candidate.weight > 0) && (!context.diplomacy || !diplomacyProtects(candidate.option, context.diplomacy)) && (!context.relief || !reliefProtects(candidate.option, context.relief)) && (!context.border || !borderProtects(candidate.option, context.border)));
   let emergencies = candidates.filter(candidate => candidate.weight > 0 && urgent(candidate, context));
   if (context.relief) {
     const priorityOf = (candidate: Candidate): number => Math.max(reliefPriority(candidate.option, context.relief!), context.diplomacy ? diplomacyPriority(candidate.option, context.diplomacy) : 0);

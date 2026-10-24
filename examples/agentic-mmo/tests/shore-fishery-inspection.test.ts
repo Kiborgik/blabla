@@ -78,6 +78,22 @@ function inspect(city: City): ElementRecord {
   });
 }
 
+await test('all active worked-site previews state that no resources are produced yet', () => {
+  for (const improvementId of ['charcoal-clearing', 'shore-fishery', 'mine']) {
+    const { city } = fixture('none');
+    city.improvements = {};
+    city.construction = { active: { kind: 'improvement', id: 'synthetic-current-order', cityId: city.id,
+      improvementId, tileId: 21, ruleVersion: 1, startedRound: 2, paid: { materials: 8, credits: 4 }, workRequired: 4, workDone: 1 }, lastCompleted: null };
+    const before = structuredClone(city);
+    const view = inspect(city).content();
+    assert.match(view, /Under construction/);
+    assert.match(view, /1 \/ 4 work · Not built yet/);
+    assert.match(view, /Reserved Tile 21 · No resources produced yet/);
+    assert.doesNotMatch(view, /No food or materials made yet/);
+    assert.deepEqual(city, before);
+  }
+});
+
 await test('fishery full inspection separates paid construction, opening recipe and historical actual output', () => {
   const { city } = fixture(); const before = structuredClone(city);
   const view = inspect(city).content();

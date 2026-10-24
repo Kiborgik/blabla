@@ -23,7 +23,7 @@ import type { DetailLevel } from '../visuals/world-visuals.ts';
 import { flatMapPoint, flatSceneFaces } from './settlement-parts.ts';
 import { createWorldCues } from './world-cues.ts';
 import { mapHierarchyAnchors, mapHierarchyObstacles } from './map-labels.ts';
-import { LUMBER_MARK_PATH, improvementLabel, improvementMark, improvementParts } from '../visuals/improvement-visuals.ts';
+import { CHARCOAL_MARK_PATH, LUMBER_MARK_PATH, improvementLabel, improvementMark, improvementParts } from '../visuals/improvement-visuals.ts';
 import { SHORE_FISHERY_MARK_PATH } from '../visuals/shore-fishery-visuals.ts';
 import { HILLSIDE_COMMONWORKS_MARK_PATH } from '../visuals/hillside-commonworks-visuals.ts';
 import { districtAdjacencySummary, districtMark, districtLabel, districtParts } from '../visuals/district-visuals.ts';
@@ -240,7 +240,7 @@ export function createFlatAtlasRenderer(
     const leader = node('line', { x1: '0', y1: '0', stroke: district.color, 'stroke-width': '1', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
     label.textContent = district.caption;
     const mark = node('g', { 'pointer-events': 'none', 'aria-hidden': 'true' });
-    mark.append(node('circle', { r: '12', fill: '#173a3c', stroke: district.color, 'stroke-width': '2', 'stroke-dasharray': district.status === 'building' ? '3 2' : 'none' }), node('path', { d: district.mark === 'wonder' ? WONDER_MARK_PATH : district.mark === 'commons' ? HILLSIDE_COMMONWORKS_MARK_PATH : district.mark === 'fishery' ? SHORE_FISHERY_MARK_PATH : district.mark === 'pasture' ? PASTORAL_MARK_PATH : district.mark === 'lumber' ? LUMBER_MARK_PATH : district.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[district.mark], transform: 'translate(-9 -9) scale(.75)', fill: 'none', stroke: '#fff3c6', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+    mark.append(node('circle', { r: '12', fill: '#173a3c', stroke: district.color, 'stroke-width': '2', 'stroke-dasharray': district.status === 'building' ? '3 2' : 'none' }), node('path', { d: district.mark === 'wonder' ? WONDER_MARK_PATH : district.mark === 'charcoal' ? CHARCOAL_MARK_PATH : district.mark === 'commons' ? HILLSIDE_COMMONWORKS_MARK_PATH : district.mark === 'fishery' ? SHORE_FISHERY_MARK_PATH : district.mark === 'pasture' ? PASTORAL_MARK_PATH : district.mark === 'lumber' ? LUMBER_MARK_PATH : district.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[district.mark], transform: 'translate(-9 -9) scale(.75)', fill: 'none', stroke: '#fff3c6', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
     if ('adjacency' in district && district.adjacency?.source === 'improvement') {
       const bonus = node('text', { x: '0', y: '25', 'text-anchor': 'middle', 'font-size': '11', 'font-family': 'Arial, sans-serif', fill: '#fff3c6', stroke: '#173a3c', 'stroke-width': '3', 'paint-order': 'stroke' });
       bonus.textContent = `+${district.adjacency.bonus} base`;

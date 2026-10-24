@@ -33,6 +33,7 @@ function resolvedImprovementSiteBlock(state: WorldState, city: City, definition:
   if (definition.siteRequirement === 'grassland-hill' && (center.owner !== city.civId || site.terrain !== 'grassland' || !isHillSite(site))) return 'The improvement requires an owned grassland hill and its exact owned town';
   if (definition.siteRequirement === 'hill' && !isHillSite(site)) return 'The improvement requires a buildable hill site';
   if (definition.siteRequirement === 'forest' && site.terrain !== 'forest') return 'The improvement requires a current forest site';
+  if (definition.id === 'charcoal-clearing' && center.owner !== city.civId) return 'The Charcoal clearing requires its exact owned support town';
   if (definition.siteRequirement === 'revealed-horse-site' && (site.terrain !== 'grassland' || !revealedHorseSite(state, city.civId, tileId))) return 'The improvement requires this civilization’s revealed grassland horse site';
   if (hexDistance(center, site) > definition.siteRange) return `The improvement site must be within ${definition.siteRange} hexes of this town`;
   if (state.cities.some(candidate => candidate.tileId === tileId)) return 'A city center occupies this site';

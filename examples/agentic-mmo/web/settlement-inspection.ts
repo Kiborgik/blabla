@@ -482,7 +482,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     else if (key?.startsWith('active:') && activeDistrict) {
       preview.append(text('strong', 'Under construction'), text('p', `${exactNumber(activeDistrict.workDone)} / ${exactNumber(activeDistrict.workRequired)} work · Not built yet`));
       if ('buildingId' in activeDistrict && activeDistrict.catchmentTileId !== undefined) preview.append(text('p', `Mountain source · Tile ${activeDistrict.catchmentTileId}`));
-      if ('kind' in activeDistrict && activeDistrict.kind === 'improvement') preview.append(text('p', `Reserved Tile ${activeDistrict.tileId} · No food or materials made yet`));
+      if ('kind' in activeDistrict && activeDistrict.kind === 'improvement') preview.append(text('p', `Reserved Tile ${activeDistrict.tileId} · No resources produced yet`));
     } else {
       preview.append(text('strong', operation || worked ? `Built · ${(operation ?? worked?.operation)?.enabled ? 'On' : 'Paused'} now` : 'Built'));
       const last = operation?.lastResult ?? worked?.operation.lastResult;

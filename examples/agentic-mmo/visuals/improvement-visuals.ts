@@ -2,6 +2,7 @@ import { RESOURCE_IDS } from '../core/content.ts';
 import { METRIC_LABELS } from './visual-language.ts';
 import { workedLandCompositionV1 } from './worked-land-composition.ts';
 import { shoreFisheryParts } from './shore-fishery-visuals.ts';
+import { charcoalClearingParts } from './charcoal-clearing-visuals.ts';
 import { hillsideCommonworksParts } from './hillside-commonworks-visuals.ts';
 import type { CityImprovement, ImprovementConstructionOrder, ImprovementConstructionCompletion, Resources } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
@@ -33,8 +34,10 @@ export function improvementLabel(view: ImprovementView): string {
   return `${view.name}${view.status === 'building' ? ' · Building' : view.operation?.enabled === false ? ' · Paused' : ''}`;
 }
 
-export function improvementMark(view: Pick<ImprovementView, 'improvementId'>): 'commons' | 'fishery' | 'pasture' | 'lumber' | 'mine' {
-  return view.improvementId === 'hill-commons' ? 'commons' : view.improvementId === 'shore-fishery' ? 'fishery' : view.improvementId === 'pasture' ? 'pasture' : view.improvementId === 'lumber-mill' ? 'lumber' : 'mine';
+export const CHARCOAL_MARK_PATH = 'M3 20H21M5 18C5 10 9 7 12 7C16 7 19 12 19 18ZM8 16H16M3 22H9M15 22H21';
+
+export function improvementMark(view: Pick<ImprovementView, 'improvementId'>): 'charcoal' | 'commons' | 'fishery' | 'pasture' | 'lumber' | 'mine' {
+  return view.improvementId === 'charcoal-clearing' ? 'charcoal' : view.improvementId === 'hill-commons' ? 'commons' : view.improvementId === 'shore-fishery' ? 'fishery' : view.improvementId === 'pasture' ? 'pasture' : view.improvementId === 'lumber-mill' ? 'lumber' : 'mine';
 }
 
 export function improvementLastLabel(result: CityImprovement['operation']['lastResult']): string {
@@ -57,6 +60,7 @@ export function improvementParts(view: ImprovementView, detail: DetailLevel): Vi
 }
 
 function improvementRecipeParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
+  if (view.improvementId === 'charcoal-clearing') return charcoalClearingParts(view, detail);
   if (view.improvementId === 'hill-commons') return hillsideCommonworksParts(view, detail);
   if (view.improvementId === 'shore-fishery') return shoreFisheryParts(view, detail);
   if (view.improvementId === 'lumber-mill') return lumberParts(view, detail);
