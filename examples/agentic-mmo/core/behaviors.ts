@@ -192,12 +192,12 @@ function selectPhase(context: Situation, options: readonly ActionOption[], candi
   const useful = candidates?.filter(candidate => candidate.weight > 0 && !protectedCandidate(candidate.option, context));
   const scores: Partial<Record<BehaviorPhase, number>> = useful ? {
     development: useful.some(candidate => isStrategicDevelopment(candidate.option.action)) ? 10 : 0,
-    expansion: useful.some(candidate => ['settle', 'settle-coast'].includes(candidate.option.action.type)) && (context.cities.length < profile.settlementGoal || context.progression.coastalNeeded) && actor.resources.food > upkeep * 4 + 10 ? 8 * profile.priorities.expansion : 0,
+    expansion: useful.some(candidate => ['settle', 'settle-coast'].includes(candidate.option.action.type)) && context.cities.length < profile.settlementGoal && actor.resources.food > upkeep * 4 + 10 ? 8 * profile.priorities.expansion : 0,
     trade: useful.some(candidate => isStrategicExchange(candidate.option.action)) ? 7 * profile.priorities.trade : 0,
     consolidation: 3,
   } : {
     development: options.some(option => ['research', 'build', 'choose-civic', 'improve', 'build-wonder', 'build-rail'].includes(option.action.type)) ? 10 : 2,
-    expansion: options.some(option => ['settle', 'settle-coast'].includes(option.action.type)) && (context.cities.length < profile.settlementGoal || context.progression.coastalNeeded) && actor.resources.food > upkeep * 4 + 10 ? 8 * profile.priorities.expansion : 0,
+    expansion: options.some(option => ['settle', 'settle-coast'].includes(option.action.type)) && context.cities.length < profile.settlementGoal && actor.resources.food > upkeep * 4 + 10 ? 8 * profile.priorities.expansion : 0,
     trade: options.some(option => ['propose-trade', 'respond-trade'].includes(option.action.type)) ? 7 * profile.priorities.trade : 0,
     consolidation: 3,
   };
@@ -387,8 +387,7 @@ function actionWeight(option: ActionOption, context: Situation): number {
       return (route?.damage ?? 0) * profile.priorities.recovery * 0.5;
     }
     case 'settle': case 'settle-coast': {
-      const coastalGoal = context.progression.coastalNeeded && (action.type === 'settle-coast' || context.progression.coastalCities.size === 0 && context.progression.coastalSites.has(action.tileId));
-      if (context.foodRisk || cities.length >= profile.settlementGoal + (coastalGoal ? 2 : 0) || actor.resources.food < context.upkeep * 3 + ECONOMY_RULES.settle.cost.food
+      if (context.foodRisk || cities.length >= profile.settlementGoal || actor.resources.food < context.upkeep * 3 + ECONOMY_RULES.settle.cost.food
         || actor.resources.materials < ECONOMY_RULES.settle.cost.materials + 8 || actor.resources.credits < ECONOMY_RULES.settle.cost.credits + 4) return 0;
       const site = state.tiles.find(tile => tile.id === action.tileId);
       const output = site ? siteProduction(state, site) : {};
@@ -469,7 +468,8 @@ function actionWeight(option: ActionOption, context: Situation): number {
   }
 }
 
-interface Candidate { option: ActionOption; weight: number; category: string; variant: string; lane: string | null }
+interface CoastalPolicyHold { readonly kind: 'coastal-opportunity'; readonly reason: string }
+interface Candidate { option: ActionOption; weight: number; category: string; variant: string; lane: string | null; coastalHold: CoastalPolicyHold | null }
 
 function classify(action: GameAction): { category: string; variant: string } {
   switch (action.type) {
@@ -576,6 +576,8 @@ function scoreCandidates(context: Situation, options: readonly ActionOption[], l
   const woodlandPlanner = hasFeatures(context.state, [WOODLAND_RULES.featureId]) ? createLandworkPlanner(context.state, context.actor.id) : null;
   return options.map(option => {
     const action = option.action;
+    const coastalAssessment = context.progression.coastalOpportunity.assessment(action);
+    const coastalHold: CoastalPolicyHold | null = coastalAssessment.hold ? { kind: 'coastal-opportunity', reason: coastalAssessment.reason ?? 'No supported current coastal opportunity.' } : null;
     const progressed = progressionWeight(option, actionWeight(option, context), context.state, context.actor, context.profile, context.progression);
     const base = frontierWeight(action, progressed, context);
     const replacing = action.type === 'stop-trade' && context.progression.replaceableRoutes.has(action.routeId)
@@ -590,8 +592,8 @@ function scoreCandidates(context: Situation, options: readonly ActionOption[], l
     const woodlandDesired = woodlandToggle && action.type === 'set-improvement-operation' ? action.improvementId === 'charcoal-clearing' ? !!context.charcoal({ ...action, enabled: true }) : context.progression.shortages.materials >= 3 || context.state.woodlands?.stands[String(action.tileId)]?.stock === WOODLAND_RULES.capacity : true;
     const refusedWoodland = woodlandToggle && action.type === 'set-improvement-operation' && (!woodlandOperationAllowed(context.state, context.actor.id, action, woodlandDesired) || action.improvementId === 'lumber-mill' && action.enabled && !woodlandPlanner!.lumberOperation(action.cityId, action.tileId)) || !!woodlandPlanner && action.type === 'improve' && isWoodlandImprovement(action.improvementId) && !woodlandPlanner.quote(action.cityId, action.tileId).quotes.some(quote => quote.action.type === 'improve' && quote.action.improvementId === action.improvementId);
     const restWeight = woodlandToggle && action.type === 'set-improvement-operation' && !action.enabled && !refusedWoodland ? Math.max(4, assessed) : assessed;
-    const weight = refusedWoodland || refusedCharcoal || refusedIntake || usesStrategicTemperaments(context.memory.policyVersion) && protectedCandidate(option, context) ? 0 : restWeight;
-    return { option, weight, ...classify(option.action), lane: laneOf(option.action, lanes) };
+    const weight = coastalHold || refusedWoodland || refusedCharcoal || refusedIntake || usesStrategicTemperaments(context.memory.policyVersion) && protectedCandidate(option, context) ? 0 : restWeight;
+    return { option, weight, ...classify(option.action), lane: laneOf(option.action, lanes), coastalHold };
   });
 }
 
@@ -614,13 +616,13 @@ export function assessCivilizationBehavior(state: WorldState, seat: number, prev
   const candidates = assessSituation(context, options, requiredLanes(state, seat));
   return { phase: context.phase, foodRisk: context.foodRisk, severeFoodRisk: context.severeFoodRisk, upkeep: context.upkeep,
     commitmentUntilRound: (context.phase === memory.phase ? memory.phaseSinceRound : state.round) + profile.commitmentRounds,
-    candidates: candidates.map(candidate => ({ ...candidate, protected: protectedCandidate(candidate.option, context), urgent: urgent(candidate, context),
+    candidates: candidates.map(candidate => ({ ...candidate, protected: candidate.coastalHold !== null || protectedCandidate(candidate.option, context), urgent: urgent(candidate, context),
       ...(candidate.option.action.type === 'adopt-government' && context.patronage ? { economicPriority: context.patronage(candidate.option.action) } : {}),
       ordinaryWeight: usesStrategicTemperaments(memory.policyVersion) ? ordinaryPhaseWeight(candidate.option.action, candidate.weight, context.phase) : candidate.weight })) };
 }
 
 function ordinaryReason(context: Situation): string {
-  const cause = context.phase === 'expansion' ? 'funded founding fits town or coastal needs' : context.phase === 'trade' ? 'a useful funded exchange is available'
+  const cause = context.phase === 'expansion' ? 'funded founding fits town needs' : context.phase === 'trade' ? 'a useful funded exchange is available'
     : context.phase === 'development' ? 'useful funded domestic or research work is available' : context.phase === 'survival'
       ? context.foodRisk ? 'current Food risk overrides ordinary preferences' : `no current Food risk; retained Survival buffer ${context.actor.resources.food}/${Math.max(12, context.upkeep * 4)} Food`
       : context.phase === 'recovery' ? 'serious damage overrides ordinary preferences' : 'consolidate useful operations and existing places';
@@ -638,7 +640,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   const profile = civilizationBehaviorProfile(state.seed, seat, memory.policyVersion);
   const context = situation(state, actor, profile, memory, options);
   const lanes = requiredLanes(state, seat);
-  const candidates = assessSituation(context, options, lanes);
+  const candidates = assessSituation(context, options, lanes).filter(candidate => candidate.coastalHold === null);
   const required = candidates.filter(candidate => candidate.lane !== null && (candidate.option.action.type !== 'improve' || !['charcoal-clearing', 'river-intake'].includes(candidate.option.action.improvementId) && !(hasFeatures(state, [WOODLAND_RULES.featureId]) && isWoodlandImprovement(candidate.option.action.improvementId)) || candidate.weight > 0) && (!context.diplomacy || !diplomacyProtects(candidate.option, context.diplomacy)) && (!context.relief || !reliefProtects(candidate.option, context.relief)) && (!context.border || !borderProtects(candidate.option, context.border)));
   let emergencies = candidates.filter(candidate => candidate.weight > 0 && urgent(candidate, context));
   if (context.relief) {
@@ -693,7 +695,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   if (context.relief) reason = reliefReason(choice.option, context.relief) ?? reason;
   if (context.knowledge) reason = knowledgeReason(choice.option, context.knowledge) ?? reason;
   if (context.border) reason = borderReason(choice.option, context.border) ?? reason;
-  reason = fundedLandworkReason(choice.option.action, context) ?? frontierReason(choice.option.action, context) ?? reason;
+  reason = context.progression.coastalOpportunity.assessment(choice.option.action).reason ?? fundedLandworkReason(choice.option.action, context) ?? frontierReason(choice.option.action, context) ?? reason;
   if ((choice.option.action.type === 'improve' || choice.option.action.type === 'set-improvement-operation' && choice.option.action.enabled) && choice.option.action.improvementId === 'river-intake') {
     const assessment = context.riverIntake(choice.option.action);
     if (assessment) reason = riverIntakeReason(assessment);
@@ -720,7 +722,7 @@ export function chooseDirectorBehavior(state: WorldState, previous?: BehaviorMem
       weight = action.event === 'calm' ? 24 : action.event === 'drought' ? (actor?.resources.food ?? 0) > upkeep * 5 + 12 ? 2 : 0.1
         : action.event === 'earthquake' ? damage < 25 ? 2 : 0.1 : action.event === 'resource-boom' ? 5 : 1;
     }
-    return { option, weight, ...classify(action), lane: null };
+    return { option, weight, ...classify(action), lane: null, coastalHold: null };
   });
   const choice = weightedChoice(candidates, behaviorSeed(`${behaviorDrawVersion(memory.policyVersion)}:${state.seed}:${DIRECTOR_SEAT}:${memory.decisionCount}`), true);
   const action = choice.option.action;

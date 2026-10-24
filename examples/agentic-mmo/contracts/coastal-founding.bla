@@ -11,6 +11,12 @@ state coast_target_outside_frontier: bool
 state coast_receipt_exact: bool
 state coast_quote_informative: bool
 state coast_replay_preserved: bool
+state coast_local_prospect_exact: bool
+state coast_founding_support_preserved: bool
+state coast_non_navigation_goals_preserved: bool
+state coast_all_pools_hold_unsafe: bool
+state coast_active_work_preserved: bool
+state coast_current_snapshot_only: bool
 
 action coastal_fixture(kind: int)
 action found_coastal_settlement()
@@ -27,6 +33,12 @@ when found_coastal_settlement {
 }
 when inspect_coastal_choices {
     expect "choices-show-exact-source-path-and-conserved-cost": after.coast_quote_informative
+    expect "local-prospect-uses-exact-current-geography": after.coast_local_prospect_exact
+    expect "founding-support-protects-people-and-promises": after.coast_founding_support_preserved
+    expect "local-navigation-keeps-other-research-goals": after.coast_non_navigation_goals_preserved
+    expect "unsafe-coastal-investment-stays-out-of-all-pools": after.coast_all_pools_hold_unsafe
+    expect "coastal-opportunity-never-replaces-paid-work": after.coast_active_work_preserved
+    expect "coastal-opportunity-is-a-revalidated-snapshot": after.coast_current_snapshot_only
 }
 when replay_coastal_history {
     expect "old-and-new-histories-remain-readable": after.coast_replay_preserved

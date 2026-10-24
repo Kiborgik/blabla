@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-build.68",
+    "date": "2026-10-24",
+    "title": "Coastal opportunities, local costs",
+    "changes": [
+      "Civilizations assess actual shore towns, ocean paths and available settlement sites before investing in a Boat yard or favoring Navigation. Existing research and paid construction continue independently.",
+      "Coastal departures protect current supplies, home workers and household needs. Global first-coast bonuses no longer override ordinary town limits; a useful local prospect does not guarantee a later settlement or era change."
+    ]
+  },
+  {
     "version": "0.1.0-build.67",
     "date": "2026-10-24",
     "title": "Compare the real cost of a reform",
@@ -15,15 +24,6 @@
     "changes": [
       "Site symbols and short labels make room for the actual buildings and worked land. Visible inspection targets keep their exact town and site identity; crowded views retain the existing Work inspector.",
       "Recorded Survival reasons now distinguish current Food risk from rebuilding the existing safety buffer. Paid production, construction, geography and autonomous choice weights are unchanged."
-    ]
-  },
-  {
-    "version": "0.1.0-build.65",
-    "date": "2026-10-24",
-    "title": "Important moments stay in view",
-    "changes": [
-      "Routine river-flow and woodland-season accounting no longer crowd out founding, reform and discovery in the Chronicle. Their full recorded facts remain available in Events; blocked work stays prominent.",
-      "State workforce now explains its released Learning patronage alternative to Urban planning. This is a presentation update; paid simulation rules are unchanged."
     ]
   }
 ]

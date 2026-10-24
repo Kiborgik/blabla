@@ -7,7 +7,6 @@ import { chooseCivilizationBehavior, createBehaviorMemory } from '../core/behavi
 import { CIVICS, ECONOMY_RULES, IMPROVEMENTS, RESOURCE_IDS, SPACEFLIGHT_RULES, TECHNOLOGIES, TRADE_RECIPES, TURN_RULES, VICTORY_RULES } from '../core/content.ts';
 import { applyCommand, catchUpStrategy, createWorld, legalActions } from '../core/engine.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
-import { sameAction } from '../core/simulation/choices.ts';
 import { allocateOperations } from '../core/simulation/operations.ts';
 import { improvementSiteBlock } from '../core/simulation/improvements.ts';
 import { createLandTransportPlanner, createSteamTransportPlanner, transportCadence } from '../core/simulation/transport.ts';
@@ -31,7 +30,7 @@ function syntheticWorld(): WorldState {
   return state;
 }
 
-void test('synthetic personality-cap scenario still chooses and pays for a conserved coastal departure', () => {
+void test('synthetic personality-cap scenario preserves ordinary limits while legal coastal departure remains conserved', () => {
   const state = syntheticWorld();
   const actor = state.civilizations[0]; const source = state.cities[0]; assert.ok(actor && source);
   const profile = civilizationBehaviorProfile(state.seed, actor.id);
@@ -44,16 +43,14 @@ void test('synthetic personality-cap scenario still chooses and pays for a conse
   assert.ok(options.some(option => option.action.type === 'settle-coast'));
   const plan = deriveProgressionPlan(state, actor, profile, options);
   assert.ok(plan.coastalNeeded); assert.equal(plan.cityById.size, profile.settlementGoal);
-  let selected: ReturnType<typeof chooseCivilizationBehavior> | undefined;
   for (let cursor = 0; cursor < 32; cursor++) {
     const memory = createBehaviorMemory(state, 0); memory.decisionCount = cursor;
     const decision = chooseCivilizationBehavior(state, 0, memory, epoch);
-    if (decision.action?.type === 'settle-coast') { selected = decision; break; }
+    assert.notEqual(decision.action?.type, 'settle-coast', 'Coastal policy cannot override the ordinary personality town cap');
   }
-  assert.ok(selected?.action?.type === 'settle-coast', 'A personality cap cannot permanently zero the paid coastal goal');
-  assert.ok(options.some(option => sameAction(option.action, selected.action)));
+  const legalDeparture = options.find(option => option.action.type === 'settle-coast'); assert.ok(legalDeparture);
   const before = structuredClone(state);
-  const result = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: epoch, action: selected.action });
+  const result = applyCommand(state, { seat: 0, expectedRevision: state.revision, timestamp: epoch, action: legalDeparture.action });
   assert.ok(result.ok, result.error);
   assert.deepEqual(state, before);
   assert.equal(result.state.cities.reduce((sum, city) => sum + city.population, 0), before.cities.reduce((sum, city) => sum + city.population, 0));

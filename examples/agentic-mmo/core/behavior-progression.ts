@@ -1,3 +1,4 @@
+import { createCoastalOpportunity } from './behavior-coastal-opportunity.ts';
 import { woodlandOperationDesired } from './behavior-woodlands.ts';
 import { isWoodlandImprovement } from './simulation/woodlands.ts';
 import { WOODLAND_RULES } from './woodland-content.ts';
@@ -17,6 +18,7 @@ import { createLandTransportPlanner, createSteamTransportPlanner, transportCaden
 import type { ActionOption, BuildingDefinition, City, Civilization, GameAction, Resource, Resources, SteamTransportQuote, StrategicDeposit, TradeTerms, WorldState } from './types.ts';
 
 export interface ProgressionPlan {
+  coastalOpportunity: ReturnType<typeof createCoastalOpportunity>;
   coastalNeeded: boolean;
   coastalCities: ReadonlySet<string>;
   coastalSites: ReadonlySet<number>;
@@ -205,13 +207,16 @@ export function deriveProgressionPlan(state: WorldState, actor: Civilization, pr
   const coastalCities = new Set(cities.filter(city => coastalSites.has(city.tileId)).map(city => city.id));
   const targets = coastalNeeded ? ['navigation'] : !state.calendarMilestones.includes('industrial-world') ? ['industrialization', 'steam-power'] : ['computing', 'spaceflight'];
   const researchGoals = technologyAncestors([...targets, 'agriculture', 'writing', 'currency', 'education', 'banking', 'masonry', 'fuel-management'], actor);
+  const coastalOpportunity = createCoastalOpportunity(state, actor.id, options);
+  if (!actor.technologies.includes('navigation') && coastalOpportunity.navigationGoal) researchGoals.add('navigation');
+  else researchGoals.delete('navigation');
   const witnessed = new Set(state.industrialEvidence?.foundryOperations.map(receipt => receipt.cityId) ?? []);
   const missingFoundries = (state.industrialEvidence?.foundryOperations.length ?? 0) < 2;
   const space = state.spaceflight?.civilizations[actor.id];
   const supplyHorizon = SPACEFLIGHT_RULES.flightRounds + VICTORY_RULES.mars.suppliedRounds + 2;
   const spaceSupplyNeeded = !space?.activeMission && (!space?.colony || RESOURCE_IDS.some(resource => space.colony && space.colony.stock[resource] < ((VICTORY_RULES.mars.upkeep[resource] ?? 0) + (actor.marsProgress < SPACEFLIGHT_RULES.habitat.requiredWork ? (SPACEFLIGHT_RULES.habitat.costPerBeat as Partial<Resources>)[resource] ?? 0 : 0)) * supplyHorizon));
   const plan: ProgressionPlan = {
-    coastalNeeded, coastalSites, coastalCities, researchGoals, spaceSupplyNeeded,
+    coastalOpportunity, coastalNeeded, coastalSites, coastalCities, researchGoals, spaceSupplyNeeded,
     researchNeeded: TECHNOLOGIES.some(technology => hasFeatures(state, technology.requiredFeatures) && !actor.technologies.includes(technology.id)),
     foundryCitiesNeeded: new Set(missingFoundries ? cities.filter(city => !witnessed.has(city.id)).map(city => city.id) : []),
     deposits: new Map((observedStrategicResources(state, actor.id).revealedDeposits ?? []).map(deposit => [deposit.tileId, deposit])),
@@ -238,7 +243,7 @@ export function progressionWeight(option: ActionOption, base: number, state: Wor
     case 'build': {
       const building = buildingById.get(action.project); if (!building || !city) return base;
       if (building.id === 'launchpad') return plan.spaceSupplyNeeded && ![...plan.cityById.values()].some(town => town.buildings.includes('launchpad') || town.construction?.active && !('kind' in town.construction.active) && town.construction.active.buildingId === 'launchpad') ? Math.max(base, 250) * (city.buildings.includes('coal-plant') ? 2 : 1) * (city.population >= 13 ? 4 : 0.2) : base * 0.05;
-      if (building.id === 'boat-yard') return plan.coastalNeeded && plan.coastalCities.has(city.id) ? Math.max(base, 160 * profile.priorities.expansion) : base * 0.05;
+      if (building.id === 'boat-yard') return base;
       if (building.id === 'foundry') return plan.foundryCitiesNeeded.has(city.id) && (actor.strategicResources?.iron ?? 0) > 0 ? Math.max(base, 160 * profile.priorities.construction) : base * 0.2;
       if (building.housing) return base * (city.population >= cityGrowthFacts(state, city).capacity - 2 ? 6 : 1);
       if (building.localPowerOutput) return base * ((plan.researchNeeded && city.buildings.includes('research-lab') || plan.spaceSupplyNeeded && city.buildings.includes('launchpad')) && (actor.strategicResources?.coal ?? 0) >= 4 ? 10 : 0.1);
@@ -268,12 +273,7 @@ export function progressionWeight(option: ActionOption, base: number, state: Wor
       return base * (actor.resources.credits > 80 ? 0.5 : 0.05);
     }
     case 'build-rail': return plan.usefulRailEdges.has(railEdgeId(action.fromTileId, action.toTileId)) ? Math.max(base, 120) : base * 0.02;
-    case 'settle': case 'settle-coast': {
-      if (!base) return 0;
-      if (plan.coastalNeeded && action.type === 'settle-coast') return base * 20;
-      if (plan.coastalNeeded && plan.coastalCities.size === 0) return base * (plan.coastalSites.has(action.tileId) ? 20 : plan.cityById.size >= profile.settlementGoal - 1 ? 0.02 : 0.5);
-      return base;
-    }
+    case 'settle': case 'settle-coast': return base;
     case 'set-building-operation': {
       const desired = plan.desiredBuildings.has(operationKey(action.cityId, action.buildingId));
       return desired === action.enabled ? 90 : 0;
