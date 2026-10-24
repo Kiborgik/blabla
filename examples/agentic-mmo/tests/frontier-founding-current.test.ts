@@ -33,7 +33,9 @@ void test('current local genesis retains frontier content and exact same-version
   assert.ok(initial.state.unlockedFeatures.includes('productive-frontier-founding'));
   assert.ok(initial.state.unlockedFeatures.includes('charcoal-clearing'));
   assert.equal(initial.policyVersion, ACTIVE_LOCAL_POLICY_VERSION);
-  assert.equal(initial.policyVersion, 'weighted-civilizations-v5-funded-landwork');
+  assert.equal(initial.policyVersion, 'weighted-civilizations-v6-staged-coastal');
+  assert.equal(initial.state.releaseId, 'settlement-staged-coastal-1');
+  assert.ok(initial.state.unlockedFeatures.includes('staged-coastal-preparation'));
   assert.ok(LOCAL_SIMULATION_STORAGE_KEY.startsWith('civitas:procedural-observatory:'));
   const before = JSON.stringify(initial);
   const prefix = advanceLocalSimulation(initial, 2);

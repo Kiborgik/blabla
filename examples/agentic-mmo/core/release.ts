@@ -116,7 +116,11 @@ const regionalIronRelease: RegisteredRulesDefinition = {
   id: 'settlement-regional-iron-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
   featureIds: [...civicWorksRelease.featureIds, 'regional-iron'],
 };
-export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease, hillsideRelease, studiesRelease, borderRelease, fundedLandworkRelease, charcoalRelease, productiveFrontierRelease, riverIntakeRelease, woodlandRelease, learningPatronageRelease, civicWorksRelease, regionalIronRelease];
+const stagedCoastalRelease: RegisteredRulesDefinition = {
+  id: 'settlement-staged-coastal-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  featureIds: [...regionalIronRelease.featureIds, 'staged-coastal-preparation'],
+};
+export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease, hillsideRelease, studiesRelease, borderRelease, fundedLandworkRelease, charcoalRelease, productiveFrontierRelease, riverIntakeRelease, woodlandRelease, learningPatronageRelease, civicWorksRelease, regionalIronRelease, stagedCoastalRelease];
 
 function currentRelease(): RegisteredRulesDefinition {
   const release = RELEASES.find((candidate) => candidate.id === 'settlement-foundations-1');

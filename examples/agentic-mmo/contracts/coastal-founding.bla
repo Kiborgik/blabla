@@ -17,6 +17,10 @@ state coast_non_navigation_goals_preserved: bool
 state coast_all_pools_hold_unsafe: bool
 state coast_active_work_preserved: bool
 state coast_current_snapshot_only: bool
+state coast_preparation_current_towns_only: bool
+state coast_departure_revalidated: bool
+state coast_missing_yard_goal_legal: bool
+state coast_paid_port_dedup_funded: bool
 
 action coastal_fixture(kind: int)
 action found_coastal_settlement()
@@ -39,6 +43,10 @@ when inspect_coastal_choices {
     expect "unsafe-coastal-investment-stays-out-of-all-pools": after.coast_all_pools_hold_unsafe
     expect "coastal-opportunity-never-replaces-paid-work": after.coast_active_work_preserved
     expect "coastal-opportunity-is-a-revalidated-snapshot": after.coast_current_snapshot_only
+    expect "yard-preparation-protects-only-current-towns": after.coast_preparation_current_towns_only
+    expect "departure-independently-funds-conserved-households": after.coast_departure_revalidated
+    expect "missing-yard-goal-needs-current-legal-preparation": after.coast_missing_yard_goal_legal
+    expect "paid-port-dedup-needs-departure-funding": after.coast_paid_port_dedup_funded
 }
 when replay_coastal_history {
     expect "old-and-new-histories-remain-readable": after.coast_replay_preserved

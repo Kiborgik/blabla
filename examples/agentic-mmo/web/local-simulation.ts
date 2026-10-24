@@ -1,6 +1,6 @@
 import { applyCommand, applyHistoryAdvance, catchUpClock, catchUpStrategy } from '../core/engine.ts';
 import { behaviorPolicyVersion, chooseCivilizationBehavior, chooseDirectorBehavior, isBehaviorMemory, type BehaviorMemory } from '../core/behaviors.ts';
-import { FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION } from '../core/behavior-profiles.ts';
+import { STAGED_COASTAL_BEHAVIOR_POLICY_VERSION } from '../core/behavior-profiles.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { RELEASES } from '../core/release.ts';
 import { nextEarnedHistoryAdvance } from '../core/simulation/history.ts';
@@ -9,9 +9,9 @@ import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:regional-iron-v1';
-export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-regional-iron-1';
-export const ACTIVE_LOCAL_POLICY_VERSION = FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION;
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:staged-coastal-v1';
+export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-staged-coastal-1';
+export const ACTIVE_LOCAL_POLICY_VERSION = STAGED_COASTAL_BEHAVIOR_POLICY_VERSION;
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
 const EPOCH = '2000-01-01T00:00:00.000Z';
 const MAXIMUM_STEPS = 60;

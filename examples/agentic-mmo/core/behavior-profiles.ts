@@ -6,21 +6,23 @@ export const LEGACY_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v1';
 export const BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v2';
 export const FOOD_BUDGET_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v3-food-budget';
 export const FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v5-funded-landwork';
+export const STAGED_COASTAL_BEHAVIOR_POLICY_VERSION = 'weighted-civilizations-v6-staged-coastal';
 export { behaviorSeed, TEMPERAMENT_BEHAVIOR_POLICY_VERSION };
-export type BehaviorPolicyVersion = typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION | typeof TEMPERAMENT_BEHAVIOR_POLICY_VERSION | typeof FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION;
+export type BehaviorPolicyVersion = typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION | typeof TEMPERAMENT_BEHAVIOR_POLICY_VERSION | typeof FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION | typeof STAGED_COASTAL_BEHAVIOR_POLICY_VERSION;
 
 export function usesStrategicTemperaments(policyVersion: BehaviorPolicyVersion): boolean {
-  return policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION;
+  return policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION || policyVersion === STAGED_COASTAL_BEHAVIOR_POLICY_VERSION;
 }
 
 export function behaviorPolicyVersion(state: Pick<WorldState, 'unlockedFeatures' | 'origin'>): BehaviorPolicyVersion {
   if (!state.unlockedFeatures.includes(FOOD_BUDGET_RULES.featureId)) return BEHAVIOR_POLICY_VERSION;
+  if (state.origin?.temperamentVersion === STRATEGIC_TEMPERAMENT_VERSION && state.unlockedFeatures.includes('staged-coastal-preparation')) return STAGED_COASTAL_BEHAVIOR_POLICY_VERSION;
   if (state.origin?.temperamentVersion === STRATEGIC_TEMPERAMENT_VERSION && state.unlockedFeatures.includes('funded-landwork-planning')) return FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION;
   return state.origin?.temperamentVersion === STRATEGIC_TEMPERAMENT_VERSION ? TEMPERAMENT_BEHAVIOR_POLICY_VERSION : FOOD_BUDGET_BEHAVIOR_POLICY_VERSION;
 }
 
 export function behaviorDrawVersion(policyVersion: BehaviorPolicyVersion): typeof BEHAVIOR_POLICY_VERSION | typeof FOOD_BUDGET_BEHAVIOR_POLICY_VERSION {
-  return policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION ? FOOD_BUDGET_BEHAVIOR_POLICY_VERSION : policyVersion;
+  return policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION || policyVersion === STAGED_COASTAL_BEHAVIOR_POLICY_VERSION ? FOOD_BUDGET_BEHAVIOR_POLICY_VERSION : policyVersion;
 }
 
 export type BehaviorPhase = 'survival' | 'recovery' | 'development' | 'expansion' | 'trade' | 'consolidation' | 'director';

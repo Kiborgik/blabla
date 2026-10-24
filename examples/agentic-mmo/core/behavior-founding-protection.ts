@@ -34,14 +34,21 @@ export interface FoundingFunding {
 }
 export interface FoundingFundingAssessment { readonly facts: FoundingFunding | null; readonly reason: string | null }
 export interface FoundingProtectionRequest {
+  readonly kind?: 'founding';
   readonly source: City | null;
   readonly destination: City;
   readonly horizon: number;
   readonly foundingCost: Readonly<Partial<Resources>>;
   readonly setupCost: Readonly<Partial<Resources>>;
-  readonly preserveWaitingHouseholds?: boolean;
   readonly allocationMode?: 'reserved-tail' | 'actual-payment';
   readonly requireEnabledOperations?: boolean;
+}
+export interface CurrentTownsProtectionRequest {
+  readonly kind: 'current-towns';
+  readonly horizon: number;
+  readonly setupCost: Readonly<Partial<Resources>>;
+  readonly allocationMode: 'actual-payment';
+  readonly requireEnabledOperations: true;
 }
 interface Footprint { key: string; id: string; ordinary: Partial<Resources>; strategic: StrategicResources; residents: number; openingPopulation: number; available: number }
 interface Pending { cityId: string; order: ConstructionOrder; definition: BuildingDefinition | ImprovementDefinition }
@@ -184,9 +191,12 @@ export function createFoundingProtection(state: WorldState, civId: number) {
     if (!Number.isSafeInteger(shared.horizon) || shared.horizon < 1 || !Number.isSafeInteger(state.round + shared.horizon)) reject('unsafe-accounting: protected horizon exceeds safe rounds');
     return shared;
   };
-  const fund = (request: FoundingProtectionRequest): FoundingFundingAssessment => {
-    const { source, destination, horizon } = request;
-    const key = JSON.stringify([source?.id ?? null, destination.id, horizon, request.foundingCost, request.setupCost, request.preserveWaitingHouseholds ?? false, request.allocationMode ?? 'reserved-tail', request.requireEnabledOperations ?? false]);
+  const fund = (request: FoundingProtectionRequest | CurrentTownsProtectionRequest): FoundingFundingAssessment => {
+    const { horizon, setupCost } = request;
+    const source = request.kind === 'current-towns' ? null : request.source;
+    const destination = request.kind === 'current-towns' ? null : request.destination;
+    const foundingCost: Readonly<Partial<Resources>> = request.kind === 'current-towns' ? {} : request.foundingCost;
+    const key = JSON.stringify([request.kind ?? 'founding', source?.id ?? null, destination?.id ?? null, horizon, foundingCost, setupCost, request.allocationMode ?? 'reserved-tail', request.requireEnabledOperations ?? false]);
     const cached = funding.get(key); if (cached) return cached;
     const reject = (reason: string) => { const result = { facts: null, reason }; funding.set(key, result); return result; };
     const shared = prepare(); if (shared.failure) return reject(shared.failure);
@@ -197,27 +207,22 @@ export function createFoundingProtection(state: WorldState, civId: number) {
     const ordinary = { ...promised.ordinary }; const strategic = { ...promised.strategic };
     const oneOperation = empty(); const oneStrategic: StrategicResources = {};
     if (!safe(ordinary, strategic)) return reject('unsafe-accounting: current promises cannot be bounded');
-    add(ordinary, request.foundingCost); add(ordinary, request.setupCost);
+    add(ordinary, foundingCost); add(ordinary, setupCost);
     for (const footprint of shared.footprints.values()) { add(oneOperation, footprint.ordinary); addStrategic(oneStrategic, footprint.strategic); }
     add(ordinary, oneOperation, horizon); addStrategic(strategic, oneStrategic, horizon);
     const households: FoundingHouseholds[] = [];
-    const towns = source ? [...ownCities.map(city => city.id === source.id ? { ...city, population: city.population - ECONOMY_RULES.settle.population } : city), destination] : ownCities;
+    const towns = source ? [...ownCities.map(city => city.id === source.id ? { ...city, population: city.population - ECONOMY_RULES.settle.population } : city), destination!] : ownCities;
     for (const city of towns) {
       const pendingHousing = shared.pending.filter(pending => pending.cityId === city.id).reduce((sum, pending) => sum + ('housing' in pending.definition ? pending.definition.housing ?? 0 : 0), 0);
-      let envelope = householdEnvelope(state, city, horizon, pendingHousing, !!source && city.id === destination.id);
+      const envelope = householdEnvelope(state, city, horizon, pendingHousing, !!source && city.id === destination!.id);
       if (!envelope) return reject('unsafe-accounting: household growth exceeds bounded population or Food arithmetic');
-      if (request.preserveWaitingHouseholds && source && city.id === source.id) {
-        const waiting = householdEnvelope(state, source, horizon, pendingHousing, false);
-        if (!waiting) return reject('unsafe-accounting: waiting household growth cannot be bounded');
-        if (waiting.householdFood + waiting.growthFood > envelope.householdFood + envelope.growthFood) envelope = waiting;
-      }
       households.push(envelope); ordinary.food = quantize(ordinary.food + envelope.householdFood + envelope.growthFood);
     }
     if (!safe(ordinary, strategic) || RESOURCE_IDS.some(id => actor!.resources[id] < ordinary[id]) || STRATEGIC_RESOURCE_IDS.some(id => (actor!.strategicResources?.[id] ?? 0) < (strategic[id] ?? 0))) return reject('opening-budget: current stocks must fund setup, growing households, operations and existing promises without future income');
     const projected = projectOperationAllocation(state, opening => {
       const payer = opening.civilizations.find(actor => actor.id === civId)!;
       for (const id of RESOURCE_IDS) payer.resources[id] = request.allocationMode === 'actual-payment'
-        ? quantize(payer.resources[id] - (request.foundingCost[id] ?? 0) - (request.setupCost[id] ?? 0))
+        ? quantize(payer.resources[id] - (foundingCost[id] ?? 0) - (setupCost[id] ?? 0))
         : quantize(payer.resources[id] - ordinary[id] + oneOperation[id]);
       payer.strategicResources ??= {};
       if (request.allocationMode !== 'actual-payment') for (const id of STRATEGIC_RESOURCE_IDS) payer.strategicResources[id] = (payer.strategicResources[id] ?? 0) - (strategic[id] ?? 0) + (oneStrategic[id] ?? 0);

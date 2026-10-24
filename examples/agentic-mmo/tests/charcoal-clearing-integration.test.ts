@@ -25,7 +25,7 @@ void test('fresh current genesis retains charcoal and funded policy without inst
   const run = createLocalSimulation(73);
   assert.ok(ACTIVE_LOCAL_RELEASE_ID.startsWith('settlement-'));
   assert.ok(LOCAL_SIMULATION_STORAGE_KEY.startsWith('civitas:procedural-observatory:'));
-  assert.equal(ACTIVE_LOCAL_POLICY_VERSION, 'weighted-civilizations-v5-funded-landwork');
+  assert.equal(run.policyVersion, ACTIVE_LOCAL_POLICY_VERSION);
   assert.equal(run.state.origin?.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.ok(isWorldState(run.state));
   for (const feature of ['food-budget', 'shore-fisheries', 'knowledge-compacts', 'hillside-commonworks', 'supplied-borders', 'funded-landwork-planning', 'charcoal-clearing']) assert.ok(run.state.unlockedFeatures.includes(feature), feature);

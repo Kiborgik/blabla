@@ -7,8 +7,10 @@ import { GeneratedControllerProbes, inspectGeneratedSample, inspectControllerChe
 import { createCampaignAdapter } from '../cli/adapter.ts';
 import { GameStore, isRecord } from '../cli/store.ts';
 import { chooseCivilizationBehavior, chooseDirectorBehavior, createBehaviorMemory } from '../core/behaviors.ts';
-import { applyCommand, legalActions } from '../core/engine.ts';
-import { createLocalSimulation, advanceLocalSimulation, parseLocalSimulation, type LocalSimulation } from '../web/local-simulation.ts';
+import { applyCommand, createWorld, legalActions } from '../core/engine.ts';
+import { behaviorDrawVersion, civilizationBehaviorProfile, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, STAGED_COASTAL_BEHAVIOR_POLICY_VERSION } from '../core/behavior-profiles.ts';
+import { isWorldState } from '../core/validation.ts';
+import { ACTIVE_LOCAL_POLICY_VERSION, ACTIVE_LOCAL_RELEASE_ID, createLocalSimulation, advanceLocalSimulation, parseLocalSimulation, type LocalSimulation } from '../web/local-simulation.ts';
 
 function geographyHolds(s: GeneratedControllerSample): boolean {
   return s.width === 18 && s.height === 24 && s.tile_count === 432
@@ -20,15 +22,15 @@ function geographyHolds(s: GeneratedControllerSample): boolean {
 }
 
 function genesisHolds(s: GeneratedControllerSample): boolean {
-  return s.genesis_errors === 0 && s.policy_version === 'weighted-civilizations-v5-funded-landwork'
-    && s.release_id === 'settlement-regional-iron-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
+  return s.genesis_errors === 0 && s.policy_version === 'weighted-civilizations-v6-staged-coastal'
+    && s.release_id === 'settlement-staged-coastal-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
 }
 
 function decisionHolds(d: GeneratedControllerDecision): boolean {
   return d.seat >= 0 && d.seat <= 5 && d.accepted && d.legal_member && d.revision_after === d.revision_before + 1
     && d.action_digest === d.repeated_action_digest && d.decision_digest === d.repeated_decision_digest
     && d.input_world_before === d.input_world_after && d.input_memory_before === d.input_memory_after
-    && d.memory_valid && d.cursor_after === d.cursor_before + 1 && d.policy_version === 'weighted-civilizations-v5-funded-landwork'
+    && d.memory_valid && d.cursor_after === d.cursor_before + 1 && d.policy_version === 'weighted-civilizations-v6-staged-coastal'
     && d.profile_id === d.explanation_profile_id && d.source === 'local-procedural' && d.genesis_before === d.genesis_after;
 }
 
@@ -354,4 +356,21 @@ await test('real adapter dispatch/reset exercises all probes without mutating le
     assert.deepEqual(observe(), initial);
     assert.deepEqual(store.snapshot(), snapshot);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+await test('current staged genesis preserves requested rules and seeded funded policy domains', () => {
+  const direct = createWorld(73, '2000-01-01T00:00:00.000Z', ACTIVE_LOCAL_RELEASE_ID);
+  const local = createLocalSimulation(73);
+  assert.ok(isWorldState(direct));
+  assert.equal(direct.releaseId, ACTIVE_LOCAL_RELEASE_ID);
+  assert.equal(direct.origin?.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID);
+  assert.equal(ACTIVE_LOCAL_POLICY_VERSION, STAGED_COASTAL_BEHAVIOR_POLICY_VERSION);
+  assert.equal(local.policyVersion, ACTIVE_LOCAL_POLICY_VERSION);
+  assert.ok(local.state.unlockedFeatures.includes('staged-coastal-preparation'));
+  assert.ok(local.state.unlockedFeatures.includes('regional-iron'));
+  assert.deepEqual(local.state.strategicDeposits, direct.strategicDeposits);
+  assert.equal(behaviorDrawVersion(STAGED_COASTAL_BEHAVIOR_POLICY_VERSION), behaviorDrawVersion(FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION));
+  for (let seat = 0; seat < 5; seat += 1) assert.deepEqual(civilizationBehaviorProfile(73, seat, STAGED_COASTAL_BEHAVIOR_POLICY_VERSION), civilizationBehaviorProfile(73, seat, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION));
+  const restored = parseLocalSimulation(JSON.parse(JSON.stringify(local)));
+  assert.deepEqual(restored, local);
 });

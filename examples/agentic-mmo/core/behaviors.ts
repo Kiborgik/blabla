@@ -13,7 +13,7 @@ import { revealedHorseSite } from './simulation/pastoral.ts';
 import { deriveKnowledgePlan, knowledgeProtects, knowledgeReason, knowledgeWeight, type KnowledgePlan } from './behavior-knowledge.ts';
 import { FOOD_BUDGET_RULES } from './food-security-content.ts';
 import { civilizationFoodUpkeep, forecastCivilizationFoodProduction } from './simulation/food-security.ts';
-import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, usesStrategicTemperaments, behaviorDrawVersion, behaviorPolicyVersion, type BehaviorPolicyVersion, LEGACY_BEHAVIOR_POLICY_VERSION, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
+import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, STAGED_COASTAL_BEHAVIOR_POLICY_VERSION, usesStrategicTemperaments, behaviorDrawVersion, behaviorPolicyVersion, type BehaviorPolicyVersion, LEGACY_BEHAVIOR_POLICY_VERSION, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
 import { isStrategicDevelopment, isStrategicExchange, ordinaryPhaseWeight } from './strategic-temperaments.ts';
 import { deriveReliefPlan, reliefPriority, reliefProtects, reliefReason, reliefWeight, type ReliefPlan } from './behavior-relief.ts';
 import { deriveDiplomacyPlan, diplomacyPriority, diplomacyProtects, diplomacyReason, diplomacyWeight, type DiplomacyPlan } from './behavior-diplomacy.ts';
@@ -30,7 +30,7 @@ import { siteProduction } from './simulation/sites.ts';
 import { cityProductivity } from './simulation/world.ts';
 import { DIRECTOR_SEAT, type ActionOption, type City, type Civilization, type Focus, type GameAction, type Resources, type TradeTerms, type WorldState } from './types.ts';
 
-export { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion };
+export { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, STAGED_COASTAL_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion };
 export type { BehaviorPhase, BehaviorProfile };
 
 export interface BehaviorMemory {
@@ -102,7 +102,7 @@ function validMemoryFields(value: unknown, legacy = false): boolean {
 }
 
 export function isBehaviorMemory(value: unknown): value is BehaviorMemory {
-  return record(value) && value.version === 2 && (value.policyVersion === BEHAVIOR_POLICY_VERSION || value.policyVersion === FOOD_BUDGET_BEHAVIOR_POLICY_VERSION || value.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || value.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION) && validMemoryFields(value);
+  return record(value) && value.version === 2 && (value.policyVersion === BEHAVIOR_POLICY_VERSION || value.policyVersion === FOOD_BUDGET_BEHAVIOR_POLICY_VERSION || value.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || value.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION || value.policyVersion === STAGED_COASTAL_BEHAVIOR_POLICY_VERSION) && validMemoryFields(value);
 }
 
 export function isLegacyBehaviorMemory(value: unknown): value is LegacyBehaviorMemory {
@@ -183,7 +183,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
   const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, civicWorks: createCivicWorksPolicy(state, actor.id, weights), phase: memory.phase, patronage: hasFeatures(state, ['learning-patronage']) ? createPatronagePolicy(state, actor.id, weights, profile.priorities) : null, fundedLandwork: null, frontier: hasFeatures(state, ['productive-frontier-founding']) ? createProductiveFrontierAssessment(state, actor.id) : null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), riverIntake: createRiverIntakePolicy(state, actor.id, weights, profile.priorities.construction), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
-  if (memory.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION) context.fundedLandwork = deriveFundedLandworkPlan(context, options);
+  if (memory.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION || memory.policyVersion === STAGED_COASTAL_BEHAVIOR_POLICY_VERSION) context.fundedLandwork = deriveFundedLandworkPlan(context, options);
   return context;
 }
 

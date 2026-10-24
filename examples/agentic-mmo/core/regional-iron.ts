@@ -165,7 +165,7 @@ const canonicalPlans = new Map<string, RegionalIronPlan | null>();
 
 export function regionalIronPlanForWorld(state: Pick<WorldState, 'seed' | 'width' | 'height' | 'origin' | 'drainage'>): RegionalIronPlan | null {
   const origin = state.origin, basis = state.drainage?.terrainBasis;
-  if (!origin || origin.initialReleaseId !== 'settlement-regional-iron-1' || origin.generatorVersion !== 'drainage-geography-v2' || origin.seed !== state.seed || !Array.isArray(basis)
+  if (!origin || !['settlement-regional-iron-1', 'settlement-staged-coastal-1'].includes(origin.initialReleaseId ?? '') || origin.generatorVersion !== 'drainage-geography-v2' || origin.seed !== state.seed || !Array.isArray(basis)
     || !Number.isSafeInteger(origin.geographyAttempt) || origin.geographyAttempt! < 0 || origin.geographyAttempt! >= 96) return null;
   const key = JSON.stringify([state.seed, state.width, state.height, origin.geographyAttempt, basis]);
   if (canonicalPlans.has(key)) return structuredClone(canonicalPlans.get(key)!);

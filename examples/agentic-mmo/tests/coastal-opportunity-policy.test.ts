@@ -185,9 +185,9 @@ void test('supported sea founding retains ordinary raw site utility and no extra
 });
 
 void test('typed Yard hold survives required and urgent pools while unrelated required lanes remain useful', () => {
-  const { state, source, yard } = fixture(); onlyYardAtSource(state, source); source.population = 6;
+  const { state, source, yard } = fixture(); onlyYardAtSource(state, source); source.population = 6; state.civilizations[0]!.resources.materials = 21.99;
   assert.equal(projectOperationAllocation(state).cities.find(city => city.id === source.id)!.buildingOperations!.irrigation!.lastResult!.status, 'operated');
-  const candidate = assessed(state, yard); assert.equal(candidate.weight, 0); assert.ok(candidate.coastalHold); assert.equal(candidate.lane, `construction:${source.id}`);
+  const candidate = assessed(state, yard); assert.equal(candidate.weight, 0); assert.ok(candidate.coastalHold); assert.match(candidate.coastalHold.reason, /preparation-waiting: opening-budget/); assert.equal(candidate.lane, `construction:${source.id}`);
   for (const urgentStreak of [0, 2]) {
     const decisions = draw(state, { urgentStreak, lastRequiredLane: 'construction:city-0' });
     assert.ok(decisions.every(decision => !sameAction(yard, decision.action)));
@@ -201,15 +201,20 @@ void test('typed Yard hold survives required and urgent pools while unrelated re
   const decisions = draw(damaged, { urgentStreak: 0, lastRequiredLane: 'construction:city-0' });
   assert.ok(decisions.every(decision => !sameAction(yard, decision.action)));
   assert.ok(decisions.some(decision => decision.action?.type === 'repair-city'));
-  const funded = structuredClone(state); funded.cities.find(city => city.id === source.id)!.population = 9;
+  const funded = structuredClone(state); funded.civilizations[0]!.resources.materials = 22;
+  assert.equal(funded.cities.find(city => city.id === source.id)!.population, 6);
   const positive = draw(funded, { urgentStreak: 2, lastRequiredLane: 'construction:city-0' });
   assert.ok(positive.every(decision => sameAction(yard, decision.action)));
-  assert.match(positive[0]!.explanation.reason, /conditional|current opportunity/i);
+  assert.match(positive[0]!.explanation.reason, /coastal preparation/i);
+  assert.match(positive[0]!.explanation.reason, /no residents move; fresh departure check required/i);
+  assert.match(positive[0]!.explanation.reason, /14 Materials \+ 10 Credits/);
+  assert.match(positive[0]!.explanation.reason, /current towns and commitments funded for 8 beats/);
+  assert.ok(positive[0]!.explanation.reason.length <= 280);
   assert.doesNotMatch(positive[0]!.explanation.reason, /will (found|complete|reach)|guarantee/i);
 });
 
 void test('Yard hold survives relief competition and a live promise without displacing consented cargo', () => {
-  const { state, source, yard } = fixture(); onlyYardAtSource(state, source); source.population = 6; reliefCorridor(state);
+  const { state, source, yard } = fixture(); onlyYardAtSource(state, source); source.population = 6; reliefCorridor(state); state.civilizations[0]!.resources.materials = 21.99;
   const competition = draw(state, { urgentStreak: 0, lastRequiredLane: 'construction:city-0' });
   assert.ok(competition.some(decision => decision.action?.type === 'propose-relief'));
   assert.ok(competition.every(decision => !sameAction(yard, decision.action)));
@@ -235,7 +240,8 @@ void test('unsafe sea departure stays out of ordinary and emergency draws while 
   for (const decision of positive.filter(decision => decision.action?.type === 'settle-coast')) {
     const witness = deriveProgressionPlan(funded, funded.civilizations[0]!, profile(funded), options(funded)).coastalOpportunity.assessment(decision.action!).witness;
     assert.ok(witness && witness.protectedHorizon >= 8 && witness.protectedHorizon <= 18);
-    assert.ok(decision.explanation.reason.startsWith(`Current coastal opportunity ${witness.sourceCityId} → ${witness.tileId}: stocks protect base-town households and retained obligations for ${witness.protectedHorizon} beats `));
+    assert.ok(decision.explanation.reason.startsWith(`Coastal departure: transfer 3 residents and pay founding costs; growing households and retained commitments funded for ${witness.protectedHorizon} beats `));
+    assert.ok(decision.explanation.reason.length <= 280);
     assert.doesNotMatch(decision.explanation.reason, /will (found|complete|reach)|guarantee/i);
   }
 });

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-build.71",
+    "date": "2026-10-24",
+    "title": "Prepare a shore, then fund the departure",
+    "changes": [
+      "A useful Boat yard can be prepared while protecting existing towns and paid work, without reserving households that have not moved. Already paid Yard work is not charged again.",
+      "A later coastal departure still independently checks its exact path, supplies and conserved residents. Preparation is not a promised settlement; Navigation and existing work remain independent choices."
+    ]
+  },
+  {
     "version": "0.1.0-build.70",
     "date": "2026-10-24",
     "title": "Iron follows the hills",
@@ -15,15 +24,6 @@
     "changes": [
       "Civilizations with State workforce may commission three actual Kiln staff for two scheduled seasons of paid work on one existing building order, instead of ordinary Kiln production.",
       "Each successful season pays 1 Material and 2 Credits for capped extra construction work. Existing supplies and paid work stay protected; blocked work leaves ordinary operation available, and the commission expires without an automatic follow-on."
-    ]
-  },
-  {
-    "version": "0.1.0-build.68",
-    "date": "2026-10-24",
-    "title": "Coastal opportunities, local costs",
-    "changes": [
-      "Civilizations assess actual shore towns, ocean paths and available settlement sites before investing in a Boat yard or favoring Navigation. Existing research and paid construction continue independently.",
-      "Coastal departures protect current supplies, home workers and household needs. Global first-coast bonuses no longer override ordinary town limits; a useful local prospect does not guarantee a later settlement or era change."
     ]
   }
 ]

@@ -6,7 +6,7 @@ import { hexDistance } from './simulation/geography.ts';
 import { hasFeatures } from './simulation/history.ts';
 import type { ActionOption, City, CoastalFoundingQuote, GameAction, Resources, WorldState } from './types.ts';
 
-export interface CoastalOpportunityWitness extends FoundingFunding {
+interface CoastalOpportunityFacts extends FoundingFunding {
   readonly kind: 'local-coastal-opportunity';
   readonly revision: number;
   readonly round: number;
@@ -17,11 +17,13 @@ export interface CoastalOpportunityWitness extends FoundingFunding {
   readonly pathTileIds: readonly number[];
   readonly yard: 'missing' | 'active' | 'completed';
   readonly navigation: 'missing' | 'active' | 'completed';
-  readonly mode: 'preparation' | 'founding';
   readonly protectedHorizon: number;
-  readonly foundingCost: Readonly<Partial<Resources>>;
   readonly setupCost: Readonly<Partial<Resources>>;
 }
+export type CoastalOpportunityWitness = CoastalOpportunityFacts & (
+  { readonly mode: 'preparation'; readonly populationTransfer: 0 }
+  | { readonly mode: 'founding'; readonly populationTransfer: 3; readonly foundingCost: Readonly<Partial<Resources>> }
+);
 export interface CoastalActionAssessment {
   readonly hold: boolean;
   readonly reason: string | null;
@@ -103,20 +105,26 @@ export function createCoastalOpportunity(state: WorldState, civId: number, legal
       const work = constructionWork(state, prospect.source); const beats = Math.ceil(requiredConstructionWork(yardDefinition!.id) / work);
       if (!amountSafe(work) || work <= 0 || !Number.isSafeInteger(beats) || beats > 8) return reject('yard-work-horizon: a new Yard needs bounded positive work within eight supplied beats', horizon);
     }
-    const destination: City = { id: 'coastal-opportunity-prospective-town', name: 'Conditional coastal town', civId, tileId: prospect.paths.keys().next().value!, ...ECONOMY_RULES.initialCity, population: ECONOMY_RULES.settle.population, focus: prospect.source.focus, buildings: [], housing: { ruleVersion: 1, origin: 'founded', baseCapacity: LOCAL_GROWTH_RULES.foundedBaseCapacity, establishedRound: round } };
-    const assessment = protection.fund({ source: prospect.source, destination, horizon, foundingCost: ECONOMY_RULES.settle.cost, setupCost, preserveWaitingHouseholds: mode === 'preparation', allocationMode: 'actual-payment', requireEnabledOperations: true });
+    let assessment: FoundingFundingAssessment;
+    if (mode === 'preparation') assessment = protection.fund({ kind: 'current-towns', horizon, setupCost, allocationMode: 'actual-payment', requireEnabledOperations: true });
+    else {
+      const destination: City = { id: 'coastal-opportunity-prospective-town', name: 'Conditional coastal town', civId, tileId: prospect.paths.keys().next().value!, ...ECONOMY_RULES.initialCity, population: ECONOMY_RULES.settle.population, focus: prospect.source.focus, buildings: [], housing: { ruleVersion: 1, origin: 'founded', baseCapacity: LOCAL_GROWTH_RULES.foundedBaseCapacity, establishedRound: round } };
+      assessment = protection.fund({ source: prospect.source, destination, horizon, foundingCost: ECONOMY_RULES.settle.cost, setupCost, allocationMode: 'actual-payment', requireEnabledOperations: true });
+    }
     const value = { assessment, horizon, setupCost }; funding.set(key, value); return value;
   };
   const witness = (prospect: SourceProspect, tileId: number, mode: CoastalOpportunityWitness['mode']): CoastalActionAssessment => {
     const path = prospect.paths.get(tileId); if (!path) return result(true, 'coastal-path: the exact legal destination and ocean path are unavailable');
-    const funded = support(prospect, mode); if (!funded.assessment.facts) return result(true, funded.assessment.reason);
-    const facts: CoastalOpportunityWitness = { kind: 'local-coastal-opportunity', revision, round, civId, sourceCityId: prospect.source.id, sourceTileId: prospect.source.tileId, tileId, pathTileIds: [...path.tileIds], yard: prospect.yard, navigation: prospect.navigation, mode, protectedHorizon: funded.horizon, foundingCost: { ...ECONOMY_RULES.settle.cost }, setupCost: { ...funded.setupCost }, ...funded.assessment.facts };
-    return result(false, mode === 'founding' ? `Current coastal opportunity ${prospect.source.id} → ${tileId}: stocks protect base-town households and retained obligations for ${funded.horizon} beats` : `Conditional coastal opportunity ${prospect.source.id} → ${tileId}: setup and ${funded.horizon}-beat support fit current stocks; later choices remain independent`, facts);
+    const funded = support(prospect, mode); if (!funded.assessment.facts) return result(true, `coastal-${mode === 'founding' ? 'departure' : 'preparation'}-waiting: ${funded.assessment.reason}`);
+    const shared: CoastalOpportunityFacts = { kind: 'local-coastal-opportunity', revision, round, civId, sourceCityId: prospect.source.id, sourceTileId: prospect.source.tileId, tileId, pathTileIds: [...path.tileIds], yard: prospect.yard, navigation: prospect.navigation, protectedHorizon: funded.horizon, setupCost: { ...funded.setupCost }, ...funded.assessment.facts };
+    const facts: CoastalOpportunityWitness = mode === 'preparation' ? { ...shared, mode, populationTransfer: 0 } : { ...shared, mode, populationTransfer: 3, foundingCost: { ...ECONOMY_RULES.settle.cost } };
+    const preparation = prospect.yard === 'missing' ? `new Yard costs ${funded.setupCost.materials ?? 0} Materials + ${funded.setupCost.credits ?? 0} Credits` : 'paid Yard retained, no new setup charge';
+    return result(false, mode === 'founding' ? `Coastal departure: transfer 3 residents and pay founding costs; growing households and retained commitments funded for ${funded.horizon} beats (${prospect.source.id} → ${tileId})` : `Coastal preparation: no residents move; fresh departure check required. ${preparation}; current towns and commitments funded for ${funded.horizon} beats (${prospect.source.id} → ${tileId})`, facts);
   };
   const investmentOrder = { completed: 0, active: 1, missing: 2 };
   const preparedProspects = [...prospects.values()].filter(prospect => prospect.enablingTileId !== null).toSorted((a, b) => investmentOrder[a.yard] - investmentOrder[b.yard] || (a.source.id < b.source.id ? -1 : a.source.id > b.source.id ? 1 : 0));
-  const supportedPaid = preparedProspects.filter(prospect => prospect.yard !== 'missing' && !!support(prospect, 'preparation').assessment.facts);
-  const navigationProspect = preparedProspects.find(prospect => prospect.navigation !== 'completed' && !!support(prospect, 'preparation').assessment.facts);
+  const supportedPaid = preparedProspects.filter(prospect => prospect.yard !== 'missing' && !!support(prospect, 'founding').assessment.facts);
+  const navigationProspect = preparedProspects.find(prospect => prospect.navigation !== 'completed' && (prospect.yard !== 'missing' || legalYards.has(prospect.source.id)) && !!support(prospect, 'preparation').assessment.facts);
   const researchBusy = !!actor && !!actor.researchTarget && !actor.technologies.includes(actor.researchTarget);
   const navigationGoal = !!navigationProspect && !researchBusy;
   const assessment = (action: GameAction): CoastalActionAssessment => {
@@ -141,7 +149,7 @@ export function createCoastalOpportunity(state: WorldState, civId: number, legal
       }
     } else if (researchBusy) answer = result(false, `coastal-research-busy: retain active ${actor!.researchTarget} and its paid progress; no research duration is forecast`);
     else if (navigationProspect) answer = witness(navigationProspect, navigationProspect.enablingTileId!, 'preparation');
-    else answer = result(false, 'coastal-no-research-bonus: no supported current shore prospect; ordinary Navigation remains available');
+    else answer = result(false, 'coastal-no-research-bonus: no supported current preparation with a legal or paid Yard; ordinary Navigation remains available');
     assessments.set(key, answer); return answer;
   };
   return Object.freeze({ navigationGoal, assessment, get work() { return Object.freeze({ sources: sources.length, sites: sites.length, endpointQuotes: counts.endpointQuotes, trees: planner.work.trees, visitedTiles: planner.work.visitedTiles, fundingAssessments: counts.fundingAssessments }); } });

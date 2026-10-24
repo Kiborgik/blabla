@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCoastalOpportunity, type CoastalOpportunityWitness } from '../core/behavior-coastal-opportunity.ts';
+import { createFoundingProtection } from '../core/behavior-founding-protection.ts';
+import { constructionWork } from '../core/simulation/construction.ts';
 import { exchangePromisedResources } from '../core/behavior-knowledge.ts';
 import { ECONOMY_RULES, PUBLIC_PROJECT_RECIPES, RESOURCE_IDS, TECHNOLOGIES, TRADE_RECIPES } from '../core/content.ts';
 import { applyCommand, catchUpStrategy, legalActions } from '../core/engine.ts';
@@ -112,8 +114,9 @@ void test('fixed generated geography discovers exact funded missing prerequisite
   assert.equal(quote.pathTileIds[0], source.tileId); assert.equal(quote.pathTileIds.at(-1), quote.tileId);
   assert.equal(coastalPathBlock(state, { mode: 'coast', ruleVersion: 1, tileIds: [...quote.pathTileIds], edges: quote.pathTileIds.length - 1 }, source.tileId, quote.tileId), null);
   assert.equal(choices.some(option => option.action.type === 'settle' && option.action.tileId === quote.tileId), false);
-  assert.equal(quote.protectedHorizon, 8); assert.deepEqual(quote.foundingCost, { food: 10, materials: 12, credits: 8 });
-  assert.deepEqual(quote.setupCost, { materials: 14, credits: 10 }); assert.equal(quote.protectedBudget.ordinary.materials, 26); assert.equal(quote.protectedBudget.ordinary.credits, 18); assert.equal(quote.protectedBudget.ordinary.science, 0);
+  assert.equal(quote.protectedHorizon, 8); assert.equal('foundingCost' in quote, false); assert.equal(quote.populationTransfer, 0);
+  assert.equal(quote.households.some(home => home.prospective), false); assert.equal(quote.households.find(home => home.cityId === source.id)!.openingPopulation, source.population);
+  assert.deepEqual(quote.setupCost, { materials: 14, credits: 10 }); assert.equal(quote.protectedBudget.ordinary.materials, 14); assert.equal(quote.protectedBudget.ordinary.credits, 10); assert.equal(quote.protectedBudget.ordinary.science, 0);
   assert.equal(planner.assessment({ type: 'research', technology: 'navigation' }).hold, false);
   assert.strictEqual(planner.assessment(yard), assessed); assert.ok(Object.isFrozen(quote)); assert.ok(Object.isFrozen(quote.protectedBudget.ordinary)); assert.ok(Object.isFrozen(quote.pathTileIds));
   assert.ok(planner.work.endpointQuotes <= planner.work.sources * state.tiles.length); assert.ok(planner.work.trees <= planner.work.sources); assert.ok(planner.work.visitedTiles <= planner.work.sources * state.tiles.length);
@@ -132,7 +135,7 @@ void test('controlled legal engine actions pay Yard once, produce Navigation, se
   assert.equal(state.cities.find(city => city.id === initial.source.id)!.buildings.includes('boat-yard'), false);
   assert.equal(options(state).some(option => sameAction(option.action, initial.action)), false);
   const active = witness(state, { type: 'research', technology: 'navigation' }); assert.equal(active.yard, 'active'); assert.deepEqual(active.setupCost, {});
-  assert.equal(active.protectedBudget.ordinary.materials, 12); assert.equal(active.protectedBudget.ordinary.credits, 8);
+  assert.equal(active.protectedBudget.ordinary.materials, 0); assert.equal(active.protectedBudget.ordinary.credits, 0);
   const beforeResearch = structuredClone(state); act({ type: 'research', technology: 'navigation' });
   assertPaid(beforeResearch.civilizations[0]!.resources, state.civilizations[0]!.resources, {}); assert.equal(state.civilizations[0]!.resources.science, 0);
   assert.equal(state.civilizations[0]!.researchProgress, 0); assert.equal(state.civilizations[0]!.researchTarget, 'navigation');
@@ -176,15 +179,16 @@ void test('six-to-three departure cannot sacrifice a currently staffed paid sour
   assert.ok(funded.allocations.some(allocation => allocation.openingPopulation === 6 && allocation.allocated === 3));
 });
 
-void test('combined Yard and founding stocks are reserved together, and funded ready or active Yard is never charged again', () => {
-  const prepared = fixture(); prepared.actor.resources.materials = 25; prepared.actor.resources.credits = 18;
+void test('present Yard and later founding prices are separate, and a paid Yard is never charged again', () => {
+  const prepared = fixture(); prepared.actor.resources.materials = 14; prepared.actor.resources.credits = 10;
   assert.ok(options(prepared.state).some(option => sameAction(option.action, prepared.yard)));
-  assert.equal(assessment(prepared.state, prepared.yard).hold, true); assert.match(assessment(prepared.state, prepared.yard).reason!, /opening-budget/);
-  prepared.actor.resources.materials = 26; assert.equal(witness(prepared.state, prepared.yard).protectedBudget.ordinary.materials, 26);
+  assert.equal(witness(prepared.state, prepared.yard).protectedBudget.ordinary.materials, 14);
   const paid = commit(prepared.state, prepared.yard); const active = witness(paid, { type: 'research', technology: 'navigation' });
-  assert.deepEqual(active.setupCost, {}); assert.equal(paid.civilizations[0]!.resources.materials, 12); assert.equal(active.protectedBudget.ordinary.materials, 12);
+  assert.deepEqual(active.setupCost, {}); assert.equal(paid.civilizations[0]!.resources.materials, 0); assert.equal(active.protectedBudget.ordinary.materials, 0);
+  assert.equal(active.populationTransfer, 0); assert.equal('foundingCost' in active, false);
   const ready = readyFixture(); ready.actor.resources.materials = 12; ready.actor.resources.credits = 8;
-  assert.equal(witness(ready.state, ready.action).protectedBudget.ordinary.materials, 12); assert.deepEqual(witness(ready.state, ready.action).setupCost, {});
+  const departure = witness(ready.state, ready.action); assert.equal(departure.protectedBudget.ordinary.materials, 12); assert.deepEqual(departure.setupCost, {});
+  assert.equal(departure.populationTransfer, 3); assert.equal(departure.mode, 'founding'); if (departure.mode === 'founding') assert.deepEqual(departure.foundingCost, { food: 10, materials: 12, credits: 8 });
   ready.actor.resources.credits = 7.99; assert.equal(assessment(ready.state, ready.action).hold, true);
 });
 
@@ -196,10 +200,16 @@ void test('accepted promises are charged once and necessary current horizons18 v
   const funded = witness(state, action); const promises = exchangePromisedResources(state, 0, 18);
   assert.equal(funded.protectedHorizon, 18); assert.equal(funded.protectedBudget.ordinary.materials, 12 + promises.ordinary.materials); assert.equal(funded.protectedBudget.ordinary.energy, promises.ordinary.energy);
   assert.equal(funded.protectedBudget.ordinary.food, cents(10 + promises.ordinary.food + funded.households.reduce((sum, home) => sum + home.householdFood + home.growthFood, 0)));
+  const preparationState = structuredClone(state); preparationState.civilizations[0]!.technologies = preparationState.civilizations[0]!.technologies.filter(id => id !== 'navigation');
+  assert.ok(isWorldState(preparationState)); const preparation = witness(preparationState, { type: 'research', technology: 'navigation' });
+  assert.equal(preparation.protectedHorizon, 18); assert.equal(preparation.protectedBudget.ordinary.materials, promises.ordinary.materials); assert.equal(preparation.protectedBudget.ordinary.energy, promises.ordinary.energy);
+  assert.equal(preparation.protectedBudget.ordinary.food, cents(promises.ordinary.food + preparation.households.reduce((sum, home) => sum + home.householdFood + home.growthFood, 0)));
   actor.resources = { ...funded.protectedBudget.ordinary }; assert.ok(witness(state, action)); actor.resources.materials -= 0.01; assert.equal(assessment(state, action).hold, true);
   actor.resources = { food: 10000, materials: 10000, energy: 10000, credits: 10000, science: 0, culture: 10000 };
   const project = state.publicProjects![0]!; assert.equal(project.status, 'committed'); if (project.status === 'committed') { project.terms.completionDelayRounds = 19; project.dueRound = 19; }
   assert.ok(isWorldState(state)); const refused = assessment(state, action); assert.equal(refused.hold, true); assert.match(refused.reason!, /horizon/);
+  actor.technologies = actor.technologies.filter(id => id !== 'navigation'); const unsupportedPreparation = createCoastalOpportunity(state, 0, options(state));
+  assert.equal(unsupportedPreparation.navigationGoal, false); assert.equal(unsupportedPreparation.assessment({ type: 'research', technology: 'navigation' }).witness, null);
 });
 
 void test('base-town aftermath reserves reopened source housing, future newborn households and already-paid housing without a Farm adapter', () => {
@@ -215,6 +225,29 @@ void test('base-town aftermath reserves reopened source housing, future newborn 
   const pending = witness(paid, action); const protectedHome = pending.households.find(item => item.cityId === source.id)!;
   assert.equal(protectedHome.capacity, housingBefore + 4); assert.equal(protectedHome.growthCount, 7); assert.equal(pending.protectedBudget.ordinary.materials, 12); assert.equal(pending.protectedBudget.ordinary.credits, 8);
   assert.deepEqual(paid.cities.find(city => city.id === source.id)!.construction!.active, paidOrder);
+});
+
+void test('preparation retains already-paid recipes elsewhere and source housing without repaying either order', () => {
+  const prepared = fixture(); const capital = prepared.state.cities.find(city => city.civId === 0 && city.id !== prepared.source.id)!;
+  const pendingRecipe = commit(prepared.state, { type: 'build', cityId: capital.id, project: 'irrigation' });
+  const before = structuredClone(pendingRecipe); const funded = witness(pendingRecipe, prepared.yard);
+  assert.ok(funded.retainedOperations.includes(`${capital.id}/building/irrigation`));
+  assert.equal(funded.protectedBudget.ordinary.materials, 14 + funded.protectedHorizon); assert.equal(funded.protectedBudget.ordinary.credits, 10); assert.equal(funded.populationTransfer, 0);
+  assert.deepEqual(pendingRecipe, before);
+  pendingRecipe.civilizations[0]!.resources.materials = 14 + funded.protectedHorizon - 0.01;
+  assert.ok(options(pendingRecipe).some(option => sameAction(option.action, prepared.yard))); assert.match(assessment(pendingRecipe, prepared.yard).reason!, /preparation-waiting.*opening-budget/);
+  const housing = fixture(); technologies(housing.state, ['masonry']); housing.source.buildings.push('boat-yard');
+  const pendingHousing = commit(housing.state, { type: 'build', cityId: housing.source.id, project: 'granary' }); const retained = structuredClone(pendingHousing);
+  const current = witness(pendingHousing, { type: 'research', technology: 'navigation' }); const home = current.households.find(item => item.cityId === housing.source.id)!;
+  assert.equal(home.openingPopulation, 8); assert.equal(home.capacity, 12); assert.equal(home.growthCount, 4); assert.equal(current.populationTransfer, 0);
+  assert.equal(current.households.some(item => item.prospective), false); assert.equal(current.protectedBudget.ordinary.materials, 0); assert.equal(current.protectedBudget.ordinary.credits, 0); assert.deepEqual(pendingHousing, retained);
+});
+
+void test('new Yard work at exactly eight supplied beats passes while nine beats cannot borrow future productivity', () => {
+  const { state, source, yard } = fixture(); source.focus = 'growth'; source.wellbeing = 50; source.infrastructure = 0; source.damage = 25;
+  assert.ok(isWorldState(state)); assert.equal(constructionWork(state, source), 0.75); assert.equal(witness(state, yard).protectedHorizon, 8);
+  source.damage = 26; assert.ok(isWorldState(state)); assert.equal(constructionWork(state, source), 0.74);
+  const before = structuredClone(state); const denied = assessment(state, yard); assert.equal(denied.hold, true); assert.match(denied.reason!, /yard-work-horizon/); assert.deepEqual(state, before);
 });
 
 void test('current destination claims and a valid naturally inland source invalidate the exact old departure without rewriting generated terrain', () => {
@@ -252,6 +285,9 @@ void test('actual dispatched residents are reserved in source households once an
   assert.equal(home.openingPopulation, 5); assert.equal(home.reservedReturning, 2); assert.equal(home.capacity, 8); assert.equal(home.growthCount, 3);
   assert.equal(home.householdFood, [5, 6, 7, 8, 8, 8, 8, 8].reduce((sum, population) => sum + householdFoodUpkeep(state, population), 0));
   assert.equal(home.growthFood, 7 + 7 + 7); assert.equal(funded.protectedHorizon, 8);
+  const preparation = createFoundingProtection(state, 0).fund({ kind: 'current-towns', horizon: 8, setupCost: {}, allocationMode: 'actual-payment', requireEnabledOperations: true });
+  assert.ok(preparation.facts, preparation.reason ?? ''); const waiting = preparation.facts.households.find(item => item.cityId === source.id)!;
+  assert.equal(waiting.openingPopulation, 8); assert.equal(waiting.reservedReturning, 2); assert.equal(waiting.growthCount, 0); assert.equal(preparation.facts.households.some(item => item.prospective), false);
   technologies(state, ['kiln-firing']); source.buildings.push('kiln'); source.buildingOperations = { kiln: { enabled: true, lastResult: null } };
   assert.ok(isWorldState(state)); assert.equal(projectOperationAllocation(state).cities.find(city => city.id === source.id)!.buildingOperations!.kiln!.lastResult!.status, 'operated');
   const before = structuredClone(state); const refused = assessment(state, prepared.action); assert.equal(refused.hold, true); assert.match(refused.reason!, /protected-operation/); assert.deepEqual(state, before);
