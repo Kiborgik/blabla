@@ -21,6 +21,11 @@ state coast_preparation_current_towns_only: bool
 state coast_departure_revalidated: bool
 state coast_missing_yard_goal_legal: bool
 state coast_paid_port_dedup_funded: bool
+state coast_labor_single_optional_pause: bool
+state coast_labor_flow_comparable: bool
+state coast_labor_protected_choices_retained: bool
+state coast_labor_resume_revalidated: bool
+state coast_labor_work_bounded: bool
 
 action coastal_fixture(kind: int)
 action found_coastal_settlement()
@@ -47,6 +52,11 @@ when inspect_coastal_choices {
     expect "departure-independently-funds-conserved-households": after.coast_departure_revalidated
     expect "missing-yard-goal-needs-current-legal-preparation": after.coast_missing_yard_goal_legal
     expect "paid-port-dedup-needs-departure-funding": after.coast_paid_port_dedup_funded
+    expect "labor-preparation-is-one-optional-pause": after.coast_labor_single_optional_pause
+    expect "labor-value-compares-paid-operating-flows": after.coast_labor_flow_comparable
+    expect "labor-choice-retains-food-learning-and-promises": after.coast_labor_protected_choices_retained
+    expect "labor-resume-suppression-revalidates-current-opportunity": after.coast_labor_resume_revalidated
+    expect "labor-search-is-one-pair-with-counted-work": after.coast_labor_work_bounded
 }
 when replay_coastal_history {
     expect "old-and-new-histories-remain-readable": after.coast_replay_preserved

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-build.72",
+    "date": "2026-10-24",
+    "title": "Make room for a possible coastal town",
+    "changes": [
+      "A civilization can compare retaining one productive operation with freeing its three residents for a fully supplied coastal opportunity. Food, Learning and accepted commitments remain protected.",
+      "Pausing is optional preparation, not a promised departure. A later settlement is independently chosen and pays its actual founding costs; hypothetical town output is never spent in advance."
+    ]
+  },
+  {
     "version": "0.1.0-build.71",
     "date": "2026-10-24",
     "title": "Prepare a shore, then fund the departure",
@@ -15,15 +24,6 @@
     "changes": [
       "Fresh worlds place eight finite Iron deposits in three connected hill districts, instead of giving every capital an owned deposit. Revealed outcrops follow the actual sites and show remaining reserves.",
       "Two capitals have structural approaches to the deposits, not free access or promised income. Land purchase, Mine work and later Foundry production still need their separate costs, people and supplies."
-    ]
-  },
-  {
-    "version": "0.1.0-build.69",
-    "date": "2026-10-24",
-    "title": "A crew for unfinished civic work",
-    "changes": [
-      "Civilizations with State workforce may commission three actual Kiln staff for two scheduled seasons of paid work on one existing building order, instead of ordinary Kiln production.",
-      "Each successful season pays 1 Material and 2 Credits for capped extra construction work. Existing supplies and paid work stay protected; blocked work leaves ordinary operation available, and the commission expires without an automatic follow-on."
     ]
   }
 ]

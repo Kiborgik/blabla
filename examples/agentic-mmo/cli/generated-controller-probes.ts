@@ -9,8 +9,8 @@ import type { HexTile } from '../core/types.ts';
 import { ACTIVE_LOCAL_POLICY_VERSION, ACTIVE_LOCAL_RELEASE_ID, createLocalSimulation, advanceLocalSimulation, parseLocalSimulation, type LocalSimulation } from '../web/local-simulation.ts';
 
 const EPOCH = '2000-01-01T00:00:00.000Z';
-const POLICY = 'weighted-civilizations-v6-staged-coastal';
-const RELEASE = 'settlement-staged-coastal-1';
+const POLICY = 'weighted-civilizations-v7-expansion-labor';
+const RELEASE = 'settlement-expansion-labor-1';
 const TERRAINS = ['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'];
 const DIRECTIONS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]] as const;
 const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined';

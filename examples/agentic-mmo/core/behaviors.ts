@@ -1,3 +1,4 @@
+import { createExpansionLaborOpportunity, type ExpansionLaborAssessment } from './behavior-expansion-labor.ts';
 import { civicWorksActionHold, createCivicWorksPolicy } from './behavior-civic-works.ts';
 import { createPatronagePolicy } from './behavior-patronage.ts';
 import { woodlandOperationAllowed } from './behavior-woodlands.ts';
@@ -13,7 +14,7 @@ import { revealedHorseSite } from './simulation/pastoral.ts';
 import { deriveKnowledgePlan, knowledgeProtects, knowledgeReason, knowledgeWeight, type KnowledgePlan } from './behavior-knowledge.ts';
 import { FOOD_BUDGET_RULES } from './food-security-content.ts';
 import { civilizationFoodUpkeep, forecastCivilizationFoodProduction } from './simulation/food-security.ts';
-import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, STAGED_COASTAL_BEHAVIOR_POLICY_VERSION, usesStrategicTemperaments, behaviorDrawVersion, behaviorPolicyVersion, type BehaviorPolicyVersion, LEGACY_BEHAVIOR_POLICY_VERSION, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
+import { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, STAGED_COASTAL_BEHAVIOR_POLICY_VERSION, EXPANSION_LABOR_BEHAVIOR_POLICY_VERSION, usesStrategicTemperaments, behaviorDrawVersion, behaviorPolicyVersion, type BehaviorPolicyVersion, LEGACY_BEHAVIOR_POLICY_VERSION, behaviorSeed, civilizationBehaviorProfile, type BehaviorPhase, type BehaviorProfile } from './behavior-profiles.ts';
 import { isStrategicDevelopment, isStrategicExchange, ordinaryPhaseWeight } from './strategic-temperaments.ts';
 import { deriveReliefPlan, reliefPriority, reliefProtects, reliefReason, reliefWeight, type ReliefPlan } from './behavior-relief.ts';
 import { deriveDiplomacyPlan, diplomacyPriority, diplomacyProtects, diplomacyReason, diplomacyWeight, type DiplomacyPlan } from './behavior-diplomacy.ts';
@@ -30,7 +31,7 @@ import { siteProduction } from './simulation/sites.ts';
 import { cityProductivity } from './simulation/world.ts';
 import { DIRECTOR_SEAT, type ActionOption, type City, type Civilization, type Focus, type GameAction, type Resources, type TradeTerms, type WorldState } from './types.ts';
 
-export { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, STAGED_COASTAL_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion };
+export { BEHAVIOR_POLICY_VERSION, FOOD_BUDGET_BEHAVIOR_POLICY_VERSION, TEMPERAMENT_BEHAVIOR_POLICY_VERSION, FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION, STAGED_COASTAL_BEHAVIOR_POLICY_VERSION, EXPANSION_LABOR_BEHAVIOR_POLICY_VERSION, behaviorPolicyVersion };
 export type { BehaviorPhase, BehaviorProfile };
 
 export interface BehaviorMemory {
@@ -102,7 +103,7 @@ function validMemoryFields(value: unknown, legacy = false): boolean {
 }
 
 export function isBehaviorMemory(value: unknown): value is BehaviorMemory {
-  return record(value) && value.version === 2 && (value.policyVersion === BEHAVIOR_POLICY_VERSION || value.policyVersion === FOOD_BUDGET_BEHAVIOR_POLICY_VERSION || value.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || value.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION || value.policyVersion === STAGED_COASTAL_BEHAVIOR_POLICY_VERSION) && validMemoryFields(value);
+  return record(value) && value.version === 2 && (value.policyVersion === BEHAVIOR_POLICY_VERSION || value.policyVersion === FOOD_BUDGET_BEHAVIOR_POLICY_VERSION || value.policyVersion === TEMPERAMENT_BEHAVIOR_POLICY_VERSION || value.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION || value.policyVersion === STAGED_COASTAL_BEHAVIOR_POLICY_VERSION || value.policyVersion === EXPANSION_LABOR_BEHAVIOR_POLICY_VERSION) && validMemoryFields(value);
 }
 
 export function isLegacyBehaviorMemory(value: unknown): value is LegacyBehaviorMemory {
@@ -160,6 +161,7 @@ interface Situation {
   frontier: ReturnType<typeof createProductiveFrontierAssessment> | null;
   patronage: ReturnType<typeof createPatronagePolicy> | null;
   civicWorks: ReturnType<typeof createCivicWorksPolicy>;
+  expansionLabor: ReturnType<typeof createExpansionLaborOpportunity> | null;
 }
 
 function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
@@ -182,8 +184,19 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, civicWorks: createCivicWorksPolicy(state, actor.id, weights), phase: memory.phase, patronage: hasFeatures(state, ['learning-patronage']) ? createPatronagePolicy(state, actor.id, weights, profile.priorities) : null, fundedLandwork: null, frontier: hasFeatures(state, ['productive-frontier-founding']) ? createProductiveFrontierAssessment(state, actor.id) : null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), riverIntake: createRiverIntakePolicy(state, actor.id, weights, profile.priorities.construction), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
-  if (memory.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION || memory.policyVersion === STAGED_COASTAL_BEHAVIOR_POLICY_VERSION) context.fundedLandwork = deriveFundedLandworkPlan(context, options);
+  const context: Situation = { state, actor, cities, profile, memory, expansionLabor: null, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, civicWorks: createCivicWorksPolicy(state, actor.id, weights), phase: memory.phase, patronage: hasFeatures(state, ['learning-patronage']) ? createPatronagePolicy(state, actor.id, weights, profile.priorities) : null, fundedLandwork: null, frontier: hasFeatures(state, ['productive-frontier-founding']) ? createProductiveFrontierAssessment(state, actor.id) : null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), riverIntake: createRiverIntakePolicy(state, actor.id, weights, profile.priorities.construction), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
+  if (memory.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION || memory.policyVersion === STAGED_COASTAL_BEHAVIOR_POLICY_VERSION || memory.policyVersion === EXPANSION_LABOR_BEHAVIOR_POLICY_VERSION) context.fundedLandwork = deriveFundedLandworkPlan(context, options);
+  if (hasFeatures(state, ['expansion-labor-reallocation'])) {
+    const neutral = { ...context, phase: 'development' as const };
+    context.expansionLabor = createExpansionLaborOpportunity(state, actor.id, options, {
+      weights, desiredBuildings: context.progression.desiredBuildings, desiredImprovements: context.progression.desiredImprovements,
+      coastalOpportunity: context.progression.coastalOpportunity, settlementGoal: profile.settlementGoal, foodRisk,
+      recovery: maxDamage >= 25 || memory.phase === 'recovery' && maxDamage >= 10,
+      requiredPools: requiredLanes(state, actor.id).size > 0,
+      foundingWeight: option => actionWeight(option, neutral), holds: option => protectedCandidate(option, neutral),
+    });
+    context.expansionLabor.assessment();
+  }
   return context;
 }
 
@@ -509,6 +522,7 @@ function laneOf(action: GameAction, lanes: Map<string, Set<string>>): string | n
 
 function urgent(candidate: Candidate, context: Situation): boolean {
   const action = candidate.option.action;
+  if (expansionLaborToggle(action, context.expansionLabor?.assessment())) return false;
   if (context.border && borderPriority(candidate.option, context.border) > 0) return true;
   if (context.relief && reliefPriority(candidate.option, context.relief) > 0) return true;
   if (context.diplomacy && diplomacyPriority(candidate.option, context.diplomacy) > 0) return true;
@@ -575,13 +589,23 @@ function protectedCandidate(option: ActionOption, context: Situation): boolean {
   return civicWorksActionHold(context.state, context.actor.id, option.action) !== null || !!context.diplomacy && diplomacyProtects(option, context.diplomacy) || !!context.relief && reliefProtects(option, context.relief) || !!context.knowledge && knowledgeProtects(option, context.knowledge) || !!context.border && borderProtects(option, context.border);
 }
 
+function expansionLaborToggle(action: GameAction, assessment: ExpansionLaborAssessment | undefined): 'pause' | 'resume' | null {
+  if (action.type !== 'set-building-operation') return null;
+  for (const [kind, toggle] of [['pause', assessment?.pause], ['resume', assessment?.suppressedResume]] as const)
+    if (toggle && action.cityId === toggle.cityId && action.buildingId === toggle.buildingId && action.enabled === toggle.enabled) return kind;
+  return null;
+}
+
 function scoreCandidates(context: Situation, options: readonly ActionOption[], lanes: Map<string, Set<string>>): Candidate[] {
   const woodlandPlanner = hasFeatures(context.state, [WOODLAND_RULES.featureId]) ? createLandworkPlanner(context.state, context.actor.id) : null;
   return options.map(option => {
     const action = option.action;
     const coastalAssessment = context.progression.coastalOpportunity.assessment(action);
     const coastalHold: CoastalPolicyHold | null = coastalAssessment.hold ? { kind: 'coastal-opportunity', reason: coastalAssessment.reason ?? 'No supported current coastal opportunity.' } : null;
-    const progressed = progressionWeight(option, actionWeight(option, context), context.state, context.actor, context.profile, context.progression);
+    const labor = context.expansionLabor?.assessment();
+    const laborToggle = expansionLaborToggle(action, labor);
+    const progressed = laborToggle === 'pause' ? Math.max(0, labor!.witness!.netFlowValue) : laborToggle === 'resume' ? 0
+      : progressionWeight(option, actionWeight(option, context), context.state, context.actor, context.profile, context.progression);
     const base = frontierWeight(action, progressed, context);
     const replacing = action.type === 'stop-trade' && context.progression.replaceableRoutes.has(action.routeId)
       && !context.state.publicProjects?.some(project => project.routeId === action.routeId && project.status === 'committed');
@@ -617,7 +641,7 @@ export function assessCivilizationBehavior(state: WorldState, seat: number, prev
   if (!actor) throw new RangeError('Civilization assessment requires an existing civilization');
   const context = situation(state, actor, profile, memory, options);
   const candidates = assessSituation(context, options, requiredLanes(state, seat));
-  return { phase: context.phase, foodRisk: context.foodRisk, severeFoodRisk: context.severeFoodRisk, upkeep: context.upkeep,
+  return { expansionLabor: context.expansionLabor ? { assessment: context.expansionLabor.assessment(), work: context.expansionLabor.work } : null, phase: context.phase, foodRisk: context.foodRisk, severeFoodRisk: context.severeFoodRisk, upkeep: context.upkeep,
     commitmentUntilRound: (context.phase === memory.phase ? memory.phaseSinceRound : state.round) + profile.commitmentRounds,
     candidates: candidates.map(candidate => ({ ...candidate, protected: candidate.coastalHold !== null || protectedCandidate(candidate.option, context), urgent: urgent(candidate, context),
       ...(candidate.option.action.type === 'adopt-government' && context.patronage ? { economicPriority: context.patronage(candidate.option.action) } : {}),
@@ -700,7 +724,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   if (context.relief) reason = reliefReason(choice.option, context.relief) ?? reason;
   if (context.knowledge) reason = knowledgeReason(choice.option, context.knowledge) ?? reason;
   if (context.border) reason = borderReason(choice.option, context.border) ?? reason;
-  reason = context.progression.coastalOpportunity.assessment(choice.option.action).reason ?? fundedLandworkReason(choice.option.action, context) ?? frontierReason(choice.option.action, context) ?? reason;
+  reason = (expansionLaborToggle(choice.option.action, context.expansionLabor?.assessment()) ? context.expansionLabor!.assessment().reason : null) ?? context.progression.coastalOpportunity.assessment(choice.option.action).reason ?? fundedLandworkReason(choice.option.action, context) ?? frontierReason(choice.option.action, context) ?? reason;
   if ((choice.option.action.type === 'improve' || choice.option.action.type === 'set-improvement-operation' && choice.option.action.enabled) && choice.option.action.improvementId === 'river-intake') {
     const assessment = context.riverIntake(choice.option.action);
     if (assessment) reason = riverIntakeReason(assessment);

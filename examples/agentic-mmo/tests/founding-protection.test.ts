@@ -180,3 +180,35 @@ void test('coastal closure unit probes refuse unsupported work without editing t
     }
   }
 });
+
+const coastalOraclePath = process.env.COASTAL_PARITY_ORACLE;
+if (coastalOraclePath) {
+  const { createCoastalOpportunity: legacyCoastal } = await import(pathToFileURL(coastalOraclePath).href) as { createCoastalOpportunity: typeof createCoastalOpportunity };
+  void test('extracted exact coastal funding preserves complete old preparation and departure assessments', () => {
+    const base = createGeneratedWorld(73, '2026-10-24T00:00:00.000Z', 'settlement-learning-patronage-1', 'cultural-toponyms-v1', 'strategic-temperaments-v1');
+    const source = base.cities.find(city => isCoastalSite(base, city.tileId))!; assert.ok(source);
+    syntheticTechnologies(base, source.civId, ['navigation', 'kiln-firing', 'water-management']);
+    const actor = base.civilizations.find(actor => actor.id === source.civId)!;
+    actor.resources = { food: 10000, materials: 10000, credits: 10000, energy: 10000, science: 0, culture: 10000 };
+    source.population = 9; source.buildings = ['boat-yard', 'kiln']; source.buildingOperations = { kiln: { enabled: true, lastResult: null } }; source.construction = { active: null, lastCompleted: null };
+    const cases: [string, (state: WorldState, city: City) => void][] = [
+      ['funded', () => {}],
+      ['lost-residents', (_state, city) => { city.population = 6; }],
+      ['paused', (_state, city) => { city.population = 6; city.buildingOperations!.kiln!.enabled = false; }],
+      ['opening-stock', state => { state.civilizations.find(actor => actor.id === source.civId)!.resources.food = 100; }],
+      ['paid-pending', (_state, city) => { city.construction!.active = { id: 'parity-paid', cityId: city.id, buildingId: 'irrigation', ruleVersion: 1, startedRound: 0, paid: { materials: 12, credits: 8 }, workRequired: 4, workDone: 1 }; }],
+      ['unsupported-horizon', (_state, city) => { city.construction!.active = { id: 'parity-long', cityId: city.id, buildingId: 'irrigation', ruleVersion: 1, startedRound: 0, paid: { materials: 12, credits: 8 }, workRequired: 1000, workDone: 0 }; }],
+    ];
+    for (const [name, mutate] of cases) for (const preparation of [false, true]) {
+      const state = structuredClone(base); const town = state.cities.find(city => city.id === source.id)!;
+      if (preparation) town.buildings = town.buildings.filter(id => id !== 'boat-yard');
+      mutate(state, town); const before = structuredClone(state); const options = availableActions(state, source.civId);
+      const old = legacyCoastal(state, source.civId, options); const current = createCoastalOpportunity(state, source.civId, options);
+      assert.equal(current.navigationGoal, old.navigationGoal, name);
+      for (const option of options) if (option.action.type === 'settle-coast' || option.action.type === 'build' && option.action.project === 'boat-yard' || option.action.type === 'research' && option.action.technology === 'navigation')
+        assert.deepEqual(current.assessment(option.action), old.assessment(option.action), `${name}/${preparation}/${JSON.stringify(option.action)}`);
+      const { allocationProjections: _allocations, ...currentWork } = current.work;
+      assert.deepEqual(currentWork, old.work, name); assert.deepEqual(state, before, name);
+    }
+  });
+}

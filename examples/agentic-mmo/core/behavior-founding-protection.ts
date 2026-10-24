@@ -121,6 +121,7 @@ export function createFoundingProtection(state: WorldState, civId: number) {
   const ownCities = state.cities.filter(city => city.civId === civId).toSorted((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const funding = new Map<string, FoundingFundingAssessment>();
   let preparation: Prepared | undefined;
+  let allocationProjections = 0;
   const prepare = (): Prepared => {
     if (preparation) return preparation;
     const shared: Prepared = { horizon: 1, baseline: new Map(), footprints: new Map(), pending: [], failure: null }; preparation = shared;
@@ -128,6 +129,7 @@ export function createFoundingProtection(state: WorldState, civId: number) {
     if (state.civicWorks?.active.some(commission => commission.civId === civId)) { reject('active-civic-works: scheduled crew fees and earlier paid recipes are outside this founding forecast'); return shared; }
     if (!actor || !safe(actor.resources, actor.strategicResources) || !Number.isSafeInteger(state.round) || !Number.isSafeInteger(state.round + 1)) { reject('unsafe-accounting: opening resources or round cannot be bounded'); return shared; }
     if (actor.government?.pending) reject('government-transition: pending modifiers are not projected');
+    allocationProjections++;
     const projected = projectOperationAllocation(state); shared.baseline = operated(projected, civId);
     if (!selectedInstitutionsFunded(projected, civId)) reject('selected-institution-unfunded: an accepted Studies institution lacks current inputs or residents');
     for (const compact of state.knowledge?.active ?? []) if (compact.status === 'accepted' && (compact.terms.teacherId === civId || compact.terms.learnerId === civId)) shared.horizon = Math.max(shared.horizon, compact.deadlineRound - state.round);
@@ -219,6 +221,7 @@ export function createFoundingProtection(state: WorldState, civId: number) {
       households.push(envelope); ordinary.food = quantize(ordinary.food + envelope.householdFood + envelope.growthFood);
     }
     if (!safe(ordinary, strategic) || RESOURCE_IDS.some(id => actor!.resources[id] < ordinary[id]) || STRATEGIC_RESOURCE_IDS.some(id => (actor!.strategicResources?.[id] ?? 0) < (strategic[id] ?? 0))) return reject('opening-budget: current stocks must fund setup, growing households, operations and existing promises without future income');
+    allocationProjections++;
     const projected = projectOperationAllocation(state, opening => {
       const payer = opening.civilizations.find(actor => actor.id === civId)!;
       for (const id of RESOURCE_IDS) payer.resources[id] = request.allocationMode === 'actual-payment'
@@ -239,5 +242,5 @@ export function createFoundingProtection(state: WorldState, civId: number) {
     const facts: FoundingFunding = { protectedBudget: { ordinary, strategic }, households, retainedOperations, allocations: retainedOperations.map(key => { const result = actual.get(key)!; return { key, openingPopulation: result.openingPopulation, required: result.residents, available: result.available, allocated: result.residents }; }) };
     const result = { facts, reason: null }; funding.set(key, result); return result;
   };
-  return Object.freeze({ prepare: (): Readonly<Pick<Prepared, 'horizon' | 'failure'>> => prepare(), fund });
+  return Object.freeze({ prepare: (): Readonly<Pick<Prepared, 'horizon' | 'failure'>> => prepare(), fund, get work() { return Object.freeze({ allocationProjections }); } });
 }

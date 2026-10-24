@@ -57,13 +57,13 @@ when observe_generated_world {
     expect "current-factory-exercises-three-distinct-seeds": count(after.gc_samples) == 3 and unique(after.gc_samples, s => s.seed) and any(after.gc_samples, s => s.seed == 73) and any(after.gc_samples, s => s.seed == 1701) and any(after.gc_samples, s => s.seed == 90210)
     expect "raw-geography-has-connected-viable-starts": all(after.gc_samples, s => s.width == 18 and s.height == 24 and s.tile_count == 432 and s.land_count > 0 and s.passable_count > 0 and s.passable_count <= s.land_count and s.connected_count > 0 and s.connected_count <= s.passable_count and s.land_fraction >= 0.55 and s.land_fraction <= 0.8 and s.connected_fraction >= 0.7 and s.connected_fraction <= 1.0 and s.connected_capitals == 5 and s.capital_count == 5 and s.minimum_spacing >= 6 and s.viable_capitals == 5 and s.coastal_capitals > 0 and s.coastal_capitals < 5 and s.neighborhood_kinds >= 3)
     expect "seeds-produce-distinct-terrain-and-starts": unique(after.gc_samples, s => s.terrain_signature) and unique(after.gc_samples, s => s.start_signature)
-    expect "current-world-keeps-immutable-fresh-genesis": all(after.gc_samples, s => s.genesis_errors == 0 and s.policy_version == "weighted-civilizations-v6-staged-coastal" and s.release_id == "settlement-staged-coastal-1" and s.origin_json == s.expected_origin_json and s.world_digest == s.repeat_world_digest)
+    expect "current-world-keeps-immutable-fresh-genesis": all(after.gc_samples, s => s.genesis_errors == 0 and s.policy_version == "weighted-civilizations-v7-expansion-labor" and s.release_id == "settlement-expansion-labor-1" and s.origin_json == s.expected_origin_json and s.world_digest == s.repeat_world_digest)
 }
 
 when decide {
     expect "six-current-seats-actually-apply-a-legal-choice": count(after.gc_decisions) == 6 and unique(after.gc_decisions, d => d.seat) and all(after.gc_decisions, d => d.seat >= 0 and d.seat <= 5 and d.accepted and d.legal_member and d.revision_after == d.revision_before + 1)
     expect "same-input-has-same-complete-seeded-decision": all(after.gc_decisions, d => d.action_digest == d.repeated_action_digest and d.decision_digest == d.repeated_decision_digest and d.input_world_before == d.input_world_after and d.input_memory_before == d.input_memory_after)
-    expect "accepted-current-memory-advances-once": all(after.gc_decisions, d => d.memory_valid and d.cursor_after == d.cursor_before + 1 and d.policy_version == "weighted-civilizations-v6-staged-coastal" and d.profile_id == d.explanation_profile_id)
+    expect "accepted-current-memory-advances-once": all(after.gc_decisions, d => d.memory_valid and d.cursor_after == d.cursor_before + 1 and d.policy_version == "weighted-civilizations-v7-expansion-labor" and d.profile_id == d.explanation_profile_id)
     expect "decision-source-and-genesis-are-truthful": all(after.gc_decisions, d => d.source == "local-procedural" and d.genesis_before == d.genesis_after)
 }
 

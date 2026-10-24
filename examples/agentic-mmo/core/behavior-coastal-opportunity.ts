@@ -39,7 +39,9 @@ interface SourceProspect {
 const amountSafe = (value: number): boolean => Number.isFinite(value) && value >= 0 && Number.isSafeInteger(Math.round(value * 100));
 const result = (hold: boolean, reason: string | null, witness: CoastalOpportunityWitness | null = null): CoastalActionAssessment => freezeFoundingFacts({ hold, reason, witness });
 
-function closure(state: WorldState, civId: number): { horizon: number; reason: string | null } {
+export interface CoastalClosure { readonly horizon: number; readonly reason: string | null }
+
+function closure(state: WorldState, civId: number): CoastalClosure {
   const actor = state.civilizations.find(candidate => candidate.id === civId);
   if (!actor) return { horizon: 8, reason: 'coastal-actor: the exact actor is unavailable' };
   if (state.spaceflight?.civilizations[civId]?.activeMission || state.spaceflight?.civilizations[civId]?.colony) return { horizon: 8, reason: 'unsupported-off-world: active mission or colony support is outside this coastal snapshot' };
@@ -60,12 +62,41 @@ function closure(state: WorldState, civId: number): { horizon: number; reason: s
   return { horizon, reason: null };
 }
 
+export function createCoastalFunding(state: WorldState, civId: number, suppliedClosure?: CoastalClosure) {
+  const protection = createFoundingProtection(state, civId);
+  const yardDefinition = BUILDINGS.find(building => building.id === 'boat-yard');
+  const cache = new Map<string, { assessment: FoundingFundingAssessment; horizon: number; setupCost: Partial<Resources> }>();
+  let closureFacts = suppliedClosure;
+  const closureForSnapshot = (): CoastalClosure => closureFacts ??= freezeFoundingFacts(closure(state, civId));
+  const fund = (source: City, tileId: number, mode: CoastalOpportunityWitness['mode'], newYard = false) => {
+    const key = `${source.id}/${tileId}/${mode}/${newYard}`; const cached = cache.get(key); if (cached) return cached;
+    const setupCost = mode === 'preparation' && newYard ? { ...yardDefinition!.cost } : {};
+    const reject = (reason: string, horizon = 8) => { const value = { assessment: { facts: null, reason }, horizon, setupCost }; cache.set(key, value); return value; };
+    const closed = closureForSnapshot(); if (closed.reason) return reject(closed.reason, closed.horizon);
+    const prepared = protection.prepare(); if (prepared.failure) return reject(prepared.failure);
+    const horizon = Math.max(8, closed.horizon, prepared.horizon);
+    if (!Number.isSafeInteger(horizon) || horizon > 18) return reject('unsupported-horizon: necessary support exceeds the eighteen-beat coastal bound', horizon);
+    if (mode === 'preparation' && newYard) {
+      const work = constructionWork(state, source); const beats = Math.ceil(requiredConstructionWork(yardDefinition!.id) / work);
+      if (!amountSafe(work) || work <= 0 || !Number.isSafeInteger(beats) || beats > 8) return reject('yard-work-horizon: a new Yard needs bounded positive work within eight supplied beats', horizon);
+    }
+    let assessment: FoundingFundingAssessment;
+    if (mode === 'preparation') assessment = protection.fund({ kind: 'current-towns', horizon, setupCost, allocationMode: 'actual-payment', requireEnabledOperations: true });
+    else {
+      const destination: City = { id: 'coastal-opportunity-prospective-town', name: 'Conditional coastal town', civId, tileId, ...ECONOMY_RULES.initialCity, population: ECONOMY_RULES.settle.population, focus: source.focus, buildings: [], housing: { ruleVersion: 1, origin: 'founded', baseCapacity: LOCAL_GROWTH_RULES.foundedBaseCapacity, establishedRound: state.round } };
+      assessment = protection.fund({ source, destination, horizon, foundingCost: ECONOMY_RULES.settle.cost, setupCost, allocationMode: 'actual-payment', requireEnabledOperations: true });
+    }
+    const value = { assessment, horizon, setupCost }; cache.set(key, value); return value;
+  };
+  return Object.freeze({ fund, get closure() { return closureForSnapshot(); }, get work() { return protection.work; } });
+}
+
 export function createCoastalOpportunity(state: WorldState, civId: number, legalOptions: readonly ActionOption[]) {
   const revision = state.revision; const round = state.round;
   const actor = state.civilizations.find(candidate => candidate.id === civId);
   const yardDefinition = BUILDINGS.find(building => building.id === 'boat-yard');
   const navigationDefinition = TECHNOLOGIES.find(technology => technology.id === COASTAL_FOUNDING_RULES.requiredTechnology);
-  const protection = createFoundingProtection(state, civId);
+  const exactFunding = createCoastalFunding(state, civId);
   const planner = createCoastalPlanner(state);
   const ownCities = state.cities.filter(city => city.civId === civId).toSorted((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const sources = ownCities.filter(city => foundingSourceEligible(city) && isCoastalSite(state, city.tileId));
@@ -91,27 +122,11 @@ export function createCoastalOpportunity(state: WorldState, civId: number, legal
     }
     if (paths.size) prospects.set(source.id, { source, yard, navigation, paths, enablingTileId });
   }
-  let closureFacts: ReturnType<typeof closure> | undefined;
   const support = (prospect: SourceProspect, mode: CoastalOpportunityWitness['mode']) => {
     const key = `${prospect.source.id}/${mode}`; const cached = funding.get(key); if (cached) return cached;
     counts.fundingAssessments++;
-    const setupCost = mode === 'preparation' && prospect.yard === 'missing' ? { ...yardDefinition!.cost } : {};
-    const reject = (reason: string, horizon = 8) => { const value = { assessment: { facts: null, reason }, horizon, setupCost }; funding.set(key, value); return value; };
-    closureFacts ??= closure(state, civId); if (closureFacts.reason) return reject(closureFacts.reason, closureFacts.horizon);
-    const prepared = protection.prepare(); if (prepared.failure) return reject(prepared.failure);
-    const horizon = Math.max(8, closureFacts.horizon, prepared.horizon);
-    if (!Number.isSafeInteger(horizon) || horizon > 18) return reject('unsupported-horizon: necessary support exceeds the eighteen-beat coastal bound', horizon);
-    if (mode === 'preparation' && prospect.yard === 'missing') {
-      const work = constructionWork(state, prospect.source); const beats = Math.ceil(requiredConstructionWork(yardDefinition!.id) / work);
-      if (!amountSafe(work) || work <= 0 || !Number.isSafeInteger(beats) || beats > 8) return reject('yard-work-horizon: a new Yard needs bounded positive work within eight supplied beats', horizon);
-    }
-    let assessment: FoundingFundingAssessment;
-    if (mode === 'preparation') assessment = protection.fund({ kind: 'current-towns', horizon, setupCost, allocationMode: 'actual-payment', requireEnabledOperations: true });
-    else {
-      const destination: City = { id: 'coastal-opportunity-prospective-town', name: 'Conditional coastal town', civId, tileId: prospect.paths.keys().next().value!, ...ECONOMY_RULES.initialCity, population: ECONOMY_RULES.settle.population, focus: prospect.source.focus, buildings: [], housing: { ruleVersion: 1, origin: 'founded', baseCapacity: LOCAL_GROWTH_RULES.foundedBaseCapacity, establishedRound: round } };
-      assessment = protection.fund({ source: prospect.source, destination, horizon, foundingCost: ECONOMY_RULES.settle.cost, setupCost, allocationMode: 'actual-payment', requireEnabledOperations: true });
-    }
-    const value = { assessment, horizon, setupCost }; funding.set(key, value); return value;
+    const value = exactFunding.fund(prospect.source, prospect.paths.keys().next().value!, mode, prospect.yard === 'missing');
+    funding.set(key, value); return value;
   };
   const witness = (prospect: SourceProspect, tileId: number, mode: CoastalOpportunityWitness['mode']): CoastalActionAssessment => {
     const path = prospect.paths.get(tileId); if (!path) return result(true, 'coastal-path: the exact legal destination and ocean path are unavailable');
@@ -152,5 +167,5 @@ export function createCoastalOpportunity(state: WorldState, civId: number, legal
     else answer = result(false, 'coastal-no-research-bonus: no supported current preparation with a legal or paid Yard; ordinary Navigation remains available');
     assessments.set(key, answer); return answer;
   };
-  return Object.freeze({ navigationGoal, assessment, get work() { return Object.freeze({ sources: sources.length, sites: sites.length, endpointQuotes: counts.endpointQuotes, trees: planner.work.trees, visitedTiles: planner.work.visitedTiles, fundingAssessments: counts.fundingAssessments }); } });
+  return Object.freeze({ navigationGoal, assessment, get closure() { return exactFunding.closure; }, get work() { return Object.freeze({ sources: sources.length, sites: sites.length, endpointQuotes: counts.endpointQuotes, trees: planner.work.trees, visitedTiles: planner.work.visitedTiles, fundingAssessments: counts.fundingAssessments, allocationProjections: exactFunding.work.allocationProjections }); } });
 }
