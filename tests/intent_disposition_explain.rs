@@ -100,6 +100,56 @@ fn human_show(temp: &TempDir) -> String {
     String::from_utf8(output.stdout).unwrap()
 }
 
+fn stable_task_view(mut view: Value) -> Value {
+    for entry in view["evidence_progress"]["entries"].as_array_mut().unwrap() {
+        assert!(entry["observation_age_seconds"].as_u64().is_some());
+        entry["observation_age_seconds"] = json!(0);
+    }
+    view
+}
+
+fn stable_json_output(bytes: &[u8]) -> String {
+    let view: Value = serde_json::from_slice(bytes).unwrap();
+    let original = format!("\"evidence_progress\":{}", view["evidence_progress"]);
+    let stable = stable_task_view(view);
+    let replacement = format!("\"evidence_progress\":{}", stable["evidence_progress"]);
+    let text = std::str::from_utf8(bytes).unwrap();
+    assert_eq!(text.matches(&original).count(), 1);
+    text.replacen(&original, &replacement, 1)
+}
+
+fn stable_human_output(human: &str) -> String {
+    const HEADER: &str =
+        "\nEvidence-run progress (last observations only; never readiness authority):\n";
+    let Some((before, rest)) = human.split_once(HEADER) else {
+        return human.to_owned();
+    };
+    let (progress, after) = rest.split_once("\n\n").unwrap();
+    let progress: String = progress
+        .split_inclusive('\n')
+        .map(|line| {
+            let Some((run_id, rest)) = line
+                .strip_prefix("  ")
+                .and_then(|line| line.split_once(": last observed "))
+            else {
+                return line.to_owned();
+            };
+            assert_eq!(run_id.len(), 32);
+            assert!(run_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+            let (phase, rest) = rest.split_once(' ').unwrap();
+            assert!(matches!(
+                phase,
+                "preparing" | "running" | "draining" | "complete" | "incomplete"
+            ));
+            let (age, rest) = rest.split_once("s ago; stdout ").unwrap();
+            assert!(!age.is_empty() && age.bytes().all(|byte| byte.is_ascii_digit()));
+            assert!(age.parse::<u64>().is_ok());
+            format!("  {run_id}: last observed {phase} 0s ago; stdout {rest}")
+        })
+        .collect();
+    format!("{before}{HEADER}{progress}\n\n{after}")
+}
+
 fn human_row<'a>(human: &'a str, identity: &str) -> &'a str {
     let start = human.find(&format!("  {identity}  ")).unwrap();
     let rest = &human[start..];
@@ -452,6 +502,129 @@ fn invalid_claims_are_explained_even_when_revisions_are_equal() {
 }
 
 #[test]
+fn stable_comparisons_ignore_only_unsigned_progress_observation_ages() {
+    let mut first = json!({
+        "affected_intent": [{"identity": "system::app", "state": "stale"}],
+        "task": {"acceptance_epoch": 1, "evidence": [{"exit": 0}], "observation_age_seconds": 5},
+        "readiness_summary": {"authority": "diagnostic-only"},
+        "evidence_progress": {
+            "diagnostic_only": true, "directory_available": true,
+            "total": 1, "shown": 1, "omitted": 0, "unavailable": 0, "limit": 20,
+            "entries": [{
+                "observation_age_seconds": 5, "outcome": "exited", "receipt_observed": true,
+                "last_observed": {
+                    "schema": 1, "run_id": "0123456789abcdef0123456789abcdef",
+                    "started_unix": 100, "observed_unix": 101,
+                    "limit_bytes": 67108864, "acceptance_epoch": 1,
+                    "pins_fingerprint": "pins", "recording": "recorded",
+                    "receipt_fingerprint": "receipt",
+                    "capture": {
+                        "phase": "complete", "child": {"kind": "exited", "code": 0},
+                        "stdout_bytes": 3, "stderr_bytes": 4,
+                        "stdout_eof": true, "stderr_eof": true, "complete": true,
+                        "failure": null, "cancellation_requested": false,
+                        "cleanup": "not-requested"
+                    }
+                }
+            }]
+        }
+    });
+    let mut later = first.clone();
+    later["evidence_progress"]["entries"][0]["observation_age_seconds"] = json!(6);
+    assert_ne!(later, first);
+    let first_bytes = serde_json::to_vec(&first).unwrap();
+    assert_eq!(
+        stable_json_output(&serde_json::to_vec(&later).unwrap()),
+        stable_json_output(&first_bytes)
+    );
+    let progress = &first["evidence_progress"];
+    let ordered = format!("{{\"evidence_progress\":{progress},\"task\":\"work\"}}\n");
+    for changed in [
+        ordered.replacen('{', "{ ", 1),
+        format!("{{\"task\":\"work\",\"evidence_progress\":{progress}}}\n"),
+        ordered.replace("\"work\"", "\"\\u0077ork\""),
+    ] {
+        assert_ne!(
+            stable_json_output(changed.as_bytes()),
+            stable_json_output(ordered.as_bytes())
+        );
+    }
+    let changed = ordered.replace("\"diagnostic_only\":true", "\"diagnostic_only\": true");
+    assert!(std::panic::catch_unwind(|| stable_json_output(changed.as_bytes())).is_err());
+    let stable = stable_task_view(first.clone());
+    assert_eq!(stable_task_view(later), stable);
+    first["evidence_progress"]["entries"][0]["observation_age_seconds"] = json!(0);
+    assert_eq!(stable, first);
+
+    for parent in [
+        "/affected_intent/0",
+        "/task",
+        "/task/evidence/0",
+        "/readiness_summary",
+        "/evidence_progress",
+        "/evidence_progress/entries/0",
+        "/evidence_progress/entries/0/last_observed",
+        "/evidence_progress/entries/0/last_observed/capture",
+        "/evidence_progress/entries/0/last_observed/capture/child",
+    ] {
+        for (key, value) in stable.pointer(parent).unwrap().as_object().unwrap() {
+            let path = format!("{parent}/{key}");
+            if matches!(
+                path.as_str(),
+                "/evidence_progress/entries"
+                    | "/evidence_progress/entries/0/observation_age_seconds"
+            ) {
+                continue;
+            }
+            let mut changed = stable.clone();
+            *changed.pointer_mut(&path).unwrap() = if value.is_null() {
+                json!(false)
+            } else {
+                Value::Null
+            };
+            assert_ne!(stable_task_view(changed), stable, "{path}");
+        }
+    }
+    for invalid in [Value::Null, json!(-1), json!(1.5), json!("5")] {
+        let mut changed = stable.clone();
+        changed["evidence_progress"]["entries"][0]["observation_age_seconds"] = invalid;
+        assert!(std::panic::catch_unwind(|| stable_task_view(changed)).is_err());
+    }
+
+    let human = "task::work   ACCEPTED\n\nEvidence-run progress (last observations only; never readiness authority):\n  1 total, 1 shown, 0 omitted, 0 unavailable\n  0123456789abcdef0123456789abcdef: last observed complete 5s ago; stdout 3 bytes, stderr 4 bytes; outcome exited; recording recorded; receipt observed true\n\nStatement:\n  An unrelated event was 5s ago\n";
+    let stable = stable_human_output(human);
+    assert_eq!(stable, human.replace("complete 5s ago", "complete 0s ago"));
+    assert_eq!(
+        stable_human_output(&human.replace("complete 5s ago", "complete 6s ago")),
+        stable
+    );
+    for (before, after) in [
+        ("ACCEPTED", "READY"),
+        ("1 total", "2 total"),
+        ("1 shown", "0 shown"),
+        ("0 omitted", "1 omitted"),
+        ("0 unavailable", "1 unavailable"),
+        (
+            "0123456789abcdef0123456789abcdef",
+            "1123456789abcdef0123456789abcdef",
+        ),
+        ("complete 5s ago", "running 5s ago"),
+        ("stdout 3", "stdout 4"),
+        ("stderr 4", "stderr 5"),
+        ("outcome exited", "outcome unknown"),
+        ("recording recorded", "recording failed"),
+        ("receipt observed true", "receipt observed false"),
+        ("event was 5s ago", "event was 6s ago"),
+    ] {
+        assert_ne!(stable_human_output(&human.replace(before, after)), stable);
+    }
+    for invalid in ["-1", "1.5", "+5", "18446744073709551616"] {
+        let changed = human.replace("complete 5s ago", &format!("complete {invalid}s ago"));
+        assert!(std::panic::catch_unwind(|| stable_human_output(&changed)).is_err());
+    }
+}
+
+#[test]
 fn explanation_is_deterministic_read_only_and_does_not_change_challenge_or_readiness() {
     let temp = fixture();
     complete(&temp);
@@ -460,22 +633,28 @@ fn explanation_is_deterministic_read_only_and_does_not_change_challenge_or_readi
     let challenge_before = cli(&temp, &["challenge", "work"]);
     let ready_before = cli(&temp, &["task", "ready", "work"]);
     let before = files(temp.path());
-    let first = show(&temp);
-    assert_eq!(show(&temp), first);
+    let first = stable_task_view(show(&temp));
+    assert_eq!(stable_task_view(show(&temp)), first);
     let json_before = support::run_in(
         Some(temp.path()),
         &support::args(&["--json", "task", "show", "work"]),
     );
     assert!(json_before.status.success());
     let human = human_show(&temp);
-    assert_eq!(human_show(&temp), human);
-    assert_eq!(show(&temp), first);
+    assert_eq!(
+        stable_human_output(&human_show(&temp)),
+        stable_human_output(&human)
+    );
+    assert_eq!(stable_task_view(show(&temp)), first);
     let json_after = support::run_in(
         Some(temp.path()),
         &support::args(&["--json", "task", "show", "work"]),
     );
     assert!(json_after.status.success());
-    assert_eq!(json_after.stdout, json_before.stdout);
+    assert_eq!(
+        stable_json_output(&json_after.stdout),
+        stable_json_output(&json_before.stdout)
+    );
     assert_human_identities(&human, &first);
     assert!(human.contains("Shared input changes"));
     assert!(human.contains("core (changed)"));
