@@ -1,12 +1,18 @@
 import type { BuildingSite } from './building-visuals.ts';
 
 export interface TownLot extends BuildingSite { id: string }
+export const TOWN_FARM_LOTS: readonly [TownLot, TownLot] = [
+  { id: 'farm-main', x: .755, z: -.3, width: .41, depth: .36, height: 1 },
+  { id: 'farm-rear', x: .685, z: -.58, width: .27, depth: .2, height: 1 },
+];
+
 export interface TownPlanV1 {
   version: 1;
   topology: 'crescent' | 'split-court' | 'ridge-terrace';
   landmarkLot: TownLot;
   supportLots: readonly TownLot[];
   constructionLot: TownLot;
+  farmLots: readonly TownLot[];
   homeLots: readonly TownLot[];
   approach: TownLot;
 }
@@ -42,6 +48,7 @@ export function townPlanV1(city: { id: string; worldSeed?: number }): TownPlanV1
     landmarkLot: lot('landmark', (variation('center-x') - .5) * .05, -.31 + (variation('center-z') - .5) * .024, .76, .52),
     supportLots: [-1, 1].map((side, index) => lot(`support-${index}`, side * .64, -.52 + (variation(`support-${side}`) - .5) * .018, .3, .28, .62)),
     constructionLot: lot('construction', (variation('construction-x') - .5) * .06, -.79, .46, .22, .85),
+    farmLots: TOWN_FARM_LOTS,
     homeLots,
     approach: lot('approach', 0, .43, .18, .86, 0),
   };

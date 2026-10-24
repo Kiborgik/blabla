@@ -67,6 +67,22 @@ await test('homes keep stable reserved anchors through growth, damage and detail
   }
 });
 
+await test('fixed positive-side Farm reservations replace only the positive support without enclosing the missing corner', () => {
+  for (let worldSeed = 0; worldSeed < 64; worldSeed++) for (let civId = 0; civId < 5; civId++) {
+    const plan = townPlanV1({ worldSeed, id: `town-${civId}` });
+    assert.equal(plan.farmLots.length, 2);
+    const displaced = plan.supportLots.filter(lot => plan.farmLots.some(bed => overlaps(bed, lot)));
+    assert.equal(displaced.length, 1);
+    assert.ok(displaced[0]!.x > 0);
+    for (const bed of plan.farmLots) {
+      assert.ok(bed.x > 0);
+      for (const lot of [plan.landmarkLot, plan.constructionLot, plan.approach, ...plan.homeLots]) assert.ok(!overlaps(bed, lot), `${worldSeed}/${bed.id}/${lot.id}`);
+      for (const x of [bed.x - bed.width / 2, bed.x + bed.width / 2]) for (const z of [bed.z - bed.depth / 2, bed.z + bed.depth / 2]) assert.ok(Math.hypot(x, z) * SETTLEMENT_RENDER_SCALE <= .75132);
+    }
+    assert.ok(!overlaps(plan.farmLots[0]!, plan.farmLots[1]!));
+  }
+});
+
 await test('world and live projections forward the immutable seed without consuming simulation randomness', () => {
   const state = createWorld(1701);
   state.cities[0]!.buildings = [...city.buildings];

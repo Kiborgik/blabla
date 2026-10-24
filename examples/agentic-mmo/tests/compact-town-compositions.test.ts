@@ -75,6 +75,20 @@ await test('installed learning, industry, harbor and launch assets have differen
   assert.equal(new Set(silhouettes).size, cores.length);
 });
 
+await test('overview Farm retains its stepped ground and planted cue within the existing shared town envelope', () => {
+  for (const civId of [0, 1, 2, 3, 4]) {
+    const source = { ...city, civId, buildings: ['farm'], population: 10000, damage: 100 };
+    const visual = settlementVisual(source, 'far');
+    const parts = visual.parts.filter(part => part.id.startsWith('farm-'));
+    assert.equal(parts.length, 3);
+    assert.equal(parts.filter(part => part.material === 'soil').length, 2);
+    assert.ok(parts.some(part => part.material === 'grain'));
+    assert.ok(footprint(visual.parts, SETTLEMENT_RENDER_SCALE) <= .76);
+    assert.equal(visual.houses, 3);
+    assert.ok(visual.parts.length <= DETAIL_BUDGETS.far.parts);
+  }
+});
+
 await test('five original roof families and shape-readable crests distinguish even identical built inventories', () => {
   const roofs = CIVILIZATION_IDENTITIES.map((identity, civId) => {
     const visual = settlementVisual({ ...city, civId, buildings: ['academy', 'farm', 'workshop', 'boat-yard'] }, 'far');

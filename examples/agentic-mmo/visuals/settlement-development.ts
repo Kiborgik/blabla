@@ -4,6 +4,7 @@ import { buildingAppearance, buildingAppearances } from './building-visuals.ts';
 import type { BuildingAppearance } from './building-visuals.ts';
 import type { SettlementFacts, VisualPart } from './world-visuals.ts';
 import type { DetailLevel } from './visual-language.ts';
+import { TOWN_FARM_LOTS } from './town-plan.ts';
 
 export interface SettlementDevelopment {
   stage: 'primitive' | 'civic' | 'industrial' | 'launch';
@@ -80,13 +81,24 @@ export function settlementConstruction(city: SettlementFacts, detail: DetailLeve
   const add = (id: string, material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale']): void => {
     parts.push({ id: `construction:${order.id}:${id}`, shape: 'box', material, position, scale, rotation: 0 });
   };
-  add('foundation', 'soil', [x, .05, z], [width, .1, depth]);
-  add('open-frame', 'timber', [x - width * .38, height / 2, z - depth * .35], [.09, height, .09]);
-  if (detail !== 'far') {
-    add('frame-right', 'timber', [x + width * .38, height / 2, z - depth * .35], [.09, height, .09]);
-    add('scaffold-beam', 'timber', [x, height, z - depth * .35], [width * .84, .07, .09]);
+  if (order.buildingId === 'farm') {
+    TOWN_FARM_LOTS.forEach((lot, index) => add(index === 0 ? 'foundation' : 'foundation-step', 'soil', [lot.x, .02, lot.z], [lot.width, .04, lot.depth]));
+    const main = TOWN_FARM_LOTS[0];
+    add('stake-left', 'timber', [main.x - main.width / 2 + .03, .13, main.z + main.depth / 2 - .03], [.04, .18, .04]);
+    if (detail !== 'far') {
+      add('stake-right', 'timber', [main.x + main.width / 2 - .03, .13, main.z - main.depth / 2 + .03], [.04, .18, .04]);
+      const stripWidth = (main.width - .06) * (.35 + progress * .5);
+      add('unfinished-strip', 'settled', [main.x - main.width / 2 + .03 + stripWidth / 2, .05, main.z], [stripWidth, .02, .1]);
+    }
+  } else {
+    add('foundation', 'soil', [x, .05, z], [width, .1, depth]);
+    add('open-frame', 'timber', [x - width * .38, height / 2, z - depth * .35], [.09, height, .09]);
+    if (detail !== 'far') {
+      add('frame-right', 'timber', [x + width * .38, height / 2, z - depth * .35], [.09, height, .09]);
+      add('scaffold-beam', 'timber', [x, height, z - depth * .35], [width * .84, .07, .09]);
+    }
+    if (detail === 'close') add('paid-supplies', 'stone', [x + width * .17, .15, z + depth * .23], [width * .35, .2, depth * .3]);
   }
-  if (detail === 'close') add('paid-supplies', 'stone', [x + width * .17, .15, z + depth * .23], [width * .35, .2, depth * .3]);
   return { facts: { orderId: order.id, buildingId: order.buildingId, label: definition.name, workDone: order.workDone, workRequired: order.workRequired, paid: { ...order.paid } }, parts };
 }
 

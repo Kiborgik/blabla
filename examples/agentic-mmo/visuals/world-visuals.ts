@@ -55,19 +55,25 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
   const development = settlementDevelopment(city);
   const construction = settlementConstruction(city, detail);
   const appearances = settlementLandmarks(city, detail, construction.facts !== null);
+  const farmIndex = appearances.findIndex(appearance => appearance.id === 'farm');
+  const farmOccupied = farmIndex >= 0 || construction.facts?.buildingId === 'farm';
+  const vacatedFarmSite = farmIndex >= 0 ? buildingSites[farmIndex] : plan.supportLots.find(site => site.x < 0);
+  const occupiedSites = buildingSites.map(site => farmOccupied && vacatedFarmSite && site.id.startsWith('support-') && site.x > 0
+    ? { ...site, x: vacatedFarmSite.x, z: vacatedFarmSite.z } : site);
   const operations = settlementOperationParts(city, detail);
   const placed = appearances.map((appearance, index) => {
-    const site = buildingSites[index] ?? plan.landmarkLot;
+    if (appearance.id === 'farm') return appearance;
+    const site = occupiedSites[index] ?? plan.landmarkLot;
     const reference = buildingAppearance(appearance.id, 'close')?.parts ?? appearance.parts;
     return { ...appearance, parts: placeBuildingParts(appearance.parts, reference, site) };
   });
   const operationParts = appearances.flatMap((appearance, index) => {
     const cues = operations.filter(part => part.id.startsWith(`operation:${appearance.id}:`));
     const reference = buildingAppearance(appearance.id, 'close')?.parts ?? appearance.parts;
-    return placeBuildingParts(cues, reference, buildingSites[index] ?? plan.landmarkLot);
+    return placeBuildingParts(cues, reference, occupiedSites[index] ?? plan.landmarkLot);
   });
   const reference = construction.facts ? buildingAppearance(construction.facts.buildingId, 'close')?.parts ?? [] : [];
-  const constructionParts = placeBuildingParts(construction.parts, reference, plan.constructionLot);
+  const constructionParts = construction.facts?.buildingId === 'farm' ? construction.parts : placeBuildingParts(construction.parts, reference, plan.constructionLot);
   const primitive = development.stage === 'primitive';
   const hearth = primitive && appearances.length === 0;
   const maximumHouses = detail === 'far' ? 3 : detail === 'mid' ? 4 : appearances.length > 2 || construction.facts ? 5 : 6;

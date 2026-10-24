@@ -333,7 +333,7 @@ await test('optional detail spends spare parts fairly after all family cores are
   const appearances = buildingAppearances(BUILT_FAMILIES, 'close');
   const coreIds = appearances.flatMap((entry) => entry.corePartIds);
   const before = structuredClone(appearances);
-  assert.equal(coreIds.length, 9);
+  assert.equal(coreIds.length, 10);
   const cores = allocateBuildingParts(appearances, coreIds.length);
   assert.deepEqual(new Set(cores.map((entry) => entry.id)), new Set(coreIds));
   const firstDetails = allocateBuildingParts(appearances, coreIds.length + appearances.length);

@@ -1,6 +1,6 @@
 import { BUILDINGS } from '../core/content.ts';
 import type { VisualPart } from './world-visuals.ts';
-import { DETAIL_BUDGETS } from './visual-language.ts';
+import { TOWN_FARM_LOTS } from './town-plan.ts';
 import type { DetailLevel, VisualIcon } from './visual-language.ts';
 
 function part(id: string, shape: VisualPart['shape'], material: VisualPart['material'], position: VisualPart['position'], scale: VisualPart['scale']): VisualPart {
@@ -49,10 +49,17 @@ const APPEARANCES: Record<string, { icon: VisualIcon; label: string; corePartIds
     ],
   },
   farm: {
-    icon: 'farm', label: 'Farm', corePartIds: ['farm-soil', 'farm-row-0'], parts: (detail) => {
-      const rows = DETAIL_BUDGETS[detail].fieldRows;
-      return [part('farm-soil', 'box', 'soil', [1.04, .035, .35], [.9, .07, 1.35]),
-        ...Array.from({ length: rows }, (_, row) => part(`farm-row-${row}`, 'box', row % 2 ? 'crop' : 'grain', [1.04, .1, .35 + ((row + .5) / rows - .5) * 1.23], [.78, .13, .91 / rows]))];
+    icon: 'farm', label: 'Farm', corePartIds: ['farm-soil', 'farm-soil-step', 'farm-row-0'], parts: (detail) => {
+      const [main, rear] = TOWN_FARM_LOTS;
+      return [
+        ...TOWN_FARM_LOTS.map((lot, index) => part(index === 0 ? 'farm-soil' : 'farm-soil-step', 'box', 'soil', [lot.x, .02, lot.z], [lot.width, .04, lot.depth])),
+        part('farm-row-0', 'box', 'grain', [main.x, .07, main.z + (detail === 'far' ? 0 : main.depth / 4)], [main.width - .04, .06, detail === 'far' ? main.depth - .04 : main.depth / 2 - .04]),
+        ...(detail === 'far' ? [] : [
+          part('farm-row-1', 'box', 'crop', [main.x, .07, main.z - main.depth / 4], [main.width - .04, .06, main.depth / 2 - .04]),
+          part('farm-row-2', 'box', 'grain', [rear.x, .07, rear.z], [rear.width - .04, .06, rear.depth - .04]),
+          ...TOWN_FARM_LOTS.map((lot, index) => part(`farm-edge-${index}`, 'box', 'stone', [lot.x, .04, lot.z - lot.depth / 2 + .01], [lot.width, .08, .02])),
+        ]),
+      ];
     },
   },
   workshop: {
@@ -123,7 +130,7 @@ export function buildingIdentity(id: string): { icon: VisualIcon; label: string 
 
 export function buildingAppearance(id: string, detail: DetailLevel): BuildingAppearance | null {
   const appearance = Object.hasOwn(APPEARANCES, id) ? APPEARANCES[id] : undefined;
-  return appearance ? { id, icon: appearance.icon, label: appearance.label, corePartIds: detail === 'far' ? appearance.corePartIds.slice(0, 1) : [...appearance.corePartIds], parts: appearance.parts(detail) } : null;
+  return appearance ? { id, icon: appearance.icon, label: appearance.label, corePartIds: detail === 'far' && id !== 'farm' ? appearance.corePartIds.slice(0, 1) : [...appearance.corePartIds], parts: appearance.parts(detail) } : null;
 }
 
 export function buildingAppearances(ids: readonly string[], detail: DetailLevel): BuildingAppearance[] {

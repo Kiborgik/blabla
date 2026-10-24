@@ -123,41 +123,43 @@ await test('representative standalone landmarks and complete exact inventory sur
   assert.equal(settlementDevelopment({ ...city, buildings: ['unknown'] }).stage, 'primitive');
 });
 
-await test('flat faces and actual WebGL instance matrices consume the identical canonical settlement parts', () => {
-  const state = createWorld(1701);
-  state.cities = [{ ...state.cities[0]!, population: 14, buildings: ['aqueduct', 'granary', 'launchpad'] }];
-  const world = projectWorld(state);
-  const town = world.cities[0]!;
-  const material = new THREE.MeshBasicMaterial();
-  const meshes = createSettlementMeshes(world, () => material);
-  const origin = hexPosition(town.q, town.r);
-  const floor = world.tiles.find(tile => tile.q === town.q && tile.r === town.r)?.height ?? .4;
-  for (const [pixels, detail] of [[24, 'far'], [60, 'mid'], [110, 'close']] as const) {
-    meshes.update(pixels);
-    const parts = settlementVisual(town.settlement!, detail).parts;
-    const faces = flatSceneFaces(parts);
-    assert.ok(faces.length > parts.length);
-    assert.ok(parts.every(part => faces.some(face => face.part.id === part.id)));
-    assert.ok(parts.every(part => transformedVertices(part).every(vertex => vertex.every(Number.isFinite))));
-    const actual: number[][] = [];
-    for (const child of meshes.group.children) if (child instanceof THREE.InstancedMesh) {
-      for (let index = 0; index < child.count; index++) {
-        const matrix = new THREE.Matrix4(); child.getMatrixAt(index, matrix); actual.push([...matrix.elements]);
+await test('flat faces and Three instance matrices consume the identical canonical settlement parts', () => {
+  for (const buildings of [['aqueduct', 'granary', 'launchpad'], ['farm'], ['farm', 'kiln', 'workshop']]) {
+    const state = createWorld(1701);
+    state.cities = [{ ...state.cities[0]!, population: 14, buildings }];
+    const world = projectWorld(state);
+    const town = world.cities[0]!;
+    const material = new THREE.MeshBasicMaterial();
+    const meshes = createSettlementMeshes(world, () => material);
+    const origin = hexPosition(town.q, town.r);
+    const floor = world.tiles.find(tile => tile.q === town.q && tile.r === town.r)?.height ?? .4;
+    for (const [pixels, detail] of [[24, 'far'], [60, 'mid'], [110, 'close']] as const) {
+      meshes.update(pixels);
+      const parts = settlementVisual(town.settlement!, detail).parts;
+      const faces = flatSceneFaces(parts);
+      assert.ok(faces.length > parts.length);
+      assert.ok(parts.every(part => faces.some(face => face.part.id === part.id)));
+      assert.ok(parts.every(part => transformedVertices(part).every(vertex => vertex.every(Number.isFinite))));
+      const actual: number[][] = [];
+      for (const child of meshes.group.children) if (child instanceof THREE.InstancedMesh) {
+        for (let index = 0; index < child.count; index++) {
+          const matrix = new THREE.Matrix4(); child.getMatrixAt(index, matrix); actual.push([...matrix.elements]);
+        }
+      }
+      const expected = parts.map(part => new THREE.Matrix4().compose(
+        new THREE.Vector3(origin.x + part.position[0] * SETTLEMENT_RENDER_SCALE, floor + part.position[1] * SETTLEMENT_RENDER_SCALE, origin.z + part.position[2] * SETTLEMENT_RENDER_SCALE),
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), part.rotation),
+        new THREE.Vector3(...part.scale.map(value => value * SETTLEMENT_RENDER_SCALE) as [number, number, number]),
+      ).elements);
+      assert.equal(actual.length, expected.length);
+      for (const matrix of expected) {
+        const index = actual.findIndex(candidate => candidate.every((value, offset) => Math.abs(value - matrix[offset]!) < .00001));
+        assert.ok(index >= 0);
+        actual.splice(index, 1);
       }
     }
-    const expected = parts.map(part => new THREE.Matrix4().compose(
-      new THREE.Vector3(origin.x + part.position[0] * SETTLEMENT_RENDER_SCALE, floor + part.position[1] * SETTLEMENT_RENDER_SCALE, origin.z + part.position[2] * SETTLEMENT_RENDER_SCALE),
-      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), part.rotation),
-      new THREE.Vector3(...part.scale.map(value => value * SETTLEMENT_RENDER_SCALE) as [number, number, number]),
-    ).elements);
-    assert.equal(actual.length, expected.length);
-    for (const matrix of expected) {
-      const index = actual.findIndex(candidate => candidate.every((value, offset) => Math.abs(value - matrix[offset]!) < .00001));
-      assert.ok(index >= 0);
-      actual.splice(index, 1);
-    }
+    meshes.dispose(); material.dispose();
   }
-  meshes.dispose(); material.dispose();
 });
 
 await test('full installed towns can reserve paid work without overflowing or hiding the new frame', () => {
