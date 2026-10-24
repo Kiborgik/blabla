@@ -1,32 +1,19 @@
 state revision: int
 state accepted: bool
-state legal_choice: bool
 state world_preserved: bool
 state memory_preserved: bool
-state deterministic: bool
-state replay_equal: bool
 state observer_read_only: bool
-state truthful_source: bool
 state concurrent_actions: int
 
-action decide()
 action duplicate_wake()
-action restart_controller()
 action inspect()
 action competing_wakes()
 
-when decide {
-    expect "policy-chooses-only-authoritative-actions": not after.accepted or after.legal_choice
-    expect "same-input-has-same-seeded-decision": after.deterministic
-    expect "decision-source-is-truthful": after.truthful_source
-}
 when duplicate_wake {
     expect "duplicate-wake-preserves-world": after.world_preserved
     expect "duplicate-wake-preserves-random-cursor": after.memory_preserved
 }
-when restart_controller {
-    expect "restart-preserves-exact-continuation": after.replay_equal
-}
+
 when inspect {
     expect "spectator-never-commands-the-world": after.observer_read_only and after.world_preserved
 }
@@ -35,19 +22,11 @@ when competing_wakes {
     expect "competing-wakes-do-not-double-act": after.concurrent_actions >= 0 and after.concurrent_actions <= 1
 }
 
-state immutable_world_identity: bool
-state generated_starts_viable: bool
-state distinct_coherent_geography: bool
 state checkpoint_write_allowed: bool
 state ephemeral_mode: bool
 
-action observe_generated_world()
 action persist_local_world()
 
-when observe_generated_world {
-    expect "fresh-geography-has-viable-distinct-starts": after.generated_starts_viable and after.distinct_coherent_geography
-    expect "current-world-keeps-immutable-genesis": after.immutable_world_identity
-}
 when persist_local_world {
     expect "ephemeral-world-never-writes-shared-checkpoint": not after.ephemeral_mode or not after.checkpoint_write_allowed
 }

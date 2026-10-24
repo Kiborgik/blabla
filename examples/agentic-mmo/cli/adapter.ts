@@ -9,6 +9,7 @@ import { SpectatorPolicyProbes } from './spectator-probes.ts';
 import { RecoveryProbes } from './recovery-probes.ts';
 import { LandTransportProbes } from './land-transport-probes.ts';
 import { PublicProjectProbes } from './public-project-probes.ts';
+import { GeneratedControllerProbes } from './generated-controller-probes.ts';
 
 export function createCampaignAdapter(
   store = new GameStore(resolve(process.cwd(), '.blabla/contract-world.json')),
@@ -20,6 +21,7 @@ export function createCampaignAdapter(
   const recovery = new RecoveryProbes();
   const projects = new PublicProjectProbes();
   const land = new LandTransportProbes();
+  const generated = new GeneratedControllerProbes();
   return new Adapter(
     () => {
       store.initialize(17, true);
@@ -29,6 +31,7 @@ export function createCampaignAdapter(
       recovery.reset();
       projects.reset();
       land.reset();
+      generated.reset();
     },
     () => {
       const campaign = store.snapshot();
@@ -57,9 +60,13 @@ export function createCampaignAdapter(
         ...recovery.observe(),
         ...projects.observe(),
         ...land.observe(),
+        ...generated.observe(),
       };
     },
   )
+    .action('observe_generated_world', 0, () => { generated.observeGeneratedWorld(); })
+    .action('decide', 0, () => { generated.decide(); })
+    .action('restart_controller', 0, () => { generated.restartController(); })
     .action('land_transport_fixture', 1, (args) => { land.prepare(args.integer(0)); })
     .action('eligible_land_consent_fixture', 0, () => { land.prepare(1); })
     .action('funded_due_land_fixture', 0, () => { land.prepare(2); })

@@ -1,0 +1,74 @@
+type GeneratedControllerSample {
+    seed: int, width: int, height: int, tile_count: int,
+    land_count: int, passable_count: int, connected_count: int,
+    land_fraction: float, connected_fraction: float, connected_capitals: int,
+    capital_count: int, minimum_spacing: int, viable_capitals: int,
+    coastal_capitals: int, neighborhood_kinds: int,
+    terrain_signature: string, start_signature: string,
+    origin_json: string, expected_origin_json: string,
+    world_digest: string, repeat_world_digest: string,
+    policy_version: string, release_id: string, genesis_errors: int
+}
+
+type GeneratedControllerDecision {
+    seat: int, action_digest: string, repeated_action_digest: string,
+    decision_digest: string, repeated_decision_digest: string,
+    input_world_before: string, input_world_after: string,
+    input_memory_before: string, input_memory_after: string,
+    policy_version: string, profile_id: string, explanation_profile_id: string,
+    source: string, cursor_before: int, cursor_after: int,
+    revision_before: int, revision_after: int,
+    accepted: bool, memory_valid: bool, legal_member: bool,
+    genesis_before: string, genesis_after: string
+}
+
+type GeneratedControllerContinuation {
+    step: int, left_revision: int, right_revision: int,
+    left_world_digest: string, right_world_digest: string,
+    left_memory_digest: string, right_memory_digest: string,
+    left_decision_digest: string, right_decision_digest: string,
+    left_envelope_digest: string, right_envelope_digest: string,
+    left_genesis: string, right_genesis: string
+}
+
+state gc_samples: [GeneratedControllerSample]
+state gc_decisions: [GeneratedControllerDecision]
+state gc_checkpoint_parse_accepted: bool
+state gc_checkpoint_steps: int
+state gc_restored_steps: int
+state gc_checkpoint_revision: int
+state gc_checkpoint_populated_memories: int
+state gc_checkpoint_envelope_digest: string
+state gc_restored_envelope_digest: string
+state gc_checkpoint_world_digest: string
+state gc_restored_world_digest: string
+state gc_checkpoint_memory_digest: string
+state gc_restored_memory_digest: string
+state gc_checkpoint_before_digest: string
+state gc_checkpoint_after_digest: string
+state gc_checkpoint_genesis: string
+state gc_continuation: [GeneratedControllerContinuation]
+
+action observe_generated_world()
+action decide()
+action restart_controller()
+
+when observe_generated_world {
+    expect "current-factory-exercises-three-distinct-seeds": count(after.gc_samples) == 3 and unique(after.gc_samples, s => s.seed) and any(after.gc_samples, s => s.seed == 73) and any(after.gc_samples, s => s.seed == 1701) and any(after.gc_samples, s => s.seed == 90210)
+    expect "raw-geography-has-connected-viable-starts": all(after.gc_samples, s => s.width == 18 and s.height == 24 and s.tile_count == 432 and s.land_count > 0 and s.passable_count > 0 and s.passable_count <= s.land_count and s.connected_count > 0 and s.connected_count <= s.passable_count and s.land_fraction >= 0.55 and s.land_fraction <= 0.8 and s.connected_fraction >= 0.7 and s.connected_fraction <= 1.0 and s.connected_capitals == 5 and s.capital_count == 5 and s.minimum_spacing >= 6 and s.viable_capitals == 5 and s.coastal_capitals > 0 and s.coastal_capitals < 5 and s.neighborhood_kinds >= 3)
+    expect "seeds-produce-distinct-terrain-and-starts": unique(after.gc_samples, s => s.terrain_signature) and unique(after.gc_samples, s => s.start_signature)
+    expect "current-world-keeps-immutable-fresh-genesis": all(after.gc_samples, s => s.genesis_errors == 0 and s.policy_version == "weighted-civilizations-v5-funded-landwork" and s.release_id == "settlement-productive-frontiers-1" and s.origin_json == s.expected_origin_json and s.world_digest == s.repeat_world_digest)
+}
+
+when decide {
+    expect "six-current-seats-actually-apply-a-legal-choice": count(after.gc_decisions) == 6 and unique(after.gc_decisions, d => d.seat) and all(after.gc_decisions, d => d.seat >= 0 and d.seat <= 5 and d.accepted and d.legal_member and d.revision_after == d.revision_before + 1)
+    expect "same-input-has-same-complete-seeded-decision": all(after.gc_decisions, d => d.action_digest == d.repeated_action_digest and d.decision_digest == d.repeated_decision_digest and d.input_world_before == d.input_world_after and d.input_memory_before == d.input_memory_after)
+    expect "accepted-current-memory-advances-once": all(after.gc_decisions, d => d.memory_valid and d.cursor_after == d.cursor_before + 1 and d.policy_version == "weighted-civilizations-v5-funded-landwork" and d.profile_id == d.explanation_profile_id)
+    expect "decision-source-and-genesis-are-truthful": all(after.gc_decisions, d => d.source == "local-procedural" and d.genesis_before == d.genesis_after)
+}
+
+when restart_controller {
+    expect "restart-restores-a-progressed-current-checkpoint": after.gc_checkpoint_parse_accepted and after.gc_checkpoint_steps == 2 and after.gc_restored_steps == 2 and after.gc_checkpoint_revision > 0 and after.gc_checkpoint_populated_memories == 6 and after.gc_checkpoint_envelope_digest == after.gc_restored_envelope_digest and after.gc_checkpoint_world_digest == after.gc_restored_world_digest and after.gc_checkpoint_memory_digest == after.gc_restored_memory_digest
+    expect "restart-preserves-complete-finite-continuation": count(after.gc_continuation) == 2 and unique(after.gc_continuation, c => c.step) and all(after.gc_continuation, c => c.step >= 3 and c.step <= 4 and c.left_revision > after.gc_checkpoint_revision and c.left_revision == c.right_revision and c.left_world_digest == c.right_world_digest and c.left_memory_digest == c.right_memory_digest and c.left_decision_digest == c.right_decision_digest and c.left_envelope_digest == c.right_envelope_digest and c.left_genesis == after.gc_checkpoint_genesis and c.right_genesis == after.gc_checkpoint_genesis)
+    expect "checkpoint-input-is-not-mutated-by-continuation": after.gc_checkpoint_before_digest == after.gc_checkpoint_after_digest
+}
