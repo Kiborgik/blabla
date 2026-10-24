@@ -491,6 +491,11 @@ This order uses existing guards, not a new readiness or acceptance authority.
    check inputs and settles known assignment changes and findings. Read
    `task show NAME` for the accepted model, consulted lenses, affected identities
    and pinned delivery goals before preparing final receipts.
+   Before opening a [combined review](#one-review-of-several-delivery-sources),
+   inspect the owner and relevant author tasks' delivery obligations with
+   `task show NAME`, then name the owner with `--review-of` and every additional
+   author with `--delivery-review-of`; shared goals or check inputs do not assign
+   sources.
 2. **Freeze source and current evidence.** Inspect
    [receipt-relative freshness](#inspect-receipt-relative-freshness). Run the
    declared check only when evidence is missing, failed or superseded; read its

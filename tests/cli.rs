@@ -30,6 +30,38 @@ fn help_describes_contract_commands() {
 }
 
 #[test]
+fn help_describes_explicit_delivery_review_sources() {
+    for (command, required) in [
+        (
+            "open",
+            [
+                "--delivery-review-of <NAME>",
+                "Additional delivery source this review is assigned to inspect",
+                "repeat for each source",
+                "Declare at opening; requires --review-of",
+            ],
+        ),
+        (
+            "delivery-review",
+            [
+                "--source <SOURCE>",
+                "An explicitly assigned delivery source",
+                "defaults to --review-of",
+                "Does not add review authority",
+            ],
+        ),
+    ] {
+        let output = run(&args(&["task", command, "--help"]));
+        assert!(output.status.success(), "{output:?}");
+        let text = String::from_utf8(output.stdout).unwrap();
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for expected in required {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+    }
+}
+
+#[test]
 fn check_reports_compiled_behavior_counts() {
     let output = run(&args(&["check", "examples/todo.bla", "--json"]));
     assert_eq!(output.status.code(), Some(0), "{output:?}");

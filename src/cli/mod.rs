@@ -287,7 +287,11 @@ enum TaskAction {
             help = "The distinct existing task this review inspects"
         )]
         review_of: Option<String>,
-        #[arg(long, value_name = "NAME")]
+        #[arg(
+            long,
+            value_name = "NAME",
+            help = "Additional delivery source this review is assigned to inspect; repeat for each source. Declare at opening; requires --review-of."
+        )]
         delivery_review_of: Vec<String>,
         #[arg(
             long,
@@ -338,7 +342,10 @@ enum TaskAction {
     #[command(about = "Independently review a delivery claim or resolve an exact closed residual")]
     DeliveryReview {
         name: String,
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "An explicitly assigned delivery source; defaults to --review-of. Does not add review authority."
+        )]
         source: Option<String>,
         goal: String,
         #[arg(long)]
