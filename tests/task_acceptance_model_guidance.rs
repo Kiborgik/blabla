@@ -1,7 +1,7 @@
 use blabla::project::task;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 use tempfile::TempDir;
 
@@ -22,11 +22,11 @@ fn success(temp: &TempDir, arguments: &[&str]) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-fn files(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
-    fn visit(root: &Path, path: &Path, result: &mut BTreeMap<String, Option<Vec<u8>>>) {
+fn files(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+    fn visit(root: &Path, path: &Path, result: &mut BTreeMap<PathBuf, Option<Vec<u8>>>) {
         for entry in std::fs::read_dir(path).unwrap() {
             let path = entry.unwrap().path();
-            let name = path.strip_prefix(root).unwrap().display().to_string();
+            let name = path.strip_prefix(root).unwrap().to_path_buf();
             if path.is_dir() {
                 result.insert(name, None);
                 visit(root, &path, result);
@@ -38,6 +38,54 @@ fn files(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
     let mut result = BTreeMap::new();
     visit(root, root, &mut result);
     result
+}
+
+#[test]
+fn snapshot_preserves_native_paths_and_detects_tree_changes() {
+    let temp = TempDir::new().unwrap();
+    let tasks = Path::new(".blabla").join("tasks");
+    let record = tasks.join("work.json");
+    let empty_dir = tasks.join("empty");
+    let empty_file = tasks.join("empty.json");
+    std::fs::create_dir_all(temp.path().join(&empty_dir)).unwrap();
+    std::fs::write(temp.path().join(&record), [0, 128, 255]).unwrap();
+    std::fs::write(temp.path().join(&empty_file), []).unwrap();
+    let before: BTreeMap<PathBuf, Option<Vec<u8>>> = files(temp.path());
+    assert_eq!(
+        before,
+        BTreeMap::from([
+            (PathBuf::from(".blabla"), None),
+            (PathBuf::from(".blabla/tasks"), None),
+            (PathBuf::from(".blabla/tasks/empty"), None),
+            (PathBuf::from(".blabla/tasks/empty.json"), Some(vec![])),
+            (
+                PathBuf::from(".blabla/tasks/work.json"),
+                Some(vec![0, 128, 255])
+            ),
+        ])
+    );
+    assert_eq!(before[&record], Some(vec![0, 128, 255]));
+
+    std::fs::write(temp.path().join(&record), [0, 128, 254]).unwrap();
+    assert_ne!(files(temp.path()), before);
+    std::fs::write(temp.path().join(&record), [0, 128, 255]).unwrap();
+    assert_eq!(files(temp.path()), before);
+
+    std::fs::remove_dir(temp.path().join(&empty_dir)).unwrap();
+    assert_ne!(files(temp.path()), before);
+    std::fs::create_dir(temp.path().join(&empty_dir)).unwrap();
+    assert_eq!(files(temp.path()), before);
+
+    std::fs::remove_file(temp.path().join(&empty_file)).unwrap();
+    assert_ne!(files(temp.path()), before);
+    std::fs::create_dir(temp.path().join(&empty_file)).unwrap();
+    assert_ne!(files(temp.path()), before);
+    std::fs::remove_dir(temp.path().join(&empty_file)).unwrap();
+    std::fs::write(temp.path().join(&empty_file), []).unwrap();
+    assert_eq!(files(temp.path()), before);
+
+    std::fs::write(temp.path().join(tasks).join("extra.json"), []).unwrap();
+    assert_ne!(files(temp.path()), before);
 }
 
 fn fixture(process: Option<&str>) -> TempDir {
@@ -115,10 +163,8 @@ fn compound_model_warns_without_changing_acceptance() {
         record.evidence.is_empty() && record.exceptions.is_empty() && record.challenged.is_none()
     );
     let mut after = files(temp.path());
-    after.insert(
-        ".blabla/tasks/work.json".to_owned(),
-        before[".blabla/tasks/work.json"].clone(),
-    );
+    let task_path = Path::new(".blabla").join("tasks").join("work.json");
+    after.insert(task_path.clone(), before[&task_path].clone());
     assert_eq!(after, before);
 }
 
