@@ -1,0 +1,40 @@
+state same_town: bool
+state exact_campus: bool
+state adjacent_high_ground: bool
+state paid_once: bool
+state completed: bool
+state no_completion_output: bool
+state credits_paid: bool
+state residents_allocated: bool
+state science_made: bool
+state blocked: bool
+state no_payment_or_output: bool
+state refused: bool
+state no_effects: bool
+state replay_exact: bool
+
+action start_observatory()
+action complete_observatory()
+action work_observatory()
+action block_observatory()
+action refuse_observatory_action()
+action replay_observatory_history()
+
+when start_observatory {
+    expect "exact-own-campus-high-ground-start": after.same_town and after.exact_campus and after.adjacent_high_ground and after.paid_once
+}
+when complete_observatory {
+    expect "completion-before-later-observatory-output": after.completed and after.no_completion_output
+}
+when work_observatory {
+    expect "paid-and-staffed-science": after.credits_paid and after.residents_allocated and after.science_made
+}
+when block_observatory {
+    expect "blocked-operation-preserves-inputs": after.blocked and after.no_payment_or_output
+}
+when refuse_observatory_action {
+    expect "invalid-observatory-choice-has-no-effects": after.refused and after.no_effects
+}
+when replay_observatory_history {
+    expect "observatory-history-replays-exactly": after.replay_exact
+}

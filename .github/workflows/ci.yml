@@ -34,6 +34,8 @@ jobs:
           cache-on-failure: "true"
       - uses: taiki-e/install-action@nextest
       - name: Product gate
+        env:
+          BLABLA_SOURCE_CLI_DIAGNOSTICS: ${{ matrix.os == 'windows-latest' && '1' || '' }}
         run: python experiments/gate.py --tag ci --out ci-artifacts/gate
       - name: Hello contract check
         run: cargo run --quiet -- check examples/hello.bla

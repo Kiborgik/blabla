@@ -425,3 +425,94 @@ fn parameterless_candidate_preserves_rng_and_future_parameterized_calls() {
     }
     assert_eq!(state, original);
 }
+
+fn assert_numeric_affinity_beats_literals(ty: &str, literal: &str, observed: Value) {
+    for relation in [
+        "before.observed == input.proposed",
+        "input.proposed == before.observed",
+    ] {
+        let source = format!(
+            "state observed: {ty}\naction exercise(proposed: {ty})\nwhen exercise {{ expect \"match\": {relation} or after.observed == before.observed }}\nalways \"literal\" {{ observed >= {literal} }}"
+        );
+        let contract = crate::semantics::compile("numeric-affinity.bla", &source).unwrap();
+        let guidance = Guidance::new(&contract);
+        let seed = 0u64.wrapping_sub(0x9e3779b97f4a7c15);
+        assert_eq!(
+            SplitMix64::new(seed).sample_below_rejecting_modulo_bias(10),
+            0
+        );
+        let call = guidance
+            .candidate(
+                &contract.actions[0],
+                &json!({"observed": observed}),
+                &mut SplitMix64::new(seed),
+            )
+            .unwrap();
+        assert_eq!(call.args, vec![observed.clone()], "{relation}");
+    }
+}
+
+#[test]
+fn numeric_field_affinity_beats_literals_at_category_zero_for_int() {
+    assert_numeric_affinity_beats_literals("int", "0", json!(431));
+}
+
+#[test]
+fn numeric_field_affinity_beats_literals_at_category_zero_for_float() {
+    assert_numeric_affinity_beats_literals("float", "0.0", float(431.25));
+}
+
+#[test]
+fn numeric_affinity_preserves_exact_literal_and_generic_lanes() {
+    for (ty, observed, literal) in [
+        (Type::Int, json!(431), json!(9001)),
+        (Type::Float, float(431.25), float(9001.25)),
+    ] {
+        for matching in [false, true] {
+            for has_literal in [false, true] {
+                let name = if matching { "observed" } else { "unrelated" };
+                let contract = contract(
+                    vec![field("observed", ty.clone())],
+                    vec![field(name, ty.clone())],
+                );
+                let mut guidance = Guidance::new(&contract);
+                if has_literal {
+                    guidance.literals.push((ty.clone(), literal.clone()));
+                }
+                let observation = json!({"observed": observed});
+                let original = observation.clone();
+                let mut pools = CandidatePools::default();
+                collect_record(&observation, &contract.state, &mut pools);
+                let mut actual = SplitMix64::new(0);
+                let mut expected = SplitMix64::new(0);
+                let mut categories = [0; 10];
+                for _ in 0..256 {
+                    let category = expected.sample_below_rejecting_modulo_bias(10);
+                    categories[category] += 1;
+                    let value = match (matching, has_literal, category) {
+                        (true, _, 0..=4) => {
+                            expected.sample_below_rejecting_modulo_bias(1);
+                            observed.clone()
+                        }
+                        (_, true, 0..=5) => {
+                            expected.sample_below_rejecting_modulo_bias(1);
+                            literal.clone()
+                        }
+                        _ => generate_value(&ty, &pools, &mut expected).unwrap(),
+                    };
+                    let call = guidance
+                        .candidate(&contract.actions[0], &observation, &mut actual)
+                        .unwrap();
+                    assert_eq!(
+                        call.args,
+                        vec![value],
+                        "{ty:?} matching={matching} literal={has_literal} category={category}"
+                    );
+                    assert_eq!(actual.state, expected.state);
+                }
+                assert!(categories.iter().all(|count| *count > 0));
+                assert_eq!(observation, original);
+            }
+        }
+    }
+}

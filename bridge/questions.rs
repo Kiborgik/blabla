@@ -80,6 +80,8 @@ impl Questions {
         });
         let tree = BTreeMap::from([(DELIVERABLE.to_owned(), "asked-1".to_owned())]);
         task.evidence.push(Evidence {
+            member_manifest: None,
+            reuse: None,
             identity: task::declared_check(&task),
             acceptance_epoch: Some(task.acceptance_epoch),
             check: CHECK.to_owned(),

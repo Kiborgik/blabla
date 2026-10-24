@@ -1,0 +1,27 @@
+state role_fixture_initialized: bool
+state role_project_configured: bool
+state role_configuration_valid: bool
+state requested_role_registered: bool
+state task_open_succeeded: bool
+state task_record_unchanged: bool
+state role_free_bootstrap: bool
+state declared_policy_retained: bool
+
+action configured_role_fixture(kind: int)
+action open_requested_role()
+action open_registered_role()
+action open_bootstrap_role()
+
+when configured_role_fixture {
+    expect "role-fixture-establishes-real-configuration": after.role_fixture_initialized
+}
+when open_requested_role {
+    expect "broken-registered-process-never-becomes-bootstrap": not before.role_fixture_initialized or before.role_configuration_valid or (not after.task_open_succeeded and after.task_record_unchanged)
+    expect "configured-project-refuses-unknown-role": not (before.role_fixture_initialized and before.role_project_configured and not before.requested_role_registered) or (not after.task_open_succeeded and after.task_record_unchanged)
+}
+when open_registered_role {
+    expect "registered-role-remains-usable": after.task_open_succeeded and after.declared_policy_retained
+}
+when open_bootstrap_role {
+    expect "explicit-role-free-bootstrap-remains-supported": not before.role_free_bootstrap or after.task_open_succeeded
+}

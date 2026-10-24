@@ -137,6 +137,8 @@ impl Attestation {
         self.tree
             .insert(DELIVERABLE.to_owned(), format!("deliverable-{unix}"));
         self.task.evidence.push(Evidence {
+            member_manifest: None,
+            reuse: None,
             identity: task::declared_check(&self.task),
             acceptance_epoch: Some(self.task.acceptance_epoch),
             check: CHECK.to_owned(),

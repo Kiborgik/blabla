@@ -501,6 +501,8 @@ fn a_second_goal_registration_and_a_group_named_goal_are_refused() {
 
 fn declared(state: &str) -> Goal {
     Goal {
+        delivery: None,
+        applies_to: Vec::new(),
         name: "ship".to_owned(),
         serves: Vec::new(),
         statement: "ship it".to_owned(),
@@ -1002,4 +1004,33 @@ fn finish_carries_the_same_standing_challenge_with_or_without_goals() {
         "{finished}"
     );
     assert_eq!(finished["challenge"], bare["challenge"]);
+}
+
+#[test]
+fn required_delivery_applies_to_is_a_strict_hyphenated_goal_field() {
+    let base = "goal \"ship\" { statement \"Observed outcome\" expect [\"contract::arch\"] state \"active\" delivery \"required\" applies-to [\"system::app\"] }";
+    let blocks = blabla::memory::syntax::parse("goals.bla", base).unwrap();
+    let parsed = goal::build(&blocks).unwrap();
+    assert_eq!(
+        parsed.goals[0].delivery,
+        Some(goal::DeliveryRequirement::Required)
+    );
+    assert_eq!(parsed.goals[0].applies_to, ["system::app"]);
+    for invalid in [
+        base.replace("applies-to", "applies-other"),
+        base.replace("applies-to", "applies_to"),
+        base.replace("delivery \"required\"", "delivery \"optional\""),
+        base.replace("[\"system::app\"]", "\"system::app\""),
+        base.replace(
+            "applies-to [\"system::app\"]",
+            "applies-to [\"system::app\"] applies-to []",
+        ),
+    ] {
+        assert!(
+            blabla::memory::syntax::parse("goals.bla", &invalid)
+                .and_then(|blocks| goal::build(&blocks))
+                .is_err(),
+            "{invalid}"
+        );
+    }
 }

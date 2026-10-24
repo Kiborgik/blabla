@@ -1,0 +1,15 @@
+state receipt_read_mutated: bool
+state receipt_read_authorized: bool
+state receipt_private_fields_exposed: bool
+state receipt_original_revision: bool
+state receipt_absence_not_rejection: bool
+
+action receipt_fixture(kind: int)
+action read_action_receipt()
+when read_action_receipt {
+    expect "receipt-read-has-no-world-effects": not after.receipt_read_mutated
+    expect "receipt-read-keeps-owner-boundary": after.receipt_read_authorized
+    expect "receipt-read-never-exposes-private-input": not after.receipt_private_fields_exposed
+    expect "accepted-receipt-retains-committed-revision": after.receipt_original_revision
+    expect "missing-receipt-is-not-a-denial-verdict": after.receipt_absence_not_rejection
+}

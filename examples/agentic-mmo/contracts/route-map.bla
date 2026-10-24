@@ -1,0 +1,31 @@
+state route_map_valid_quote: bool
+state route_map_has_quote: bool
+state route_map_within_budget: bool
+state route_map_has_geometry: bool
+state route_map_exact_vertices: bool
+state route_map_schematic: bool
+state route_map_unavailable_explained: bool
+state route_map_terms_unchanged: bool
+state route_map_history_unchanged: bool
+state route_map_world_unchanged: bool
+state route_map_renderer_parity: bool
+state route_map_budget_bounded: bool
+state route_map_all_identities_reachable: bool
+
+action route_map_fixture(kind: int)
+action project_recorded_route()
+action compare_route_renderers()
+action allocate_route_map_budget()
+
+when project_recorded_route {
+    expect "eligible-recorded-path-keeps-every-turn": not (before.route_map_valid_quote and before.route_map_within_budget) or (after.route_map_has_geometry and after.route_map_exact_vertices and not after.route_map_schematic)
+    expect "older-links-remain-explicitly-schematic": before.route_map_has_quote or after.route_map_schematic
+    expect "invalid-quotes-never-invent-a-shortcut": not before.route_map_has_quote or before.route_map_valid_quote or (not after.route_map_has_geometry and not after.route_map_schematic and after.route_map_unavailable_explained)
+    expect "projection-keeps-terms-history-and-world": after.route_map_terms_unchanged and after.route_map_history_unchanged and after.route_map_world_unchanged
+}
+when compare_route_renderers {
+    expect "both-renderers-use-the-same-recorded-vertices": after.route_map_renderer_parity
+}
+when allocate_route_map_budget {
+    expect "bounded-map-detail-retains-complete-inspection": after.route_map_budget_bounded and after.route_map_all_identities_reachable
+}

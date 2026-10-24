@@ -1,0 +1,38 @@
+state resident_feature_active: bool
+state resident_recipe_eligible: bool
+state resident_recipe_operated: bool
+state resident_paid_exactly: bool
+state resident_allocated_exactly: bool
+state resident_blocked_atomic: bool
+state resident_local_capacity_preserved: bool
+state resident_population_conserved: bool
+state resident_opening_only: bool
+state resident_old_release_preserved: bool
+state resident_receipt_truthful: bool
+state resident_observation_exact: bool
+
+action resident_fixture(kind: int)
+action operate_resident_recipes()
+action found_from_supported_city()
+action pause_and_operate()
+action compare_historical_operation()
+action observe_resident_capacity()
+
+when operate_resident_recipes {
+    expect "funded-and-supported-recipe-operates": not (before.resident_feature_active and before.resident_recipe_eligible) or after.resident_recipe_operated
+    expect "resources-and-residents-allocate-together": after.resident_paid_exactly and after.resident_allocated_exactly and after.resident_blocked_atomic
+    expect "capacity-is-local-and-opening-only": after.resident_local_capacity_preserved and after.resident_opening_only
+    expect "receipts-distinguish-allocation-from-payment": after.resident_receipt_truthful
+}
+when found_from_supported_city {
+    expect "founding-conserves-people-and-changes-later-support": after.resident_population_conserved and after.resident_opening_only and after.resident_local_capacity_preserved
+}
+when pause_and_operate {
+    expect "paused-recipe-reserves-neither-budget": after.resident_blocked_atomic and after.resident_local_capacity_preserved
+}
+when compare_historical_operation {
+    expect "old-releases-retain-resource-only-production": after.resident_old_release_preserved
+}
+when observe_resident_capacity {
+    expect "factored-capacity-and-historical-results-stay-distinct": after.resident_observation_exact and after.resident_receipt_truthful
+}

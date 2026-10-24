@@ -1,0 +1,33 @@
+state project_committed: bool
+state project_completed: bool
+state project_last_valid: bool
+state project_due: bool
+state project_paid_units: int
+state project_route_damage_units: int
+state project_delivery_count: int
+state project_refusal_unchanged: bool
+state project_atomic_contributions: bool
+state project_zero_payment_without_completion: bool
+state project_clamped_repair: bool
+state project_shipments_preserved: bool
+
+action project_fixture(kind: int)
+action project_consent()
+action project_cancel()
+action project_due_beat()
+when project_consent {
+    expect "consent-creates-no-immediate-payment": after.project_paid_units == 0
+    expect "consent-creates-no-immediate-repair": after.project_route_damage_units == before.project_route_damage_units
+    expect "consent-does-not-invent-shipment": after.project_delivery_count == before.project_delivery_count
+}
+when project_cancel {
+    expect "cancellation-spends-no-pledged-stock": after.project_paid_units == 0
+    expect "valid-cancellation-ends-commitment": not after.project_last_valid or not after.project_committed
+}
+when project_due_beat {
+    expect "completion-needs-due-commitment": not after.project_completed or before.project_committed and before.project_due
+    expect "due-contributions-are-both-complete-or-neither": after.project_atomic_contributions
+    expect "unfulfilled-project-spends-nothing": after.project_zero_payment_without_completion
+    expect "completed-project-clamps-only-actual-route-damage": after.project_clamped_repair
+    expect "project-resolution-preserves-shipment-history": after.project_shipments_preserved
+}

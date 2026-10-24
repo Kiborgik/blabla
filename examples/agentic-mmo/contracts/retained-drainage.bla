@@ -1,0 +1,11 @@
+type DrainageSample {
+    seed: int, land: int, nodes: int, bad_edges: int, bad_outlets: int,
+    stale_basis: int, longest_course: int, adjacent_starts: int, projection_errors: int,
+    world_before: string, world_after: string
+}
+state drainage_samples: [DrainageSample]
+action observe_retained_drainage()
+when observe_retained_drainage {
+    expect "retained-drainage-is-downhill-outlet-connected-and-current": count(after.drainage_samples) == 3 and unique(after.drainage_samples, s => s.seed) and all(after.drainage_samples, s => (s.seed == 73 or s.seed == 1701 or s.seed == 90210) and s.land > 0 and s.nodes == s.land and s.bad_edges == 0 and s.bad_outlets == 0 and s.stale_basis == 0 and s.longest_course >= 4 and s.adjacent_starts >= 1)
+    expect "drainage-projection-is-exact-and-read-only": all(after.drainage_samples, s => s.projection_errors == 0 and s.world_before == s.world_after)
+}

@@ -2,9 +2,11 @@ use super::ignore::Ignore;
 use super::snapshot;
 use super::status::RECORD_DIRECTORY;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+pub mod delivery;
+pub mod effort;
 pub mod revision;
 pub mod store;
 
@@ -575,6 +577,37 @@ pub fn review_revision(
     identities: BTreeMap<String, String>,
 ) -> RelevantRevision {
     let mut revision = relevant_revision(&work_under_review(reviewed), tree, identities);
+    if reviewed.intent_disposition_required || !reviewed.intent_dispositions.is_empty() {
+        let mut fingerprint = super::Fnv::new();
+        fingerprint.write_str(&revision.task_digest);
+        fingerprint.write_str(
+            &serde_json::to_string(&(
+                reviewed.intent_disposition_required,
+                &reviewed.intent_identities,
+                &reviewed.intent_dispositions,
+            ))
+            .expect("intent dispositions serialize"),
+        );
+        revision.task_digest = fingerprint.finish();
+    }
+    if reviewed.goal_reflection_required || reviewed.goal_reflection.is_some() {
+        let mut fingerprint = super::Fnv::new();
+        fingerprint.write_str(&revision.task_digest);
+        fingerprint.write_str(
+            &serde_json::to_string(&(reviewed.goal_reflection_required, &reviewed.goal_reflection))
+                .expect("goal reflection serializes"),
+        );
+        revision.task_digest = fingerprint.finish();
+    }
+    if !reviewed.delivery_obligations.is_empty() || !reviewed.delivery_reviews.is_empty() {
+        let mut fingerprint = super::Fnv::new();
+        fingerprint.write_str(&revision.task_digest);
+        fingerprint.write_str(
+            &serde_json::to_string(&(&reviewed.delivery_obligations, &reviewed.delivery_reviews))
+                .expect("delivery records serialize"),
+        );
+        revision.task_digest = fingerprint.finish();
+    }
     for input in &review.check_inputs {
         revision
             .paths
@@ -592,10 +625,267 @@ pub fn review_current(
     review.accepted.is_some()
         && reviewed.state != "withdrawn"
         && review.name != reviewed.name
-        && review.review_of.as_ref().is_some_and(|target| {
-            target.task == reviewed.name
-                && target.revision == review_revision(review, reviewed, tree, identities)
+        && review
+            .review_of
+            .iter()
+            .chain(&review.delivery_review_targets)
+            .any(|target| {
+                target.task == reviewed.name
+                    && target.revision
+                        == review_revision(review, reviewed, tree, identities.clone())
+            })
+}
+
+pub const INTENT_DISPOSITIONS: [&str; 2] = ["updated", "confirmed-unchanged"];
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IntentDisposition {
+    pub identity: String,
+    pub status: String,
+    pub reason: String,
+    pub model: String,
+    pub unix: u64,
+    pub revision: RelevantRevision,
+}
+
+pub fn intent_revision(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    identities: BTreeMap<String, String>,
+) -> RelevantRevision {
+    let mut revision = relevant_revision(task, tree, identities);
+    for path in &task.scope {
+        revision
+            .paths
+            .insert(path.clone(), observed_digest(tree, path));
+    }
+    revision
+}
+
+pub fn disposition_current(task: &Task, identity: &str, revision: &RelevantRevision) -> bool {
+    task.intent_dispositions
+        .iter()
+        .rev()
+        .find(|entry| entry.identity == identity)
+        .is_some_and(|entry| {
+            entry.revision == *revision
+                && task
+                    .accepted
+                    .as_ref()
+                    .is_some_and(|accepted| accepted.model == entry.model)
+                && INTENT_DISPOSITIONS.contains(&entry.status.as_str())
+                && !entry.reason.trim().is_empty()
         })
+}
+
+pub fn record_disposition(task: &mut Task, disposition: IntentDisposition) -> Result<(), String> {
+    write_disposition(task, disposition, "accepted")
+}
+
+pub fn refresh_ready_disposition(
+    task: &mut Task,
+    disposition: IntentDisposition,
+) -> Result<(), String> {
+    write_disposition(task, disposition, "ready")
+}
+
+fn write_disposition(
+    task: &mut Task,
+    disposition: IntentDisposition,
+    state: &str,
+) -> Result<(), String> {
+    if !task.intent_disposition_required {
+        return Err("this task did not opt into required affected-intent disposition".to_owned());
+    }
+    if task.state != state
+        || !task
+            .accepted
+            .as_ref()
+            .is_some_and(|accepted| accepted.model == disposition.model)
+    {
+        return Err(format!(
+            "an intent disposition must be recorded by the task's accepted model while it is {}",
+            state.to_uppercase()
+        ));
+    }
+    if !disposition
+        .revision
+        .identities
+        .contains_key(&disposition.identity)
+    {
+        return Err(format!(
+            "{} is not an affected intent identity of this task",
+            disposition.identity
+        ));
+    }
+    if !INTENT_DISPOSITIONS.contains(&disposition.status.as_str()) {
+        return Err("intent status must be updated or confirmed-unchanged".to_owned());
+    }
+    if disposition.reason.trim().is_empty() {
+        return Err("an intent disposition needs a concrete reason naming relevant implementation or evidence".to_owned());
+    }
+    task.intent_identities
+        .extend(disposition.revision.identities.keys().cloned());
+    task.intent_dispositions.push(disposition);
+    task.challenged = None;
+    Ok(())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum GoalReflectionOutcome {
+    Successor {
+        recommendation: String,
+        owner: String,
+        dependencies: Vec<String>,
+        observable_outcome: String,
+    },
+    Blocked {
+        blocker: String,
+        owner: String,
+        unblock_when: String,
+    },
+    CompletionRecommended,
+    NoUsefulSuccessor,
+}
+
+impl GoalReflectionOutcome {
+    pub fn word(&self) -> &'static str {
+        match self {
+            Self::Successor { .. } => "successor",
+            Self::Blocked { .. } => "blocked",
+            Self::CompletionRecommended => "completion-recommended",
+            Self::NoUsefulSuccessor => "no-useful-successor",
+        }
+    }
+
+    fn complete(&self) -> bool {
+        let nonblank = |value: &str| !value.trim().is_empty();
+        match self {
+            Self::Successor {
+                recommendation,
+                owner,
+                dependencies,
+                observable_outcome,
+            } => {
+                nonblank(recommendation)
+                    && nonblank(owner)
+                    && nonblank(observable_outcome)
+                    && dependencies.iter().all(|value| nonblank(value))
+            }
+            Self::Blocked {
+                blocker,
+                owner,
+                unblock_when,
+            } => nonblank(blocker) && nonblank(owner) && nonblank(unblock_when),
+            Self::CompletionRecommended | Self::NoUsefulSuccessor => true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GoalReflection {
+    pub decision: String,
+    pub observation: String,
+    pub evidence_refs: Vec<String>,
+    pub reason: String,
+    pub outcome: GoalReflectionOutcome,
+    pub model: String,
+    pub unix: u64,
+    pub revision: RelevantRevision,
+}
+
+impl GoalReflection {
+    fn complete(&self) -> bool {
+        [&self.decision, &self.observation, &self.reason]
+            .iter()
+            .all(|value| !value.trim().is_empty())
+            && !self.evidence_refs.is_empty()
+            && self
+                .evidence_refs
+                .iter()
+                .all(|value| !value.trim().is_empty())
+            && self.outcome.complete()
+    }
+}
+
+pub fn goal_reflection_revision(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    identities: BTreeMap<String, String>,
+) -> RelevantRevision {
+    let mut revision = intent_revision(task, tree, identities);
+    let mut fingerprint = super::Fnv::new();
+    fingerprint.write_str(&revision.task_digest);
+    fingerprint.write_str(
+        &serde_json::to_string(&(
+            task.goal_reflection_required,
+            latest_evidence(task),
+            task.intent_disposition_required,
+            &task.intent_dispositions,
+        ))
+        .expect("reflection inputs serialize"),
+    );
+    revision.task_digest = fingerprint.finish();
+    revision
+}
+
+pub fn goal_reflection_current(task: &Task, revision: &RelevantRevision) -> bool {
+    task.goal
+        .as_ref()
+        .is_some_and(|goal| !goal.trim().is_empty())
+        && task.goal_reflection.as_ref().is_some_and(|reflection| {
+            reflection.revision == *revision
+                && reflection.complete()
+                && task
+                    .accepted
+                    .as_ref()
+                    .is_some_and(|accepted| accepted.model == reflection.model)
+        })
+}
+
+pub fn record_goal_reflection(task: &mut Task, reflection: GoalReflection) -> Result<(), String> {
+    write_goal_reflection(task, reflection, "accepted")
+}
+
+pub fn refresh_ready_goal_reflection(
+    task: &mut Task,
+    reflection: GoalReflection,
+) -> Result<(), String> {
+    write_goal_reflection(task, reflection, "ready")
+}
+
+fn write_goal_reflection(
+    task: &mut Task,
+    reflection: GoalReflection,
+    state: &str,
+) -> Result<(), String> {
+    if !task.goal_reflection_required || task.goal.is_none() {
+        return Err("goal reflection requires an opted-in task with a named goal".to_owned());
+    }
+    if task.state != state
+        || !task
+            .accepted
+            .as_ref()
+            .is_some_and(|accepted| accepted.model == reflection.model)
+    {
+        return Err(format!(
+            "a goal reflection must be recorded by the task's accepted model while it is {}",
+            state.to_uppercase()
+        ));
+    }
+    if !reflection.complete() {
+        return Err("a goal reflection needs a concrete decision, observation, evidence reference, causal reason and every field of its outcome".to_owned());
+    }
+    if state == "ready" {
+        task.intent_identities
+            .extend(reflection.revision.identities.keys().cloned());
+    }
+    task.goal_reflection = Some(reflection);
+    task.challenged = None;
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -645,7 +935,21 @@ pub fn evidence_matches(task: &Task, evidence: &Evidence) -> bool {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvidenceReuse {
+    pub original_index: usize,
+    pub original_digest: String,
+    pub original_epoch: u64,
+    pub original_log_digest: String,
+    pub model: String,
+    pub reason: String,
+    pub unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Evidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reuse: Option<EvidenceReuse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<CheckIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -661,6 +965,167 @@ pub struct Evidence {
     pub command: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_member_manifest"
+    )]
+    pub member_manifest: Option<serde_json::Value>,
+}
+
+fn deserialize_member_manifest<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
+}
+
+const EVIDENCE_MEMBER_BASIS: &str = "tracked-input-snapshot-v1";
+const EVIDENCE_MEMBER_LIMIT: usize = 8192;
+const EVIDENCE_MEMBER_PATH_BYTES: usize = 4096;
+const EVIDENCE_MEMBER_PAYLOAD_BYTES: usize = 1_048_576;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvidenceMemberEnvelope {
+    basis: String,
+    capture: String,
+    availability: String,
+    member_count: usize,
+    #[serde(default)]
+    members: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct EvidenceMemberBaseline {
+    pub members: BTreeMap<String, String>,
+    pub capture: &'static str,
+}
+
+fn member_payload_fits(value: &serde_json::Value) -> bool {
+    struct Budget(usize);
+    impl std::io::Write for Budget {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self
+                .0
+                .checked_sub(bytes.len())
+                .ok_or_else(|| std::io::Error::other("member payload limit"))?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    serde_json::to_writer(Budget(EVIDENCE_MEMBER_PAYLOAD_BYTES), value).is_ok()
+}
+
+fn valid_member(path: &str, digest: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\0')
+        && !Path::new(path).is_absolute()
+        && Path::new(path)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+        && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
+        && digest.len() == 16
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+pub fn capture_evidence_members(
+    inputs: &BTreeMap<String, Option<String>>,
+    tree: &BTreeMap<String, String>,
+    capture: &str,
+) -> serde_json::Value {
+    let selected = || {
+        tree.iter()
+            .filter(|(path, _)| inputs.keys().any(|root| covers(root, path)))
+    };
+    let member_count = selected().count();
+    let unavailable = |reason: &str| {
+        serde_json::json!({
+            "basis": EVIDENCE_MEMBER_BASIS, "capture": capture,
+            "availability": "unavailable", "reason": reason, "member_count": member_count
+        })
+    };
+    if member_count > EVIDENCE_MEMBER_LIMIT {
+        return unavailable("member-limit");
+    }
+    if selected().any(|(path, _)| path.len() > EVIDENCE_MEMBER_PATH_BYTES) {
+        return unavailable("path-limit");
+    }
+    if selected().any(|(path, digest)| !valid_member(path, digest)) {
+        return unavailable("invalid-member");
+    }
+    let members: BTreeMap<_, _> = selected().collect();
+    let complete = serde_json::json!({
+        "basis": EVIDENCE_MEMBER_BASIS, "capture": capture,
+        "availability": "complete", "member_count": member_count, "members": members
+    });
+    if member_payload_fits(&complete) {
+        complete
+    } else {
+        unavailable("byte-limit")
+    }
+}
+
+pub fn evidence_member_baseline(
+    evidence: &Evidence,
+) -> Result<EvidenceMemberBaseline, &'static str> {
+    let raw = evidence.member_manifest.as_ref().ok_or("legacy-absent")?;
+    if !member_payload_fits(raw) {
+        return Err("byte-limit");
+    }
+    let envelope: EvidenceMemberEnvelope =
+        serde_json::from_value(raw.clone()).map_err(|_| "malformed-manifest")?;
+    if envelope.basis != EVIDENCE_MEMBER_BASIS {
+        return Err("unsupported-basis");
+    }
+    let capture = match envelope.capture.as_str() {
+        "execution-start" => "execution-start",
+        "manual-record" => "manual-record",
+        _ => return Err("unsupported-capture"),
+    };
+    if envelope.availability == "unavailable" && envelope.members.is_none() {
+        return Err(match envelope.reason.as_deref() {
+            Some("member-limit") => "member-limit",
+            Some("path-limit") => "path-limit",
+            Some("byte-limit") => "byte-limit",
+            Some("invalid-member") => "invalid-member",
+            _ => "malformed-manifest",
+        });
+    }
+    if envelope.availability != "complete" || envelope.reason.is_some() {
+        return Err("malformed-manifest");
+    }
+    let members = envelope.members.ok_or("malformed-manifest")?;
+    if members.len() > EVIDENCE_MEMBER_LIMIT {
+        return Err("member-limit");
+    }
+    if members.len() != envelope.member_count {
+        return Err("member-count-mismatch");
+    }
+    for (path, digest) in &members {
+        if path.len() > EVIDENCE_MEMBER_PATH_BYTES {
+            return Err("path-limit");
+        }
+        if !valid_member(path, digest) {
+            return Err("invalid-member");
+        }
+        if !evidence.inputs.keys().any(|root| covers(root, path)) {
+            return Err("member-outside-inputs");
+        }
+    }
+    if evidence
+        .inputs
+        .iter()
+        .any(|(root, digest)| observed_digest(&members, root) != *digest)
+    {
+        return Err("input-digest-mismatch");
+    }
+    Ok(EvidenceMemberBaseline { members, capture })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -703,8 +1168,11 @@ pub struct Attribution {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Resolution {
+    pub delivery_claims_pending: Vec<String>,
     pub knowledge_fingerprints: BTreeMap<String, String>,
     pub review_current: Option<bool>,
+    pub intent_disposition_pending: Option<Vec<String>>,
+    pub goal_reflection_current: Option<bool>,
     pub models: Vec<String>,
     pub lenses: Vec<String>,
     pub requirements: Vec<String>,
@@ -728,8 +1196,11 @@ pub fn resolve(
         .map(|(identity, _)| identity.clone())
         .collect();
     Resolution {
+        delivery_claims_pending: Vec::new(),
         knowledge_fingerprints: BTreeMap::new(),
         review_current: None,
+        intent_disposition_pending: None,
+        goal_reflection_current: None,
         models: models.to_vec(),
         lenses: lenses.to_vec(),
         requirements,
@@ -859,11 +1330,13 @@ pub fn apply(task: &mut Task, to: &str) -> bool {
 
 fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String {
     let mut record = task.clone();
+    record.work_intervals.clear();
     record.challenged = None;
     record.state.clear();
     record.closed_unix = None;
     record.closed_paths.clear();
     record.result = None;
+    record.result_basis = None;
     record.build = None;
     record
         .findings
@@ -947,7 +1420,7 @@ pub fn record_challenge(
     blockers: usize,
     unix: u64,
 ) -> bool {
-    if task.state != "accepted" {
+    if !matches!(task.state.as_str(), "accepted" | "ready") {
         return false;
     }
     task.challenged = None;
@@ -1103,6 +1576,7 @@ pub fn withdraw(
     });
     task.state = "withdrawn".to_owned();
     task.result = None;
+    task.result_basis = None;
     task.closed_unix = None;
     task.closed_paths.clear();
     task.challenged = None;
@@ -1474,10 +1948,40 @@ pub fn validate_scope(
     Ok(scopes)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ResultBasis {
+    Bounded {
+        reason: String,
+        project_state: String,
+        prior_run_id: String,
+        implementation_fingerprint: String,
+        revision: RelevantRevision,
+    },
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Task {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub work_intervals: Vec<effort::Interval>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub delivery_obligations: BTreeMap<String, delivery::Obligation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delivery_reviews: Vec<delivery::Review>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub goal_reflection_required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal_reflection: Option<GoalReflection>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub intent_disposition_required: bool,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub intent_identities: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intent_dispositions: Vec<IntentDisposition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_of: Option<ReviewTarget>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delivery_review_targets: Vec<ReviewTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub withdrawal: Option<Withdrawal>,
     pub name: String,
@@ -1506,6 +2010,8 @@ pub struct Task {
     pub acceptance_epoch: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Acceptance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_basis: Option<ResultBasis>,
     #[serde(default)]
     pub assessments: Vec<Assessment>,
     #[serde(default)]
@@ -1540,6 +2046,10 @@ pub struct Task {
     pub falsifications: Vec<Falsification>,
 }
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 fn open_state() -> String {
     STATES[0].to_owned()
 }
@@ -1547,7 +2057,16 @@ fn open_state() -> String {
 impl Default for Task {
     fn default() -> Task {
         Task {
+            work_intervals: Vec::new(),
+            delivery_obligations: BTreeMap::new(),
+            delivery_reviews: Vec::new(),
+            goal_reflection_required: false,
+            goal_reflection: None,
+            intent_disposition_required: false,
+            intent_identities: BTreeSet::new(),
+            intent_dispositions: Vec::new(),
             review_of: None,
+            delivery_review_targets: Vec::new(),
             withdrawal: None,
             name: String::new(),
             role: String::new(),
@@ -1565,6 +2084,7 @@ impl Default for Task {
             accepted: None,
             acceptance_epoch: 0,
             result: None,
+            result_basis: None,
             assessments: Vec::new(),
             exceptions: Vec::new(),
             evidence: Vec::new(),
@@ -1932,6 +2452,267 @@ pub fn owe_path(task: &mut Task, path: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn member_evidence(tree: &BTreeMap<String, String>, roots: &[&str]) -> Evidence {
+        let inputs: BTreeMap<_, _> = roots
+            .iter()
+            .map(|root| (root.to_string(), observed_digest(tree, root)))
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "check": "check", "exit": 0, "tree": "tree", "tool": "run", "unix": 1,
+            "inputs": inputs, "member_manifest": capture_evidence_members(&inputs, tree, "execution-start")
+        })).unwrap()
+    }
+
+    #[test]
+    fn evidence_member_manifest_complete_selection_deduplicates_and_reconstructs_roots() {
+        let tree = BTreeMap::from([
+            ("core/a.rs".into(), "0000000000000001".into()),
+            ("core/b.rs".into(), "0000000000000002".into()),
+            ("core2/c.rs".into(), "0000000000000003".into()),
+            ("report.md".into(), "0000000000000004".into()),
+        ]);
+        let mut work = Task {
+            scope: vec!["core".into()],
+            check_inputs: vec!["core".into(), "core/a.rs".into(), "missing".into()],
+            ..Default::default()
+        };
+        work.deliverables.push(Deliverable {
+            path: "report.md".into(),
+            opened_digest: None,
+        });
+        let inputs = evidence_inputs(&work, &tree);
+        let raw = capture_evidence_members(&inputs, &tree, "execution-start");
+        assert_eq!(raw["member_count"], 3);
+        let evidence = member_evidence(&tree, &["core", "core/a.rs", "report.md", "missing"]);
+        assert_eq!(evidence.member_manifest.as_ref().unwrap(), &raw);
+        let baseline = evidence_member_baseline(&evidence).unwrap();
+        assert_eq!(
+            baseline
+                .members
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["core/a.rs", "core/b.rs", "report.md"]
+        );
+        for (root, digest) in &inputs {
+            assert_eq!(observed_digest(&baseline.members, root), *digest);
+        }
+        assert_eq!(inputs["missing"], None);
+    }
+
+    #[test]
+    fn evidence_member_manifest_empty_null_and_removed_root_are_not_missing_selection() {
+        let mut evidence = member_evidence(&BTreeMap::new(), &["missing"]);
+        assert!(
+            evidence_member_baseline(&evidence)
+                .unwrap()
+                .members
+                .is_empty()
+        );
+        assert_eq!(
+            evidence.member_manifest.as_ref().unwrap()["member_count"],
+            0
+        );
+        evidence
+            .inputs
+            .insert("missing".into(), Some("0000000000000001".into()));
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "input-digest-mismatch"
+        );
+        let tree = BTreeMap::from([("core/a.rs".into(), "0000000000000001".into())]);
+        let mut evidence = member_evidence(&tree, &["core"]);
+        evidence.inputs.clear();
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "member-outside-inputs"
+        );
+    }
+
+    #[test]
+    fn evidence_member_manifest_legacy_and_malformed_wire_roundtrip_without_gates() {
+        let old = r#"{"check":"check","exit":0,"tree":"old","tool":"check","unix":1,"inputs":{}}"#;
+        let evidence: Evidence = serde_json::from_str(old).unwrap();
+        assert_eq!(serde_json::to_string(&evidence).unwrap(), old);
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "legacy-absent"
+        );
+        for raw in [
+            serde_json::Value::Null,
+            serde_json::json!([1]),
+            serde_json::json!({"basis":"future","unknown":true}),
+        ] {
+            let mut wire = serde_json::to_value(&evidence).unwrap();
+            wire["member_manifest"] = raw;
+            let decoded: Evidence = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&decoded).unwrap(), wire);
+            assert_eq!(
+                evidence_member_baseline(&decoded).unwrap_err(),
+                "malformed-manifest"
+            );
+            let work = Task::default();
+            assert_eq!(
+                evidence_matches(&work, &decoded),
+                evidence_matches(&work, &evidence)
+            );
+        }
+        let mut current = evidence.clone();
+        current.acceptance_epoch = Some(1);
+        current.identity = Some(CheckIdentity::Text {
+            command: "check".into(),
+        });
+        let mut work = Task {
+            acceptance_epoch: 1,
+            check: Some("check".into()),
+            evidence: vec![current],
+            ..Default::default()
+        };
+        assert!(readiness(&work, &BTreeMap::new()).supported);
+        work.evidence[0].member_manifest = Some(serde_json::json!({"bad":"diagnostics"}));
+        assert!(readiness(&work, &BTreeMap::new()).supported);
+    }
+
+    #[test]
+    fn evidence_member_manifest_count_and_utf8_path_limits_are_all_or_unavailable() {
+        let mut tree: BTreeMap<_, _> = (0..8192)
+            .map(|n| (format!("core/{n:04}"), "0000000000000001".to_owned()))
+            .collect();
+        let evidence = member_evidence(&tree, &["core"]);
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap().members.len(),
+            8192
+        );
+        tree.insert("core/overflow".into(), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        let raw = evidence.member_manifest.as_ref().unwrap();
+        assert_eq!(raw["member_count"], 8193);
+        assert_eq!(raw["reason"], "member-limit");
+        assert!(raw.get("members").is_none());
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "member-limit"
+        );
+        for extra in [0, 1] {
+            let path = format!("core/{}{}", "é".repeat(2045), "x".repeat(1 + extra));
+            assert_eq!(path.len(), 4096 + extra);
+            let tree = BTreeMap::from([(path, "0000000000000001".into())]);
+            let evidence = member_evidence(&tree, &["core"]);
+            if extra == 0 {
+                assert!(evidence_member_baseline(&evidence).is_ok());
+            } else {
+                assert_eq!(
+                    evidence_member_baseline(&evidence).unwrap_err(),
+                    "path-limit"
+                );
+                assert!(
+                    evidence
+                        .member_manifest
+                        .as_ref()
+                        .unwrap()
+                        .get("members")
+                        .is_none()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn evidence_member_manifest_compact_byte_limit_counts_escaping_exactly() {
+        let mut tree: BTreeMap<_, _> = (0..260)
+            .map(|n| {
+                (
+                    format!("core/{n:03}/{}", "x".repeat(4000)),
+                    "0000000000000001".to_owned(),
+                )
+            })
+            .collect();
+        tree.insert("core/last".into(), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        let size = serde_json::to_vec(evidence.member_manifest.as_ref().unwrap())
+            .unwrap()
+            .len();
+        let remaining = 1_048_576 - size;
+        let base = format!(
+            "core/last{}{}",
+            "\"".repeat(remaining / 2),
+            "x".repeat(remaining % 2)
+        );
+        assert!(base.len() <= 4096);
+        tree.remove("core/last");
+        tree.insert(base.clone(), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        assert_eq!(
+            serde_json::to_vec(evidence.member_manifest.as_ref().unwrap())
+                .unwrap()
+                .len(),
+            1_048_576
+        );
+        assert!(evidence_member_baseline(&evidence).is_ok());
+        tree.remove(&base);
+        tree.insert(format!("{base}x"), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "byte-limit"
+        );
+        assert_eq!(
+            evidence.member_manifest.as_ref().unwrap()["member_count"],
+            261
+        );
+        assert!(
+            evidence
+                .member_manifest
+                .as_ref()
+                .unwrap()
+                .get("members")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn evidence_member_manifest_rejects_invalid_shape_count_path_digest_and_selection() {
+        let tree = BTreeMap::from([("core/a.rs".into(), "0000000000000001".into())]);
+        let original = member_evidence(&tree, &["core"]);
+        for (field, value, reason) in [
+            ("basis", serde_json::json!("future-v2"), "unsupported-basis"),
+            (
+                "capture",
+                serde_json::json!("completion-time"),
+                "unsupported-capture",
+            ),
+            (
+                "member_count",
+                serde_json::json!(2),
+                "member-count-mismatch",
+            ),
+            (
+                "members",
+                serde_json::json!({"../escape":"0000000000000001"}),
+                "invalid-member",
+            ),
+            (
+                "members",
+                serde_json::json!({"core/a.rs":"secret content"}),
+                "invalid-member",
+            ),
+            (
+                "members",
+                serde_json::json!({"elsewhere/a.rs":"0000000000000001"}),
+                "member-outside-inputs",
+            ),
+            (
+                "members",
+                serde_json::json!({"core/a.rs":"0000000000000002"}),
+                "input-digest-mismatch",
+            ),
+        ] {
+            let mut evidence = original.clone();
+            evidence.member_manifest.as_mut().unwrap()[field] = value;
+            assert_eq!(evidence_member_baseline(&evidence).unwrap_err(), reason);
+        }
+    }
 
     #[test]
     #[cfg(unix)]

@@ -46,6 +46,94 @@ pub(super) fn load(
     project::load(manifest).map_err(|diagnostic| emit_contract_error(diagnostic, json, seed))
 }
 
+pub(super) fn inventory(
+    explicit: Option<&Path>,
+    cwd: &Path,
+    json: bool,
+    max_entries: usize,
+) -> i32 {
+    let collected = project::locate(explicit, cwd)
+        .and_then(|path| project::read_manifest(&path))
+        .and_then(|manifest| project::inventory::collect(&manifest, max_entries));
+    let inventory = match collected {
+        Ok(inventory) => inventory,
+        Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
+    };
+    let rendered = if json {
+        write_json(&inventory)
+    } else {
+        write_inventory(&mut io::stdout().lock(), &inventory)
+    };
+    if rendered.is_err() {
+        4
+    } else if inventory.successful() {
+        0
+    } else {
+        1
+    }
+}
+
+fn write_inventory(
+    output: &mut impl Write,
+    inventory: &project::inventory::Inventory,
+) -> io::Result<()> {
+    writeln!(output, "Project inventory: {}\n", inventory.project)?;
+    for entry in &inventory.entries {
+        writeln!(
+            output,
+            "  {}  {} {}  {}{}",
+            entry.path,
+            entry.registration,
+            entry.kind,
+            entry.readability,
+            if entry.external {
+                " (explicit external registration)"
+            } else {
+                ""
+            }
+        )?;
+        if let Some(location) = &entry.registered_at {
+            writeln!(
+                output,
+                "    registered at {}:{}:{}  {}",
+                location.file,
+                location.line,
+                location.column,
+                entry.identities.join(" ")
+            )?;
+        }
+    }
+    for boundary in &inventory.boundaries {
+        writeln!(
+            output,
+            "  stopped at {}: {}",
+            boundary.path, boundary.reason
+        )?;
+    }
+    for problem in &inventory.diagnostics {
+        writeln!(
+            output,
+            "  {} [{}]: {}",
+            problem.path, problem.code, problem.message
+        )?;
+    }
+    writeln!(
+        output,
+        "\nDiscovery {} within project boundaries ({} directory entries; limit {}).",
+        if inventory.complete {
+            "complete"
+        } else {
+            "INCOMPLETE"
+        },
+        inventory.scanned_entries,
+        inventory.max_entries
+    )?;
+    writeln!(
+        output,
+        "Inventory is read-only registration metadata. Unregistered files are not parsed or loaded; no contents, requirement coverage or semantic consistency are verified. Only blabla finish decides completion."
+    )
+}
+
 pub(super) fn evaluate_with_run_state(project: &Project) -> blabla::project::status::Evaluation {
     let root = &project.manifest.root;
     let mut evaluation = evaluate(project, read_record(root));
@@ -55,6 +143,8 @@ pub(super) fn evaluate_with_run_state(project: &Project) -> blabla::project::sta
 
 #[derive(Serialize)]
 struct StatusWithMemory<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivery: Option<serde_json::Value>,
     #[serde(flatten)]
     project: &'a StatusView,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -274,26 +364,145 @@ pub(super) fn undeclared_goal(project: &Project, name: &str) -> Option<String> {
     Some(format!("goal {name:?} is not declared; {reason}"))
 }
 
+#[derive(Serialize)]
+struct GoalCoverageView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivery: Option<serde_json::Value>,
+    #[serde(flatten)]
+    goal: GoalExplainView,
+    coverage: Vec<GoalExpectationView>,
+    linked_work: Vec<GoalWorkView>,
+    task_problems: Vec<String>,
+    coverage_authority: &'static str,
+}
+
+#[derive(Serialize)]
+struct GoalExpectationView {
+    identity: String,
+    contract: String,
+    registration: &'static str,
+    resolution: &'static str,
+    verdict: goal::Verdict,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    layer: Option<Layer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    registered_at: Option<Location>,
+}
+
+#[derive(Serialize)]
+struct GoalWorkView {
+    id: String,
+    role: String,
+    state: String,
+    scope: Vec<String>,
+    evidence: task::Readiness,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    check: Option<task::CheckIdentity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latest_exit: Option<i32>,
+}
+
+fn goal_expectation(project: &Project, expectation: &goal::Expectation) -> GoalExpectationView {
+    let identity = expectation.identity.as_str();
+    let group = identity.strip_prefix("contract::").unwrap_or_else(|| {
+        identity
+            .split_once("::")
+            .map(|(group, _)| group)
+            .unwrap_or(identity)
+    });
+    let entry = project
+        .manifest
+        .entries
+        .iter()
+        .find(|entry| entry.group == group);
+    let registration = match entry {
+        Some(entry) if entry.draft => "draft",
+        Some(_) => "active",
+        None => "unregistered",
+    };
+    let resolution = match entry {
+        None => "missing_contract",
+        Some(entry) if entry.draft => {
+            if identity.starts_with("contract::") {
+                "draft_contract"
+            } else {
+                "draft_rule_unchecked"
+            }
+        }
+        Some(_) if expectation.verdict != goal::Verdict::Unresolved => "resolved",
+        Some(_) => "missing_rule",
+    };
+    GoalExpectationView {
+        identity: expectation.identity.clone(),
+        contract: format!("contract::{group}"),
+        registration,
+        resolution,
+        verdict: expectation.verdict,
+        path: entry.map(|entry| entry.display.clone()),
+        layer: entry.map(|entry| entry.layer),
+        registered_at: entry.map(|entry| Location {
+            file: project.manifest.path.display().to_string(),
+            line: entry.span.line,
+            column: entry.span.column,
+        }),
+    }
+}
+
 fn explain_goal(
     project: &Project,
     memory: &Memory<GoalMemory>,
     id: &str,
-) -> Option<GoalExplainView> {
+) -> Option<GoalCoverageView> {
     let name = id.strip_prefix("goal::")?;
     let evaluation = evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let view = status_view(project, &evaluation, &structure);
-    let serving = task::read_all(&project.manifest.root)
+    let tasks: Vec<task::Task> = task::read_all(&project.manifest.root)
         .into_iter()
         .filter(|task| task.goal.as_deref() == Some(name))
-        .map(|task| (task.name, task.state))
         .collect();
-    goal::explain(
+    let serving = tasks
+        .iter()
+        .map(|task| (task.name.clone(), task.state.clone()))
+        .collect();
+    let goal = goal::explain(
         memory,
         id,
         &judged(memory, project, &evaluation, &view),
         serving,
-    )
+    )?;
+    let tree = if tasks.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        project::snapshot(&project.manifest.root, &project.ignore)
+    };
+    let linked_work = tasks
+        .iter()
+        .map(|task| GoalWorkView {
+            id: format!("task::{}", task.name),
+            role: format!("role::{}", task.role),
+            state: task.state.clone(),
+            scope: task.scope.clone(),
+            evidence: task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree),
+            check: task::declared_check(task),
+            latest_exit: task::latest_evidence(task).map(|evidence| evidence.exit),
+        })
+        .collect();
+    Some(GoalCoverageView {
+        delivery: super::task::delivery::project_view(project, Some(id)),
+        coverage: goal
+            .outcome
+            .expectations
+            .iter()
+            .map(|expectation| goal_expectation(project, expectation))
+            .collect(),
+        goal,
+        linked_work,
+        task_problems: task::unreadable(&project.manifest.root),
+        coverage_authority: "Registration and exact identity resolution are metadata; draft rule membership is not established. Task links are explicitly goal-level, never proof that a task implements each expectation. Evidence describes only its declared check and tracked inputs. No semantic coverage percentage, goal acceptance or completion is inferred; only blabla finish decides completion.",
+    })
 }
 
 pub(super) fn status(project: &Project, json: bool) -> i32 {
@@ -307,6 +516,7 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
     let capabilities = CapabilityReport::of(&project.manifest.root);
     let result = if json {
         write_json(&StatusWithMemory {
+            delivery: super::task::delivery::project_view(project, None),
             project: &view,
             mission_memory: views.mission,
             system_memory: views.system,
@@ -327,6 +537,7 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             &capabilities,
             &project.shared_state,
         ).and_then(|()| {
+            super::task::delivery::write_projection(&mut io::stdout().lock(), super::task::delivery::project_view(project, None).as_ref())?;
             if let Some(runtime) = blabla::expert::trace::status(project) {
                 let mut output = io::stdout().lock();
                 writeln!(output, "EXPERT RUNTIME {:?}  trace retention {} days  payload limit {} bytes  unresolved limit {}/task  retained {:?} bytes  unknown deliveries {:?}  error {:?}", runtime.mode, runtime.trace_limits.retention_days, runtime.trace_limits.payload_bytes, runtime.trace_limits.unresolved_per_task, runtime.payload_bytes, runtime.unknown_deliveries, runtime.error)?;
@@ -830,7 +1041,9 @@ fn write_mission_explain(view: &MissionExplainView) -> io::Result<()> {
     writeln!(output, "\n{}", view.authority)
 }
 
-fn write_goal_explain(view: &GoalExplainView) -> io::Result<()> {
+fn write_goal_explain(coverage: &GoalCoverageView) -> io::Result<()> {
+    super::task::delivery::write_projection(&mut io::stdout().lock(), coverage.delivery.as_ref())?;
+    let view = &coverage.goal;
     let mut output = io::stdout().lock();
     writeln!(
         output,
@@ -863,6 +1076,44 @@ fn write_goal_explain(view: &GoalExplainView) -> io::Result<()> {
             expectation.identity
         )?;
     }
+    writeln!(output, "\nExpectation registration and exact resolution:")?;
+    for expectation in &coverage.coverage {
+        writeln!(
+            output,
+            "  {}  {}  {}  {}",
+            expectation.identity,
+            expectation.registration,
+            expectation.resolution,
+            expectation.path.as_deref().unwrap_or("no registered path")
+        )?;
+    }
+    if !coverage.linked_work.is_empty() {
+        writeln!(
+            output,
+            "\nExplicit goal-linked work (not per-rule implementation credit):"
+        )?;
+        for work in &coverage.linked_work {
+            writeln!(
+                output,
+                "  {}  {}  scope: {}",
+                work.id,
+                work.state,
+                work.scope.join(" ")
+            )?;
+            writeln!(
+                output,
+                "    evidence recorded: {}; current: {}; supports declared check: {}; latest matching exit: {:?}",
+                work.evidence.recorded,
+                work.evidence.current,
+                work.evidence.supported,
+                work.latest_exit
+            )?;
+        }
+    }
+    for problem in &coverage.task_problems {
+        writeln!(output, "\nUnreadable task record: {problem}")?;
+    }
+    writeln!(output, "\n{}", coverage.coverage_authority)?;
     writeln!(
         output,
         "\nOutcome acceptance: not established by these contract checks. Review the goal statement and outcome evidence separately; the recorded state is owner-declared."
@@ -1441,12 +1692,14 @@ fn verify_and_record(
     let value = serde_json::to_value(&output)
         .map_err(|failure| Box::new((error("internal", failure.to_string(), Some(seed)), 4)))?;
     let files = fingerprinted_files(&config.executable, &config.args);
+    let observed = project.fingerprint_observation(&files);
     let record = Record {
         verifier_version: env!("CARGO_PKG_VERSION").into(),
         project: project.manifest.name.clone(),
         manifest: project.manifest.path.display().to_string(),
         project_identity: project.identity.clone(),
-        implementation_fingerprint: project.fingerprint(&files),
+        implementation_fingerprint: observed.fingerprint,
+        implementation_inputs: Some(observed.inputs),
         fingerprinted_files: files
             .iter()
             .map(|file| file.display().to_string())
@@ -2202,6 +2455,58 @@ fn write_bounded_tasks(output: &mut impl Write, tasks: Option<&TaskStatus>) -> i
     writeln!(output, "  {}", tasks.authority)
 }
 
+fn write_input_drift(output: &mut impl Write, view: &StatusView) -> io::Result<()> {
+    let Some(recorded) = &view.recorded else {
+        return Ok(());
+    };
+    let drift = &recorded.input_drift;
+    if drift.availability == "legacy-unavailable" {
+        return writeln!(
+            output,
+            "\nVerification input changes: baseline unavailable for this legacy record; aggregate freshness still applies."
+        );
+    }
+    if drift.total_changes == Some(0) {
+        return Ok(());
+    }
+    writeln!(
+        output,
+        "\nVerification input changes: {} total (showing {})",
+        drift.total_changes.unwrap_or(0),
+        drift.changes.len()
+    )?;
+    for change in &drift.changes {
+        writeln!(
+            output,
+            "  {} {}: {} ({} -> {})",
+            change.change,
+            change.source,
+            change.path,
+            change
+                .recorded
+                .as_ref()
+                .map(|value| value.observation.as_str())
+                .unwrap_or("absent"),
+            change
+                .current
+                .as_ref()
+                .map(|value| value.observation.as_str())
+                .unwrap_or("absent")
+        )?;
+    }
+    if drift.omitted_changes > 0 {
+        writeln!(
+            output,
+            "  {} additional changes omitted (limit {}).",
+            drift.omitted_changes, drift.limit
+        )?;
+    }
+    writeln!(
+        output,
+        "  Observed fingerprint inputs only; no semantic dependency or completion inference."
+    )
+}
+
 fn write_status(
     view: &StatusView,
     views: &MemoryViews,
@@ -2217,6 +2522,7 @@ fn write_status(
         view.project, view.manifest
     )?;
     write_layers(&mut output, view)?;
+    write_input_drift(&mut output, view)?;
     write_mission_line(&mut output, views.mission.as_ref())?;
     write_system_line(&mut output, views.system.as_ref())?;
     write_process_line(&mut output, views.process.as_ref())?;

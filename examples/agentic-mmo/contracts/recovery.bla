@@ -1,0 +1,17 @@
+state repair_accepted: bool
+state repair_target_damage_units: int
+state repair_reduction_units: int
+state repair_paid_exact_cost: bool
+state repair_other_cities_unchanged: bool
+state repair_people_buildings_unchanged: bool
+state repair_refusal_unchanged: bool
+
+action repair_fixture(kind: int)
+action repair_case()
+when repair_case {
+    expect "exact-local-damage-reduction": not after.repair_accepted or before.repair_target_damage_units <= before.repair_reduction_units and after.repair_target_damage_units == 0 or before.repair_target_damage_units > before.repair_reduction_units and after.repair_target_damage_units == before.repair_target_damage_units - before.repair_reduction_units
+    expect "accepted-repair-pays-exact-cost": not after.repair_accepted or after.repair_paid_exact_cost
+    expect "repair-changes-only-named-city": after.repair_other_cities_unchanged
+    expect "repair-preserves-people-and-buildings": after.repair_people_buildings_unchanged
+    expect "refused-repair-has-no-effects": after.repair_accepted or after.repair_refusal_unchanged
+}

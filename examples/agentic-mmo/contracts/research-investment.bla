@@ -1,0 +1,21 @@
+state eligible: bool
+state new_rule: bool
+state advanced: bool
+state positive_budget_and_remaining: bool
+state generated_budget_respected: bool
+state available_stock_respected: bool
+state remaining_cost_respected: bool
+state bank_does_not_accelerate: bool
+state old_replay_preserved: bool
+state completion_exact_once: bool
+state next_choice_visible: bool
+state prestart_beats_excluded: bool
+
+action resolve_research_beat()
+
+when resolve_research_beat {
+    expect "productive-research-obeys-actual-beat-capacity": not before.new_rule or (after.generated_budget_respected and after.available_stock_respected and after.remaining_cost_respected and after.bank_does_not_accelerate)
+    expect "eligible-positive-research-makes-progress": not (before.eligible and before.positive_budget_and_remaining) or after.advanced
+    expect "completion-and-next-choice-remain-exact": after.completion_exact_once and after.next_choice_visible
+    expect "old-history-and-prestart-order-remain-valid": after.old_replay_preserved and after.prestart_beats_excluded
+}

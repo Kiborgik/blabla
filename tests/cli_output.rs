@@ -69,6 +69,10 @@ fn human_failure_is_concise_and_verbose_includes_full_state() {
 }
 
 fn protocol_output(mode: &str) -> std::process::Output {
+    protocol_output_with_flags(mode, &["--json"])
+}
+
+fn protocol_output_with_flags(mode: &str, flags: &[&str]) -> std::process::Output {
     let mut contract = NamedTempFile::new().unwrap();
     writeln!(
         contract,
@@ -78,10 +82,9 @@ fn protocol_output(mode: &str) -> std::process::Output {
     let app = Path::new("tests/fixtures/protocol/app.py")
         .canonicalize()
         .unwrap();
-    support::run(&[
+    let mut args = vec![
         OsStr::new("run"),
         contract.path().as_os_str(),
-        OsStr::new("--json"),
         OsStr::new("--cases"),
         OsStr::new("1"),
         OsStr::new("--steps"),
@@ -92,7 +95,10 @@ fn protocol_output(mode: &str) -> std::process::Output {
         OsStr::new("python"),
         app.as_os_str(),
         OsStr::new(mode),
-    ])
+        OsStr::new("EXCHANGE_ARGV_SECRET_MARKER"),
+    ];
+    args.splice(2..2, flags.iter().map(OsStr::new));
+    support::run(&args)
 }
 
 #[test]
@@ -103,6 +109,7 @@ fn runtime_failures_never_report_pass_and_have_distinct_machine_codes() {
         ("duplicate_ok", "APP_PROTOCOL"),
         ("duplicate_result", "APP_PROTOCOL"),
         ("wrong_id", "APP_PROTOCOL"),
+        ("spoof_witness", "APP_PROTOCOL"),
         ("trailing", "APP_PROTOCOL"),
         ("timeout_read", "APP_TIMEOUT"),
         ("crash", "APP_CRASH"),
@@ -114,7 +121,40 @@ fn runtime_failures_never_report_pass_and_have_distinct_machine_codes() {
         assert_eq!(report["code"], code, "{mode}");
         assert_eq!(report["seed"], 0);
         assert!(report.get("property").is_none());
+        if mode == "timeout_read" {
+            let witness = &report["exchange_witness"];
+            assert_eq!(witness["operation"], "reset");
+            assert_eq!(witness["allowance"], "startup");
+            assert_eq!(witness["budget_ms"], 250);
+            assert_eq!(witness["phase"], "wait_response");
+            assert_eq!(witness["child_status"]["status"], "running");
+            assert_eq!(witness["request_id"].as_str().unwrap().len(), 32);
+            assert!(witness["child_pid"].as_u64().unwrap() > 0);
+        } else {
+            assert!(report.get("exchange_witness").is_none(), "{mode}");
+        }
+        assert!(!report.to_string().contains("EXCHANGE_ARGV_SECRET_MARKER"));
+        assert!(!report.to_string().contains("ADAPTER_SPOOF_SECRET_MARKER"));
     }
+}
+
+#[test]
+fn human_timeout_includes_concise_native_metadata_without_payloads() {
+    let output = protocol_output_with_flags("timeout_read", &[]);
+    assert_eq!(output.status.code(), Some(3));
+    let text = String::from_utf8(output.stderr).unwrap();
+    assert!(text.contains("[APP_TIMEOUT]"));
+    assert!(text.contains("exchange:"));
+    assert!(text.contains("transport:"));
+    assert!(text.contains("request_id="));
+    assert!(text.contains("child_before_cleanup=Running"));
+    assert!(!text.contains("EXCHANGE_ARGV_SECRET_MARKER"));
+    assert!(text.len() < 1500, "{text}");
+    assert!(
+        !String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("exchange:")
+    );
 }
 
 #[test]
@@ -123,6 +163,7 @@ fn stderr_logging_preserves_a_single_valid_json_report() {
     assert_eq!(output.status.code(), Some(0));
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["status"], "green");
+    assert!(report.get("exchange_witness").is_none());
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()

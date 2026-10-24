@@ -1,0 +1,259 @@
+:root {
+  --hud-navy: var(--panel);
+  --hud-deep: var(--paper);
+  --hud-brass: var(--gold);
+  --hud-line: var(--border);
+  --hud-ink: var(--ink);
+  --hud-muted: var(--muted);
+  --hud-surface: var(--surface);
+  --hud-selection: var(--selection);
+  --hud-shadow: #05101e60;
+}
+:root[data-theme='light'] { --hud-shadow: #15263828; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+#app { position: relative; display: block; height: 100dvh; overflow: hidden; }
+#app .live-observatory { position: relative; width: 100%; height: 100dvh; min-height: 0; isolation: isolate; }
+#app .live-observatory .map { inset: 0; height: 100%; transform: none; }
+#app .map::after { box-shadow: inset 0 0 85px #07132130; }
+#app :is(.masthead, .civilization-panel, .inspection, .chronicle, .map-tools, .layer-controls, .era-pill, .connection-actions, .footer), dialog {
+  color: var(--hud-ink);
+}
+:root[data-theme='dark'] #app .inspection, :root[data-theme='dark'] dialog { color-scheme: dark; }
+#app .masthead { position: absolute; inset: 0 0 auto; display: flex; align-items: center; height: 44px; padding: 0 16px; gap: 20px; z-index: 8; background: var(--hud-deep); border-bottom: 1px solid var(--hud-line); box-shadow: 0 2px 10px var(--hud-shadow); }
+#app .brand { display: flex; align-items: center; gap: 8px; min-height: 44px; font: 16px Georgia, serif; letter-spacing: 2px; }
+#app .brand-mark { display: grid; place-items: center; width: 25px; height: 28px; font: italic 21px Georgia, serif; color: var(--hud-brass); border: 1px solid var(--hud-brass); clip-path: polygon(50% 0, 100% 22%, 100% 78%, 50% 100%, 0 78%, 0 22%); }
+#app .top-nav { display: flex; align-items: center; height: 100%; gap: 18px; margin-left: auto; font-size: 12px; }
+#app .nav-active { display: flex; align-items: center; align-self: stretch; color: var(--hud-brass); border-bottom: 2px solid var(--hud-brass); }
+#app .masthead button { color: var(--hud-ink); min-height: 44px; font-size: 12px; }
+#app .events-nav { padding: 0; border: 0; background: transparent; font-weight: 600; }
+#app .mode { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 500; }
+#app .status-dot { margin: 0; width: 6px; height: 6px; background: #63a784; }
+#app .mode[data-connection='offline'] .status-dot { background: #b9894d; }
+#app .mode-detail { border-left: 1px solid var(--hud-line); padding-left: 8px; color: var(--hud-muted); }
+#app .world-heading { position: absolute; top: 56px; left: 16px; width: 160px; max-width: 160px; color: #f4ecd7; text-shadow: 0 2px 6px #07121f; pointer-events: none; z-index: 2; }
+#app .world-mode { display: none; }
+#app .world-heading .eyebrow { font-size: 10px; letter-spacing: 1px; color: #efe1bd; }
+#app .world-heading h1 { margin: 4px 0 3px; font: 24px Georgia, serif; letter-spacing: -.3px; }
+#app .world-heading p { margin: 0; font-size: 12px; line-height: 1.4; color: #e3e7df; }
+#app .world-heading .body-context { margin-top: 5px; font-size: 11px; line-height: 1.4; }
+#app .live-observatory .world-heading .body-context[hidden], #app .world-mode[hidden] { display: none; }
+#app .live-observatory[data-body='mars'] .layer-controls { display: none; }
+#app .era-pill { position: absolute; top: 56px; right: 16px; width: 160px; min-height: 56px; padding: 8px 10px; background: var(--hud-navy); border: 1px solid var(--hud-line); border-radius: 3px; box-shadow: 0 3px 14px var(--hud-shadow); z-index: 3; }
+#app .era-pill strong { font: 14px Georgia, serif; }
+#app .era-pill small { display: block; margin-top: 4px; color: var(--hud-muted); font-size: 10px; letter-spacing: .5px; }
+#app .civilization-panel { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); width: min(1100px, calc(100% - 368px)); height: 72px; padding: 0; background: var(--hud-navy); border: 1px solid var(--hud-line); border-radius: 3px; box-shadow: 0 5px 18px var(--hud-shadow); z-index: 4; }
+#app .civilization-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); height: 100%; padding: 0; gap: 0; }
+#app .civilization-row { position: relative; display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; min-height: 44px; height: 100%; padding: 5px 8px; border: 0; border-right: 1px solid color-mix(in srgb, var(--hud-line) 40%, transparent); color: var(--hud-ink); background: transparent; text-align: left; }
+#app .civilization-row:last-child { border-right: 0; }
+#app .civilization-row > span:last-child { min-width: 0; flex: 1; }
+#app .civilization-row strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 15px/1.15 Georgia, serif; color: var(--hud-ink); }
+#app .civilization-row small { display: block; margin-top: 2px; font-size: 11px; line-height: 1.2; color: var(--hud-muted); }
+#app .civilization-row .civ-emblem { display: grid; place-items: center; flex: 0 0 26px; width: 26px; height: 31px; font: 19px Georgia, serif; background: color-mix(in srgb, var(--civ-color) 24%, var(--hud-navy)); border: 1px solid var(--civ-color); color: var(--hud-ink); clip-path: polygon(50% 0, 100% 20%, 100% 80%, 50% 100%, 0 80%, 0 20%); }
+#app .civilization-row[aria-pressed='true'], #app .civilization-row:hover { background: var(--hud-selection); }
+#app .civilization-row[aria-pressed='true']::before { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; background: var(--civ-color); }
+#app .civ-ribbon-facts { font-size: 11px; white-space: nowrap; }
+#app .civ-ribbon-work { display: grid; gap: 2px; margin-top: 4px; }
+#app .civ-ribbon-progress { display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--hud-muted); font-size: 10px; line-height: 1.2; }
+#app .civ-ribbon-progress .visual-icon { width: 11px; height: 11px; flex: 0 0 11px; }
+#app .civ-ribbon-work-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#app .civ-ribbon-progress progress { width: 24px; height: 3px; flex: 0 1 24px; border: 0; appearance: none; accent-color: var(--hud-brass); background: var(--hud-surface); }
+#app .civ-ribbon-progress progress::-webkit-progress-bar { background: var(--hud-surface); }
+#app .civ-ribbon-progress progress::-webkit-progress-value { background: var(--hud-brass); }
+#app .civ-ribbon-progress progress::-moz-progress-bar { background: var(--hud-brass); }
+#app .civ-ribbon-percent { min-width: 25px; text-align: right; font-variant-numeric: tabular-nums; }
+#app .inspection { position: absolute; top: 144px; right: 16px; bottom: auto; width: 352px; max-height: calc(100% - 202px); padding: 14px; background: var(--hud-navy); border: 1px solid var(--hud-line); border-top: 3px solid var(--civ-color, var(--hud-brass)); border-radius: 3px; box-shadow: 0 8px 30px var(--hud-shadow); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; overflow-anchor: none; z-index: 5; font-size: 14px; line-height: 1.45; }
+#app .live-observatory:not([data-inspection='true']) .inspection { display: none; }
+#app .inspection .sheet-close { display: block; position: sticky; float: right; top: -4px; min-width: 64px; min-height: 44px; margin: -5px -4px 0 6px; padding: 6px 8px; font-size: 12px; color: var(--hud-ink); background: var(--hud-surface); border: 1px solid var(--hud-line); border-radius: 2px; z-index: 2; }
+#app .inspection-top { display: flex; min-height: 18px; align-items: center; }
+#app .inspection-top .eyebrow { color: var(--hud-muted); font-size: 10px; letter-spacing: 1px; }
+#app .preview-tag { display: none; }
+#app .inspection-title { display: flex; align-items: center; margin: 2px 0 8px; gap: 10px; min-height: 44px; }
+#app .inspection-title .focus-symbol { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 39px; border: 1px solid var(--civ-color); color: var(--civ-color); font-size: 26px; }
+#app .inspection h2 { margin: 0; font: 24px/1.15 Georgia, serif; letter-spacing: 0; }
+#app .inspection-title p { color: var(--hud-muted); font-size: 14px; margin: 4px 0 0; }
+#app .inspection-sections { gap: 3px; margin: 4px 0 8px; }
+#app .inspection-sections button { border-radius: 2px; min-height: 44px; font-size: 14px; }
+#app .town-at-a-glance { padding: 2px 0 8px; }
+#app .town-at-a-glance .town-heading { display: none; }
+#app .town-at-a-glance .settlement-facts { margin: 3px 0; font-size: 14px; color: var(--hud-ink); }
+#app .town-at-a-glance .settlement-facts:first-of-type { font-weight: 700; }
+#app .town-at-a-glance .town-picker-label { margin-top: 7px; }
+#app .town-picker, #app .work-picker { min-height: 44px; font-size: 14px; border-radius: 2px; }
+#app .inspection .resource-rail { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; margin: 8px 0; padding: 8px 0; border-block: 1px solid var(--border); }
+#app .resource-rail .resource-help { position: relative; min-height: 50px; min-width: 0; gap: 3px; }
+#app .resource-rail .resource-name { font-size: 10px; }
+#app .resource-rail .resource-amount { font-size: 13px; }
+#app .resource-rail > div { min-height: 0; }
+#app .resource-rail::before { content: 'Civilization stores'; grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+#app .ongoing-commitments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 2px 0 8px; }
+#app .ongoing-commitment { min-width: 0; padding: 8px; border: 1px solid var(--border); background: var(--surface); }
+#app .ongoing-commitment > strong { display: block; font-size: 14px; line-height: 1.3; margin: 3px 0; overflow-wrap: anywhere; }
+#app .commitment-kind { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+#app .commitment-kind .visual-icon { width: 13px; height: 13px; flex-basis: 13px; }
+#app .commitment-amount, #app .ongoing-commitment small { display: block; font-size: 12px; line-height: 1.35; font-variant-numeric: tabular-nums; }
+#app .ongoing-commitment small { color: var(--muted); }
+#app .ongoing-commitment[data-commitment='government'] { grid-column: 1 / -1; }
+#app .town-receipt { margin: 0; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent); font-size: 14px; }
+#app .town-receipt > summary, #app .developing-towns > summary { min-height: 44px; padding: 11px 0; font-size: 14px; line-height: 1.5; }
+#app .town-receipt p, #app .installed-records p, #app .installed-records li { font-size: 14px; line-height: 1.5; }
+#app .installed-records ul { margin: 4px 0 12px; padding-left: 18px; }
+#app .research-detail, #app .construction-detail { padding: 6px 0; margin: 0; }
+#app .research-detail > strong, #app .construction-detail > strong { display: flex; align-items: center; gap: 7px; font-size: 14px; }
+#app .research-amount, #app .civic-amount { margin: 5px 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+.research-meter, .civic-meter { display: block; width: 100%; height: 6px; margin: 8px 0 6px; border: 0; border-radius: 0; appearance: none; background: var(--surface); accent-color: #63a8cf; }
+.civic-meter { accent-color: #b58bcc; }
+.research-meter::-webkit-progress-bar, .civic-meter::-webkit-progress-bar { background: color-mix(in srgb, currentColor 12%, transparent); }
+.research-meter::-webkit-progress-value { background: #63a8cf; }
+.civic-meter::-webkit-progress-value { background: #b58bcc; }
+.research-meter::-moz-progress-bar { background: #63a8cf; }
+.civic-meter::-moz-progress-bar { background: #b58bcc; }
+#app .commitment-meter { height: 4px; margin: 6px 0; }
+#app [data-commitment='civic'] .commitment-meter::-webkit-progress-value { background: #b58bcc; }
+#app [data-commitment='civic'] .commitment-meter::-moz-progress-bar { background: #b58bcc; }
+#app [data-commitment='construction'] .commitment-meter::-webkit-progress-value, .construction-meter::-webkit-progress-value { background: var(--hud-brass); }
+#app [data-commitment='construction'] .commitment-meter::-moz-progress-bar, .construction-meter::-moz-progress-bar { background: var(--hud-brass); }
+#app .civic-progress { margin: 4px 0; padding: 0; border: 0; }
+#app .civic-progress > h4 { margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+#app .civic-current { font-size: 14px; }
+#app .capability-open { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 8px; margin: 8px 0; padding: 10px; border: 1px solid var(--gold); border-radius: 2px; font-size: 14px; min-height: 44px; }
+#app .capability-open span { font-size: 11px; }
+#app .capability-open > .visual-icon { width: 14px; height: 14px; flex: 0 0 14px; }
+#app .policy-choice { margin: 8px 0; padding: 0 10px; border: 1px solid var(--border); border-left: 3px solid var(--civ-color); background: var(--surface); }
+#app .policy-choice .eyebrow { display: block; margin: 0 0 5px; font-size: 10px; color: var(--muted); }
+#app .policy-choice > p { margin: 0 0 12px; }
+#app .inspection .ambition { margin: 4px 0; font-size: 14px; line-height: 1.5; }
+#app .inspection .ambition summary { min-height: 44px; padding: 11px 0; cursor: pointer; }
+#app .inspection .ambition p { margin: 0 0 8px; }
+#app .inspection :is(.building-card, .work-preview) { padding: 10px; border-radius: 2px; }
+#app .inspection :is(.building-summary, .building-current, .building-card > p, .work-key-results .operation-amounts, .operation-amounts span) { font-size: 14px; }
+#app .inspection .city-details:empty, #app .inspection .research-detail:empty, #app .developing-towns:not(:has(.developing-town)) { display: none; }
+.civic-tree-nodes { list-style: none; padding: 0; margin: 12px 0; }
+.civic-tree-node { position: relative; margin: 0 0 10px calc(var(--civic-depth) * 6px); padding: 10px; border: 1px solid var(--border); border-left: 3px solid var(--muted); border-radius: 2px; background: var(--surface); }
+.civic-tree-node[data-status='completed'] { border-left-color: var(--positive); }
+.civic-tree-node[data-status='developing'], .civic-tree-node[data-status='available'] { border-left-color: #b58bcc; }
+.civic-tree-node[data-status='unreleased'] { border-style: dashed; }
+.civic-node-heading { display: flex; justify-content: space-between; align-items: start; gap: 8px; }
+.civic-node-heading strong { font-size: 14px; }
+.civic-node-status { font-size: 11px; padding: 2px 4px; border: 1px solid currentColor; white-space: nowrap; }
+#app .civic-tree-node p { font-size: 14px; line-height: 1.5; }
+.civic-node-parents { color: var(--muted); }
+.civic-node-cost { font-variant-numeric: tabular-nums; }
+#app .chronicle { position: absolute; display: block; left: 16px; bottom: 62px; width: 280px; max-width: calc(100% - 32px); max-height: none; padding: 0; overflow: hidden; background: var(--hud-navy); border: 1px solid var(--hud-line); border-radius: 3px; box-shadow: 0 7px 24px var(--hud-shadow); scrollbar-width: thin; z-index: 4; }
+#app .chronicle-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 8px; min-height: 44px; border-bottom: 1px solid var(--hud-line); }
+#app .chronicle-heading .eyebrow { display: block; margin: 0; font-size: 9px; color: var(--hud-brass); letter-spacing: .5px; }
+#app #events-open { display: block; min-width: 60px; min-height: 44px; padding: 0 7px; font-size: 11px; color: var(--hud-ink); background: var(--hud-surface); border: 1px solid var(--hud-line); border-radius: 2px; }
+#app #follow-events { min-height: 44px; max-width: 100px; padding: 4px 7px; font-size: 11px; line-height: 1.25; color: var(--hud-muted); background: transparent; border-radius: 2px; }
+#app #follow-events[aria-pressed='true'] { color: var(--hud-ink); box-shadow: inset 0 -2px var(--hud-brass); }
+#major-event-list { margin: 0; padding: 0; list-style: none; }
+#major-event-list > li + li { border-top: 1px solid color-mix(in srgb, var(--hud-line) 40%, transparent); }
+#app .chronicle-story { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 10px; text-align: left; color: var(--hud-ink); background: transparent; }
+#app button.chronicle-story:hover { background: var(--hud-surface); }
+#app .chronicle-marker { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 28px; color: var(--hud-brass); border: 1px solid var(--hud-line); border-radius: 2px; }
+#app .chronicle-marker .visual-icon { width: 16px; height: 16px; }
+#app .chronicle-story-body { display: block; min-width: 0; }
+#app .chronicle-story-meta { display: block; font-size: 10px; color: var(--hud-muted); }
+#app .chronicle-story strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font: 500 14px/1.35 'DM Sans', Arial, sans-serif; margin: 3px 0; }
+#app .chronicle-location { display: none; font-size: 11px; line-height: 1.4; color: var(--hud-brass); }
+#app .chronicle-location .visual-icon { width: 12px; height: 12px; margin-left: 4px; }
+#app .chronicle-story--recent { padding-block: 5px; }
+#app .chronicle-story--recent strong { margin: 2px 0; font-size: 14px; }
+#app .chronicle-story--recent .chronicle-marker { border: 0; height: 20px; }
+#app .chronicle-cause { color: var(--hud-muted); }
+#app .chronicle-result { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; color: var(--hud-ink); font-size: 14px; }
+#app #connection-story { padding: 10px 12px; }
+#app #connection-story #event-title { margin: 5px 0; font-size: 16px; }
+#app #connection-story #event-detail { color: var(--hud-muted); font-size: 14px; line-height: 1.5; }
+#app #connection-story .eyebrow, #app #connection-story .story-deltas { display: none; }
+#app .map-tools { position: absolute; right: 16px; bottom: 58px; display: flex; flex-direction: row; padding: 0; gap: 0; border: 1px solid var(--hud-line); border-radius: 2px; background: var(--hud-navy); z-index: 4; }
+#app .map-tools button { width: 44px; height: 44px; min-height: 44px; border-right: 1px solid var(--hud-line); color: var(--hud-ink); background: transparent; font-size: 22px; }
+#app .map-tools button:last-child { border: 0; width: 56px; font-size: 12px; }
+#app .map-tools button:hover { background: var(--hud-surface); }
+#app .layer-controls { position: absolute; bottom: 58px; right: 174px; display: flex; padding: 0; border: 1px solid var(--hud-line); border-radius: 2px; background: var(--hud-navy); z-index: 4; }
+#app .layer-controls button { min-height: 44px; padding: 0 12px; font-size: 12px; color: var(--hud-muted); background: transparent; }
+#app .layer-controls button[aria-pressed='true'] { background: var(--hud-selection); color: var(--hud-ink); box-shadow: inset 0 -2px var(--hud-brass); }
+#app .live-observatory[data-inspection='true'] .map-tools { right: 382px; }
+#app .live-observatory[data-inspection='true'] .layer-controls { right: 540px; }
+#app .map-hint { position: absolute; bottom: 46px; left: 16px; font-size: 10px; line-height: 14px; color: #e1e5dc; text-shadow: 0 1px 4px #071321; pointer-events: none; }
+#app .connection-actions { position: absolute; bottom: 110px; right: 16px; display: flex; gap: 8px; z-index: 4; }
+#app .connection-actions button { min-height: 44px; padding: 8px 12px; background: var(--hud-navy); color: var(--hud-ink); border: 1px solid var(--hud-line); }
+#app #render-mode { display: none; }
+#app .footer { position: absolute; inset: auto 0 0; display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 16px; background: var(--hud-deep); border-top: 1px solid var(--hud-line); font-size: 11px; z-index: 8; }
+#app .footer-status { color: var(--hud-muted); font-size: 11px; }
+#app .release-links { display: flex; align-items: center; gap: 16px; font-size: 11px; }
+#app .release-links :is(button, a) { display: inline-flex; align-items: center; min-height: 44px; padding: 0; font-size: 11px; background: transparent; color: var(--hud-muted); }
+#app .release-links strong { font-weight: 500; color: var(--hud-brass); }
+#app .update-notice { z-index: 10; bottom: 54px; }
+#app :is(button, a, summary, select):focus-visible { outline: 2px solid var(--hud-brass); outline-offset: 2px; }
+dialog { border-radius: 3px; border-color: var(--hud-line); background: var(--hud-navy); }
+dialog::backdrop { background: #06111ec4; }
+@media (min-width: 1001px) and (max-width: 1350px) {
+  #app .civilization-panel { width: calc(100% - 352px); }
+  #app .civilization-row { gap: 4px; padding-inline: 5px; }
+  #app .civilization-row .civ-emblem { flex-basis: 18px; width: 18px; height: 23px; font-size: 14px; }
+  #app .civilization-row strong { font-size: 14px; }
+  #app .civ-ribbon-progress progress { display: none; }
+}
+@media (max-width: 1000px) {
+  #app .masthead { padding: 0 10px; gap: 12px; }
+  #app .brand { font-size: 14px; gap: 6px; }
+  #app .brand > span:last-child { display: none; }
+  #app .top-nav { gap: 14px; }
+  #app .nav-active, #app .about-button, #app .mode-detail { display: none; }
+  #app .masthead .mode { display: none; }
+  #app .world-mode { display: block; margin-top: 2px; color: #e3e7df; font-size: 10px; line-height: 1.3; }
+  #app .world-heading { top: 54px; left: 10px; right: 160px; width: auto; max-width: none; padding: 5px 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; background: #102331d9; border-radius: 3px; }
+  #app .world-calendar { min-width: 0; }
+  #app .world-heading .body-switch { align-self: center; margin: 0; }
+  #app .world-heading .body-context { grid-column: 1 / -1; margin: 0; }
+  #app .world-heading h1 { font-size: 23px; margin: 3px 0; }
+  #app .world-heading .eyebrow { font-size: 9px; }
+  #app .world-heading p { font-size: 11px; }
+  #app .era-pill { display: none; }
+  #app .civilization-panel { top: auto; bottom: 44px; left: 0; right: 0; transform: none; width: 100%; height: 64px; border-radius: 0; border-inline: 0; }
+  #app .civilization-row { flex-direction: column; justify-content: center; gap: 2px; padding: 4px 2px; text-align: center; }
+  #app .civilization-row .civ-emblem { display: none; }
+  #app .civilization-row > span:last-child { flex: 0 1 auto; width: 100%; }
+  #app .civilization-row strong { font-size: 13px; text-align: center; white-space: nowrap; }
+  #app .civilization-row .civ-ribbon-facts { font-size: 10px; white-space: normal; line-height: 1.25; }
+  #app .civilization-row .civ-ribbon-work { display: none; }
+  #app .civilization-row[aria-pressed='true']::before { top: -1px; bottom: auto; }
+  #app .inspection, #app .inspection[data-inspection-view='work'] { top: auto; left: 10px; right: 10px; bottom: 118px; width: auto; max-height: min(45dvh, calc(100% - 250px)); padding: 12px; }
+  #app .inspection-top { display: none; }
+  #app .inspection-title { margin: 0 0 8px; min-height: 44px; }
+  #app .inspection h2 { font-size: 22px; }
+  #app .inspection-title .focus-symbol { width: 30px; height: 35px; font-size: 23px; }
+  #app .live-observatory[data-inspection='true'] .world-heading { display: grid; }
+  #app .live-observatory[data-inspection='true'] .world-heading p { display: block; }
+  #app .live-observatory[data-inspection='true'] .chronicle { display: none; }
+  #app .chronicle { left: 10px; bottom: 118px; width: min(280px, calc(100% - 20px)); max-height: 174px; }
+  #app .chronicle-heading { padding-inline: 6px; }
+  #app .chronicle-heading .eyebrow { font-size: 8px; }
+  #app #major-event-list > li:nth-child(n+2) { display: none; }
+  #app .chronicle-story { padding: 8px 10px; }
+  #app .chronicle .story-deltas { display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; }
+  #app .map-tools, #app .live-observatory[data-inspection='true'] .map-tools { top: 54px; right: 10px; bottom: auto; flex-direction: row; }
+  #app .map-tools button:last-child { width: 48px; }
+  #app .layer-controls, #app .map-hint { display: none; }
+  #app .connection-actions, #app .connection-actions:has(button:not([hidden])) { top: 106px; bottom: auto; left: auto; right: 10px; }
+  #app .footer { padding: 0 8px; }
+  #app .footer-status { display: none; }
+  #app .release-links { width: 100%; justify-content: space-between; gap: 8px; }
+  #app .update-notice { bottom: 110px; }
+}
+@media (max-width: 450px) and (min-height: 571px) {
+  #app .world-heading, #app .live-observatory[data-inspection='true'] .world-heading { grid-template-columns: minmax(0, 1fr); }
+  #app .world-heading .body-switch { justify-self: start; }
+}
+@media (max-width: 1000px) and (max-height: 570px) {
+  #app .world-heading { top: 51px; right: 155px; grid-template-columns: minmax(0, 1fr) auto; }
+  #app .world-heading h1 { font-size: 18px; }
+  #app .world-heading .eyebrow { display: none; }
+  #app .world-heading .body-context { font-size: 10px; }
+  #app .chronicle { width: 280px; max-height: 44px; padding: 0; }
+  #app .chronicle-heading .eyebrow, #app #major-event-list, #app #connection-story { display: none; }
+  #app .map-tools, #app .live-observatory[data-inspection='true'] .map-tools { top: 54px; bottom: auto; }
+  #app .inspection, #app .inspection[data-inspection-view='work'] { left: auto; right: 10px; width: 320px; max-height: min(45dvh, calc(100% - 220px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #app .chronicle-story, #app .civilization-row, .research-meter, .civic-meter { animation: none; transition: none; }
+}

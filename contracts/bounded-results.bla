@@ -1,0 +1,55 @@
+state bounded_accepted: bool
+state bounded_owner_attested: bool
+state bounded_reason_present: bool
+state bounded_prior_canonical_green: bool
+state bounded_implementation_only_drift: bool
+state bounded_live_structure_green: bool
+state bounded_other_blockers_clear: bool
+state bounded_task_revision_current: bool
+state bounded_verification_eligibility_current: bool
+state bounded_basis_recorded: bool
+state bounded_project_record_unchanged: bool
+state bounded_project_completion_allowed: bool
+state ordinary_close_accepted: bool
+state project_verification_current: bool
+state result_task_ready: bool
+state bounded_fixture_initialized: bool
+
+action bounded_result_fixture(kind: int)
+action bounded_success_fixture()
+action ordinary_success_fixture()
+action accept_bounded_result()
+action accept_ordinary_result()
+when bounded_success_fixture {
+    expect "positive-bounded-fixture-is-real": after.bounded_fixture_initialized
+    expect "positive-bounded-fixture-is-qualified": after.result_task_ready and after.bounded_owner_attested and after.bounded_reason_present and after.bounded_prior_canonical_green and after.bounded_implementation_only_drift and after.bounded_live_structure_green and after.bounded_other_blockers_clear and after.bounded_task_revision_current and after.bounded_verification_eligibility_current
+}
+when ordinary_success_fixture {
+    expect "positive-ordinary-fixture-is-real": after.bounded_fixture_initialized
+    expect "positive-ordinary-fixture-is-qualified": after.result_task_ready and after.project_verification_current and after.bounded_other_blockers_clear and after.bounded_task_revision_current
+}
+when accept_bounded_result {
+    expect "bounded-result-has-an-observed-fixture": not after.bounded_accepted or after.bounded_fixture_initialized
+    expect "qualified-ready-bounded-result-can-close": not (before.result_task_ready and before.bounded_owner_attested and before.bounded_reason_present and before.bounded_prior_canonical_green and before.bounded_implementation_only_drift and before.bounded_live_structure_green and before.bounded_other_blockers_clear and before.bounded_task_revision_current and before.bounded_verification_eligibility_current) or after.bounded_accepted
+    expect "bounded-acceptance-requires-explicit-owner-reason":
+        not after.bounded_accepted or after.bounded_owner_attested and after.bounded_reason_present
+    expect "bounded-acceptance-requires-qualified-prior-green":
+        not after.bounded_accepted or after.bounded_prior_canonical_green and after.bounded_implementation_only_drift and after.bounded_live_structure_green
+    expect "bounded-acceptance-keeps-every-other-blocker":
+        not after.bounded_accepted or after.bounded_other_blockers_clear
+    expect "recording-rechecks-task-and-verification-eligibility":
+        not after.bounded_accepted or after.bounded_task_revision_current and after.bounded_verification_eligibility_current
+    expect "bounded-acceptance-records-its-limited-basis":
+        not after.bounded_accepted or after.bounded_basis_recorded
+    expect "bounded-acceptance-never-refreshes-project-verification":
+        after.bounded_project_record_unchanged
+    expect "bounded-acceptance-does-not-complete-the-project":
+        not after.bounded_accepted or not after.bounded_project_completion_allowed
+}
+when accept_ordinary_result {
+    expect "ordinary-result-has-an-observed-fixture": not after.ordinary_close_accepted or after.bounded_fixture_initialized
+    expect "qualified-ready-ordinary-result-can-close": not (before.result_task_ready and before.project_verification_current and before.bounded_other_blockers_clear and before.bounded_task_revision_current) or after.ordinary_close_accepted
+    expect "ordinary-close-preserves-project-record": after.bounded_project_record_unchanged
+    expect "ordinary-close-still-needs-current-project-verification":
+        not after.ordinary_close_accepted or after.project_verification_current
+}

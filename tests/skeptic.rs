@@ -1116,8 +1116,44 @@ fn human_task_views_render_recorded_states_and_ready_waits_for_review() {
     assert_eq!(run(&temp, &["task", "ready", "one", "--json"]), 0);
     let ready = stdout_of(&temp, &["task", "show", "one"]);
     assert!(ready.contains("task::one   READY"), "{ready}");
-    assert!(ready.contains("await orchestrator review"), "{ready}");
+    assert!(ready.contains("blabla challenge one"), "{ready}");
+    assert!(ready.contains("UNCONFIRMED"), "{ready}");
+    let (pending, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(code, 0, "{pending}");
+    assert_eq!(pending["assignment_clear"], true, "{pending}");
+    assert_eq!(pending["assignment_recovery"]["action"], "await-review");
+    assert!(pending["assignment_recovery"]["blocker"].is_null());
+    assert!(
+        pending["project_challenges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "orchestrator-record-during-carry"),
+        "{pending}"
+    );
+    let (refused, code) = json_of(
+        &temp,
+        &["task", "close", "one", "--model", "qwen3.5:4b", "--json"],
+    );
+    assert_eq!(code, 2, "{refused}");
+    assert!(
+        refused["message"].as_str().unwrap().contains("unconfirmed"),
+        "{refused}"
+    );
     confirm(&temp);
+    let (confirmed, code) = json_of(&temp, &["challenge", "one", "--json"]);
+    assert_eq!(code, 0, "{confirmed}");
+    assert_eq!(confirmed["assignment_clear"], true, "{confirmed}");
+    assert_eq!(confirmed["assignment_recovery"]["action"], "await-review");
+    assert!(confirmed["assignment_recovery"]["blocker"].is_null());
+    assert!(
+        !confirmed["project_challenges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "orchestrator-record-during-carry"),
+        "{confirmed}"
+    );
 
     assert_eq!(
         run(

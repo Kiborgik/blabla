@@ -1,0 +1,60 @@
+state maximum_era: int
+state mars_population: int
+state finished: bool
+state outcome: string
+action play(seat: int, choice: int)
+action restart()
+always "colonies-need-spaceflight" { mars_population == 0 or maximum_era == 5 }
+when play {
+    expect "outcome-is-final": not before.finished or after.outcome == before.outcome
+}
+when restart {
+    expect "restart-preserves-outcome": after.outcome == before.outcome
+}
+
+state earth_population: int
+state transit_population: int
+state people_before: int
+state people_after: int
+state accepted_launch: bool
+state launch_paid_once: bool
+state exact_source_city: bool
+state eligible_launch_tools: bool
+state colony_reserves_nonnegative: bool
+state remote_upkeep_paid: bool
+state habitable: bool
+state supply_streak: int
+state won_mars: bool
+state simultaneous_winners_retained: bool
+state terminal_checkpoint_preserved: bool
+state retained_milestone_proof: bool
+state year_before: int
+state year_after: int
+state historical_cause_consumed_once: bool
+
+action depart()
+action arrive()
+action support_colony()
+action advance_earned_history()
+action finish_local_step()
+
+when depart {
+    expect "launch-debits-once-from-exact-eligible-town": not after.accepted_launch or (after.launch_paid_once and after.exact_source_city and after.eligible_launch_tools)
+    expect "departure-conserves-settlers": after.people_after == before.people_before
+}
+when arrive {
+    expect "arrival-transfers-existing-settlers": after.people_after == before.people_before
+}
+when support_colony {
+    expect "offworld-upkeep-cannot-borrow-earth-stock": after.colony_reserves_nonnegative
+    expect "stable-colony-needs-funded-habitable-beats": after.supply_streak == 0 or (after.remote_upkeep_paid and after.habitable)
+    expect "mars-win-needs-inhabited-sustained-habitat": not after.won_mars or (after.mars_population >= 3 and after.habitable and after.supply_streak >= 3)
+    expect "simultaneous-colony-successes-are-retained": after.simultaneous_winners_retained
+}
+when advance_earned_history {
+    expect "calendar-advance-has-durable-earned-cause": after.retained_milestone_proof and after.historical_cause_consumed_once
+    expect "earned-calendar-never-goes-backward": after.year_after >= before.year_before
+}
+when finish_local_step {
+    expect "winning-checkpoint-survives-local-controller": not after.finished or after.terminal_checkpoint_preserved
+}

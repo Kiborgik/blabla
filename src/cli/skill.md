@@ -11,8 +11,9 @@ BlaBla turns behavioral and structural intent into executable contracts and repo
 ## Working under an assignment
 
 A project may hand you a bounded task instead of the whole repository. `blabla task show <name>` prints the assignment -- statement, role, write scope, deliverables, findings, declared check, scratch -- then the routes below, in the order they are taken. That view is the authority, never this file. `task falsify` is offered only when the task names falsify paths.
+For an argv check, run `blabla task evidence <name> --run` once: it executes the declared program and records its actual result. Read the complete child log and exit, not just the storage wrapper exit. The generic routes below include the legacy manual-check form; never use `--exit` to record an argv task. Follow the current task view.
 {{routes}}
-Run the declared check from the project root. `--tool` is an evidence label, not the command to execute; `--exit` records the command's real exit code.
+At a meaningful feature boundary, use the declared `task evidence --run` route. Legacy manual checks may explicitly offer `--exit` and `--tool`; these record a claim, not a source-attested argv execution. Do not repeat unchanged tests for metadata-only handoffs: inspect `task freshness` and the guarded recovery route the current CLI supports, and report an unsupported route rather than fabricating reuse.
 Acceptance records that a role took the work through BlaBla, not that it read what it retrieved. Hand-back requires current successful evidence and an explicit assignment challenge receipt. Changes to the task or its inputs require another challenge; resume a READY task with `task accept` before further work. A path outside the write scope is a finding, never a widening; read the whole run before recording it.
 A hand-back is not acceptance: READY means await orchestrator review; assigned workers hand back without running `blabla finish`, closing is the orchestrator's decision, and only `blabla finish` decides project completion.
 When multiple tasks are open, choose a name explicitly; status never assigns one to the caller. Project verification GREEN and unfinished task obligations remain separate.
@@ -32,8 +33,7 @@ Read a contract file only when `explain` is not enough. Never edit a `.bla` file
 ## Contract authoring and bootstrap
 
 `blabla guide bootstrap` is the canonical procedure: source authority ordering, conflicts,
-unknowns, draft contracts (`draft behavior "path"` in `project.bla`), the skeptic pass and
-promotion to `use behavior` by a human.
+unknowns, draft contracts (`draft behavior "path"` in `project.bla`), the skeptic pass and promotion to `use behavior` by a human.
 
 ## Authoring project memory
 

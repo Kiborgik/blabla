@@ -1,0 +1,75 @@
+state exact_research_dependencies: bool
+state exact_research_costs: bool
+state current_science_only: bool
+state no_era_selection_gate: bool
+state no_automatic_successor: bool
+state credited_equals_depleted: bool
+state opening_resident_respected: bool
+state per_resource_capacity: bool
+state old_iron_preserved: bool
+state exact_owned_adjacent_edge: bool
+state same_town_reach: bool
+state full_start_payment_once: bool
+state one_town_lane: bool
+state completed_later_once: bool
+state no_tile_slot_consumed: bool
+state deterministic_weighted_path: bool
+state exact_snapshot_cadence: bool
+state explicit_new_consent: bool
+state old_quote_schedule_preserved: bool
+state full_atomic_fuel_and_cargo: bool
+state no_payment_on_block: bool
+state once_only_due_delivery: bool
+state complete_delivery_receipt: bool
+state faster_than_unrailed_baseline: bool
+state two_distinct_operated_towns: bool
+state genuine_steam_receipt: bool
+state durable_evidence: bool
+state no_calendar_change: bool
+state current_paid_industrial_sequence: bool
+state refused: bool
+state no_effects: bool
+state replay_exact: bool
+
+action complete_connected_research()
+action extract_finite_coal()
+action construct_owned_rail()
+action quote_steam_exchange()
+action consent_steam_exchange()
+action deliver_funded_steam_exchange()
+action block_unfunded_steam_exchange()
+action attain_industrial_milestone()
+action replay_industrial_history()
+action refuse_industrial_action()
+
+when complete_connected_research {
+    expect "accepted-research-is-explicit-productive-and-reachable-before-era-three": after.exact_research_dependencies and after.exact_research_costs and after.current_science_only and after.no_era_selection_gate and after.no_automatic_successor
+}
+when extract_finite_coal {
+    expect "staffed-coal-extraction-conserves-reserve-and-resource-specific-capacity": after.credited_equals_depleted and after.opening_resident_respected and after.per_resource_capacity and after.old_iron_preserved
+}
+when construct_owned_rail {
+    expect "rail-commits-one-paid-owned-local-edge-in-the-town-lane": after.exact_owned_adjacent_edge and after.same_town_reach and after.full_start_payment_once and after.one_town_lane and after.completed_later_once and after.no_tile_slot_consumed
+}
+when quote_steam_exchange {
+    expect "steam-quotes-share-deterministic-weighted-geography-and-exact-cadence": after.deterministic_weighted_path and after.exact_snapshot_cadence
+}
+when consent_steam_exchange {
+    expect "steam-requires-new-consent-without-rewriting-old-agreements": after.explicit_new_consent and after.exact_snapshot_cadence and after.old_quote_schedule_preserved
+}
+when deliver_funded_steam_exchange {
+    expect "due-steam-exchange-pays-complete-cargo-and-one-proposer-coal-once": after.full_atomic_fuel_and_cargo and after.once_only_due_delivery and after.complete_delivery_receipt
+    expect "paid-rail-sequence-has-a-real-faster-transport-consumer": after.current_paid_industrial_sequence and after.faster_than_unrailed_baseline
+}
+when block_unfunded_steam_exchange {
+    expect "blocked-or-duplicate-steam-delivery-consumes-nothing": after.no_payment_on_block and after.once_only_due_delivery
+}
+when attain_industrial_milestone {
+    expect "industrial-era-requires-two-operated-towns-and-a-genuine-steam-delivery": after.two_distinct_operated_towns and after.genuine_steam_receipt and after.durable_evidence and after.no_calendar_change
+}
+when replay_industrial_history {
+    expect "industrial-proof-and-immutable-quotes-survive-restart-and-event-pruning": after.replay_exact and after.durable_evidence and after.old_quote_schedule_preserved and after.old_iron_preserved
+}
+when refuse_industrial_action {
+    expect "invalid-industrial-choices-preserve-state": after.refused and after.no_effects
+}

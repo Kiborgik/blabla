@@ -1,0 +1,22 @@
+state production_enabled: bool
+state production_inputs_available: bool
+state production_paid_units: int
+state production_produced_units: int
+state production_stock_units: int
+
+action operate()
+action pause()
+action production_beat()
+
+when operate {
+    expect "operating-inputs-are-atomic": before.production_enabled and before.production_inputs_available or after.production_paid_units == 0
+    expect "paused-building-preserves-inputs": before.production_enabled or after.production_stock_units == before.production_stock_units
+    expect "allocator-debit-matches-receipt": before.production_stock_units - after.production_stock_units == after.production_paid_units
+}
+when pause {
+    expect "pause-does-not-spend-resources": after.production_stock_units == before.production_stock_units
+}
+when production_beat {
+    expect "inactive-recipe-has-no-input-or-output": before.production_enabled and before.production_inputs_available or after.production_paid_units == 0 and after.production_produced_units == 0
+    expect "supplied-working-recipe-produces": not before.production_enabled or not before.production_inputs_available or after.production_produced_units > 0
+}

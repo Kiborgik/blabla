@@ -1,0 +1,1882 @@
+import { earnedLandRecords, validLandIntegrationEvent } from './land-integration-validation.ts';
+import { regionalIronPlanForWorld, REGIONAL_IRON_PLACEMENT_ID } from './regional-iron.ts';
+import { isCivicWorksOperation, isCivicWorksState, validCivicWorksEvent } from './civic-works-validation.ts';
+import { validPolicyExclusivity, validInstitutionalScienceOperation } from './learning-patronage-validation.ts';
+import { isWoodlandState, isWoodlandOperationResult } from './woodland-validation.ts';
+import { validateDrainage } from './drainage.ts';
+import { isRiverFlowState, isRiverIntakeOperationResult } from './river-intake-validation.ts';
+import { isBorderState, validBorderEvent } from './border-validation.ts';
+import { isKnowledgeState, validKnowledgeEvent } from './knowledge-validation.ts';
+import { FOOD_BUDGET_RULES, type FoodSupplyReceipt } from './food-security-content.ts';
+import { isReliefState, validReliefEvent } from './relief-validation.ts';
+import { isHistoricalEventReceipt } from './historical-selection-validation.ts';
+import { historicalEventInstanceId } from './historical-selection.ts';
+import { generatedHistoryRecords, spaceflightRecords, validMarsEvent } from './spaceflight-validation.ts';
+import {
+  BUILDINGS,
+  ECONOMY_RULES,
+  LOCAL_GROWTH_RULES,
+  COAL_RULES,
+  METAL_RULES,
+  CONSTRUCTION_RULES,
+  INDUSTRIAL_RULES,
+  LAND_TRANSPORT_RULES,
+  LOCAL_POWER_RULES,
+  POWERED_SCIENCE_RULES,
+  RESIDENT_CAPACITY_RULES,
+  STRATEGIC_RESOURCE_IDS,
+  STRATEGIC_RESOURCE_RULES,
+  CIVICS,
+  CIVIC_RULES,
+  GOVERNMENTS,
+  POLICIES,
+  POLICY_SLOT_TYPES,
+  IMPROVEMENTS,
+  IMPROVEMENT_RULES,
+  ERAS,
+  DIRECTOR_EVENTS,
+  FEATURES,
+  FOCUS_IDS,
+  HISTORICAL_MILESTONES,
+  RESOURCE_IDS,
+  PUBLIC_PROJECT_RULES,
+  DISTRICT_RULES,
+  TECHNOLOGIES,
+  TRADE_RULES,
+  TURN_RULES,
+  WONDERS,
+} from './content.ts';
+import { parseUtcTimestamp } from './simulation/clock.ts';
+import { isTransportQuote, transportTopologyBlock } from './simulation/transport.ts';
+import { coastalTopologyBlock, isCoastalFoundingQuote } from './simulation/coastal.ts';
+import { hexDistance } from './simulation/geography.ts';
+import { isHillSite } from './simulation/improvements.ts';
+import { isPersistedActionPlan } from './planning.ts';
+import { RELEASES } from './release.ts';
+import {
+  CIV_COUNT,
+  DIRECTOR_SEAT,
+  GAME_VERSION,
+  SCHEMA_VERSION,
+  type City,
+  type BuildingDefinition,
+  type LocalPowerBeatReceipt,
+  type LocalPowerOperationResult,
+  type CivicState,
+  type GovernmentState,
+  type ConstructionCompletion,
+  type ImprovementConstructionCompletion,
+  type ImprovementDefinition,
+  type CoastalFoundingReceipt,
+  type Civilization,
+  type GameEvent,
+  type EventKind,
+  type HexTile,
+  type Outcome,
+  type Route,
+  type Resources,
+  type StrategicResources,
+  type RailCompletion,
+  type SteamDeliveryReceipt,
+  type IndustrialFoundryReceipt,
+  type ResidentAllocationResult,
+  type StrategicDepositLayer,
+  type StrategicExtractionResult,
+  type StrategicShipmentResult,
+  type Treaty,
+  type TradeAgreement,
+  type TradeOffer,
+  type TradeTerms,
+  type WonderCompletion,
+  type WonderLossReceipt,
+  type ResearchBoostReceipt,
+  type PopulationGrowthReceipt,
+  type PastoralSiteLayer,
+  type TileAcquisitionReceipt,
+  type WorldState,
+} from './types.ts';
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function integer(value: unknown, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): value is number {
+  return (
+    typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum && value <= maximum
+  );
+}
+
+function finite(value: unknown, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): value is number {
+  return (
+    typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
+  );
+}
+
+function text(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function strings(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item: unknown) => typeof item === 'string');
+}
+
+function unique(values: readonly unknown[]): boolean {
+  return new Set(values).size === values.length;
+}
+
+function knownStrings(value: unknown, allowed: readonly string[]): value is string[] {
+  return strings(value) && unique(value) && value.every((id) => allowed.includes(id));
+}
+
+export function isDirectorEvent(value: unknown): value is EventKind {
+  return DIRECTOR_EVENTS.some((definition) => definition.id === value);
+}
+
+function historyAdvances(value: unknown, revision: number, year: number, features: string[]): boolean {
+  if (!record(value)) return false;
+  const revisions: number[] = [];
+  for (const [key, receipt] of Object.entries(value)) {
+    if (!record(receipt) || !record(receipt.cause)) return false;
+    const cause = receipt.cause;
+    if ((cause.kind !== 'feature' && cause.kind !== 'event' && cause.kind !== 'milestone') || !text(cause.id)
+      || cause.id.trim().length === 0 || cause.id.length > 128 || key !== `${cause.kind}:${cause.id}`
+      || (cause.kind === 'feature' && !features.includes(cause.id))
+      || (cause.kind === 'milestone' && !features.includes('earned-history'))
+      || !text(receipt.reason) || receipt.reason.trim().length === 0 || receipt.reason.length > 1000
+      || !integer(receipt.deltaYears) || !integer(receipt.revision, 1, revision)
+      || !integer(receipt.yearBefore, -Number.MAX_SAFE_INTEGER)
+      || !integer(receipt.yearAfter, -Number.MAX_SAFE_INTEGER, year)
+      || !Number.isSafeInteger(receipt.yearBefore + receipt.deltaYears)
+      || receipt.yearAfter !== receipt.yearBefore + receipt.deltaYears
+      || typeof receipt.timestamp !== 'string' || parseUtcTimestamp(receipt.timestamp) === null
+      || !strings(receipt.evidence) || receipt.evidence.length === 0
+      || !receipt.evidence.every((item) => item.trim().length > 0)) return false;
+    revisions.push(receipt.revision);
+  }
+  return unique(revisions);
+}
+
+function civilization(value: unknown): value is Civilization {
+  if (!record(value) || !record(value.resources)) return false;
+  const resources = value.resources;
+  const technologies = TECHNOLOGIES.map((item) => item.id);
+  return (
+    integer(value.id, 0, CIV_COUNT - 1) &&
+    ['name', 'color', 'adjective', 'objective'].every((field) => text(value[field])) &&
+    integer(value.era, 0, ERAS.length - 1) &&
+    RESOURCE_IDS.every((resource) => finite(resources[resource])) &&
+    knownStrings(value.technologies, technologies) &&
+    typeof value.researchTarget === 'string' &&
+    (value.researchTarget === '' || technologies.includes(value.researchTarget)) &&
+    ['researchProgress', 'influence', 'marsProgress', 'score'].every((field) =>
+      finite(value[field]),
+    ) &&
+    ['marsPopulation', 'marsSupplyStreak', 'federationStreak'].every((field) =>
+      integer(value[field]),
+    ) &&
+    finite(value.legitimacy, 0, 100)
+  );
+}
+
+function poweredScienceRecords(civilizations: Civilization[], cities: City[], events: GameEvent[], features: string[]): boolean {
+  const enabled = features.includes(POWERED_SCIENCE_RULES.featureId);
+  const branch = TECHNOLOGIES.filter(technology => technology.requiredFeatures.includes(POWERED_SCIENCE_RULES.featureId));
+  const available = (id: string, completed: string[]): boolean => {
+    const definition = branch.find(technology => technology.id === id);
+    return !!definition && definition.requiredFeatures.every(feature => features.includes(feature))
+      && definition.requires.every(required => completed.includes(required));
+  };
+  for (const actor of civilizations) {
+    for (const [index, id] of actor.technologies.entries())
+      if (branch.some(technology => technology.id === id) && !available(id, actor.technologies.slice(0, index))) return false;
+    const target = branch.find(technology => technology.id === actor.researchTarget);
+    if (target && (!available(target.id, actor.technologies) || actor.technologies.includes(target.id) || actor.researchProgress >= target.cost)) return false;
+    const completed = actor.lastResearchCompletion;
+    if (completed && branch.some(technology => technology.id === completed.technologyId)) {
+      const event = events.find(candidate => candidate.id === completed.eventId);
+      if (event && (event.type !== 'research-completed' || event.actor !== actor.id || event.target !== actor.id
+        || event.round !== completed.completedRound || !event.effects.includes(`Technology ${completed.technologyId} unlocked`))) return false;
+    }
+  }
+  const laboratory = BUILDINGS.find(building => building.id === 'research-lab');
+  if (!laboratory) return false;
+  for (const settlement of cities) {
+    const active = settlement.construction?.active;
+    const completed = settlement.construction?.lastCompleted;
+    const commitments = [active, completed].filter(order => order && !('kind' in order) && order.buildingId === laboratory.id);
+    const receipts = [settlement.localPower?.lastBeat, settlement.localPower?.lastProductiveBeat];
+    if (!enabled && (settlement.buildings.includes(laboratory.id) || commitments.length > 0
+      || receipts.some(receipt => receipt?.operations.some(operation => operation.buildingId === laboratory.id)))) return false;
+    for (const order of commitments) if (!order || !sameSnapshot(order.paid, laboratory.cost) || order.workRequired !== CONSTRUCTION_RULES.requiredWork['research-lab']) return false;
+    if (active && !('kind' in active) && active.buildingId === laboratory.id) {
+      const actor = civilizations.find(candidate => candidate.id === settlement.civId);
+      if (!actor || actor.era < laboratory.minEra || !laboratory.requires.every(id => actor.technologies.includes(id))
+        || !laboratory.requiredFeatures.every(feature => features.includes(feature))) return false;
+    }
+  }
+  return enabled || events.every(event => !event.localPower?.operations.some(operation => operation.buildingId === laboratory.id)
+    && !(event.type === 'building-operation' && event.detail.includes(`/${laboratory.id} at strategic round `))
+    && !(event.type === 'building-operation-changed' && event.detail.endsWith(`/${laboratory.id}`))
+    && !(event.type === 'building-completed' && event.title.endsWith(` builds ${laboratory.name}`))
+    && !(event.type === 'research-started' && branch.some(technology => technology.id === event.detail))
+    && !(event.type === 'research-completed' && branch.some(technology => event.effects.includes(`Technology ${technology.id} unlocked`))));
+}
+
+function civicDefinitionAvailable(definition: { requiredFeatures: readonly string[]; requires: string[] }, features: string[], completed: string[]): boolean {
+  return definition.requiredFeatures.every(feature => features.includes(feature)) && definition.requires.every(id => completed.includes(id));
+}
+
+function retainedCivicCompletion(events: GameEvent[], eventId: string, actor: number, completedRound?: number, civicId?: string): boolean {
+  const event = events.find(candidate => candidate.id === eventId);
+  return !event || event.type === 'civic-completed' && event.actor === actor && event.target === actor && event.tileId === null
+    && (completedRound === undefined || event.round === completedRound)
+    && (civicId === undefined || event.effects.includes(`Completed civic ${civicId}`));
+}
+
+function civicState(value: unknown, features: string[], round: number, revision: number, actor: number, events: GameEvent[]): value is CivicState {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'completedCivicIds', 'active', 'lastCompleted', 'reformEntitlement'])
+    || value.ruleVersion !== 1 || !knownStrings(value.completedCivicIds, CIVICS.map(definition => definition.id))) return false;
+  const completed = value.completedCivicIds;
+  if (!completed.every((id, index) => { const definition = CIVICS.find(candidate => candidate.id === id); return definition !== undefined && civicDefinitionAvailable(definition, features, completed.slice(0, index)); })) return false;
+  if (value.active !== null) {
+    const active = value.active;
+    if (!record(active) || !exactKeys(active, ['civicId', 'startedRound', 'progress', 'requiredCulture'])
+      || !text(active.civicId) || completed.includes(active.civicId) || !integer(active.startedRound, 0, round)
+      || !finite(active.requiredCulture) || active.requiredCulture <= 0 || !finite(active.progress) || active.progress >= active.requiredCulture) return false;
+    const definition = CIVICS.find(candidate => candidate.id === active.civicId);
+    if (!definition || !civicDefinitionAvailable(definition, features, completed)) return false;
+  }
+  const last = value.lastCompleted;
+  if (last === null) return completed.length === 0 && value.reformEntitlement === null;
+  if (!record(last) || !exactKeys(last, ['civicId', 'completedRound', 'eventId'])
+    || last.civicId !== completed.at(-1) || !text(last.civicId) || !integer(last.completedRound, 0, round)
+    || completionRevision(last.eventId, revision) === null || !text(last.eventId)
+    || !retainedCivicCompletion(events, last.eventId, actor, last.completedRound, last.civicId)) return false;
+  if (record(value.active) && integer(value.active.startedRound) && value.active.startedRound < last.completedRound) return false;
+  const entitlement = value.reformEntitlement;
+  return entitlement === null || record(entitlement) && exactKeys(entitlement, ['civicId', 'completedRound', 'completionEventId'])
+    && entitlement.civicId === last.civicId && entitlement.completedRound === last.completedRound && entitlement.completionEventId === last.eventId;
+}
+
+function governmentAssignments(value: unknown, governmentId: unknown, features: string[], completed: string[]): boolean {
+  const definition = GOVERNMENTS.find(candidate => candidate.id === governmentId);
+  if (!definition || !civicDefinitionAvailable(definition, features, completed) || !Array.isArray(value) || !validPolicyExclusivity(value)) return false;
+  const occupied = new Set<string>(); const policies = new Set<string>(); let previous = -1;
+  for (const assignment of value) {
+    if (!record(assignment) || !exactKeys(assignment, ['slotType', 'slotIndex', 'policyId'])) return false;
+    const slotType = POLICY_SLOT_TYPES.find(type => type === assignment.slotType);
+    if (!slotType || !integer(assignment.slotIndex, 0, definition.slots[slotType] - 1) || !text(assignment.policyId)) return false;
+    const key = `${slotType}:${assignment.slotIndex}`;
+    const policy = POLICIES.find(candidate => candidate.id === assignment.policyId);
+    const position = POLICY_SLOT_TYPES.slice(0, POLICY_SLOT_TYPES.indexOf(slotType)).reduce((sum, type) => sum + definition.slots[type], 0) + assignment.slotIndex;
+    if (!policy || !civicDefinitionAvailable(policy, features, completed) || slotType !== 'wildcard' && policy.slotType !== slotType
+      || occupied.has(key) || policies.has(policy.id) || position <= previous) return false;
+    previous = position; occupied.add(key); policies.add(policy.id);
+  }
+  return true;
+}
+
+function governmentState(value: unknown, civics: CivicState, features: string[], round: number, revision: number, actor: number, events: GameEvent[]): value is GovernmentState {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'active', 'pending', 'lastSpentReformCompletionEventId']) || value.ruleVersion !== 1) return false;
+  const spent = value.lastSpentReformCompletionEventId;
+  const last = civics.lastCompleted;
+  if (spent !== null && (!text(spent) || completionRevision(spent, revision) === null || !last
+    || (completionRevision(spent, revision) ?? 0) > (completionRevision(last.eventId, revision) ?? 0)
+    || !retainedCivicCompletion(events, spent, actor))) return false;
+  if (last && (civics.reformEntitlement === null) !== (spent === last.eventId)) return false;
+  if (!last && spent !== null) return false;
+  const active = value.active;
+  if (active === null) return value.pending === null && spent === null;
+  if (!record(active) || !exactKeys(active, ['governmentId', 'assignments', 'effectiveRound', 'governmentLockUntilRound', 'policyLockUntilRound'])
+    || !governmentAssignments(active.assignments, active.governmentId, features, civics.completedCivicIds)
+    || !integer(active.effectiveRound, 0, round) || !integer(active.governmentLockUntilRound, CIVIC_RULES.commitmentBeats, active.effectiveRound + CIVIC_RULES.commitmentBeats)
+    || !integer(active.policyLockUntilRound) || active.policyLockUntilRound !== active.effectiveRound + CIVIC_RULES.commitmentBeats) return false;
+  if (value.pending === null) return true;
+  const pending = value.pending;
+  if (!record(pending) || !exactKeys(pending, ['targetGovernmentId', 'targetAssignments', 'acceptedRound', 'completionRound', 'paidCredits', 'spentCompletionEventId'])
+    || pending.targetGovernmentId === active.governmentId || !governmentAssignments(pending.targetAssignments, pending.targetGovernmentId, features, civics.completedCivicIds)
+    || !integer(pending.acceptedRound, Math.max(active.policyLockUntilRound, active.governmentLockUntilRound), round)
+    || !integer(pending.completionRound) || pending.completionRound !== pending.acceptedRound + CIVIC_RULES.transitionBeats || pending.completionRound <= round) return false;
+  if (pending.spentCompletionEventId === null) return pending.paidCredits === CIVIC_RULES.governmentCredits;
+  if (pending.paidCredits !== 0 || pending.spentCompletionEventId !== spent || !last || !text(spent)
+    || last.eventId === spent && last.completedRound > pending.acceptedRound) return false;
+  const event = events.find(candidate => candidate.id === spent);
+  return !event || event.round <= pending.acceptedRound;
+}
+
+function civicRecords(civilizations: Civilization[], events: GameEvent[], features: string[], round: number, revision: number): boolean {
+  const enabled = features.includes(CIVIC_RULES.featureId);
+  if (!enabled && events.some(event => ['civic-started', 'civic-completed', 'arrangement-accepted', 'transition-completed'].includes(event.type))) return false;
+  for (const actor of civilizations) {
+    if (Object.hasOwn(actor, 'civics') !== enabled || Object.hasOwn(actor, 'government') !== enabled) return false;
+    if (!enabled) continue;
+    if (!civicState(actor.civics, features, round, revision, actor.id, events)
+      || !governmentState(actor.government, actor.civics, features, round, revision, actor.id, events)) return false;
+  }
+  return true;
+}
+
+function city(value: unknown): value is City {
+  return (
+    record(value) &&
+    text(value.id) &&
+    text(value.name) &&
+    integer(value.civId, 0, CIV_COUNT - 1) &&
+    integer(value.tileId) &&
+    integer(value.population, 1) &&
+    finite(value.wellbeing, 0, 100) &&
+    finite(value.infrastructure) &&
+    finite(value.damage, 0, 100) &&
+    typeof value.focus === 'string' &&
+    FOCUS_IDS.some((focus) => focus === value.focus) &&
+    knownStrings(
+      value.buildings,
+      BUILDINGS.map((building) => building.id),
+    )
+  );
+}
+
+function foodSupply(value: unknown, round: number, features: string[]): value is FoodSupplyReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'foodRule', 'round', 'population', 'produced', 'required', 'paid', 'growthPaid', 'supplied', 'foodBefore', 'foodAfter'])
+    || value.ruleVersion !== 1 || value.foodRule !== FOOD_BUDGET_RULES.ruleId || !integer(value.round, 0, round) || !integer(value.population, 1)
+    || !finite(value.produced) || !finite(value.required) || !finite(value.paid) || !finite(value.growthPaid) || !finite(value.foodBefore) || !finite(value.foodAfter)
+    || typeof value.supplied !== 'boolean') return false;
+  if (value.produced !== quantized(value.produced)) return false;
+  const available = quantized(value.foodBefore + value.produced);
+  const required = quantized(value.population * FOOD_BUDGET_RULES.populationFoodUpkeep);
+  if (!finite(available) || value.required !== required || value.paid !== Math.min(available, required) || value.supplied !== (available >= required)) return false;
+  const afterMeals = quantized(available - value.paid);
+  const growthCost = features.includes(LOCAL_GROWTH_RULES.featureId)
+    ? LOCAL_GROWTH_RULES.baseFoodCost + Math.floor(value.population / LOCAL_GROWTH_RULES.populationPerFoodCost)
+    : ECONOMY_RULES.growth.foodCost;
+  if (value.growthPaid !== 0 && (!value.supplied || value.growthPaid !== growthCost || afterMeals < ECONOMY_RULES.growth.foodReserve + growthCost)) return false;
+  return value.foodAfter === quantized(afterMeals - value.growthPaid);
+}
+
+function foodSupplyRecords(cities: City[], round: number, features: string[]): boolean {
+  return cities.every(settlement => !Object.hasOwn(settlement, 'lastFoodSupply')
+    || features.includes(FOOD_BUDGET_RULES.featureId) && foodSupply(settlement.lastFoodSupply, round, features));
+}
+
+function resourceAmounts(value: unknown): value is Partial<Resources> {
+  return record(value) && Object.entries(value).every(([resource, amount]) =>
+    RESOURCE_IDS.some((known) => known === resource) && finite(amount));
+}
+
+function exactResourceAmounts(value: unknown, expected: Partial<Resources>): boolean {
+  return resourceAmounts(value) && Object.keys(value).length === Object.keys(expected).length
+    && RESOURCE_IDS.every(resource => value[resource] === expected[resource]);
+}
+
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function strategicResources(value: unknown): value is StrategicResources {
+  return record(value) && Object.entries(value).every(([resource, amount]) => STRATEGIC_RESOURCE_IDS.some(id => id === resource) && integer(amount));
+}
+
+function sameStrategicResources(first: StrategicResources, second: StrategicResources): boolean {
+  return STRATEGIC_RESOURCE_IDS.every(id => Object.hasOwn(first, id) === Object.hasOwn(second, id) && first[id] === second[id]);
+}
+
+function strategicCargo(value: unknown): value is NonNullable<TradeTerms['strategicCargo']> {
+  return record(value) && exactKeys(value, ['proposer', 'recipient'])
+    && strategicResources(value.proposer) && strategicResources(value.recipient);
+}
+
+const strategicExtractionFields = ['ruleVersion', 'tileId', 'round', 'resource', 'quantity', 'reserveBefore', 'reserveAfter', 'stockBefore', 'stockAfter', 'capacity', 'status'] as const;
+
+function strategicExtraction(value: unknown): value is StrategicExtractionResult {
+  if (!record(value) || !exactKeys(value, strategicExtractionFields)
+    || value.ruleVersion !== 1 || !STRATEGIC_RESOURCE_IDS.some(id => id === value.resource)
+    || !integer(value.tileId) || !integer(value.round) || !integer(value.quantity)
+    || !integer(value.reserveBefore) || !integer(value.reserveAfter) || !integer(value.stockBefore) || !integer(value.stockAfter) || !integer(value.capacity)
+    || value.reserveBefore - value.reserveAfter !== value.quantity || value.stockAfter - value.stockBefore !== value.quantity) return false;
+  if (value.status === 'extracted') return value.quantity > 0 && value.quantity === Math.min(value.reserveBefore, Math.max(0, value.capacity - value.stockBefore), (value.resource === 'coal' ? STRATEGIC_RESOURCE_RULES.coal.extractionPerBeat : STRATEGIC_RESOURCE_RULES.iron.extractionPerBeat)) && value.stockAfter <= value.capacity;
+  return value.quantity === 0 && (value.status === 'unrevealed' || value.status === 'exhausted' && value.reserveBefore === 0
+    || value.status === 'storage-full' && value.reserveBefore > 0 && value.stockBefore >= value.capacity);
+}
+
+function sameExtraction(first: StrategicExtractionResult, second: StrategicExtractionResult): boolean {
+  return strategicExtractionFields.every(key => first[key] === second[key]);
+}
+
+function strategicShipment(value: unknown): value is StrategicShipmentResult {
+  return record(value) && exactKeys(value, ['ruleVersion', 'routeId', 'offerId', 'proposer', 'recipient', 'proposerSent', 'recipientSent'])
+    && value.ruleVersion === 1 && boundedText(value.routeId) && boundedText(value.offerId)
+    && integer(value.proposer, 0, CIV_COUNT - 1) && integer(value.recipient, 0, CIV_COUNT - 1) && value.proposer !== value.recipient
+    && strategicResources(value.proposerSent) && strategicResources(value.recipientSent);
+}
+
+function strategicLayer(value: unknown, seed: number, tiles: HexTile[], regional: boolean): value is StrategicDepositLayer {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'placementId', 'seed', 'tileIds', 'deposits'])
+    || value.ruleVersion !== 1 || value.placementId !== (regional ? REGIONAL_IRON_PLACEMENT_ID : 'iron-placement-1') || value.seed !== seed
+    || !Array.isArray(value.tileIds) || value.tileIds.length > Math.min(8, tiles.length) || !unique(value.tileIds)
+    || !Array.from(value.tileIds).every((id: unknown) => integer(id) && tiles.some(site => site.id === id)) || !record(value.deposits)
+    || !exactKeys(value.deposits, value.tileIds.map(String))) return false;
+  return Object.entries(value.deposits).every(([key, deposit]) => record(deposit)
+    && exactKeys(deposit, ['tileId', 'resource', 'initialReserve', 'remaining']) && integer(deposit.tileId) && key === String(deposit.tileId)
+    && deposit.resource === 'iron' && integer(deposit.initialReserve, 1) && integer(deposit.remaining, 0, deposit.initialReserve));
+}
+
+function metalRecords(hasLayer: boolean, layer: unknown, civilizations: Civilization[], cities: City[], tiles: HexTile[], events: GameEvent[], routes: Route[], features: string[], seed: number, coal: unknown): boolean {
+  const enabled = features.includes('finite-metals');
+  if (hasLayer !== enabled || civilizations.some(actor => Object.hasOwn(actor, 'strategicResources') !== enabled)) return false;
+  if (!enabled) return !events.some(event => Object.hasOwn(event, 'strategicExtraction') || Object.hasOwn(event, 'strategicShipment'));
+  if (!strategicLayer(layer, seed, tiles, features.includes('regional-iron')) || !civilizations.every(actor => strategicResources(actor.strategicResources))) return false;
+  const retainedExtraction = (value: StrategicExtractionResult): boolean => {
+    const deposit = value.resource === 'coal' ? record(coal) && record(coal.deposits) ? coal.deposits[String(value.tileId)] : undefined : layer.deposits[String(value.tileId)];
+    return record(deposit) && deposit.resource === value.resource && integer(deposit.initialReserve) && integer(deposit.remaining) && value.reserveBefore <= deposit.initialReserve && value.reserveAfter >= deposit.remaining
+      && value.capacity > 0 && value.capacity % STRATEGIC_RESOURCE_RULES[value.resource].capacityPerCity === 0;
+  };
+  for (const settlement of cities) for (const improvement of Object.values(settlement.improvements ?? {})) {
+    const result = improvement.operation.lastResult;
+    if (!result?.extraction) continue;
+    if (result.extraction.tileId !== improvement.tileId || result.extraction.round !== result.round || !retainedExtraction(result.extraction)) return false;
+    const event = events.find(candidate => candidate.type === 'improvement-operation' && candidate.actor === settlement.civId && candidate.tileId === improvement.tileId && candidate.round === result.round);
+    if (event && (!event.strategicExtraction || !sameExtraction(result.extraction, event.strategicExtraction))) return false;
+  }
+  for (const event of events) {
+    if (event.strategicExtraction) {
+      if (!retainedExtraction(event.strategicExtraction)) return false;
+      const settlement = cities.find(candidate => candidate.improvements?.[String(event.tileId)]?.operation.lastResult?.round === event.round);
+      const result = settlement?.improvements?.[String(event.tileId)]?.operation.lastResult;
+      if (settlement && (!result?.extraction || event.actor !== settlement.civId || !sameExtraction(result.extraction, event.strategicExtraction))) return false;
+    }
+    const shipment = event.strategicShipment;
+    if (!shipment) continue;
+    const connection = routes.find(candidate => candidate.id === shipment.routeId);
+    const agreement = connection?.agreement;
+    const cargo = agreement?.terms.strategicCargo;
+    if (!connection || !agreement || !cargo || agreement.offerId !== shipment.offerId || connection.owner !== shipment.proposer || connection.partner !== shipment.recipient
+      || !sameStrategicResources(cargo.proposer, shipment.proposerSent) || !sameStrategicResources(cargo.recipient, shipment.recipientSent)
+      || event.round <= agreement.acceptedRound || (event.round - (agreement.terms.transport ? agreement.acceptedRound : 0)) % agreement.terms.cadenceRounds !== 0) return false;
+  }
+  return true;
+}
+
+function sameSnapshot(first: unknown, second: unknown): boolean {
+  if (Array.isArray(first)) return Array.isArray(second) && first.length === second.length && first.every((item: unknown, index) => sameSnapshot(item, second[index]));
+  if (record(first)) return record(second) && exactKeys(second, Object.keys(first)) && Object.entries(first).every(([key, value]) => sameSnapshot(value, second[key]));
+  return first === second;
+}
+
+function railIdentity(value: Record<string, unknown>): boolean {
+  return value.ruleVersion === 1 && integer(value.tileId) && integer(value.toTileId, value.tileId + 1)
+    && value.edgeId === `${value.tileId}:${value.toTileId}` && boundedText(value.cityId)
+    && sameSnapshot(value.paid, INDUSTRIAL_RULES.railCost) && sameSnapshot(value.strategicPaid, INDUSTRIAL_RULES.railStrategicCost)
+    && value.workRequired === INDUSTRIAL_RULES.railWork;
+}
+
+function railCompletion(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is RailCompletion {
+  if (!record(value) || !exactKeys(value, ['kind', 'ruleVersion', 'orderId', 'cityId', 'civId', 'edgeId', 'tileId', 'toTileId', 'startedRound', 'completedRound', 'paid', 'strategicPaid', 'workRequired', 'eventId'])
+    || value.kind !== 'rail' || !railIdentity(value) || !integer(value.civId, 0, CIV_COUNT - 1)
+    || !integer(value.startedRound, 0, round) || !integer(value.completedRound, value.startedRound + 1, round)) return false;
+  const started = orderRevision(value.orderId, revision); const completed = completionRevision(value.eventId, revision);
+  return started !== null && completed !== null && completed > started;
+}
+
+function industrialFoundry(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is IndustrialFoundryReceipt {
+  return record(value) && exactKeys(value, ['ruleVersion', 'cityId', 'civId', 'round', 'eventId', 'paid', 'strategicPaid', 'produced', 'residents'])
+    && value.ruleVersion === 1 && boundedText(value.cityId) && integer(value.civId, 0, CIV_COUNT - 1) && integer(value.round, 1, round)
+    && completionRevision(value.eventId, revision) !== null && sameSnapshot(value.paid, { energy: 2 }) && sameSnapshot(value.strategicPaid, { iron: 1 })
+    && resourceAmounts(value.produced) && exactKeys(value.produced, ['materials']) && finite(value.produced.materials, Number.MIN_VALUE)
+    && residentAllocation(value.residents) && value.residents.required === RESIDENT_CAPACITY_RULES.perPaidRecipe
+    && record(value.residents) && value.residents.communityReserve === RESIDENT_CAPACITY_RULES.communityReserve
+    && value.residents.allocated === value.residents.required && value.residents.available >= value.residents.required;
+}
+
+function paymentSum(value: unknown, first: Partial<Resources>, second: Partial<Resources>): boolean {
+  if (!resourceAmounts(value)) return false;
+  const expected = Object.fromEntries(RESOURCE_IDS.map(id => [id, (first[id] ?? 0) + (second[id] ?? 0)]));
+  return sameSnapshot(value, expected);
+}
+
+function strategicPayment(value: unknown, cargo: StrategicResources | undefined, fuel: number): boolean {
+  if (!strategicResources(value)) return false;
+  const expected = { ...cargo };
+  if (fuel > 0) expected.coal = (expected.coal ?? 0) + fuel;
+  return sameSnapshot(value, expected);
+}
+
+function steamReceipt(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER, maxTiles = Number.MAX_SAFE_INTEGER): value is SteamDeliveryReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'routeId', 'offerId', 'proposer', 'recipient', 'acceptedRound', 'round', 'eventId', 'terms', 'proposerPaid', 'recipientPaid', 'proposerStrategicPaid', 'recipientStrategicPaid'])
+    || value.ruleVersion !== 1 || !boundedText(value.routeId) || !boundedText(value.offerId)
+    || !integer(value.proposer, 0, CIV_COUNT - 1) || !integer(value.recipient, 0, CIV_COUNT - 1) || value.proposer === value.recipient
+    || !integer(value.acceptedRound, 0, round) || !integer(value.round, value.acceptedRound + 1, round)
+    || completionRevision(value.eventId, revision) === null || !tradeTerms(value.terms)) return false;
+  const terms = value.terms; const quote = terms.transport;
+  return record(terms) && exactKeys(terms, ['recipeId', 'recipeVersion', ...tradeResourceFields, 'cadenceRounds', 'damageDisableAt', 'transport', ...(Object.hasOwn(terms, 'strategicCargo') ? ['strategicCargo'] : [])])
+    && isTransportQuote(quote, maxTiles) && quote.mode === 'steam'
+    && terms.cadenceRounds === Math.max(quote.baseCadence, Math.ceil(quote.weightedDistance / INDUSTRIAL_RULES.edgesPerBeat))
+    && (value.round - value.acceptedRound) % terms.cadenceRounds === 0
+    && paymentSum(value.proposerPaid, terms.proposerCargo, terms.proposerUpkeep)
+    && paymentSum(value.recipientPaid, terms.recipientCargo, terms.recipientUpkeep)
+    && strategicPayment(value.proposerStrategicPaid, terms.strategicCargo?.proposer, INDUSTRIAL_RULES.shipmentCoal)
+    && strategicPayment(value.recipientStrategicPaid, terms.strategicCargo?.recipient, 0);
+}
+
+function industrialEvent(value: Record<string, unknown>): boolean {
+  if (value.type === 'rail-completed' && !Object.hasOwn(value, 'railCompletion')) return false;
+  if (Object.hasOwn(value, 'railCompletion')) {
+    const fact = value.railCompletion;
+    if (!railCompletion(fact) || value.type !== 'rail-completed' || fact.eventId !== value.id || fact.completedRound !== value.round
+      || fact.civId !== value.actor || value.target !== value.actor || fact.tileId !== value.tileId || fact.edgeId !== value.detail) return false;
+  }
+  if (Object.hasOwn(value, 'industrialFoundry')) {
+    const fact = value.industrialFoundry;
+    if (!industrialFoundry(fact) || value.type !== 'building-operation' || fact.eventId !== value.id || fact.round !== value.round
+      || fact.civId !== value.actor || value.target !== value.actor || value.detail !== `${fact.cityId}/foundry at strategic round ${fact.round}`) return false;
+  }
+  if (Object.hasOwn(value, 'steamDelivery')) {
+    const fact = value.steamDelivery;
+    if (!steamReceipt(fact) || value.type !== 'trade-delivered' || fact.eventId !== value.id || fact.round !== value.round
+      || fact.proposer !== value.actor || fact.recipient !== value.target || fact.routeId !== value.detail) return false;
+  }
+  return true;
+}
+
+type IndustrialContext = Pick<WorldState, 'seed' | 'tiles' | 'cities' | 'civilizations' | 'events' | 'routes' | 'unlockedFeatures' | 'revision' | 'round' | 'calendarMilestones'> & { coalDeposits: unknown; railEdges: unknown; industrialEvidence: unknown; strategicDeposits: unknown; pastoralSites: unknown; tradeOffers: TradeOffer[]; presentFields: string[] };
+
+function coalLayer(value: unknown, world: IndustrialContext): value is StrategicDepositLayer {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'placementId', 'seed', 'tileIds', 'deposits'])
+    || value.ruleVersion !== 1 || value.placementId !== COAL_RULES.placement.id || value.seed !== world.seed
+    || !Array.isArray(value.tileIds) || value.tileIds.length > COAL_RULES.placement.maximumDeposits || !unique(value.tileIds)
+    || !value.tileIds.every((id: unknown) => integer(id) && world.tiles.some(site => site.id === id))
+    || !record(value.deposits) || !exactKeys(value.deposits, value.tileIds.map(String))) return false;
+  const ids = value.tileIds; const selected = world.tiles.filter(site => ids.includes(site.id));
+  const overlaps = (layer: unknown, id: number): boolean => record(layer) && Array.isArray(layer.tileIds) && layer.tileIds.includes(id);
+  if (!selected.every(site => isHillSite(site) && site.resource === null && !overlaps(world.strategicDeposits, site.id) && !overlaps(world.pastoralSites, site.id)
+    && selected.every(other => other.id === site.id || hexDistance(site, other) >= COAL_RULES.placement.frontierMinimumDistance))) return false;
+  return Object.entries(value.deposits).every(([key, deposit]) => record(deposit) && exactKeys(deposit, ['tileId', 'resource', 'initialReserve', 'remaining'])
+    && integer(deposit.tileId) && key === String(deposit.tileId) && deposit.resource === 'coal' && deposit.initialReserve === COAL_RULES.initialReserve
+    && integer(deposit.remaining, 0, COAL_RULES.initialReserve));
+}
+
+function industrialRecords(world: IndustrialContext): boolean {
+  const enabled = world.unlockedFeatures.includes('industrial-steam');
+  if (['coalDeposits', 'railEdges', 'industrialEvidence'].some(field => world.presentFields.includes(field) !== enabled)) return false;
+  if (!enabled) return world.civilizations.every(actor => !Object.hasOwn(actor.strategicResources ?? {}, 'coal'))
+    && world.events.every(event => !event.industrialFoundry && !event.steamDelivery && !event.railCompletion && event.strategicExtraction?.resource !== 'coal' && !Object.hasOwn(event.strategicShipment?.proposerSent ?? {}, 'coal') && !Object.hasOwn(event.strategicShipment?.recipientSent ?? {}, 'coal'))
+    && world.routes.every(connection => !Object.hasOwn(connection.agreement ?? {}, 'lastSteamDelivery'))
+    && [...(world.tradeOffers ?? []).map(offer => offer.terms), ...world.routes.flatMap(connection => connection.agreement ? [connection.agreement.terms] : [])].every(terms => !Object.hasOwn(terms.strategicCargo?.proposer ?? {}, 'coal') && !Object.hasOwn(terms.strategicCargo?.recipient ?? {}, 'coal'));
+  if (!coalLayer(world.coalDeposits, world) || !record(world.railEdges) || !record(world.industrialEvidence)
+    || !exactKeys(world.industrialEvidence, ['ruleVersion', 'foundryOperations', 'steamDelivery']) || world.industrialEvidence.ruleVersion !== 1
+    || !Array.isArray(world.industrialEvidence.foundryOperations) || world.industrialEvidence.foundryOperations.length > 2) return false;
+  const registry = world.railEdges; const evidence = world.industrialEvidence;
+  const proofs = evidence.foundryOperations;
+  if (!Array.isArray(proofs)) return false;
+  const edges = new Set<string>(); const orders = new Set<string>(); const events = new Set<string>();
+  const geometry = (fact: { tileId: number; toTileId: number; cityId: string }, owner?: number): boolean => {
+    const first = world.tiles.find(site => site.id === fact.tileId); const second = world.tiles.find(site => site.id === fact.toTileId);
+    const town = world.cities.find(settlement => settlement.id === fact.cityId); const center = world.tiles.find(site => site.id === town?.tileId);
+    return !!first && !!second && !!center && hexDistance(first, second) === 1
+      && [first, second].every(site => LAND_TRANSPORT_RULES.passable[site.terrain] && hexDistance(center, site) <= INDUSTRIAL_RULES.railRange && (owner === undefined || site.owner === owner));
+  };
+  for (const [key, fact] of Object.entries(registry)) {
+    if (!railCompletion(fact, world.revision, world.round) || key !== fact.edgeId || !geometry(fact) || orders.has(fact.orderId) || events.has(fact.eventId)) return false;
+    edges.add(key); orders.add(fact.orderId); events.add(fact.eventId);
+    const retained = world.events.find(event => event.id === fact.eventId);
+    if (retained && !sameSnapshot(retained.railCompletion, fact)) return false;
+  }
+  for (const settlement of world.cities) {
+    const active = settlement.construction?.active; const last = settlement.construction?.lastCompleted;
+    if (active && 'kind' in active && active.kind === 'rail') {
+      if (edges.has(active.edgeId) || !geometry(active, settlement.civId) || orders.has(active.id)
+        || !world.civilizations.find(actor => actor.id === settlement.civId)?.technologies.includes(INDUSTRIAL_RULES.requiredTechnology)) return false;
+      edges.add(active.edgeId); orders.add(active.id);
+    } else if (active && orders.has(active.id)) return false;
+    if (last && 'kind' in last && last.kind === 'rail') { if (!sameSnapshot(registry[last.edgeId], last)) return false; }
+    else if (last && (orders.has(last.orderId) || events.has(last.eventId))) return false;
+    for (const improvement of Object.values(settlement.improvements ?? {})) if (orders.has(improvement.completion.orderId) || events.has(improvement.completion.eventId)) return false;
+  }
+  const validFoundry = (fact: unknown): fact is IndustrialFoundryReceipt => {
+    if (!industrialFoundry(fact, world.revision, world.round)) return false;
+    const settlement = world.cities.find(candidate => candidate.id === fact.cityId); if (!settlement) return false;
+    const result = settlement.buildingOperations?.foundry?.lastResult;
+    if (result?.round === fact.round && settlement.civId === fact.civId && (result.status !== 'operated' || !sameSnapshot(result.paid, fact.paid)
+      || !sameSnapshot(result.strategicPaid, fact.strategicPaid) || !sameSnapshot(result.produced, fact.produced) || !sameSnapshot(result.residents, fact.residents))) return false;
+    const retained = world.events.find(event => event.id === fact.eventId);
+    return !retained || sameSnapshot(retained.industrialFoundry, fact);
+  };
+  const validSteam = (fact: unknown): fact is SteamDeliveryReceipt => {
+    if (!steamReceipt(fact, world.revision, world.round, world.tiles.length)) return false;
+    const connection = world.routes.find(candidate => candidate.id === fact.routeId); const agreement = connection?.agreement;
+    if (!connection || !agreement || agreement.offerId !== fact.offerId || connection.owner !== fact.proposer || connection.partner !== fact.recipient
+      || agreement.acceptedRound !== fact.acceptedRound || !sameTradeTerms(agreement.terms, fact.terms)) return false;
+    const origin = world.cities.find(settlement => settlement.id === connection.from); const destination = world.cities.find(settlement => settlement.id === connection.to);
+    const quote = fact.terms.transport;
+    if (!origin || !destination || !quote || quote.mode !== 'steam' || transportTopologyBlock(world, quote, origin.tileId, destination.tileId) !== null
+      || !quote.railEdges.every(edge => { const completion = registry[edge.edgeId]; return railCompletion(completion, world.revision, world.round) && completion.eventId === edge.completionEventId && completion.completedRound <= fact.acceptedRound; })) return false;
+    const retained = world.events.find(event => event.id === fact.eventId);
+    return !retained || sameSnapshot(retained.steamDelivery, fact);
+  };
+  if (!proofs.every(validFoundry) || !unique(proofs.map(fact => fact.cityId))
+    || !unique(proofs.map(fact => fact.eventId))) return false;
+  if (evidence.steamDelivery !== null && (!validSteam(evidence.steamDelivery) || evidence.steamDelivery.terms.transport?.mode !== 'steam'
+    || evidence.steamDelivery.terms.cadenceRounds >= evidence.steamDelivery.terms.transport.unrailedCadence)) return false;
+  for (const connection of world.routes) {
+    const agreement = connection.agreement; if (!agreement) continue;
+    const steam = agreement.terms.transport?.mode === 'steam';
+    if (Object.hasOwn(agreement, 'lastSteamDelivery') !== steam) return false;
+    if (!steam) continue;
+    const fact = agreement.lastSteamDelivery;
+    if (fact === null) { if (agreement.lastDeliveryRound !== null) return false; continue; }
+    if (!validSteam(fact) || fact.routeId !== connection.id || fact.offerId !== agreement.offerId || fact.proposer !== connection.owner || fact.recipient !== connection.partner
+      || fact.acceptedRound !== agreement.acceptedRound || fact.round !== agreement.lastDeliveryRound || !sameTradeTerms(fact.terms, agreement.terms)) return false;
+  }
+  const proofIds = [...events, ...proofs.map(fact => fact.eventId), ...(steamReceipt(evidence.steamDelivery) ? [evidence.steamDelivery.eventId] : [])];
+  if (!unique(proofIds)) return false;
+  for (const event of world.events) {
+    if (event.industrialFoundry && (!validFoundry(event.industrialFoundry)
+      || proofs.length < 2 && !proofs.some(fact => fact.cityId === event.industrialFoundry?.cityId))
+      || event.steamDelivery && (!validSteam(event.steamDelivery)
+        || evidence.steamDelivery === null && event.steamDelivery.terms.transport?.mode === 'steam' && event.steamDelivery.terms.cadenceRounds < event.steamDelivery.terms.transport.unrailedCadence)
+      || event.railCompletion && !sameSnapshot(registry[event.railCompletion.edgeId], event.railCompletion)) return false;
+  }
+  return !world.calendarMilestones.includes('industrial-world') || proofs.length === 2 && evidence.steamDelivery !== null
+    && world.civilizations.some(actor => actor.technologies.includes('industrialization'));
+}
+
+function pastoralLayer(value: unknown, seed: number, tiles: HexTile[], iron: StrategicDepositLayer | undefined): value is PastoralSiteLayer {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'placementId', 'seed', 'tileIds', 'sites'])
+    || value.ruleVersion !== 1 || value.placementId !== 'pastoral-sites-1' || value.seed !== seed
+    || !Array.isArray(value.tileIds) || value.tileIds.length > Math.min(10, tiles.length) || !unique(value.tileIds)
+    || !Array.from(value.tileIds).every((id: unknown) => integer(id) && tiles.some(site => site.id === id) && !iron?.tileIds.includes(id))
+    || !record(value.sites) || !exactKeys(value.sites, value.tileIds.map(String))) return false;
+  return Object.entries(value.sites).every(([key, site]) => record(site) && exactKeys(site, ['tileId', 'resource'])
+    && integer(site.tileId) && key === String(site.tileId) && site.resource === 'horses');
+}
+
+function waterLandRecords(hasLayer: boolean, layer: unknown, cities: City[], tiles: HexTile[], events: GameEvent[], features: string[], seed: number, iron: unknown): boolean {
+  const enabled = features.includes('water-land');
+  const deposits = strategicLayer(iron, seed, tiles, features.includes('regional-iron')) ? iron : undefined;
+  const pastoral = enabled && pastoralLayer(layer, seed, tiles, deposits) ? layer : null;
+  if (hasLayer !== enabled || enabled && !pastoral) return false;
+  const sourceValid = (settlement: City, source: unknown): boolean => {
+    if (!enabled || !integer(source) || source === settlement.tileId) return false;
+    const center = tiles.find(site => site.id === settlement.tileId);
+    const catchment = tiles.find(site => site.id === source);
+    return center !== undefined && catchment !== undefined && hexDistance(center, catchment) === 1;
+  };
+  for (const settlement of cities) {
+    const installed = settlement.buildings.includes('aqueduct');
+    const mapping: unknown = settlement.buildingCatchments;
+    if (Object.hasOwn(settlement, 'buildingCatchments')) {
+      if (!enabled || !record(mapping) || !exactKeys(mapping, installed ? ['aqueduct'] : [])
+        || installed && !sourceValid(settlement, mapping.aqueduct)) return false;
+    } else if (installed) return false;
+    if (!enabled && settlement.buildings.includes('water-mill')) return false;
+    const active = settlement.construction?.active;
+    const completed = settlement.construction?.lastCompleted;
+    for (const entry of [active, completed]) {
+      if (!entry) continue;
+      if ('kind' in entry) {
+        if (entry.kind === 'improvement' && entry.improvementId === 'pasture'
+          && (!pastoral || !Object.hasOwn(pastoral.sites, String(entry.tileId)))) return false;
+        continue;
+      }
+      if (entry.buildingId === 'water-mill' && !enabled) return false;
+      const aqueduct = entry.buildingId === 'aqueduct';
+      if (aqueduct !== Object.hasOwn(entry, 'catchmentTileId')) return false;
+      if (!aqueduct) continue;
+      if (!sourceValid(settlement, entry.catchmentTileId)) return false;
+      if (entry === completed) {
+        if (!record(mapping) || mapping.aqueduct !== entry.catchmentTileId || !completed) return false;
+        const event = events.find(candidate => candidate.id === completed.eventId);
+        if (event && (event.type !== 'building-completed' || event.round !== completed.completedRound || event.tileId !== settlement.tileId
+          || event.actor !== settlement.civId || event.target !== settlement.civId)) return false;
+      }
+    }
+    for (const improvement of Object.values(settlement.improvements ?? {})) {
+      if (improvement.improvementId !== 'pasture') continue;
+      if (!pastoral || !Object.hasOwn(pastoral.sites, String(improvement.tileId))
+        || improvement.operation.lastResult && Object.hasOwn(improvement.operation.lastResult, 'extraction')) return false;
+    }
+  }
+  return true;
+}
+
+function observatoryRecords(cities: City[], tiles: HexTile[], events: GameEvent[], features: string[]): boolean {
+  const enabled = features.includes('observatory-learning');
+  const sourceValid = (settlement: City, value: unknown): boolean => {
+    if (!enabled || !record(value) || !exactKeys(value, ['campusTileId', 'sourceTileId'])
+      || !integer(value.campusTileId) || !integer(value.sourceTileId) || value.campusTileId === value.sourceTileId
+      || !settlement.buildings.includes('campus') || settlement.districtSites?.campus !== value.campusTileId) return false;
+    const campus = tiles.find(site => site.id === value.campusTileId);
+    const source = tiles.find(site => site.id === value.sourceTileId);
+    return campus !== undefined && source !== undefined && hexDistance(campus, source) === 1;
+  };
+  for (const settlement of cities) {
+    const installed = settlement.buildings.includes('observatory');
+    const result = settlement.buildingOperations?.observatory?.lastResult;
+    if (result && !Object.hasOwn(result, 'residents')) return false;
+    const mapping: unknown = settlement.buildingHighGround;
+    if (Object.hasOwn(settlement, 'buildingHighGround')) {
+      if (!enabled || !record(mapping) || !exactKeys(mapping, installed ? ['observatory'] : [])
+        || installed && !sourceValid(settlement, mapping.observatory)) return false;
+    } else if (installed) return false;
+    const active = settlement.construction?.active;
+    const completed = settlement.construction?.lastCompleted;
+    for (const entry of [active, completed]) {
+      if (!entry || 'kind' in entry) continue;
+      const observatory = entry.buildingId === 'observatory';
+      if (observatory !== Object.hasOwn(entry, 'highGround')) return false;
+      if (!observatory) continue;
+      if (!sourceValid(settlement, entry.highGround)) return false;
+      if (entry === completed) {
+        if (!record(mapping) || !record(mapping.observatory) || !entry.highGround || !completed
+          || mapping.observatory.campusTileId !== entry.highGround.campusTileId
+          || mapping.observatory.sourceTileId !== entry.highGround.sourceTileId) return false;
+        const event = events.find(candidate => candidate.id === completed.eventId);
+        if (event && (event.type !== 'building-completed' || event.round !== completed.completedRound || event.tileId !== settlement.tileId
+          || event.actor !== settlement.civId || event.target !== settlement.civId)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function residentAllocation(value: unknown): value is ResidentAllocationResult {
+  return record(value) && exactKeys(value, ['ruleVersion', 'openingPopulation', 'communityReserve', 'required', 'available', 'allocated'])
+    && value.ruleVersion === 1 && integer(value.openingPopulation, 1) && integer(value.communityReserve)
+    && integer(value.required, 1) && integer(value.available) && integer(value.allocated)
+    && value.available <= Math.max(0, value.openingPopulation - value.communityReserve);
+}
+
+function operationResult(value: unknown, round: number, features: string[], strategicRecipe: boolean): boolean {
+  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages', ...(strategicRecipe ? ['strategicPaid', 'strategicShortages'] : []), ...(Object.hasOwn(value, 'residents') ? ['residents'] : []), ...(Object.hasOwn(value, 'policyContribution') ? ['policyContribution'] : [])])
+    || !integer(value.round, 0, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
+    || !Array.isArray(value.shortages)) return false;
+  const strategic: string[] = [];
+  if (strategicRecipe) {
+    if (!features.includes('foundry-production') || !features.includes('finite-metals')
+      || !strategicResources(value.strategicPaid) || !features.includes('industrial-steam') && Object.hasOwn(value.strategicPaid, 'coal') || !Array.isArray(value.strategicShortages) || !residentAllocation(value.residents)) return false;
+    for (const shortage of value.strategicShortages) {
+      if (!record(shortage) || !exactKeys(shortage, ['resource', 'required', 'available'])
+        || shortage.resource !== 'iron' || !integer(shortage.required, 1) || !integer(shortage.available)
+        || shortage.required <= shortage.available) return false;
+      strategic.push(shortage.resource);
+    }
+    if (!unique(strategic)) return false;
+  }
+  if (Object.hasOwn(value, 'residents') && (!features.includes('resident-capacity') || !residentAllocation(value.residents))) return false;
+  const residents = residentAllocation(value.residents) ? value.residents : null;
+  const resources: string[] = [];
+  for (const shortage of value.shortages) {
+    if (!record(shortage) || !exactKeys(shortage, ['resource', 'required', 'available'])
+      || typeof shortage.resource !== 'string' || !RESOURCE_IDS.some((resource) => resource === shortage.resource)
+      || !finite(shortage.available) || !finite(shortage.required, Number.MIN_VALUE)
+      || shortage.required <= shortage.available) return false;
+    resources.push(shortage.resource);
+  }
+  if (!unique(resources)) return false;
+  if (value.status === 'operated') return resources.length === 0 && strategic.length === 0
+    && (!strategicRecipe || strategicResources(value.strategicPaid) && Object.values(value.strategicPaid).some(amount => amount > 0))
+    && (residents === null || residents.allocated === residents.required && residents.available >= residents.required);
+  return Object.keys(value.paid).length === 0 && Object.keys(value.produced).length === 0
+    && (!strategicRecipe || strategicResources(value.strategicPaid) && Object.keys(value.strategicPaid).length === 0)
+    && (residents === null || residents.allocated === 0)
+    && (value.status === 'paused' ? resources.length === 0 && strategic.length === 0 : value.status === 'blocked'
+      && (resources.length > 0 || strategic.length > 0 || residents !== null && residents.available < residents.required));
+}
+
+function powerParticipant(building: BuildingDefinition | undefined): boolean {
+  return !!building && ((building.localPowerInput ?? 0) > 0 || (building.localPowerOutput ?? 0) > 0);
+}
+
+function powerOperation(value: unknown, building: BuildingDefinition | undefined, round: number): value is LocalPowerOperationResult {
+  if (!building || !record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages', 'strategicPaid', 'strategicShortages', 'residents', 'localPower', 'emissionsProduced', 'operationEventId'])
+    || !integer(value.round, 0, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
+    || !strategicResources(value.strategicPaid) || !Array.isArray(value.shortages) || !Array.isArray(value.strategicShortages)
+    || !residentAllocation(value.residents) || value.residents.required !== RESIDENT_CAPACITY_RULES.perPaidRecipe
+    || value.residents.communityReserve !== RESIDENT_CAPACITY_RULES.communityReserve || !record(value.localPower)
+    || !exactKeys(value.localPower, ['ruleVersion', 'required', 'availableBefore', 'consumed', 'generated', 'shortage'])
+    || value.localPower.ruleVersion !== LOCAL_POWER_RULES.ruleVersion
+    || !['required', 'availableBefore', 'consumed', 'generated', 'shortage'].every(key => integer(value.localPower && record(value.localPower) ? value.localPower[key] : undefined))
+    || !integer(value.emissionsProduced) || completionRevision(value.operationEventId, Number.MAX_SAFE_INTEGER) === null) return false;
+  const power = value.localPower;
+  if (power.required !== (building.localPowerInput ?? 0) || !integer(power.availableBefore)
+    || power.shortage !== Math.max(0, (building.localPowerInput ?? 0) - power.availableBefore)) return false;
+  const ordinary: string[] = []; const strategic: string[] = [];
+  for (const [shortages, inputs, ids] of [[value.shortages, building.operatingInputs ?? {}, ordinary], [value.strategicShortages, building.strategicInputs ?? {}, strategic]] as const) {
+    for (const shortage of shortages) {
+      if (!record(shortage) || !exactKeys(shortage, ['resource', 'required', 'available']) || typeof shortage.resource !== 'string'
+        || !Object.hasOwn(inputs, shortage.resource) || shortage.required !== Reflect.get(inputs, shortage.resource)
+        || !finite(shortage.available) || !finite(shortage.required, Number.MIN_VALUE) || shortage.available >= shortage.required) return false;
+      ids.push(shortage.resource);
+    }
+    if (!unique(ids)) return false;
+  }
+  const residents = value.residents;
+  if (value.status === 'operated') return sameSnapshot(value.paid, { ...building.operatingInputs })
+    && sameSnapshot(value.strategicPaid, { ...building.strategicInputs })
+    && Object.keys(value.produced).every(resource => Object.hasOwn(building.production, resource))
+    && ordinary.length === 0 && strategic.length === 0 && power.shortage === 0
+    && power.consumed === (building.localPowerInput ?? 0) && power.generated === (building.localPowerOutput ?? 0)
+    && value.emissionsProduced === (building.emissionsPerOperation ?? 0)
+    && residents.allocated === residents.required && residents.available >= residents.required;
+  return sameSnapshot(value.paid, {}) && sameSnapshot(value.produced, {}) && sameSnapshot(value.strategicPaid, {})
+    && residents.allocated === 0 && power.consumed === 0 && power.generated === 0 && value.emissionsProduced === 0
+    && (value.status === 'paused' ? ordinary.length === 0 && strategic.length === 0 : value.status === 'blocked'
+      && (ordinary.length > 0 || strategic.length > 0 || power.shortage > 0 || residents.available < residents.required));
+}
+
+function powerBeat(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is LocalPowerBeatReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'cityId', 'civId', 'round', 'eventId', 'openingPopulation', 'communityReserve', 'operations', 'generated', 'consumed', 'expired'])
+    || value.ruleVersion !== LOCAL_POWER_RULES.ruleVersion || !boundedText(value.cityId) || !integer(value.civId, 0, CIV_COUNT - 1)
+    || !integer(value.round, 0, round) || completionRevision(value.eventId, revision) === null
+    || !integer(value.openingPopulation, 1) || value.communityReserve !== RESIDENT_CAPACITY_RULES.communityReserve
+    || !Array.isArray(value.operations) || value.operations.length === 0 || value.operations.length > BUILDINGS.filter(powerParticipant).length
+    || !integer(value.generated) || !integer(value.consumed) || !integer(value.expired)) return false;
+  const beatRevision = completionRevision(value.eventId, revision); const beatIndex = Number(String(value.eventId).split(':')[1]);
+  let availablePower = 0; let availableResidents = Math.max(0, value.openingPopulation - value.communityReserve);
+  let generated = 0; let consumed = 0; let previous = ''; const ids: string[] = []; const eventIds: string[] = [];
+  for (const operation of value.operations) {
+    if (!record(operation) || !exactKeys(operation, ['buildingId', 'phase', 'recipe', 'result'])) return false;
+    const building = BUILDINGS.find(item => item.id === operation.buildingId);
+    if (!building || !powerParticipant(building)) return false;
+    const generator = (building.localPowerOutput ?? 0) > 0;
+    const key = `${generator ? 0 : 1}:${building.id}`;
+    if (key <= previous || operation.phase !== (generator ? 'generator' : 'consumer')
+      || !sameSnapshot(operation.recipe, { ruleVersion: LOCAL_POWER_RULES.ruleVersion, inputs: { ...building.operatingInputs }, strategicInputs: { ...building.strategicInputs }, baseOutputs: { ...building.production }, residentsRequired: RESIDENT_CAPACITY_RULES.perPaidRecipe, localPowerInput: building.localPowerInput ?? 0, localPowerOutput: building.localPowerOutput ?? 0, emissionsPerOperation: building.emissionsPerOperation ?? 0 })
+      || !powerOperation(operation.result, building, value.round)) return false;
+    const result = operation.result;
+    if (result.round !== value.round || result.residents.openingPopulation !== value.openingPopulation
+      || result.residents.communityReserve !== value.communityReserve || result.residents.available > availableResidents
+      || generator && result.residents.available !== availableResidents || result.localPower.availableBefore !== availablePower
+      || completionRevision(result.operationEventId, revision) !== beatRevision || Number(result.operationEventId.split(':')[1]) >= beatIndex) return false;
+    availableResidents = result.residents.available - result.residents.allocated;
+    generated += result.localPower.generated; consumed += result.localPower.consumed;
+    availablePower += result.localPower.generated - result.localPower.consumed;
+    if (availablePower < 0) return false;
+    previous = key; ids.push(building.id); eventIds.push(result.operationEventId);
+  }
+  return unique(ids) && unique(eventIds) && value.generated === generated && value.consumed === consumed && value.expired === availablePower;
+}
+
+function productivePower(value: LocalPowerBeatReceipt): boolean {
+  return value.operations.some(operation => operation.phase === 'consumer' && operation.result.status === 'operated'
+    && operation.result.localPower.consumed > 0 && Object.values(operation.result.produced).some(amount => amount > 0));
+}
+
+function powerEvent(value: Record<string, unknown>): boolean {
+  if (!Object.hasOwn(value, 'localPower')) return value.type !== 'local-power-beat';
+  return powerBeat(value.localPower) && value.type === 'local-power-beat' && value.localPower.eventId === value.id
+    && value.localPower.round === value.round && value.localPower.civId === value.actor && value.actor === value.target && integer(value.tileId);
+}
+
+function powerRecords(cities: City[], events: GameEvent[], features: string[], round: number, revision: number): boolean {
+  const enabled = features.includes(LOCAL_POWER_RULES.featureId);
+  const valid = (receipt: LocalPowerBeatReceipt, settlement: City): boolean => {
+    if (!powerBeat(receipt, revision, round) || receipt.cityId !== settlement.id
+      || receipt.operations.some(operation => !settlement.buildings.includes(operation.buildingId))) return false;
+    const retained = events.find(event => event.id === receipt.eventId);
+    if (retained && (retained.tileId !== settlement.tileId || !sameSnapshot(retained.localPower, receipt))) return false;
+    return receipt.operations.every(operation => {
+      const result = operation.result; const event = events.find(item => item.id === result.operationEventId);
+      if (!event) return true;
+      return event.type === 'building-operation' && event.round === receipt.round && event.actor === receipt.civId && event.target === receipt.civId
+        && event.tileId === settlement.tileId && event.detail === `${settlement.id}/${operation.buildingId} at strategic round ${receipt.round}`
+        && event.title.endsWith(` ${result.status}`)
+        && event.effects.includes(`Residents: required ${result.residents.required}, opening capacity remaining ${result.residents.available}, allocated ${result.residents.allocated}; population is not consumed`)
+        && event.effects.includes(`Local Power: required ${result.localPower.required}, available ${result.localPower.availableBefore}, consumed ${result.localPower.consumed}, generated ${result.localPower.generated}`)
+        && event.effects.includes(`Receipt-only emissions ${result.emissionsProduced}`)
+        && Object.entries(result.paid).every(([resource, amount]) => amount === 0 || event.effects.includes(`Paid ${amount} ${resource}`))
+        && Object.entries(result.strategicPaid).every(([resource, amount]) => amount === 0 || event.effects.includes(`Paid ${amount} ${resource}`))
+        && Object.entries(result.produced).every(([resource, amount]) => amount === 0 || event.effects.includes(`Produced ${amount} ${resource}`));
+    });
+  };
+  for (const settlement of cities) {
+    const participants = BUILDINGS.filter(building => settlement.buildings.includes(building.id) && powerParticipant(building));
+    if (!enabled || participants.length === 0) { if (Object.hasOwn(settlement, 'localPower') || participants.length > 0) return false; continue; }
+    const ledger: unknown = settlement.localPower;
+    if (!record(ledger) || !exactKeys(ledger, ['ruleVersion', 'lastBeat', 'lastProductiveBeat']) || ledger.ruleVersion !== LOCAL_POWER_RULES.ruleVersion
+      || ledger.lastBeat !== null && (!powerBeat(ledger.lastBeat, revision, round) || !valid(ledger.lastBeat, settlement))
+      || ledger.lastProductiveBeat !== null && (!powerBeat(ledger.lastProductiveBeat, revision, round) || !valid(ledger.lastProductiveBeat, settlement) || !productivePower(ledger.lastProductiveBeat))) return false;
+    const latest = ledger.lastBeat; const productive = ledger.lastProductiveBeat;
+    if (latest === null) { if (productive !== null || participants.some(building => settlement.buildingOperations?.[building.id]?.lastResult !== null)) return false; continue; }
+    if (productive !== null && (!powerBeat(productive) || !powerBeat(latest) || productive.round > latest.round)
+      || !powerBeat(latest) || productivePower(latest) && !sameSnapshot(latest, productive)) return false;
+    for (const building of participants) {
+      const result = settlement.buildingOperations?.[building.id]?.lastResult;
+      const retained = latest.operations.find(operation => operation.buildingId === building.id);
+      if (result !== null && (!result || !retained || !sameSnapshot(result, retained.result)) || result === null && retained) return false;
+    }
+    for (const event of events) if (event.localPower?.cityId === settlement.id) {
+      if (!valid(event.localPower, settlement) || event.round > latest.round
+        || event.round === latest.round && !sameSnapshot(event.localPower, latest)
+        || productivePower(event.localPower) && (!powerBeat(productive) || event.round > productive.round
+          || event.round === productive.round && !sameSnapshot(event.localPower, productive))) return false;
+    }
+  }
+  return events.every(event => !event.localPower || enabled && cities.some(settlement => settlement.id === event.localPower?.cityId && valid(event.localPower, settlement)));
+}
+
+function buildingOperations(value: City, round: number, features: string[]): boolean {
+  const definitions = BUILDINGS.filter((building) => value.buildings.includes(building.id)
+    && (RESOURCE_IDS.some((resource) => (building.operatingInputs?.[resource] ?? 0) > 0) || STRATEGIC_RESOURCE_IDS.some(resource => (building.strategicInputs?.[resource] ?? 0) > 0) || powerParticipant(building)));
+  const paid = definitions.map((building) => building.id);
+  if (!Object.hasOwn(value, 'buildingOperations')) return paid.length === 0;
+  const operations: unknown = value.buildingOperations;
+  if (!features.includes('building-operations') || !record(operations) || !exactKeys(operations, paid)) return false;
+  return Object.entries(operations).every(([id, operation]) => record(operation)
+    && exactKeys(operation, ['enabled', 'lastResult']) && typeof operation.enabled === 'boolean'
+    && (operation.lastResult === null || (record(operation.lastResult) && operation.lastResult.status === 'civic-works'
+      ? isCivicWorksOperation(operation.lastResult, id, features, round)
+      : validInstitutionalScienceOperation(operation.lastResult, id, features) && (powerParticipant(definitions.find(building => building.id === id))
+        ? features.includes(LOCAL_POWER_RULES.featureId) && powerOperation(operation.lastResult, definitions.find(building => building.id === id), round)
+        : operationResult(operation.lastResult, round, features, (definitions.find(building => building.id === id)?.strategicInputs?.iron ?? 0) > 0)))));
+}
+
+function orderRevision(value: unknown, revision: number): number | null {
+  if (!boundedText(value) || !/^construction-[1-9]\d*$/.test(value)) return null;
+  const result = Number(value.slice('construction-'.length));
+  return integer(result, 1, revision) ? result : null;
+}
+
+function completionRevision(value: unknown, revision: number): number | null {
+  if (!boundedText(value) || !/^[1-9]\d*:(0|[1-9]\d*)$/.test(value)) return null;
+  const [head, tail] = value.split(':');
+  const result = Number(head);
+  return integer(result, 1, revision) && integer(Number(tail)) ? result : null;
+}
+
+function coastalReceipt(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER, maxTiles = Number.MAX_SAFE_INTEGER): value is CoastalFoundingReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'sourceCityId', 'sourceTileId', 'destinationTileId', 'pathTileIds', 'population', 'paid', 'foundedRound', 'eventId'])
+    || value.ruleVersion !== 1 || !boundedText(value.sourceCityId) || !integer(value.sourceTileId) || !integer(value.destinationTileId)
+    || !integer(value.population, 1) || !resourceAmounts(value.paid) || !integer(value.foundedRound, 0, round)
+    || completionRevision(value.eventId, revision) === null || !Array.isArray(value.pathTileIds)) return false;
+  const quote = { mode: 'coast', ruleVersion: 1, tileIds: value.pathTileIds, edges: value.pathTileIds.length - 1 };
+  return isCoastalFoundingQuote(quote, maxTiles) && quote.tileIds[0] === value.sourceTileId && quote.tileIds.at(-1) === value.destinationTileId;
+}
+
+function sameCoastalReceipt(left: CoastalFoundingReceipt, right: CoastalFoundingReceipt): boolean {
+  return left.ruleVersion === right.ruleVersion && left.sourceCityId === right.sourceCityId && left.sourceTileId === right.sourceTileId
+    && left.destinationTileId === right.destinationTileId && left.population === right.population && left.foundedRound === right.foundedRound && left.eventId === right.eventId
+    && left.pathTileIds.length === right.pathTileIds.length && left.pathTileIds.every((id, index) => id === right.pathTileIds[index])
+    && Object.keys(left.paid).length === Object.keys(right.paid).length && RESOURCE_IDS.every(resource => Object.hasOwn(left.paid, resource) === Object.hasOwn(right.paid, resource) && left.paid[resource] === right.paid[resource]);
+}
+
+function coastalRecords(cities: City[], events: GameEvent[], tiles: HexTile[], features: string[], round: number, revision: number): boolean {
+  const receipts: CoastalFoundingReceipt[] = [];
+  const valid = (value: unknown): value is CoastalFoundingReceipt => features.includes('coastal-founding') && coastalReceipt(value, revision, round, tiles.length)
+    && coastalTopologyBlock({ tiles }, { mode: 'coast', ruleVersion: 1, tileIds: value.pathTileIds, edges: value.pathTileIds.length - 1 }, value.sourceTileId, value.destinationTileId) === null;
+  for (const settlement of cities) {
+    if (!Object.hasOwn(settlement, 'coastalFounding')) continue;
+    const receipt = settlement.coastalFounding;
+    if (!valid(receipt) || receipt.destinationTileId !== settlement.tileId) return false;
+    const event = events.find(item => item.id === receipt.eventId);
+    if (event && (!event.coastalFounding || !sameCoastalReceipt(receipt, event.coastalFounding))) return false;
+    receipts.push(receipt);
+  }
+  return unique(receipts.map(receipt => receipt.eventId)) && events.every(event => !Object.hasOwn(event, 'coastalFounding') || valid(event.coastalFounding));
+}
+
+function quantized(value: number): number { return Math.round(value * 100) / 100; }
+
+function wonderCompletion(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is WonderCompletion {
+  if (!record(value) || !exactKeys(value, ['kind', 'ruleVersion', 'wonderId', 'orderId', 'civId', 'cityId', 'tileId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId'])
+    || value.kind !== 'wonder' || value.ruleVersion !== 1 || !WONDERS.some(definition => definition.id === value.wonderId)
+    || !boundedText(value.cityId) || !integer(value.civId, 0, CIV_COUNT - 1) || !integer(value.tileId)
+    || !integer(value.startedRound, 0, round) || !integer(value.completedRound, value.startedRound + 1, round)
+    || !resourceAmounts(value.paid) || !finite(value.workRequired, Number.MIN_VALUE)) return false;
+  const started = orderRevision(value.orderId, revision); const completed = completionRevision(value.eventId, revision);
+  return started !== null && completed !== null && completed > started;
+}
+
+function wonderLoss(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is WonderLossReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'wonderId', 'orderId', 'civId', 'cityId', 'tileId', 'startedRound', 'paid', 'workRequired', 'workDone', 'refund', 'resolvedRound', 'winnerOrderId', 'eventId'])
+    || value.ruleVersion !== 1 || !WONDERS.some(definition => definition.id === value.wonderId)
+    || !boundedText(value.cityId) || !integer(value.civId, 0, CIV_COUNT - 1) || !integer(value.tileId)
+    || !integer(value.startedRound, 0, round) || !integer(value.resolvedRound, value.startedRound + 1, round)
+    || !resourceAmounts(value.paid) || !finite(value.workRequired, Number.MIN_VALUE) || !finite(value.workDone, 0, value.workRequired)
+    || !record(value.refund) || !exactKeys(value.refund, ['materials']) || value.refund.materials !== quantized((value.paid.materials ?? 0) * 0.5)) return false;
+  const started = orderRevision(value.orderId, revision); const winner = orderRevision(value.winnerOrderId, revision); const ended = completionRevision(value.eventId, revision);
+  return started !== null && winner !== null && ended !== null && started < ended && winner < ended && value.orderId !== value.winnerOrderId;
+}
+
+function researchBoost(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER): value is ResearchBoostReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'wonderId', 'wonderCompletionEventId', 'civId', 'technologyId', 'basisReleaseId', 'percent', 'costBasis', 'nominalAmount', 'progressBefore', 'amount', 'progressAfter', 'unusedAmount', 'round', 'eventId', 'researchCompletionEventId'])
+    || value.ruleVersion !== 1 || !WONDERS.some(definition => definition.id === value.wonderId) || !integer(value.civId, 0, CIV_COUNT - 1)
+    || !TECHNOLOGIES.some(technology => technology.id === value.technologyId)
+    || !RELEASES.some(release => release.id === value.basisReleaseId && release.featureIds.includes('unique-wonders'))
+    || value.percent !== 20 || !finite(value.costBasis, Number.MIN_VALUE) || !finite(value.progressBefore) || value.progressBefore >= value.costBasis
+    || !finite(value.nominalAmount, Number.MIN_VALUE) || value.nominalAmount !== quantized(value.costBasis * 0.2)
+    || !finite(value.amount, Number.MIN_VALUE) || value.amount !== quantized(Math.min(value.nominalAmount, value.costBasis - value.progressBefore))
+    || !finite(value.progressAfter, 0, value.costBasis) || value.progressAfter !== quantized(value.progressBefore + value.amount)
+    || !finite(value.unusedAmount) || value.unusedAmount !== quantized(value.nominalAmount - value.amount) || !integer(value.round, 0, round)) return false;
+  const won = completionRevision(value.wonderCompletionEventId, revision); const used = completionRevision(value.eventId, revision);
+  if (won === null || used === null || used <= won) return false;
+  if (value.progressAfter < value.costBasis) return value.researchCompletionEventId === null;
+  return completionRevision(value.researchCompletionEventId, revision) === used && typeof value.researchCompletionEventId === 'string'
+    && Number(value.researchCompletionEventId.split(':')[1]) > Number(String(value.eventId).split(':')[1]);
+}
+
+function sameWonderFact(first: unknown, second: unknown): boolean {
+  if (!record(first) || !record(second)) return false;
+  return exactKeys(second, Object.keys(first)) && Object.entries(first).every(([key, value]) => record(value)
+    ? record(second[key]) && sameWonderFact(value, second[key]) : value === second[key]);
+}
+
+function wonderEvent(value: Record<string, unknown>): boolean {
+  for (const [type, field] of [['wonder-completed', 'wonderCompletion'], ['wonder-lost', 'wonderLoss'], ['research-boost', 'researchBoost']])
+    if (value.type === type && !Object.hasOwn(value, field ?? '')) return false;
+  if (Object.hasOwn(value, 'wonderCompletion')) {
+    const fact = value.wonderCompletion;
+    if (!wonderCompletion(fact) || value.type !== 'wonder-completed' || fact.eventId !== value.id || fact.completedRound !== value.round
+      || fact.tileId !== value.tileId || fact.civId !== value.actor || value.target !== value.actor || value.detail !== fact.orderId) return false;
+  }
+  if (Object.hasOwn(value, 'wonderLoss')) {
+    const fact = value.wonderLoss;
+    if (!wonderLoss(fact) || value.type !== 'wonder-lost' || fact.eventId !== value.id || fact.resolvedRound !== value.round
+      || fact.tileId !== value.tileId || fact.civId !== value.actor || value.detail !== fact.orderId) return false;
+  }
+  if (Object.hasOwn(value, 'researchBoost')) {
+    const fact = value.researchBoost;
+    if (!researchBoost(fact) || value.type !== 'research-boost' || fact.eventId !== value.id || fact.round !== value.round
+      || fact.civId !== value.actor || value.target !== value.actor || value.detail !== fact.technologyId) return false;
+  }
+  return true;
+}
+
+function wonderRecords(hasRegistry: boolean, registry: unknown, cities: City[], civilizations: Civilization[], tiles: HexTile[], events: GameEvent[], features: string[], revision: number, round: number): boolean {
+  if (hasRegistry !== features.includes('unique-wonders')) return false;
+  if (!hasRegistry) return !events.some(event => event.wonderCompletion || event.wonderLoss || event.researchBoost);
+  if (!record(registry) || Object.keys(registry).some(id => !WONDERS.some(definition => definition.id === id))) return false;
+  const occupied = new Set(cities.map(settlement => settlement.tileId)); const orders = new Set<string>(); const identities = new Set<string>();
+  const activeContenders: string[] = [];
+  for (const settlement of cities) {
+    for (const site of Object.values(settlement.districtSites ?? {})) occupied.add(site);
+    for (const installed of Object.values(settlement.improvements ?? {})) { occupied.add(installed.tileId); orders.add(installed.completion.orderId); identities.add(installed.completion.eventId); }
+    const active = settlement.construction?.active; const last = settlement.construction?.lastCompleted;
+    if (active) {
+      orders.add(active.id); if (active.tileId !== undefined && !('kind' in active && active.kind === 'rail')) occupied.add(active.tileId);
+      if ('kind' in active && active.kind === 'wonder') {
+        if (Object.hasOwn(registry, active.wonderId)) return false;
+        activeContenders.push(`${settlement.civId}:${active.wonderId}`);
+      }
+    }
+    if (last && !('kind' in last && last.kind === 'wonder')) { orders.add(last.orderId); identities.add(last.eventId); }
+  }
+  if (!unique(activeContenders)) return false;
+  const completed = new Map<string, WonderCompletion>();
+  const facts = new Map<string, WonderCompletion | WonderLossReceipt | ResearchBoostReceipt>();
+  const retain = (fact: WonderCompletion | WonderLossReceipt | ResearchBoostReceipt): boolean => {
+    if (identities.has(fact.eventId)) return false; identities.add(fact.eventId); facts.set(fact.eventId, fact);
+    if ('orderId' in fact) { if (orders.has(fact.orderId)) return false; orders.add(fact.orderId); }
+    return true;
+  };
+  for (const [id, value] of Object.entries(registry)) {
+    if (!record(value) || !exactKeys(value, ['ruleVersion', 'completion', 'losses', 'boostLimit', 'boostPercent', 'boosts'])
+      || value.ruleVersion !== 1 || value.boostLimit !== 2 || value.boostPercent !== 20 || !wonderCompletion(value.completion, revision, round)
+      || value.completion.wonderId !== id || !Array.isArray(value.losses) || value.losses.length >= CIV_COUNT || !Array.isArray(value.boosts) || value.boosts.length > 2) return false;
+    const won = value.completion; const settlement = cities.find(town => town.id === won.cityId && town.civId === won.civId);
+    if (!settlement || !tiles.some(site => site.id === won.tileId) || occupied.has(won.tileId) || !retain(won)) return false;
+    occupied.add(won.tileId); completed.set(id, won);
+    const last = settlement.construction?.lastCompleted;
+    if (last?.orderId === won.orderId && !sameWonderFact(last, won)) return false;
+    const contenders = new Set([won.civId]); const sites = new Set([won.tileId]);
+    for (const loss of value.losses as unknown[]) {
+      if (!wonderLoss(loss, revision, round) || loss.wonderId !== id || loss.winnerOrderId !== won.orderId || loss.resolvedRound !== won.completedRound
+        || completionRevision(loss.eventId, revision) !== completionRevision(won.eventId, revision) || contenders.has(loss.civId) || sites.has(loss.tileId)
+        || !cities.some(town => town.id === loss.cityId && town.civId === loss.civId) || !tiles.some(site => site.id === loss.tileId) || !retain(loss)) return false;
+      contenders.add(loss.civId); sites.add(loss.tileId);
+    }
+    let previous = completionRevision(won.eventId, revision) ?? 0; const technologies = new Set<string>();
+    for (const boost of value.boosts as unknown[]) {
+      if (!researchBoost(boost, revision, round) || boost.wonderId !== id || boost.wonderCompletionEventId !== won.eventId || boost.civId !== won.civId
+        || boost.round < won.completedRound || (completionRevision(boost.eventId, revision) ?? 0) <= previous || technologies.has(boost.technologyId) || !retain(boost)) return false;
+      previous = completionRevision(boost.eventId, revision) ?? 0; technologies.add(boost.technologyId);
+      if (boost.researchCompletionEventId !== null) {
+        if (identities.has(boost.researchCompletionEventId) || !civilizations.find(civ => civ.id === boost.civId)?.technologies.includes(boost.technologyId)) return false;
+        identities.add(boost.researchCompletionEventId);
+        const latest = civilizations.find(civ => civ.id === boost.civId)?.lastResearchCompletion;
+        if (latest?.eventId === boost.researchCompletionEventId && (latest.technologyId !== boost.technologyId || latest.completedRound !== boost.round)) return false;
+        const event = events.find(candidate => candidate.id === boost.researchCompletionEventId);
+        if (event && (event.type !== 'research-completed' || event.actor !== boost.civId || event.target !== boost.civId || event.round !== boost.round
+          || !event.effects.includes(`Technology ${boost.technologyId} unlocked`))) return false;
+      }
+    }
+  }
+  for (const settlement of cities) {
+    const last = settlement.construction?.lastCompleted;
+    if (last && 'kind' in last && last.kind === 'wonder') {
+      const value = completed.get(last.wonderId);
+      if (!value || !sameWonderFact(value, last)) return false;
+    }
+  }
+  for (const fact of facts.values()) {
+    const event = events.find(candidate => candidate.id === fact.eventId);
+    if (event) {
+      const copy = event.wonderCompletion ?? event.wonderLoss ?? event.researchBoost;
+      if (!copy || !sameWonderFact(copy, fact)) return false;
+    }
+  }
+  return events.every(event => {
+    const fact = event.wonderCompletion ?? event.wonderLoss ?? event.researchBoost;
+    if (!fact) return true;
+    const saved = facts.get(event.id); if (!saved || !sameWonderFact(saved, fact)) return false;
+    const won = completed.get(fact.wonderId); if (!won) return false;
+    return event.wonderLoss ? event.target === won.civId : event.researchBoost ? event.tileId === won.tileId : true;
+  });
+}
+
+function constructionIdentity(value: Record<string, unknown>, settlement: City, features: string[], completed: boolean): boolean {
+  if (value.cityId !== settlement.id) return false;
+  if (value.kind === 'rail') return features.includes('industrial-steam') && railIdentity(value);
+  if (value.kind === 'wonder') return features.includes('unique-wonders') && integer(value.tileId)
+    && WONDERS.some(definition => definition.id === value.wonderId);
+  if (value.kind === 'improvement') return features.includes(IMPROVEMENT_RULES.featureId) && integer(value.tileId)
+    && IMPROVEMENTS.some(definition => definition.id === value.improvementId)
+    && (value.improvementId !== 'pasture' || features.includes('water-land'))
+    && (value.improvementId !== 'lumber-mill' || features.includes('forest-production'))
+    && IMPROVEMENTS.some(definition => definition.id === value.improvementId && (!definition.operatingInputs
+      || definition.requiredFeatures.every(feature => features.includes(feature)) && value.workRequired === definition.requiredWork
+      && exactResourceAmounts(value.paid, definition.cost)));
+  return !Object.hasOwn(value, 'kind') && typeof value.buildingId === 'string'
+    && BUILDINGS.some(building => building.id === value.buildingId)
+    && settlement.buildings.includes(value.buildingId) === completed
+    && (!Object.hasOwn(value, 'tileId') || integer(value.tileId));
+}
+
+function constructionKeys(value: Record<string, unknown>): string[] {
+  return value.kind === 'rail' ? ['kind', 'edgeId', 'tileId', 'toTileId', 'strategicPaid'] : value.kind === 'wonder' ? ['kind', 'wonderId', 'tileId'] : value.kind === 'improvement' ? ['kind', 'improvementId', 'tileId'] : ['buildingId', ...(Object.hasOwn(value, 'tileId') ? ['tileId'] : []), ...(Object.hasOwn(value, 'catchmentTileId') ? ['catchmentTileId'] : []), ...(Object.hasOwn(value, 'highGround') ? ['highGround'] : [])];
+}
+
+function constructionCompletion(value: unknown, settlement: City, features: string[], round: number, revision: number): value is ConstructionCompletion {
+  if (record(value) && value.kind === 'rail') return features.includes('industrial-steam') && railCompletion(value, revision, round) && value.cityId === settlement.id;
+  if (record(value) && value.kind === 'wonder') return features.includes('unique-wonders') && wonderCompletion(value, revision, round)
+    && value.cityId === settlement.id && value.civId === settlement.civId;
+  if (!record(value) || !exactKeys(value, ['orderId', 'cityId', 'startedRound', 'completedRound', 'paid', 'workRequired', 'eventId', ...constructionKeys(value)])
+    || !constructionIdentity(value, settlement, features, true)) return false;
+  const started = orderRevision(value.orderId, revision);
+  const ended = completionRevision(value.eventId, revision);
+  return started !== null && ended !== null && ended > started
+    && integer(value.startedRound, 0, round) && integer(value.completedRound, value.startedRound + 1, round)
+    && resourceAmounts(value.paid) && finite(value.workRequired, Number.MIN_VALUE);
+}
+
+function construction(value: unknown, settlement: City, features: string[], round: number, revision: number, ids: string[]): boolean {
+  if (!record(value) || !exactKeys(value, ['active', 'lastCompleted'])) return false;
+  const active = value.active;
+  if (active !== null) {
+    if (!record(active) || !exactKeys(active, ['id', 'cityId', 'ruleVersion', 'startedRound', 'paid', 'workRequired', 'workDone', ...constructionKeys(active)])
+      || !constructionIdentity(active, settlement, features, false)
+      || orderRevision(active.id, revision) === null || typeof active.id !== 'string'
+      || active.ruleVersion !== 1 || !integer(active.startedRound, 0, round)
+      || !resourceAmounts(active.paid) || !finite(active.workRequired, Number.MIN_VALUE)
+      || !finite(active.workDone) || active.workDone >= active.workRequired) return false;
+    ids.push(active.id);
+  }
+  const completed = value.lastCompleted;
+  if (completed !== null) {
+    if (!constructionCompletion(completed, settlement, features, round, revision)) return false;
+    if (record(active) && (!integer(active.startedRound, completed.completedRound, round)
+      || (orderRevision(active.id, revision) ?? 0) <= (completionRevision(completed.eventId, revision) ?? 0))) return false;
+    ids.push(completed.orderId);
+  }
+  return true;
+}
+
+function sameImprovementCompletion(left: ImprovementConstructionCompletion, right: ImprovementConstructionCompletion): boolean {
+  return left.orderId === right.orderId && left.cityId === right.cityId && left.improvementId === right.improvementId
+    && left.tileId === right.tileId && left.startedRound === right.startedRound && left.completedRound === right.completedRound
+    && left.workRequired === right.workRequired && left.eventId === right.eventId
+    && Object.keys(left.paid).length === Object.keys(right.paid).length
+    && RESOURCE_IDS.every(resource => Object.hasOwn(left.paid, resource) === Object.hasOwn(right.paid, resource) && left.paid[resource] === right.paid[resource]);
+}
+
+function paidImprovementResult(value: unknown, definition: ImprovementDefinition, completedRound: number, round: number, features: string[]): boolean {
+  if (definition.id === 'river-intake') return definition.requiredFeatures.every(feature => features.includes(feature)) && isRiverIntakeOperationResult(value, completedRound, round);
+  if (!definition.requiredFeatures.every(feature => features.includes(feature)) || !record(value)
+    || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'residents', 'blockedReason', 'inputs', 'shortages'])
+    || !integer(value.round, completedRound + 1, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
+    || !residentAllocation(value.residents) || !Array.isArray(value.inputs) || !Array.isArray(value.shortages)) return false;
+  const residents = value.residents;
+  const produced = value.produced;
+  if (residents.required !== definition.residentsRequired || residents.communityReserve !== RESIDENT_CAPACITY_RULES.communityReserve) return false;
+  const resources = RESOURCE_IDS.filter(resource => (definition.operatingInputs?.[resource] ?? 0) > 0);
+  if (value.inputs.length !== resources.length) return false;
+  const missing: Array<{ resource: string; required: number; available: number }> = [];
+  for (const [index, resource] of resources.entries()) {
+    const input: unknown = value.inputs[index];
+    if (!record(input) || !exactKeys(input, ['resource', 'required', 'available']) || input.resource !== resource
+      || input.required !== definition.operatingInputs?.[resource] || !finite(input.required, Number.MIN_VALUE) || !finite(input.available)) return false;
+    if (input.available < input.required) missing.push({ resource, required: input.required, available: input.available });
+  }
+  const expectedShortages = value.status === 'paused' || value.blockedReason === 'site-ineligible' ? [] : missing;
+  if (value.shortages.length !== expectedShortages.length || !value.shortages.every((shortage: unknown, index: number) => {
+    const expected = expectedShortages[index];
+    return expected && record(shortage) && exactKeys(shortage, ['resource', 'required', 'available'])
+      && shortage.resource === expected.resource && shortage.required === expected.required && shortage.available === expected.available;
+  })) return false;
+  if (value.status === 'operated') return value.blockedReason === null && missing.length === 0
+    && residents.allocated === residents.required && residents.available >= residents.required
+    && exactResourceAmounts(value.paid, definition.operatingInputs ?? {})
+    && RESOURCE_IDS.every(resource => {
+      const amount = produced[resource];
+      return !Object.hasOwn(produced, resource) || (definition.production[resource] ?? 0) > 0 && finite(amount, Number.MIN_VALUE) && quantized(amount) === amount;
+    });
+  if (Object.keys(value.paid).length || Object.keys(value.produced).length || residents.allocated !== 0) return false;
+  return value.status === 'paused' ? value.blockedReason === null : value.status === 'blocked'
+    && (value.blockedReason === 'site-ineligible' || value.blockedReason === 'input-shortage' && missing.length > 0
+      || value.blockedReason === 'resident-shortage' && missing.length === 0 && residents.available < residents.required);
+}
+
+function improvementResult(value: unknown, improvementId: unknown, completedRound: number, round: number, features: string[]): boolean {
+  if (features.includes('renewing-worked-woodlands') && (improvementId === 'lumber-mill' || improvementId === 'charcoal-clearing')) return isWoodlandOperationResult(value, improvementId, completedRound, round);
+  const definition = IMPROVEMENTS.find(candidate => candidate.id === improvementId);
+  if (definition?.operatingInputs) return paidImprovementResult(value, definition, completedRound, round, features);
+  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'residents', 'blockedReason', ...(Object.hasOwn(value, 'extraction') ? ['extraction'] : [])])
+    || !integer(value.round, completedRound + 1, round) || !resourceAmounts(value.paid) || Object.keys(value.paid).length !== 0
+    || !resourceAmounts(value.produced) || !residentAllocation(value.residents)) return false;
+  if (Object.hasOwn(value, 'extraction') && (!features.includes('finite-metals') || value.status !== 'operated' || !strategicExtraction(value.extraction) || value.extraction.resource === 'coal' && !features.includes('industrial-steam'))) return false;
+  const residents = value.residents;
+  if (value.status === 'operated') return value.blockedReason === null && residents.allocated === residents.required && residents.available >= residents.required;
+  if (residents.allocated !== 0 || Object.keys(value.produced).length !== 0) return false;
+  return value.status === 'paused' ? value.blockedReason === null : value.status === 'blocked'
+    && (value.blockedReason === 'site-ineligible' || value.blockedReason === 'resident-shortage' && residents.available < residents.required);
+}
+
+function improvementRecords(cities: City[], tiles: HexTile[], events: GameEvent[], features: string[], round: number, revision: number): boolean {
+  const occupied = new Set(cities.map(settlement => settlement.tileId));
+  for (const settlement of cities) {
+    for (const tileId of Object.values(settlement.districtSites ?? {})) occupied.add(tileId);
+    const active = settlement.construction?.active;
+    if (active && !('kind' in active) && active.tileId !== undefined) occupied.add(active.tileId);
+  }
+  const reserve = (tileId: number): boolean => {
+    if (!tiles.some(site => site.id === tileId) || occupied.has(tileId)) return false;
+    occupied.add(tileId); return true;
+  };
+  const orderIds: string[] = [];
+  const eventIds: string[] = [];
+  for (const settlement of cities) {
+    const active = settlement.construction?.active;
+    const last = settlement.construction?.lastCompleted;
+    if (active) { orderIds.push(active.id); if ('kind' in active && active.kind !== 'rail' && !reserve(active.tileId)) return false; }
+    if (last) { orderIds.push(last.orderId); eventIds.push(last.eventId); }
+    const mapping: unknown = settlement.improvements;
+    if (Object.hasOwn(settlement, 'improvements')) {
+      if (!features.includes(IMPROVEMENT_RULES.featureId) || !record(mapping)) return false;
+      for (const [key, value] of Object.entries(mapping)) {
+        if (!/^(0|[1-9]\d*)$/.test(key) || !record(value) || !exactKeys(value, ['improvementId', 'tileId', 'completion', 'operation'])
+          || !integer(value.tileId) || key !== String(value.tileId) || !reserve(value.tileId)
+          || !IMPROVEMENTS.some(definition => definition.id === value.improvementId)
+          || !constructionCompletion(value.completion, settlement, features, round, revision)
+          || !('kind' in value.completion) || value.completion.kind !== 'improvement' || value.completion.improvementId !== value.improvementId || value.completion.tileId !== value.tileId
+          || !record(value.operation) || !exactKeys(value.operation, ['enabled', 'lastResult']) || typeof value.operation.enabled !== 'boolean'
+          || value.operation.lastResult !== null && !improvementResult(value.operation.lastResult, value.improvementId, value.completion.completedRound, round, features)
+          || value.improvementId !== 'mine' && record(value.operation.lastResult) && Object.hasOwn(value.operation.lastResult, 'extraction')) return false;
+        const completion = value.completion;
+        const event = events.find(item => item.id === completion.eventId);
+        if (event && (event.type !== 'improvement-completed' || event.round !== completion.completedRound || event.tileId !== completion.tileId
+          || event.actor !== settlement.civId || event.target !== settlement.civId || event.detail !== `${settlement.id}/${completion.tileId}/${completion.improvementId}`)) return false;
+        if (last && 'kind' in last && last.kind === 'improvement' && last.orderId === completion.orderId) {
+          if (!sameImprovementCompletion(last, completion)) return false;
+        } else { orderIds.push(completion.orderId); eventIds.push(completion.eventId); }
+      }
+    }
+    if (last && 'kind' in last && last.kind === 'improvement') {
+      const installed = record(mapping) ? mapping[String(last.tileId)] : null;
+      if (!record(installed) || !constructionCompletion(installed.completion, settlement, features, round, revision)
+        || !('kind' in installed.completion) || installed.completion.kind !== 'improvement' || !sameImprovementCompletion(last, installed.completion)) return false;
+    }
+  }
+  return unique(orderIds) && unique(eventIds);
+}
+
+function recurringRecords(cities: City[], civilizations: Civilization[], features: string[], round: number, revision: number): boolean {
+  const enabled = features.includes('recurring-decisions');
+  const orderIds: string[] = [];
+  for (const settlement of cities) {
+    if (Object.hasOwn(settlement, 'construction') && (!enabled || !construction(settlement.construction, settlement, features, round, revision, orderIds))) return false;
+  }
+  for (const actor of civilizations) {
+    if (!Object.hasOwn(actor, 'lastResearchCompletion')) continue;
+    const completed: unknown = actor.lastResearchCompletion;
+    if (!enabled || !record(completed) || !exactKeys(completed, ['technologyId', 'completedRound', 'eventId'])
+      || typeof completed.technologyId !== 'string' || !actor.technologies.includes(completed.technologyId)
+      || !integer(completed.completedRound, 0, round) || completionRevision(completed.eventId, revision) === null) return false;
+  }
+  return unique(orderIds);
+}
+
+function districtRecords(cities: City[], tiles: HexTile[], events: GameEvent[], features: string[]): boolean {
+  const enabled = features.includes(DISTRICT_RULES.featureId);
+  const occupied = new Set<number>();
+  const sites = new Map(tiles.map(site => [site.id, site]));
+  const centers = new Set(cities.map(settlement => settlement.tileId));
+  const reserve = (settlement: City, buildingId: string, tileId: unknown): boolean => {
+    const district = BUILDINGS.find(building => building.id === buildingId)?.district;
+    if (!enabled || !district || !integer(tileId) || occupied.has(tileId) || centers.has(tileId)) return false;
+    const site = sites.get(tileId);
+    const center = sites.get(settlement.tileId);
+    if (!site || !center || site.owner !== settlement.civId || site.terrain === 'ocean' || site.terrain === 'mountain'
+      || hexDistance(center, site) > district.range) return false;
+    occupied.add(tileId);
+    return true;
+  };
+  for (const settlement of cities) {
+    const installed = BUILDINGS.filter(building => building.district && settlement.buildings.includes(building.id));
+    const mapping: unknown = settlement.districtSites;
+    if (Object.hasOwn(settlement, 'districtSites')) {
+      if (!enabled || !record(mapping) || !exactKeys(mapping, installed.map(building => building.id))) return false;
+      for (const building of installed) if (!reserve(settlement, building.id, mapping[building.id])) return false;
+    } else if (installed.length > 0) return false;
+    const active = settlement.construction?.active;
+    const completed = settlement.construction?.lastCompleted;
+    const commitments = [...settlement.buildings, ...(active && !('kind' in active) ? [active.buildingId] : [])];
+    if (commitments.some(id => BUILDINGS.find(building => building.id === id)?.requiresBuildings?.some(required => !settlement.buildings.includes(required)))) return false;
+    for (const entry of [active, completed]) {
+      if (!entry || 'kind' in entry) continue;
+      const district = BUILDINGS.find(building => building.id === entry.buildingId)?.district;
+      if (Boolean(district) !== Object.hasOwn(entry, 'tileId')) return false;
+      if (!district) continue;
+      if (entry === active) {
+        if (!reserve(settlement, entry.buildingId, entry.tileId)) return false;
+      } else {
+        if (!record(mapping) || mapping[entry.buildingId] !== entry.tileId || !completed || 'kind' in completed) return false;
+        const event = events.find(value => value.id === completed.eventId);
+        if (event && (event.type !== 'building-completed' || event.round !== completed.completedRound || event.tileId !== completed.tileId
+          || event.actor !== settlement.civId || event.target !== settlement.civId)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function tile(value: unknown): value is HexTile {
+  return (
+    record(value) &&
+    integer(value.id) &&
+    integer(value.q) &&
+    integer(value.r) &&
+    typeof value.terrain === 'string' &&
+    ['ocean', 'grassland', 'forest', 'desert', 'mountain', 'tundra'].includes(value.terrain) &&
+    finite(value.elevation) &&
+    (value.owner === null || integer(value.owner, 0, CIV_COUNT - 1)) &&
+    (value.resource === null || RESOURCE_IDS.some((resource) => resource === value.resource))
+  );
+}
+
+function route(value: unknown): value is Route {
+  return (
+    record(value) &&
+    text(value.id) &&
+    text(value.from) &&
+    text(value.to) &&
+    integer(value.owner, 0, CIV_COUNT - 1) &&
+    integer(value.partner, 0, CIV_COUNT - 1) &&
+    value.owner !== value.partner &&
+    typeof value.active === 'boolean' &&
+    finite(value.damage, 0, 100) &&
+    finite(value.volume) &&
+    (!('agreement' in value) || tradeAgreement(value.agreement))
+  );
+}
+
+const tradeResourceFields = ['constructionCost', 'proposerCargo', 'recipientCargo', 'proposerUpkeep', 'recipientUpkeep', 'proposerYield', 'recipientYield'] as const;
+
+function tradeTerms(value: unknown): value is TradeTerms {
+  return record(value) && text(value.recipeId) && integer(value.recipeVersion, 1)
+    && integer(value.cadenceRounds, 1) && finite(value.damageDisableAt, Number.MIN_VALUE, 100)
+    && tradeResourceFields.every((field) => resourceAmounts(value[field]))
+    && (!Object.hasOwn(value, 'strategicCargo') || strategicCargo(value.strategicCargo));
+}
+
+function tradeAgreement(value: unknown): value is TradeAgreement {
+  return record(value) && text(value.offerId) && tradeTerms(value.terms)
+    && typeof value.enabled === 'boolean' && integer(value.acceptedRound)
+    && integer(value.nextDeliveryRound) && integer(value.deliveryCount)
+    && (value.lastAttemptRound === null || integer(value.lastAttemptRound))
+    && (value.lastDeliveryRound === null || integer(value.lastDeliveryRound))
+    && (value.closedRound === null || integer(value.closedRound))
+    && (value.blockedBy === null || integer(value.blockedBy, 0, CIV_COUNT - 1))
+    && (value.blockedReason === null || text(value.blockedReason));
+}
+
+function tradeOffer(value: unknown): value is TradeOffer {
+  return record(value) && text(value.id) && integer(value.proposer, 0, CIV_COUNT - 1)
+    && integer(value.recipient, 0, CIV_COUNT - 1) && value.proposer !== value.recipient
+    && text(value.from) && text(value.to) && tradeTerms(value.terms)
+    && integer(value.createdRound) && integer(value.expiresRound)
+    && value.expiresRound > value.createdRound
+    && typeof value.status === 'string' && ['pending', 'accepted', 'declined', 'withdrawn', 'expired'].includes(value.status)
+    && (value.routeId === null || text(value.routeId));
+}
+
+function sameTradeTerms(first: TradeTerms, second: TradeTerms): boolean {
+  return first.recipeId === second.recipeId && first.recipeVersion === second.recipeVersion
+    && first.cadenceRounds === second.cadenceRounds && first.damageDisableAt === second.damageDisableAt
+    && sameSnapshot(first.transport, second.transport)
+    && (first.strategicCargo === undefined ? second.strategicCargo === undefined : second.strategicCargo !== undefined
+      && sameStrategicResources(first.strategicCargo.proposer, second.strategicCargo.proposer) && sameStrategicResources(first.strategicCargo.recipient, second.strategicCargo.recipient))
+    && tradeResourceFields.every((field) => RESOURCE_IDS.every((resource) => first[field][resource] === second[field][resource]));
+}
+
+function tradeTransport(terms: TradeTerms, from: string, to: string, cities: City[], tiles: HexTile[], features: string[]): boolean {
+  if (Object.hasOwn(terms, 'strategicCargo') && !features.includes('finite-metals')) return false;
+  if (!Object.hasOwn(terms, 'transport')) return true;
+  if (!features.includes('land-transport') || !isTransportQuote(terms.transport, tiles.length)) return false;
+  if (terms.transport.mode === 'steam' && (!features.includes('industrial-steam') || terms.cadenceRounds !== Math.max(terms.transport.baseCadence, Math.ceil(terms.transport.weightedDistance / INDUSTRIAL_RULES.edgesPerBeat)))) return false;
+  const origin = cities.find(settlement => settlement.id === from);
+  const destination = cities.find(settlement => settlement.id === to);
+  return origin !== undefined && destination !== undefined
+    && transportTopologyBlock({ tiles }, terms.transport, origin.tileId, destination.tileId) === null;
+}
+
+function tradePair(first: number, second: number): string {
+  return `${Math.min(first, second)}:${Math.max(first, second)}`;
+}
+
+function tradeState(value: unknown, routes: Route[], cities: City[], tiles: HexTile[], round: number, features: string[]): boolean {
+  if (!Array.isArray(value) || !value.every(tradeOffer) || !unique(value.map((offer) => offer.id))) return false;
+  const pendingPairs = new Map<string, number>();
+  const enabledPairs = new Map<string, number>();
+  for (const offer of value) {
+    if (offer.createdRound > round || !cities.some((settlement) => settlement.id === offer.from && settlement.civId === offer.proposer)
+      || !cities.some((settlement) => settlement.id === offer.to && settlement.civId === offer.recipient)
+      || !tradeTransport(offer.terms, offer.from, offer.to, cities, tiles, features)) return false;
+    if (offer.status === 'accepted') {
+      const accepted = routes.find((connection) => connection.id === offer.routeId);
+      if (!accepted?.agreement || accepted.agreement.offerId !== offer.id) return false;
+    } else if (offer.routeId !== null) return false;
+    if (offer.status === 'pending' && round < offer.expiresRound) {
+      const key = tradePair(offer.proposer, offer.recipient);
+      const count = (pendingPairs.get(key) ?? 0) + 1;
+      if (count > TRADE_RULES.maxPendingPerPair) return false;
+      pendingPairs.set(key, count);
+    }
+  }
+  for (const connection of routes) {
+    const agreement = connection.agreement;
+    if (!agreement) continue;
+    if (!tradeTransport(agreement.terms, connection.from, connection.to, cities, tiles, features)) return false;
+    const cadenceOrigin = agreement.terms.transport === undefined ? 0 : agreement.acceptedRound;
+    const offer = value.find((candidate) => candidate.id === agreement.offerId);
+    if (!offer || offer.status !== 'accepted' || offer.routeId !== connection.id
+      || offer.proposer !== connection.owner || offer.recipient !== connection.partner
+      || offer.from !== connection.from || offer.to !== connection.to || !sameTradeTerms(offer.terms, agreement.terms)
+      || agreement.acceptedRound < offer.createdRound || agreement.acceptedRound >= offer.expiresRound
+      || agreement.acceptedRound > round || agreement.nextDeliveryRound <= agreement.acceptedRound
+      || (agreement.nextDeliveryRound - cadenceOrigin) % agreement.terms.cadenceRounds !== 0
+      || (agreement.enabled && agreement.nextDeliveryRound <= round)
+      || (agreement.lastAttemptRound !== null && (agreement.lastAttemptRound <= agreement.acceptedRound || agreement.lastAttemptRound > round || (agreement.lastAttemptRound - cadenceOrigin) % agreement.terms.cadenceRounds !== 0))
+      || (agreement.lastDeliveryRound !== null && (agreement.lastAttemptRound === null || agreement.lastDeliveryRound > agreement.lastAttemptRound || agreement.lastDeliveryRound <= agreement.acceptedRound || (agreement.lastDeliveryRound - cadenceOrigin) % agreement.terms.cadenceRounds !== 0))
+      || ((agreement.deliveryCount === 0) !== (agreement.lastDeliveryRound === null))
+      || (agreement.blockedBy !== null && (agreement.blockedBy !== connection.owner && agreement.blockedBy !== connection.partner || agreement.blockedReason === null))
+      || (agreement.enabled ? agreement.closedRound !== null : agreement.closedRound === null || agreement.closedRound < agreement.acceptedRound || agreement.closedRound > round || agreement.blockedBy !== null || agreement.blockedReason !== null || connection.active || connection.volume !== 0)) return false;
+    if (agreement.enabled) {
+      const key = tradePair(connection.owner, connection.partner);
+      const count = (enabledPairs.get(key) ?? 0) + 1;
+      if (count > TRADE_RULES.maxActivePerPair) return false;
+      enabledPairs.set(key, count);
+    }
+  }
+  return true;
+}
+
+function boundedText(value: unknown, maximum = 128): value is string {
+  return text(value) && value.trim().length > 0 && value.length <= maximum;
+}
+
+function projectVector(value: unknown): value is Partial<Resources> {
+  return resourceAmounts(value) && Object.keys(value).length > 0
+    && Object.values(value).every((amount) => finite(amount, Number.MIN_VALUE));
+}
+
+function publicProjectTerms(value: unknown): boolean {
+  return record(value) && exactKeys(value, ['recipeId', 'recipeVersion', 'proposerContribution', 'recipientContribution', 'damageReduction', 'pendingLifetimeRounds', 'completionDelayRounds'])
+    && boundedText(value.recipeId) && integer(value.recipeVersion, 1)
+    && projectVector(value.proposerContribution) && projectVector(value.recipientContribution)
+    && finite(value.damageReduction, Number.MIN_VALUE, 100)
+    && integer(value.pendingLifetimeRounds, 1) && integer(value.completionDelayRounds, 1);
+}
+
+function publicProjects(value: unknown, round: number, routes: Route[]): boolean {
+  if (!Array.isArray(value) || value.length > PUBLIC_PROJECT_RULES.maxActiveTotal) return false;
+  const ids: string[] = [];
+  const pairs: string[] = [];
+  for (const project of value) {
+    if (!record(project) || !boundedText(project.id) || !boundedText(project.routeId) || !boundedText(project.agreementOfferId)
+      || !integer(project.proposer, 0, CIV_COUNT - 1) || !integer(project.recipient, 0, CIV_COUNT - 1) || project.proposer === project.recipient
+      || !integer(project.proposedRound, 0, round) || !publicProjectTerms(project.terms) || !record(project.terms)) return false;
+    const base = ['id', 'routeId', 'agreementOfferId', 'proposer', 'recipient', 'terms', 'proposedRound', 'status'];
+    if (project.status === 'pending') {
+      if (!exactKeys(project, [...base, 'expiresRound']) || !integer(project.expiresRound, round + 1)
+        || project.expiresRound !== project.proposedRound + Number(project.terms.pendingLifetimeRounds)) return false;
+    } else if (project.status === 'committed') {
+      if (!exactKeys(project, [...base, 'acceptedRound', 'dueRound']) || !integer(project.acceptedRound, project.proposedRound, round)
+        || project.acceptedRound >= project.proposedRound + Number(project.terms.pendingLifetimeRounds)
+        || !integer(project.dueRound, round + 1) || project.dueRound !== project.acceptedRound + Number(project.terms.completionDelayRounds)) return false;
+    } else return false;
+    const connection = routes.find((candidate) => candidate.id === project.routeId);
+    if (connection && tradePair(connection.owner, connection.partner) !== tradePair(project.proposer, project.recipient)) return false;
+    ids.push(project.id);
+    pairs.push(tradePair(project.proposer, project.recipient));
+  }
+  return unique(ids) && pairs.every((key) => pairs.filter((other) => other === key).length <= PUBLIC_PROJECT_RULES.maxActivePerPair);
+}
+
+function publicProjectResult(value: unknown): boolean {
+  if (!record(value) || !exactKeys(value, ['projectId', 'routeId', 'agreementOfferId', 'outcome', 'reason', 'proposer', 'recipient', 'proposerPaid', 'recipientPaid', 'damageBefore', 'damageAfter'])
+    || !boundedText(value.projectId) || !boundedText(value.routeId) || !boundedText(value.agreementOfferId) || !boundedText(value.reason, 1000)
+    || !integer(value.proposer, 0, CIV_COUNT - 1) || !integer(value.recipient, 0, CIV_COUNT - 1) || value.proposer === value.recipient
+    || !resourceAmounts(value.proposerPaid) || !resourceAmounts(value.recipientPaid)) return false;
+  const damage = (value.damageBefore === null && value.damageAfter === null)
+    || (finite(value.damageBefore, 0, 100) && finite(value.damageAfter, 0, 100) && value.damageAfter <= value.damageBefore);
+  if (!damage) return false;
+  if (value.outcome === 'completed') return projectVector(value.proposerPaid) && projectVector(value.recipientPaid)
+    && finite(value.damageBefore, Number.MIN_VALUE, 100) && finite(value.damageAfter, 0, 100) && value.damageAfter < value.damageBefore;
+  return typeof value.outcome === 'string' && ['declined', 'cancelled', 'expired', 'failed', 'no-work-needed'].includes(value.outcome)
+    && Object.keys(value.proposerPaid).length === 0 && Object.keys(value.recipientPaid).length === 0 && value.damageBefore === value.damageAfter
+    && (value.outcome !== 'no-work-needed' || value.damageBefore === 0);
+}
+
+function treaty(value: unknown): value is Treaty {
+  return (
+    record(value) &&
+    text(value.id) &&
+    integer(value.a, 0, CIV_COUNT - 1) &&
+    integer(value.b, 0, CIV_COUNT - 1) &&
+    value.a !== value.b &&
+    (value.kind === 'trade' || value.kind === 'federation' || value.kind === 'peace') &&
+    integer(value.since)
+  );
+}
+
+function populationGrowth(value: unknown): value is PopulationGrowthReceipt {
+  return record(value) && exactKeys(value, ['ruleVersion', 'cityId', 'civId', 'round', 'eventId', 'populationBefore', 'populationAfter', 'capacity', 'foodPaid'])
+    && value.ruleVersion === 1 && text(value.cityId) && integer(value.civId, 0, CIV_COUNT - 1) && integer(value.round)
+    && completionRevision(value.eventId, Number.MAX_SAFE_INTEGER) !== null
+    && integer(value.populationBefore, 1) && integer(value.populationAfter, 1) && value.populationAfter === value.populationBefore + 1
+    && integer(value.capacity, value.populationAfter) && value.foodPaid === 6 + Math.floor(value.populationBefore / 4);
+}
+
+function growthRecords(cities: City[], events: GameEvent[], features: string[], round: number, revision: number): boolean {
+  const enabled = features.includes('local-growth');
+  for (const settlement of cities) {
+    if (Object.hasOwn(settlement, 'housing') !== enabled) return false;
+    if (!enabled) continue;
+    const housing: unknown = settlement.housing;
+    if (!record(housing) || !exactKeys(housing, ['ruleVersion', 'baseCapacity', 'establishedRound', 'origin'])
+      || housing.ruleVersion !== 1 || !integer(housing.establishedRound, 0, round)
+      || !(housing.origin === 'founded' && housing.baseCapacity === 8 || housing.origin === 'initial-capital' && housing.baseCapacity === 20 && housing.establishedRound === 0 && settlement.id === `city-${settlement.civId}`)) return false;
+  }
+  for (const event of events) {
+    if (!Object.hasOwn(event, 'populationGrowth')) continue;
+    const receipt = event.populationGrowth;
+    if (!enabled || !populationGrowth(receipt) || completionRevision(receipt.eventId, revision) === null) return false;
+    const settlement = cities.find(candidate => candidate.id === receipt.cityId);
+    if (!settlement || settlement.civId !== receipt.civId || settlement.tileId !== event.tileId
+      || !settlement.housing || receipt.round < settlement.housing.establishedRound) return false;
+  }
+  return true;
+}
+
+function territoryReceipt(value: unknown, revision = Number.MAX_SAFE_INTEGER, round = Number.MAX_SAFE_INTEGER, maxTiles = Number.MAX_SAFE_INTEGER): value is TileAcquisitionReceipt {
+  if (!record(value) || !exactKeys(value, ['ruleVersion', 'id', 'cityId', 'civId', 'cityTileId', 'tileId', 'pathTileIds', 'distance', 'priorCivilizationPurchases', 'paid', 'acquiredRound', 'eventId'])
+    || value.ruleVersion !== 1 || !boundedText(value.id) || !/^territory-[1-9]\d*$/.test(value.id)
+    || !boundedText(value.cityId) || !integer(value.civId, 0, CIV_COUNT - 1) || !integer(value.cityTileId, 0, maxTiles - 1) || !integer(value.tileId, 0, maxTiles - 1)
+    || !integer(value.distance, 1, 3) || !integer(value.priorCivilizationPurchases, 0, maxTiles - 1)
+    || !record(value.paid) || !exactKeys(value.paid, ['credits']) || !finite(value.paid.credits)
+    || !integer(value.acquiredRound, 0, round) || !Array.isArray(value.pathTileIds)
+    || value.pathTileIds.length < 2 || value.pathTileIds.length > Math.min(37, maxTiles)
+    || Object.keys(value.pathTileIds).length !== value.pathTileIds.length || !value.pathTileIds.every((id: unknown) => integer(id, 0, maxTiles - 1))
+    || !unique(value.pathTileIds) || value.pathTileIds[0] !== value.cityTileId || value.pathTileIds.at(-1) !== value.tileId) return false;
+  const accepted = Number(value.id.slice('territory-'.length));
+  return integer(accepted, 1, revision) && completionRevision(value.eventId, revision) === accepted;
+}
+
+function sameTerritoryReceipt(left: TileAcquisitionReceipt, right: TileAcquisitionReceipt): boolean {
+  return left.ruleVersion === right.ruleVersion && left.id === right.id && left.cityId === right.cityId && left.civId === right.civId
+    && left.cityTileId === right.cityTileId && left.tileId === right.tileId && left.distance === right.distance
+    && left.priorCivilizationPurchases === right.priorCivilizationPurchases && left.paid.credits === right.paid.credits
+    && left.acquiredRound === right.acquiredRound && left.eventId === right.eventId
+    && left.pathTileIds.length === right.pathTileIds.length && left.pathTileIds.every((id, index) => id === right.pathTileIds[index]);
+}
+
+function territoryRecords(present: boolean, value: unknown, cities: City[], tiles: HexTile[], events: GameEvent[], features: string[], round: number, revision: number, wonders: unknown, border: unknown): boolean {
+  const controls = record(border) && record(border.controls) ? border.controls : {};
+  const enabled = features.includes('owned-territory');
+  if (!enabled) return !present && events.every(event => !Object.hasOwn(event, 'territoryAcquisition'));
+  if (!present || !record(value) || Object.keys(value).length > tiles.length) return false;
+  const tileIndex = new Map(tiles.map(site => [site.id, site]));
+  const cityIndex = new Map(cities.map(settlement => [settlement.id, settlement]));
+  const centers = new Set(cities.map(settlement => settlement.tileId));
+  const receipts = new Map<number, TileAcquisitionReceipt>();
+  for (const [key, raw] of Object.entries(value)) {
+    if (!territoryReceipt(raw, revision, round, tiles.length) || key !== String(raw.tileId)) return false;
+    const center = tileIndex.get(raw.cityTileId); const target = tileIndex.get(raw.tileId); const settlement = cityIndex.get(raw.cityId);
+    const control = controls[String(raw.tileId)];
+    const currentOwner = record(control) && control.purchaseId === raw.id ? control.civId : raw.civId;
+    if (!center || !target || target.owner !== currentOwner || centers.has(raw.tileId) || hexDistance(center, target) !== raw.distance
+      || settlement && (settlement.civId !== raw.civId || settlement.tileId !== raw.cityTileId)) return false;
+    for (const [index, tileId] of raw.pathTileIds.entries()) {
+      const site = tileIndex.get(tileId); const previous = tileIndex.get(raw.pathTileIds[index - 1] ?? -1);
+      if (!site || hexDistance(center, site) > 3 || index > 0 && (!previous || hexDistance(previous, site) !== 1)) return false;
+    }
+    const event = events.find(candidate => candidate.id === raw.eventId);
+    if (event && (!event.territoryAcquisition || !sameTerritoryReceipt(raw, event.territoryAcquisition))) return false;
+    receipts.set(raw.tileId, raw);
+  }
+  const all = [...receipts.values()];
+  if (!unique(all.map(receipt => receipt.id)) || !unique(all.map(receipt => receipt.eventId))) return false;
+  const counts = new Map<number, number>();
+  for (const receipt of all.toSorted((left, right) => Number(left.id.slice(10)) - Number(right.id.slice(10)))) {
+    const count = counts.get(receipt.civId) ?? 0;
+    if (receipt.priorCivilizationPurchases !== count) return false;
+    counts.set(receipt.civId, count + 1);
+  }
+  const bound = (cityId: string, tileId: number): boolean => {
+    const control = controls[String(tileId)];
+    return !receipts.has(tileId) || (record(control) ? control.cityId : receipts.get(tileId)?.cityId) === cityId;
+  };
+  for (const settlement of cities) {
+    if (!Object.values(settlement.districtSites ?? {}).every(tileId => bound(settlement.id, tileId))
+      || !Object.values(settlement.improvements ?? {}).every(improvement => bound(settlement.id, improvement.tileId))) return false;
+    for (const order of [settlement.construction?.active, settlement.construction?.lastCompleted])
+      if (order && 'tileId' in order && order.tileId !== undefined && (!bound(settlement.id, order.tileId) || 'kind' in order && order.kind === 'rail' && !bound(settlement.id, order.toTileId))) return false;
+  }
+  if (record(wonders)) for (const entry of Object.values(wonders)) {
+    if (!record(entry) || !wonderCompletion(entry.completion, revision, round) || !bound(entry.completion.cityId, entry.completion.tileId)) return false;
+  }
+  return events.every(event => {
+    if (!event.territoryAcquisition) return true;
+    const retained = receipts.get(event.territoryAcquisition.tileId);
+    return !!retained && sameTerritoryReceipt(retained, event.territoryAcquisition);
+  });
+}
+
+export function isGameEvent(value: unknown): value is GameEvent {
+  return (
+    record(value) && validLandIntegrationEvent(value) && validMarsEvent(value) && validReliefEvent(value) && validKnowledgeEvent(value) && validBorderEvent(value) && validCivicWorksEvent(value) &&
+    (!Object.hasOwn(value, 'regionalEvent') || isHistoricalEventReceipt(value.regionalEvent) && value.regionalEvent.eventId === value.id && value.regionalEvent.round === value.round && value.regionalEvent.eventKind === value.type && value.actor === DIRECTOR_SEAT && value.target === value.regionalEvent.civId && value.tileId === value.regionalEvent.selection.local.tileId) &&
+    ['id', 'type', 'title', 'cause'].every((field) => text(value[field])) &&
+    typeof value.detail === 'string' &&
+    integer(value.round) &&
+    (value.actor === null || integer(value.actor, 0, DIRECTOR_SEAT)) &&
+    (value.target === null || integer(value.target, 0, CIV_COUNT - 1)) &&
+    (value.tileId === null || integer(value.tileId)) &&
+    strings(value.effects) &&
+    value.effects.length > 0 &&
+    finite(value.importance) && wonderEvent(value) && industrialEvent(value) && powerEvent(value) &&
+    (!Object.hasOwn(value, 'populationGrowth') || (populationGrowth(value.populationGrowth) && value.type === 'population-growth'
+      && value.populationGrowth.eventId === value.id && value.populationGrowth.round === value.round
+      && value.populationGrowth.civId === value.actor && value.actor === value.target && integer(value.tileId))) &&
+    (value.type !== 'territory-acquired' || Object.hasOwn(value, 'territoryAcquisition')) &&
+    (!Object.hasOwn(value, 'territoryAcquisition') || (territoryReceipt(value.territoryAcquisition) && value.type === 'territory-acquired'
+      && value.territoryAcquisition.eventId === value.id && value.territoryAcquisition.acquiredRound === value.round
+      && value.territoryAcquisition.tileId === value.tileId && value.territoryAcquisition.civId === value.actor && value.actor === value.target)) &&
+    (value.type !== 'coastal-founded' || Object.hasOwn(value, 'coastalFounding')) &&
+    (!Object.hasOwn(value, 'coastalFounding') || (coastalReceipt(value.coastalFounding) && value.type === 'coastal-founded'
+      && value.coastalFounding.eventId === value.id && value.coastalFounding.foundedRound === value.round && value.coastalFounding.destinationTileId === value.tileId
+      && integer(value.actor, 0, CIV_COUNT - 1) && value.target === value.actor)) &&
+    (!Object.hasOwn(value, 'strategicExtraction') || (strategicExtraction(value.strategicExtraction) && value.type === 'improvement-operation'
+      && value.strategicExtraction.round === value.round && value.strategicExtraction.tileId === value.tileId
+      && integer(value.actor, 0, CIV_COUNT - 1) && value.target === value.actor)) &&
+    (!Object.hasOwn(value, 'strategicShipment') || (strategicShipment(value.strategicShipment) && value.type === 'trade-delivered'
+      && value.strategicShipment.routeId === value.detail && value.strategicShipment.proposer === value.actor && value.strategicShipment.recipient === value.target)) &&
+    (!Object.hasOwn(value, 'publicProjectResult') || (publicProjectResult(value.publicProjectResult) && record(value.publicProjectResult) && value.type === `public-project-${String(value.publicProjectResult.outcome)}`))
+  );
+}
+
+function outcome(value: unknown): value is Outcome | null {
+  return (
+    value === null ||
+    (record(value) &&
+      typeof value.kind === 'string' &&
+      ['mars', 'federation', 'cultural', 'economic', 'military'].includes(value.kind) &&
+      Array.isArray(value.winners) &&
+      value.winners.length > 0 &&
+      value.winners.every((winner: unknown) => integer(winner, 0, CIV_COUNT - 1)) &&
+      unique(value.winners) &&
+      integer(value.round) &&
+      text(value.reason))
+  );
+}
+
+function independentTurns(value: unknown, round: number): boolean {
+  if (!record(value) || typeof value.epoch !== 'string') return false;
+  const epoch = parseUtcTimestamp(value.epoch);
+  if (epoch === null || !integer(value.strategyTicks, 0, round)
+    || !Number.isFinite(new Date(epoch + (value.strategyTicks + 1) * TURN_RULES.strategyIntervalMs).getTime())
+    || !Array.isArray(value.lastActionWindow) || value.lastActionWindow.length !== DIRECTOR_SEAT + 1
+    || !Array.isArray(value.actionsInWindow) || value.actionsInWindow.length !== DIRECTOR_SEAT + 1) return false;
+  const counts = value.actionsInWindow;
+  const nextBoundary = epoch + (value.strategyTicks + 1) * TURN_RULES.strategyIntervalMs;
+  return value.lastActionWindow.every((window: unknown, seat: number) => integer(window, -1)
+    && Number.isFinite(new Date(epoch + (window + 1) * TURN_RULES.tacticalWindowMs).getTime())
+    && epoch + window * TURN_RULES.tacticalWindowMs < nextBoundary
+    && integer(counts[seat], 0, TURN_RULES.actionsPerWindow)
+    && (window === -1 ? counts[seat] === 0 : counts[seat] > 0));
+}
+
+function actionPlans(value: unknown, revision: number): boolean {
+  return Array.isArray(value) && value.length === DIRECTOR_SEAT + 1
+    && Array.from(value).every((plan: unknown) => plan === null || isPersistedActionPlan(plan, revision));
+}
+
+export function isWorldState(value: unknown): value is WorldState {
+  if (
+    !record(value) ||
+    value.schemaVersion !== SCHEMA_VERSION ||
+    value.gameVersion !== GAME_VERSION ||
+    !text(value.releaseId) ||
+    !knownStrings(
+      value.unlockedFeatures,
+      FEATURES.map((feature) => feature.id),
+    ) ||
+    !knownStrings(
+      value.calendarMilestones,
+      HISTORICAL_MILESTONES.map((milestone) => milestone.id),
+    ) ||
+    !integer(value.seed, 0, 0xffffffff) ||
+    !integer(value.rng, 0, 0xffffffff) ||
+    !integer(value.revision) ||
+    !integer(value.round) ||
+    !integer(value.phase, 0, DIRECTOR_SEAT) ||
+    !integer(value.year, -Number.MAX_SAFE_INTEGER) ||
+    !integer(value.width, 1) ||
+    !integer(value.height, 1) ||
+    !finite(value.climate, -Number.MAX_SAFE_INTEGER) ||
+    !integer(value.directorCooldown) ||
+    !record(value.eventCounts) ||
+    !Object.values(value.eventCounts).every((count) => integer(count)) ||
+    !record(value.directorIntervals) ||
+    !Object.entries(value.directorIntervals).every(
+      ([key, timestamp]) =>
+        /^(clock|event|review):.+/.test(key) &&
+        typeof timestamp === 'string' &&
+        parseUtcTimestamp(timestamp) !== null,
+    ) ||
+    ('historyAdvances' in value && !historyAdvances(value.historyAdvances, value.revision, value.year, value.unlockedFeatures)) ||
+    (value.unlockedFeatures.includes('independent-actions') !== ('independentTurns' in value)) ||
+    ('independentTurns' in value && !independentTurns(value.independentTurns, value.round)) ||
+    (value.unlockedFeatures.includes('bounded-plans') !== ('actionPlans' in value)) ||
+    ('actionPlans' in value && !actionPlans(value.actionPlans, value.revision)) ||
+    !outcome(value.outcome)
+  )
+    return false;
+  if (
+    !integer(value.clockTicks) ||
+    (value.clockEpoch !== null &&
+      (typeof value.clockEpoch !== 'string' || parseUtcTimestamp(value.clockEpoch) === null)) ||
+    (value.clockEpoch === null && value.clockTicks !== 0)
+  )
+    return false;
+  if (
+    !Array.isArray(value.civilizations) ||
+    !value.civilizations.every(civilization) ||
+    value.civilizations.length !== CIV_COUNT ||
+    !unique(value.civilizations.map((item) => item.id)) ||
+    !Array.isArray(value.cities) ||
+    !value.cities.every(city) ||
+    !unique(value.cities.map((item) => item.id)) ||
+    !Array.isArray(value.tiles) ||
+    !value.tiles.every(tile) ||
+    !unique(value.tiles.map((item) => item.id)) ||
+    !Array.isArray(value.routes) ||
+    !value.routes.every(route) ||
+    !unique(value.routes.map((item) => item.id)) ||
+    !Array.isArray(value.treaties) ||
+    !value.treaties.every(treaty) ||
+    !unique(value.treaties.map((item) => item.id)) ||
+    !Array.isArray(value.events) ||
+    !value.events.every(isGameEvent) ||
+    !unique(value.events.map((item) => item.id))
+  )
+    return false;
+  for (const event of value.events) {
+    const receipt = event.regionalEvent;
+    if (!receipt) continue;
+    const count = value.eventCounts[receipt.eventKind];
+    if (!value.unlockedFeatures.includes('procedural-regional-targets') || receipt.revision > value.revision || receipt.round > value.round || typeof count !== 'number' || receipt.occurrence > count || receipt.instanceId !== historicalEventInstanceId(value.seed, receipt.eventKind, receipt.civId, receipt.occurrence)) return false;
+  }
+  const width = value.width;
+  const height = value.height;
+  const tiles = value.tiles;
+  if (value.origin === undefined ? Object.hasOwn(value, 'drainage') : !validateDrainage(value.drainage, tiles, width, height)) return false;
+  const cities = value.cities;
+  const round = value.round;
+  const features = value.unlockedFeatures;
+  if (features.includes('regional-iron')) {
+    const plan = regionalIronPlanForWorld(value as unknown as WorldState);
+    const layer = value.strategicDeposits;
+    if (plan?.status !== 'placed' || !strategicLayer(layer, value.seed, tiles, true)
+      || JSON.stringify(layer.tileIds) !== JSON.stringify(plan.tileIds)
+      || layer.tileIds.some(id => !isHillSite(tiles[id]!) || tiles[id]!.resource !== null)
+      || Object.values(layer.deposits).some(deposit => deposit.initialReserve !== METAL_RULES.initialReserve)) return false;
+  }
+  const counts = value.eventCounts;
+  if (features.includes('world-expansion') && (width !== 18 || height !== 24)) return false;
+  if (
+    tiles.length !== width * height ||
+    !tiles.every(
+      (item) => item.q < width && item.r < height && item.id === item.r * width + item.q,
+    ) ||
+    !cities.every((item) =>
+      tiles.some((site) => site.id === item.tileId && site.owner === item.civId),
+    ) ||
+    !unique(cities.map((item) => item.tileId)) ||
+    !cities.every((item) => buildingOperations(item, round, features)) ||
+    !foodSupplyRecords(cities, round, features) ||
+    !powerRecords(cities, value.events, features, round, value.revision) ||
+    !growthRecords(cities, value.events, features, round, value.revision) ||
+    !recurringRecords(cities, value.civilizations, features, round, value.revision) ||
+    !poweredScienceRecords(value.civilizations, cities, value.events, features) ||
+    !civicRecords(value.civilizations, value.events, features, round, value.revision) ||
+    !districtRecords(cities, tiles, value.events, features) ||
+    !observatoryRecords(cities, tiles, value.events, features) ||
+    !improvementRecords(cities, tiles, value.events, features, round, value.revision) ||
+    !metalRecords(Object.hasOwn(value, 'strategicDeposits'), value.strategicDeposits, value.civilizations, cities, tiles, value.events, value.routes, features, value.seed, value.coalDeposits) ||
+    !waterLandRecords(Object.hasOwn(value, 'pastoralSites'), value.pastoralSites, cities, tiles, value.events, features, value.seed, value.strategicDeposits) ||
+    !coastalRecords(cities, value.events, tiles, features, round, value.revision) ||
+    !wonderRecords(Object.hasOwn(value, 'wonders'), value.wonders, cities, value.civilizations, tiles, value.events, features, value.revision, round) ||
+    !territoryRecords(Object.hasOwn(value, 'tileAcquisitions'), value.tileAcquisitions, cities, tiles, value.events, features, round, value.revision, value.wonders, value.border) ||
+    !value.civilizations.every((item) =>
+      cities.some((settlement) => settlement.civId === item.id),
+    ) ||
+    !value.routes.every(
+      (item) =>
+        cities.some((endpoint) => endpoint.id === item.from && endpoint.civId === item.owner) &&
+        cities.some((endpoint) => endpoint.id === item.to && endpoint.civId === item.partner),
+    ) ||
+    !tradeState('tradeOffers' in value ? value.tradeOffers : [], value.routes, cities, tiles, round, features) ||
+    (features.includes('public-projects') !== Object.hasOwn(value, 'publicProjects')) ||
+    ('publicProjects' in value && !publicProjects(value.publicProjects, round, value.routes)) ||
+    (!features.includes('public-projects') && value.events.some((item) => Object.hasOwn(item, 'publicProjectResult'))) ||
+    !value.treaties.every((item) => item.since <= round) ||
+    !value.events.every(
+      (item) =>
+        item.round <= round &&
+        (item.tileId === null || tiles.some((site) => site.id === item.tileId)) &&
+        integer(counts[item.type], 1),
+    ) ||
+    (value.outcome !== null && value.outcome.round > round)
+  )
+    return false;
+  const civicWorksEnabled = features.includes('civic-works');
+  if (civicWorksEnabled !== Object.hasOwn(value, 'civicWorks') || civicWorksEnabled && !isCivicWorksState(value.civicWorks, value as unknown as WorldState)
+    || !civicWorksEnabled && value.events.some(event => Object.hasOwn(event, 'civicWorks') || event.type.startsWith('civic-works-'))) return false;
+  const borderEnabled = features.includes('supplied-borders');
+  if (borderEnabled !== Object.hasOwn(value, 'border') || borderEnabled && !isBorderState(value.border, value as unknown as WorldState)
+    || !borderEnabled && value.events.some(event => Object.hasOwn(event, 'border') || event.type.startsWith('border-'))) return false;
+  const knowledgeEnabled = features.includes('knowledge-compacts');
+  if (knowledgeEnabled !== Object.hasOwn(value, 'knowledge') || knowledgeEnabled && !isKnowledgeState(value.knowledge, value as unknown as WorldState)
+    || !knowledgeEnabled && value.events.some(event => Object.hasOwn(event, 'knowledgeCompact') || Object.hasOwn(event, 'knowledgeStudy') || Object.hasOwn(event, 'knowledgeResult') || event.type.startsWith('knowledge-'))) return false;
+  const woodlandEnabled = features.includes('renewing-worked-woodlands');
+  if (woodlandEnabled !== Object.hasOwn(value, 'woodlands') || woodlandEnabled && !isWoodlandState(value.woodlands, value as unknown as WorldState)
+    || !woodlandEnabled && value.events.some(event => event.type === 'woodland-beat')) return false;
+  const intakeEnabled = features.includes('river-intakes');
+  if (intakeEnabled !== Object.hasOwn(value, 'riverFlow') || intakeEnabled && !isRiverFlowState(value.riverFlow, value as unknown as WorldState)
+    || !intakeEnabled && value.events.some(event => event.type === 'river-flow')) return false;
+  const reliefEnabled = features.includes('consented-relief');
+  if (reliefEnabled !== Object.hasOwn(value, 'relief') || (reliefEnabled && !isReliefState(value.relief, value as unknown as WorldState))
+    || (!reliefEnabled && value.events.some(event => Object.hasOwn(event, 'reliefResult') || event.type.startsWith('relief-')))) return false;
+  if (!earnedLandRecords(value as unknown as WorldState) || !spaceflightRecords(value as unknown as WorldState) || !generatedHistoryRecords(value as unknown as WorldState)) return false;
+  return industrialRecords({ seed: value.seed, tiles, cities, civilizations: value.civilizations, events: value.events, routes: value.routes, unlockedFeatures: features, revision: value.revision, round, calendarMilestones: value.calendarMilestones, coalDeposits: value.coalDeposits, railEdges: value.railEdges, industrialEvidence: value.industrialEvidence, strategicDeposits: value.strategicDeposits, pastoralSites: value.pastoralSites, tradeOffers: Array.isArray(value.tradeOffers) && value.tradeOffers.every(tradeOffer) ? value.tradeOffers : [], presentFields: Object.keys(value) });
+}

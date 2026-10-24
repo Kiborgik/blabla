@@ -102,3 +102,27 @@ goal "expert-loop-demonstrated-in-real-work" {
     expect ["contract::expert", "contract::expert-seams", "contract::assignment", "contract::gate", "contract::schedule"]
     state "active"
 }
+
+goal "bounded-results-preserve-integration-truth" {
+    serves ["proportionate-verification", "bounded-workers-free-planners", "truthful-over-convenient"]
+    statement "An explicit orchestrator decision may accept a current bounded task result after a prior canonical GREEN has only implementation drift, while live structure remains GREEN. Every other task, recursive review, model, finding, confirmation, vacuity and evidence blocker remains binding. Recheck task revision and verification eligibility before recording. Persist the limited basis, leave project verification stale, and keep ordinary CLOSE unchanged. This decision neither proves changed paths unrelated nor marks any goal complete. Concurrent filesystem atomicity is not claimed."
+    expect ["bounded-results::bounded-acceptance-requires-explicit-owner-reason", "bounded-results::bounded-acceptance-requires-qualified-prior-green", "bounded-results::bounded-acceptance-keeps-every-other-blocker", "bounded-results::recording-rechecks-task-and-verification-eligibility", "bounded-results::bounded-acceptance-records-its-limited-basis", "bounded-results::bounded-acceptance-never-refreshes-project-verification", "bounded-results::bounded-acceptance-does-not-complete-the-project", "bounded-results::ordinary-close-still-needs-current-project-verification"]
+    state "active"
+}
+
+
+goal "declared-task-roles-retain-authority" {
+    serves ["truthful-over-convenient", "bounded-workers-free-planners"]
+    statement "A task in a project with declared roles must name a registered role, so a typo cannot silently remove its model policy and required lenses. Refuse an unknown role before creating a task record. An unreadable or invalid registered process also refuses before writes; bootstrap means no process registration or a valid process with zero roles. Keep explicit role-free bootstrap usable, and preserve current declared-role behavior. Historical malformed assignments require an explicit accountable correction rather than retroactive invented authority."
+    expect ["task-role-resolution::configured-project-refuses-unknown-role", "task-role-resolution::broken-registered-process-never-becomes-bootstrap", "task-role-resolution::registered-role-remains-usable", "task-role-resolution::explicit-role-free-bootstrap-remains-supported"]
+    state "active"
+}
+
+goal "applicable-user-outcomes-survive-source-closure" {
+    serves ["truthful-over-convenient", "steering-cost-over-token-cost", "bounded-workers-free-planners"]
+    statement "Owner-declared required delivery goals resurface through exact task write-system mappings. Current accountable outcome claims and independent reviews distinguish delivered, partial, blocked and not-applicable results. Source may close while a reviewed residual remains visible with its owner and trigger; tests, GREEN, reflection and another completed task cannot erase it. Later reviewed evidence resolves an exact origin without rewriting history. Existing goal and contract completion authority remains unchanged; reference presence is not proof of user benefit."
+    expect ["goal-delivery::required-goals-follow-declared-write-systems", "goal-delivery::ready-needs-every-current-applicable-claim", "goal-delivery::both-close-modes-need-accepted-current-reviews", "goal-delivery::eligible-partial-source-can-close-with-visible-residual", "goal-delivery::unresolved-origins-survive-close-restart-and-green", "goal-delivery::accepted-exact-resolution-preserves-other-origins", "goal-delivery::source-close-never-invents-goal-or-contract-completion"]
+    state "active"
+}
+
+goal "measured-proportionate-development-effort" { serves ["proportionate-verification", "truthful-over-convenient", "bounded-workers-free-planners"] statement "Measure actual worker development, verification, review and integration-publication phases through existing task records. Target combined verification-review-integration at most20percent of total active development effort, report external waits separately, expose missing historical coverage as unknown and never weaken correctness or invent effort to satisfy the target. Reuse valid evidence, one substantive independent review and affected checks; retain concrete exceptions and reduce avoidable process work." expect ["contract::development-effort"] state "active" }

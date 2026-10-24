@@ -1,0 +1,18 @@
+state compact_actions_equal: bool
+state compact_references_exact: bool
+state compact_terms_preserved: bool
+state compact_world_unchanged: bool
+state default_observation_preserved: bool
+
+action observation_fixture(kind: int)
+action observe_compact()
+action observe_default()
+when observe_compact {
+    expect "compact-view-preserves-every-exact-action": after.compact_actions_equal
+    expect "compact-facts-resolve-canonical-identities": after.compact_references_exact
+    expect "stored-consent-keeps-its-original-terms": after.compact_terms_preserved
+    expect "formatting-never-mutates-the-world": after.compact_world_unchanged
+}
+when observe_default {
+    expect "default-observation-remains-compatible": after.default_observation_preserved
+}

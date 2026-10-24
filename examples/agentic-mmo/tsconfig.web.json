@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "web/**/*.ts",
+    "tests/web.test.ts",
+    "vite.config.ts",
+    "scripts/verify.ts"
+  ],
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vite-plus/client"
+    ]
+  }
+}

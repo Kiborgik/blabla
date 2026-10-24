@@ -1,0 +1,36 @@
+state released_eligible_choice: bool
+state started: bool
+state exact_owned_site: bool
+state paid_once: bool
+state single_town_lane: bool
+state completed_installed_mines: bool
+state no_incomplete_mine_bonus: bool
+state old_terrain_adjacency_preserved: bool
+state actual_output_applied_once: bool
+state eligible_funded_workshop: bool
+state workshop_operated: bool
+state exact_local_zone: bool
+state complete_resources_and_residents: bool
+state completion_before_output: bool
+state refused: bool
+state zero_effects: bool
+
+action start_manufacturing_commitment()
+action produce_industrial_materials()
+action operate_guild_workshop()
+action refuse_invalid_commitment()
+
+when start_manufacturing_commitment {
+    expect "eligible-manufacturing-choice-starts": not before.released_eligible_choice or after.started
+    expect "manufacturing-retains-exact-site-and-one-paid-lane": not after.started or (after.exact_owned_site and after.paid_once and after.single_town_lane)
+}
+when produce_industrial_materials {
+    expect "industrial-adjacency-uses-installed-mines-once": after.completed_installed_mines and after.no_incomplete_mine_bonus and after.old_terrain_adjacency_preserved and after.actual_output_applied_once
+}
+when operate_guild_workshop {
+    expect "eligible-funded-workshop-produces": not before.eligible_funded_workshop or after.workshop_operated
+    expect "workshop-consumes-local-support-after-completion": not after.workshop_operated or (after.exact_local_zone and after.complete_resources_and_residents and after.completion_before_output)
+}
+when refuse_invalid_commitment {
+    expect "invalid-manufacturing-choice-has-no-effects": not after.refused or after.zero_effects
+}

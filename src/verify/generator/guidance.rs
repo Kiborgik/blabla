@@ -156,7 +156,10 @@ impl Guidance {
                 } else {
                     different(value, &parameter.ty)
                 }
-            } else if matches!(parameter.ty, Type::Int | Type::Float) && category < 6 {
+            } else if matches!(parameter.ty, Type::Int | Type::Float)
+                && category < 6
+                && (matching.is_empty() || category >= 5)
+            {
                 let values: Vec<_> = self
                     .literals
                     .iter()

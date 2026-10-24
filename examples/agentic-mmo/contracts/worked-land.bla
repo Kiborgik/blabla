@@ -1,0 +1,51 @@
+state eligible_start: bool
+state started: bool
+state exact_owned_site: bool
+state one_town_lane_and_site: bool
+state paid_once: bool
+state refused_unchanged: bool
+state due_work: bool
+state completed: bool
+state retained_completion: bool
+state no_completion_beat_output: bool
+state eligible_positive_output: bool
+state produced: bool
+state opening_residents_only: bool
+state paid_building_priority_preserved: bool
+state numeric_site_priority: bool
+state exact_quantized_output_once: bool
+state paused_or_unstaffed: bool
+state no_allocation_or_output: bool
+state exact_next_choices: bool
+state opening_site_inputs_funded: bool
+state exact_site_inputs_paid: bool
+state forest_identity_retained: bool
+state ordinary_energy_only: bool
+state current_rule_restart_preserved: bool
+
+action start_worked_site()
+action resolve_improvement_work()
+action resolve_improvement_operation()
+action resolve_charcoal_operation()
+
+when start_worked_site {
+    expect "eligible-owned-improvement-start-succeeds": not before.eligible_start or after.started
+    expect "improvement-reserves-one-site-and-lane-with-one-payment": not after.started or (after.exact_owned_site and after.one_town_lane_and_site and after.paid_once)
+    expect "invalid-improvement-start-leaves-no-effects": before.eligible_start or (not after.started and after.refused_unchanged)
+}
+when resolve_improvement_work {
+    expect "due-improvement-completes-with-retained-site": not before.due_work or (after.completed and after.retained_completion)
+    expect "improvement-completion-precedes-output-and-next-choice": after.no_completion_beat_output and after.exact_next_choices and after.current_rule_restart_preserved
+}
+when resolve_improvement_operation {
+    expect "eligible-staffed-positive-site-produces": not before.eligible_positive_output or after.produced
+    expect "worked-sites-share-opening-residents-in-stable-priority": after.opening_residents_only and after.paid_building_priority_preserved and after.numeric_site_priority
+    expect "worked-output-is-quantized-and-credited-once": after.exact_quantized_output_once
+    expect "paused-or-unstaffed-site-does-not-operate": not before.paused_or_unstaffed or after.no_allocation_or_output
+}
+
+when resolve_charcoal_operation {
+    expect "charcoal-pays-complete-opening-inputs": not after.produced or (before.opening_site_inputs_funded and after.exact_site_inputs_paid and after.opening_residents_only)
+    expect "charcoal-preserves-forest-and-distinguishes-ordinary-energy": after.forest_identity_retained and after.ordinary_energy_only
+    expect "charcoal-current-restart-preserves-paid-records": after.current_rule_restart_preserved
+}

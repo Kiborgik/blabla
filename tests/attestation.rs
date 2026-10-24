@@ -793,3 +793,49 @@ fn withdrawal_requires_orchestrator_attestation_and_preserves_rejected_record() 
     );
     assert_eq!(view["task"]["state"], "withdrawn");
 }
+
+#[test]
+fn readiness_confirmation_rows_use_actual_zero_based_record_indexes() {
+    let temp = project();
+    opened(&temp);
+    ok(&temp, &["task", "check", "work", "true"]);
+    take(&temp);
+    resolve_a_finding(&temp);
+    ok(&temp, &["task", "scope", "work", "--add", "docs"]);
+    hand_back(&temp);
+    let path = temp.path().join(".blabla/tasks/work.json");
+    let before = std::fs::read(&path).unwrap();
+    let shown = json(&temp, &["task", "show", "work"]);
+    let fresh = json(&temp, &["task", "freshness", "work"]);
+    assert_eq!(shown["readiness_summary"], fresh["readiness_summary"]);
+    let rows = shown["readiness_summary"]["confirmations"]["entries"]
+        .as_array()
+        .unwrap();
+    let recorded = records(&temp);
+    assert_eq!(rows.len(), 2);
+    for (index, row) in rows.iter().enumerate() {
+        assert_eq!(row["orchestrator_record_index"], index + 1);
+        for field in ["verb", "unix", "model", "carried_by"] {
+            assert_eq!(row[field], recorded[index + 1][field]);
+        }
+        assert!(row["confirmed"].is_null());
+        assert_eq!(row["blocks_ready"], false);
+        assert_eq!(row["blocks_close"], true);
+        assert_eq!(row["payload_availability"], "not-recorded");
+        assert_eq!(
+            row["confirm_route"],
+            "blabla task confirm work --model <id>"
+        );
+    }
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(state(&temp), "ready");
+    assert_eq!(
+        code(&temp, &["task", "close", "work", "--model", "opus"]),
+        2
+    );
+    ok(&temp, &["task", "confirm", "work", "--model", "opus"]);
+    assert_eq!(
+        json(&temp, &["task", "show", "work"])["readiness_summary"]["confirmations"]["total"],
+        0
+    );
+}

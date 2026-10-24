@@ -1,0 +1,14 @@
+type WoodlandSeason {
+    round: int, stand_count: int, accounting_errors: int,
+    partial_payments: int, repeated_growth: int, identity_errors: int,
+    promise_errors: int, decision_errors: int, restart_errors: int,
+    observer_errors: int
+}
+state woodland_seasons: [WoodlandSeason]
+action observe_renewing_worked_woodlands()
+when observe_renewing_worked_woodlands {
+    expect "local-stock-harvest-and-rest-account-once": count(after.woodland_seasons) > 0 and all(after.woodland_seasons, s => s.stand_count > 0 and s.accounting_errors == 0 and s.repeated_growth == 0 and s.identity_errors == 0)
+    expect "full-paid-harvest-or-zero-partial-payment": all(after.woodland_seasons, s => s.partial_payments == 0)
+    expect "useful-harvest-and-protected-rest-respect-promises": all(after.woodland_seasons, s => s.promise_errors == 0 and s.decision_errors == 0)
+    expect "current-restart-and-observation-preserve-earned-woodland-facts": all(after.woodland_seasons, s => s.restart_errors == 0 and s.observer_errors == 0)
+}

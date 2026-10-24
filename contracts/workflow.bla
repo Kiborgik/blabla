@@ -3,6 +3,7 @@ module clitask  "src/cli/task.rs"
 module project  "src/project/mod.rs"
 module skeptic  "src/skeptic.rs"
 module recovery "src/cli/recovery.rs"
+module delivery "src/cli/task/delivery.rs"
 
 require "an-assignment-resolves-what-binds-it": symbol task::Resolution
 require "resolution-names-the-permitted-models": symbol task::Resolution.models
@@ -89,3 +90,9 @@ require "a-recovery-build-refuses-verification":     value recovery::WITHHELD co
 require "a-recovery-build-refuses-structure-checks": value recovery::WITHHELD contains "check"
 
 forbid "the-task-record-stays-below-the-cli": dependency task -> clitask
+
+require "handback-recovery-shares-authoritative-diagnostics": symbol clitask::handback_recovery
+
+require "ready-delivery-refresh-is-explicit-and-guarded": symbol delivery::ClaimInput.refresh_ready
+
+require "check-amendment-input-binding-is-explicit": symbol clitask::amended_check_inputs

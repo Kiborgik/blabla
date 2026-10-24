@@ -33,3 +33,5 @@ project, you are running the wrong binary.
 | `project.bla` | contracts and registered memory |
 | `docs/` | language, structure, project and workflow reference |
 | `experiments/gate.py` | the product gate |
+
+Publish only code, tests, contracts and documentation needed to use or maintain BlaBla or its examples. Keep task status, internal reviews, handoffs, raw logs and verification reports in local BlaBla records or ignored scratch, not in Git. Use existing project documentation when a durable explanation is necessary; do not create replacement report indexes.

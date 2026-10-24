@@ -1,0 +1,63 @@
+state coast_eligible: bool
+state coast_accepted: bool
+state coast_population_conserved: bool
+state coast_paid_once: bool
+state coast_exact_source: bool
+state coast_path_valid: bool
+state coast_refusal_unchanged: bool
+state coast_previous_land_access_preserved: bool
+state coast_new_reach: bool
+state coast_target_outside_frontier: bool
+state coast_receipt_exact: bool
+state coast_quote_informative: bool
+state coast_replay_preserved: bool
+state coast_local_prospect_exact: bool
+state coast_founding_support_preserved: bool
+state coast_non_navigation_goals_preserved: bool
+state coast_all_pools_hold_unsafe: bool
+state coast_active_work_preserved: bool
+state coast_current_snapshot_only: bool
+state coast_preparation_current_towns_only: bool
+state coast_departure_revalidated: bool
+state coast_missing_yard_goal_legal: bool
+state coast_paid_port_dedup_funded: bool
+state coast_labor_single_optional_pause: bool
+state coast_labor_flow_comparable: bool
+state coast_labor_protected_choices_retained: bool
+state coast_labor_resume_revalidated: bool
+state coast_labor_work_bounded: bool
+
+action coastal_fixture(kind: int)
+action found_coastal_settlement()
+action inspect_coastal_choices()
+action replay_coastal_history()
+
+when found_coastal_settlement {
+    expect "eligible-coastal-founding-succeeds": not before.coast_eligible or after.coast_accepted
+    expect "founding-conserves-people-and-pays-once": not after.coast_accepted or (after.coast_population_conserved and after.coast_paid_once)
+    expect "exact-prepared-source-and-ocean-path": not after.coast_accepted or (after.coast_exact_source and after.coast_path_valid)
+    expect "refused-coastal-founding-has-no-effects": after.coast_accepted or after.coast_refusal_unchanged
+    expect "new-reach-preserves-existing-land-access": after.coast_previous_land_access_preserved and (not (after.coast_accepted and before.coast_target_outside_frontier) or after.coast_new_reach)
+    expect "committed-founding-retains-exact-facts": not after.coast_accepted or after.coast_receipt_exact
+}
+when inspect_coastal_choices {
+    expect "choices-show-exact-source-path-and-conserved-cost": after.coast_quote_informative
+    expect "local-prospect-uses-exact-current-geography": after.coast_local_prospect_exact
+    expect "founding-support-protects-people-and-promises": after.coast_founding_support_preserved
+    expect "local-navigation-keeps-other-research-goals": after.coast_non_navigation_goals_preserved
+    expect "unsafe-coastal-investment-stays-out-of-all-pools": after.coast_all_pools_hold_unsafe
+    expect "coastal-opportunity-never-replaces-paid-work": after.coast_active_work_preserved
+    expect "coastal-opportunity-is-a-revalidated-snapshot": after.coast_current_snapshot_only
+    expect "yard-preparation-protects-only-current-towns": after.coast_preparation_current_towns_only
+    expect "departure-independently-funds-conserved-households": after.coast_departure_revalidated
+    expect "missing-yard-goal-needs-current-legal-preparation": after.coast_missing_yard_goal_legal
+    expect "paid-port-dedup-needs-departure-funding": after.coast_paid_port_dedup_funded
+    expect "labor-preparation-is-one-optional-pause": after.coast_labor_single_optional_pause
+    expect "labor-value-compares-paid-operating-flows": after.coast_labor_flow_comparable
+    expect "labor-choice-retains-food-learning-and-promises": after.coast_labor_protected_choices_retained
+    expect "labor-resume-suppression-revalidates-current-opportunity": after.coast_labor_resume_revalidated
+    expect "labor-search-is-one-pair-with-counted-work": after.coast_labor_work_bounded
+}
+when replay_coastal_history {
+    expect "old-and-new-histories-remain-readable": after.coast_replay_preserved
+}

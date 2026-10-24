@@ -616,6 +616,7 @@ fn record(project: &super::Project, report: serde_json::Value, fingerprint_value
         manifest: project.manifest.path.display().to_string(),
         project_identity: project.identity.clone(),
         implementation_fingerprint: fingerprint_value.into(),
+        implementation_inputs: None,
         fingerprinted_files: Vec::new(),
         application: vec!["python".into(), "app.py".into()],
         timeout_ms: 1000,
@@ -916,6 +917,12 @@ fn manifest_parses_one_verification_profile_with_defaults_and_rejects_bad_ones()
         })
     );
     assert_eq!(minimal.entries[0].group, "a");
+    let maximum = parse_manifest(
+        path,
+        "project X\nverify behavior { command [\"a\"] timeout_ms 42000 }",
+    )
+    .unwrap();
+    assert_eq!(maximum.profile.unwrap().timeout_ms, 42000);
     let none = parse_manifest(path, "project X\nuse behavior \"a.bla\"").unwrap();
     assert!(none.profile.is_none());
     for (source, code) in [
@@ -952,7 +959,7 @@ fn manifest_parses_one_verification_profile_with_defaults_and_rejects_bad_ones()
             "E_PROFILE_FIELD",
         ),
         (
-            "project X\nverify behavior { command [\"a\"] timeout_ms 5001 }",
+            "project X\nverify behavior { command [\"a\"] timeout_ms 42001 }",
             "E_PROFILE_FIELD",
         ),
         (

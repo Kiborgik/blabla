@@ -1,0 +1,63 @@
+state revision: int
+state accepted: bool
+state world_preserved: bool
+state memory_preserved: bool
+state observer_read_only: bool
+state concurrent_actions: int
+
+action duplicate_wake()
+action inspect()
+action competing_wakes()
+
+when duplicate_wake {
+    expect "duplicate-wake-preserves-world": after.world_preserved
+    expect "duplicate-wake-preserves-random-cursor": after.memory_preserved
+}
+
+when inspect {
+    expect "spectator-never-commands-the-world": after.observer_read_only and after.world_preserved
+}
+
+when competing_wakes {
+    expect "competing-wakes-do-not-double-act": after.concurrent_actions >= 0 and after.concurrent_actions <= 1
+}
+
+state checkpoint_write_allowed: bool
+state ephemeral_mode: bool
+
+action persist_local_world()
+
+when persist_local_world {
+    expect "ephemeral-world-never-writes-shared-checkpoint": not after.ephemeral_mode or not after.checkpoint_write_allowed
+}
+
+state land_quote_read_only: bool
+state exact_use_eligible: bool
+state opening_budget_funded: bool
+state retained_operations_funded: bool
+state owned_alternative_preferred: bool
+
+action quote_landwork()
+
+when quote_landwork {
+    expect "landwork-forecast-does-not-commit-or-credit-output": after.land_quote_read_only
+    expect "funded-landwork-keeps-exact-site-and-opening-obligations": not after.accepted or after.exact_use_eligible and after.opening_budget_funded and after.retained_operations_funded
+    expect "equivalent-funded-owned-site-precedes-another-purchase": after.owned_alternative_preferred
+}
+
+state frontier_quote_read_only: bool
+state home_allocations_preserved: bool
+state automatic_growth_funded: bool
+state no_future_income_financing: bool
+state farm_choice_independent: bool
+
+action quote_frontier_founding()
+action choose_frontier_farm()
+
+when quote_frontier_founding {
+    expect "frontier-assessment-never-founds-or-promises-income": after.frontier_quote_read_only and after.no_future_income_financing
+    expect "funded-frontier-keeps-households-growth-and-home-work": not after.accepted or after.opening_budget_funded and after.home_allocations_preserved and after.automatic_growth_funded
+}
+when choose_frontier_farm {
+    expect "new-town-farm-remains-a-separate-paid-choice": after.farm_choice_independent
+}

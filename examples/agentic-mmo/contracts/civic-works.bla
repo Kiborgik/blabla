@@ -1,0 +1,14 @@
+type CivicWorksObservation {
+    cases: int, no_op_errors: int, allocation_errors: int,
+    payment_errors: int, commitment_errors: int, expiry_errors: int,
+    replay_errors: int, choice_errors: int, observer_errors: int
+}
+state civic_works_observations: [CivicWorksObservation]
+action observe_kiln_civic_works()
+when observe_kiln_civic_works {
+    expect "exact-paid-building-order-and-fixed-two-beat-expiry": count(after.civic_works_observations) > 0 and all(after.civic_works_observations, s => s.cases > 0 and s.no_op_errors == 0 and s.expiry_errors == 0)
+    expect "funded-kiln-crew-substitution-is-atomic-and-exclusive": all(after.civic_works_observations, s => s.allocation_errors == 0 and s.payment_errors == 0)
+    expect "households-non-donor-work-and-accepted-promises-remain-protected": all(after.civic_works_observations, s => s.commitment_errors == 0)
+    expect "retaining-materials-and-commissioning-have-distinct-useful-cases": all(after.civic_works_observations, s => s.choice_errors == 0)
+    expect "restart-and-observation-preserve-exact-earned-work": all(after.civic_works_observations, s => s.replay_errors == 0 and s.observer_errors == 0)
+}

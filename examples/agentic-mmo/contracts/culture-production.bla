@@ -1,0 +1,44 @@
+state paid_once: bool
+state exact_site: bool
+state completed: bool
+state no_completion_output: bool
+state completed_wonder_only: bool
+state culture_made: bool
+state same_town: bool
+state staffed: bool
+state inputs_paid: bool
+state no_effects: bool
+state refused: bool
+state paused: bool
+state no_payment_or_output: bool
+state replay_exact: bool
+
+action start_theater()
+action complete_theater()
+action work_theater()
+action work_printing_house()
+action pause_printing_house()
+action refuse_culture_action()
+action replay_culture_history()
+
+when start_theater {
+    expect "exact-theater-site-paid-once": after.exact_site and after.paid_once
+}
+when complete_theater {
+    expect "theater-completion-precedes-output": after.completed and after.no_completion_output
+}
+when work_theater {
+    expect "only-completed-wonders-add-culture": after.completed_wonder_only and after.culture_made
+}
+when work_printing_house {
+    expect "local-staffed-printing-pays-for-culture": after.same_town and after.staffed and after.inputs_paid and after.culture_made
+}
+when pause_printing_house {
+    expect "paused-printing-preserves-inputs": after.paused and after.no_payment_or_output
+}
+when refuse_culture_action {
+    expect "invalid-culture-action-has-no-effects": after.refused and after.no_effects
+}
+when replay_culture_history {
+    expect "culture-history-replays-exactly": after.replay_exact
+}

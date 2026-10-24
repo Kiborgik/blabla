@@ -1,0 +1,706 @@
+export { RELIEF_RULES } from './relief-content.ts';
+import { CIV_COUNT } from './types.ts';
+import type {
+  CivicDefinition, GovernmentDefinition, PolicyDefinition, BuildingCapability, BuildingDefinition, CivilizationDefinition, DirectorEventDefinition, EffectDefinition,
+  EraDefinition, FeatureDefinition, Focus, GameAction, HistoricalMilestone, Resource,
+  Resources, StrategicResource, TechnologyDefinition, Terrain, TradeRecipe, PublicProjectRecipe, ImprovementDefinition, WonderDefinition,
+} from './types.ts';
+import { HISTORICAL_DIRECTOR_EVENTS } from './historical-event-content.ts';
+
+export const SPACEFLIGHT_RULES = {
+  ruleVersion: 1, featureId: 'interplanetary-logistics', minimumSourcePopulation: 3, settlers: 3, flightRounds: 4,
+  settle: { launchCost: { materials: 36, energy: 24, credits: 60 }, cargo: { food: 18, materials: 48, energy: 40 } },
+  resupply: { launchCost: { materials: 18, energy: 16, credits: 36 }, cargo: { food: 24, materials: 24, energy: 40 } },
+  habitat: { workPerBeat: 25, requiredWork: 100, costPerBeat: { materials: 10, energy: 4 } },
+  shortage: { populationLossEvery: 2, populationLoss: 1 },
+} as const;
+export const CIVIC_RULES = { ruleVersion: 1, featureId: 'civic-bootstrap', governmentCredits: 10, reslotCredits: 8, commitmentBeats: 4, transitionBeats: 2, transitionOutput: 0.75 } as const;
+export const POWERED_SCIENCE_RULES = { ruleVersion: 1, featureId: 'powered-science' } as const;
+export const SECOND_GOVERNMENT_RULES = { ruleVersion: 1, featureId: 'second-government' } as const;
+export const LEARNING_PATRONAGE_RULES = { ruleVersion: 1, featureId: 'learning-patronage', exclusiveGroup: 'economic-priority' } as const;
+export const POLICY_SLOT_TYPES = ['military', 'economic', 'diplomatic', 'wildcard'] as const;
+export const CIVICS: CivicDefinition[] = [
+  { id: 'code-of-laws', name: 'Code of laws', requiredFeatures: ['civic-bootstrap'], requires: [], cost: 16, capability: 'Choose Chiefdom and explicitly assign Urban planning to fund additional local construction work.' },
+  { id: 'craftsmanship', name: 'Craftsmanship', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['code-of-laws'], cost: 22, capability: 'Combine practical craft with Early empire to develop State workforce.' },
+  { id: 'foreign-trade', name: 'Foreign trade', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['code-of-laws'], cost: 24, capability: 'Develop Early empire and contribute the exchange tradition required by Political philosophy.' },
+  { id: 'early-empire', name: 'Early empire', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['foreign-trade'], cost: 30, capability: 'Combine organized settlements with Craftsmanship to develop State workforce.' },
+  { id: 'state-workforce', name: 'State workforce', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['craftsmanship', 'early-empire'], cost: 40, capability: 'Prepare Political philosophy and unlock Learning patronage where released; choosing it replaces Urban planning.' },
+  { id: 'political-philosophy', name: 'Political philosophy', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['state-workforce', 'foreign-trade'], cost: 48, capability: 'Choose Autocracy for fifteen percent more construction work in the still-owned original capital, instead of Chiefdom Food across towns.' },
+];
+export const GOVERNMENTS: GovernmentDefinition[] = [
+  { id: 'chiefdom', name: 'Chiefdom', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slots: { military: 1, economic: 1, diplomatic: 0, wildcard: 0 }, baseProduction: { food: 1 } },
+  { id: 'autocracy', name: 'Autocracy', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['political-philosophy'], slots: { military: 2, economic: 1, diplomatic: 0, wildcard: 1 }, baseProduction: {}, capitalConstructionWorkPercent: 15 },
+];
+export const POLICIES: PolicyDefinition[] = [
+  { id: 'urban-planning', name: 'Urban planning', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slotType: 'economic', constructionWork: 1, exclusiveGroup: LEARNING_PATRONAGE_RULES.exclusiveGroup },
+  { id: 'learning-patronage', name: 'Learning patronage', requiredFeatures: ['civic-bootstrap', LEARNING_PATRONAGE_RULES.featureId], requires: ['state-workforce'], slotType: 'economic', constructionWork: 0, exclusiveGroup: LEARNING_PATRONAGE_RULES.exclusiveGroup, institutionalSciencePercent: { percent: 25, buildingIds: ['library', 'academy', 'university'] } },
+];
+
+export const RESOURCE_IDS: readonly Resource[] = ['food', 'materials', 'energy', 'credits', 'science', 'culture'];
+export const FOCUS_IDS: readonly Focus[] = ['growth', 'industry', 'research', 'culture', 'diplomacy'];
+export const DIRECTOR_CLOCK_RULES = { intervalMs: 360000, yearsPerTick: 10, majorEveryTicks: 10, maxCatchUpTicks: 240, eventAdvanceYears: 0, reviewAdvanceYears: 0 };
+
+export const CIVILIZATIONS: CivilizationDefinition[] = [
+  { name: 'Aster', adjective: 'Asterian', color: '#78baff', capital: 'Dawnwell', focus: 'research', objective: 'Discover what the world can become.' },
+  { name: 'Verdant', adjective: 'Verdant', color: '#8edc9d', capital: 'Willowmere', focus: 'growth', objective: 'Build places where people choose to flourish.' },
+  { name: 'Ember', adjective: 'Ember', color: '#ff996b', capital: 'Cinderhold', focus: 'industry', objective: 'Turn scarce materials into lasting power.' },
+  { name: 'Pelagos', adjective: 'Pelagian', color: '#68d9d3', capital: 'Tidehaven', focus: 'diplomacy', objective: 'Make cooperation worth more than isolation.' },
+  { name: 'Vesper', adjective: 'Vesperian', color: '#cea2ed', capital: 'Lumen', focus: 'culture', objective: 'Give people a shared story worth joining.' },
+];
+
+export const RESIDENT_CAPACITY_RULES = { ruleVersion: 1, communityReserve: 3, perPaidRecipe: 3 } as const;
+
+export const LOCAL_POWER_RULES = { ruleVersion: 1, featureId: 'local-power' } as const;
+
+export const CONSTRUCTION_RULES = { version: 1, baseWork: 1, industryWork: 2, defaultRequiredWork: 6, requiredWork: { 'research-lab': 18, 'coal-plant': 18, launchpad: 24, factory: 18, observatory: 14, foundry: 14, 'theater-square': 10, 'printing-house': 14, 'water-mill': 8, aqueduct: 12, granary: 8, farm: 4, workshop: 4, campus: 8, library: 8, 'commercial-hub': 10, market: 10, university: 14, bank: 14, 'industrial-zone': 12, 'guild-workshop': 12 } } as const;
+
+export const LOCAL_GROWTH_RULES = { ruleVersion: 1, featureId: 'local-growth', initialCapitalBaseCapacity: 20, foundedBaseCapacity: 8, baseFoodCost: 6, populationPerFoodCost: 4, researchMultiplier: 3 } as const;
+
+export const WONDER_RULES = { ruleVersion: 1, featureId: 'unique-wonders', loserMaterialRefundPercent: 50, boostLimit: 2, boostPercent: 20, boostMaximumEra: 1 } as const;
+
+export const WONDERS: WonderDefinition[] = [
+  { id: 'great-library', name: 'Great library', description: 'Compete for one great archive. The first completed contender provides science and two optional boosts to distinct active early discoveries; other contenders recover half their paid materials.', requiredFeatures: ['unique-wonders', 'recurring-decisions'], requires: ['writing'], minEra: 1, cost: { materials: 50, credits: 25 }, requiredWork: 24, siteRange: 3, production: { science: 4 } },
+];
+
+export const BUILDING_CAPABILITY_ACTIONS: Record<BuildingCapability, readonly GameAction['type'][]> = { 'coastal-departure': ['settle-coast'] };
+export const RESEARCH_INVESTMENT_RULES = { ruleVersion: 1, featureId: 'productive-research', budget: 'current-city-science-output' } as const;
+
+export const DISTRICT_RULES = { ruleVersion: 1, featureId: 'district-planning', baseCapacity: 1, populationPerDistrict: 4 } as const;
+export const IMPROVEMENT_RULES = { ruleVersion: 1, featureId: 'worked-land', hillElevation: { minimum: 70, maximum: 88 }, allocationPriority: 'paid-buildings-then-numeric-tile' } as const;
+
+export const CONNECTED_RESEARCH_PACING = { ruleVersion: 1, featureId: 'learning-commerce', multiplier: 3, baseCosts: { 'bronze-working': 36, currency: 42, mathematics: 44, education: 72, banking: 120 } } as const;
+
+export const MANUFACTURING_RESEARCH_PACING = { ruleVersion: 1, featureId: 'manufacturing', multiplier: 3, baseCosts: { 'iron-working': 48, apprenticeship: 68 } } as const;
+
+export const TERRITORY_RULES = { ruleVersion: 1, featureId: 'owned-territory', range: 3, baseCredits: 12, creditsPerDistance: 4, creditsPerPriorPurchase: 2 } as const;
+
+export const WORLD_EXPANSION_RULES = { ruleVersion: 1, featureId: 'world-expansion', fromWidth: 18, fromHeight: 12, width: 18, height: 24, algorithm: 'append-seeded-rows' } as const;
+
+export const PASTORAL_RULES = { ruleVersion: 1, featureId: 'water-land', resource: 'horses', revealTechnology: 'animal-husbandry', placement: { id: 'pastoral-sites-1', maximumSites: 10, frontierMinimumDistance: 2, ownedSiteRange: 3, seedMultiplier: 0x9e3779b1, mixMultipliers: [0x7feb352d, 0x846ca68b], seedSalt: 0x50415354 } } as const;
+
+export const METAL_RULES = { ruleVersion: 1, featureId: 'finite-metals', resource: 'iron', revealTechnology: 'bronze-working', capacityPerCity: 40, extractionPerBeat: 2, initialReserve: 240, placement: { id: 'iron-placement-1', maximumDeposits: 8, frontierMinimumDistance: 2, ownedSiteRange: 3, seedMultiplier: 0x9e3779b1, mixMultipliers: [0x7feb352d, 0x846ca68b], hillOnly: true } } as const;
+
+export const INDUSTRIAL_RULES = { ruleVersion: 1, featureId: 'industrial-steam', requiredTechnology: 'steam-power', railRange: 3, railWork: 2, railCost: { materials: 4, credits: 2 }, railStrategicCost: { iron: 1, coal: 1 }, railWeight: 0.25, plainWeight: 1, edgesPerBeat: 2, shipmentCoal: 1 } as const;
+export const COAL_RULES = { ...METAL_RULES, featureId: 'industrial-steam', resource: 'coal', revealTechnology: 'industrialization', capacityPerCity: 60, initialReserve: 300, placement: { ...METAL_RULES.placement, id: 'coal-placement-1', seedSalt: 0x434f414c } } as const;
+export const STRATEGIC_RESOURCE_IDS: readonly StrategicResource[] = ['iron', 'coal'];
+export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } as const;
+
+export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
+
+export const FEATURES: FeatureDefinition[] = [
+  { id: 'earned-land-integration', name: 'Earned inland integration', description: 'After states rise, an ordinary-founded town can connect peoples through a real paid foreign land exchange. Coastal development remains another path; industry and Mars still require their separate physical achievements.' },
+  { id: 'expansion-labor-reallocation', name: 'Optional coastal labor reallocation', description: 'A civilization may pause one unprotected operation when current supplies support a separately chosen coastal departure and the conditional town offers greater operating value. Food, Learning and accepted obligations remain protected; no residents move or future income arrives at preparation.' },
+  { id: 'regional-iron', name: 'Regional Iron districts', description: 'Eight finite Iron hill sites form separated connected districts of three, three and two. Two distinct genesis capitals have compatible structural purchase approaches; actual acquisition, Mines and extraction remain paid.' },
+  { id: 'staged-coastal-preparation', name: 'Staged coastal preparation', description: 'A current legal Boat yard can protect existing towns without reserving a future settlement. Actual departure separately revalidates its path, costs, residents and growing households.' },
+  { id: 'civic-works', name: 'Paid civic works', description: 'State workforce can assign one funded Kiln crew to an exact paid building order for two scheduled seasons. Complete Materials, Credits and resident allocation exchange current Kiln output for bounded actual construction work; no automatic continuation or free operation follows.' },
+  { id: 'renewing-worked-woodlands', name: 'Renewing worked woodlands', description: 'Lumbermills and Charcoal clearings harvest one of eight exact local forest work-lots only with their complete existing paid and staffed operation. Non-harvest economy beats recover one lot, capped at eight; continuous depleted supply is not promised and the forest biome remains.' },
+  { id: 'learning-patronage', name: 'Competing civic priorities', description: 'Choose one economic priority: Urban planning construction or Learning patronage for fully supported Library, House of learning and University Science.' },
+  { id: 'river-intakes', name: 'Funded river intakes', description: 'Optional exact-site intakes use one opening Material, one local resident and eight renewable uniform-runoff units for three base Food after funded same-town Irrigation. Physical upstream withdrawals reduce downstream residual flow; no Water stock, treaty right or baseline Irrigation loss is implied.' },
+  { id: 'productive-frontier-founding', name: 'Productive frontier towns', description: 'Civilizations assess affordable three-person satellites while protecting home work, households and commitments. A new town may independently choose paid Terraced fields; founding itself creates no farm, promised trade or future income.' },
+  { id: 'charcoal-clearing', name: 'Charcoal clearings', description: 'Kiln firing opens paid working pads within retained owned forest near their town. One opening Material and one remaining resident make one base ordinary Energy on later beats; no forest removal or local Power is implied. When renewing woodlands are active, complete operations also consume one exact local work-lot.' },
+  { id: 'supplied-borders', name: 'Supplied border parties', description: 'Small paid resident parties can contest exact unworked purchased rival land. Supplies, committed travel, limited clashes and finite home returns are recorded; no armies or town capture.' },
+  { id: 'funded-landwork-planning', name: 'Funded land use', description: 'Civilizations compare exact affordable improvements and districts before ordinary land purchases. Conditional plans protect existing work and supplies; ownership alone produces nothing.' },
+  { id: 'hillside-commonworks', name: 'Communal hillside plots', description: 'Masonry and Water management open exact owned grassland hills near their town. One opening Material and one remaining local resident maintain three base Food on later beats; no housing, water source or universal service.' },
+  { id: 'shore-fisheries', name: 'Maintained shore fisheries', description: 'Water management opens exact owned coastal land near a coastal town. One opening Material and one remaining local resident fund three base Food on later beats; no boats, fish stocks or free shoreline goods.' },
+  { id: 'food-budget', name: 'Household food security', description: 'Earth households require 1.25 Food per resident each working season. Food responds to wellbeing, damage, geography and staffed facilities rather than infrastructure amplification; other resources and off-world supplies keep their own rules.' },
+  { id: 'knowledge-compacts', name: 'Consented knowledge compacts', description: 'Two fresh ordinary deliveries with paid Science institutions at both exact endpoints permit one consented, funded contribution to an active terrestrial discovery. Due contributions are not escrow, cargo or free technology.' },
+  { id: 'consented-relief', name: 'Consented food relief', description: 'A civilization may promise contextual surplus Food over an existing exact consenting corridor. Explicit acceptance precedes one conserved, fully funded due transfer; withdrawal and shortage do not invent cargo or betrayal.' },
+  { id: 'partnership-stewardship', name: 'Partnership stewardship', description: 'Civilizations weigh supplied exchanges, expiring consent and promised repair contributions against their current needs. This additive controller rule leaves older release policies unchanged.' },
+  { id: 'procedural-regional-targets', name: 'Local historical variety', description: 'Deterministic qualifying local event targets are quoted explicitly and retained with immediate factual consequences.' },
+  { id: 'historical-pressures', name: 'Regional pressures and opportunities', description: 'Actual cultivated land, forests, coast, delivered trade, operated industry and displaced residents qualify local consequential historical events.' },
+  { id: 'earned-history', name: 'Earned historical transitions', description: 'Retain actual milestone proof and explicitly advance a new ruleset calendar once per earned cause.' },
+  { id: 'powered-science', name: 'Powered scientific laboratories', description: 'Sanitation and Chemistry lead to paid era-three local Campus laboratories using same-town Power, Credits and residents for productive Science.' },
+  { id: 'local-power', name: 'Local Coal power supplies productive Factories', description: 'Opening Coal and residents generate expiring same-town Power for atomically staffed Factories. Emissions are receipt-only; industrial-project work remains planned.' },
+  { id: 'industrial-steam', name: 'Finite Coal powers useful rail exchanges', description: 'Connected productive research reveals finite hill Coal, funds exact owned rail edges and enables newly consented fuel-paid steam delivery.' },
+  { id: 'civic-bootstrap', name: 'Culture shapes government', description: 'Actual current Culture funds explicitly chosen civics. Chiefdom and a chosen Urban planning policy improve the next working season.' },
+  { id: 'second-government', name: 'Political philosophy offers a second government', description: 'Five connected Culture commitments make Autocracy available, trading distributed Chiefdom Food for construction work in the still-owned original capital.' },
+  { id: 'observatory-learning', name: 'Learning from the sky', description: 'Sailing and Celestial navigation connect Mathematics to Astronomy and a locally staffed Observatory beside its own completed high-ground Campus. Harbor, fishing, ships and great-person systems remain planned.' },
+  { id: 'foundry-production', name: 'Iron supports local industry', description: 'Military engineering, Gunpowder and Metal casting connect existing discoveries to a locally staffed Foundry that consumes actual iron and energy. Niter, forts and military units remain planned.' },
+  { id: 'culture-production', name: 'Culture in inhabited places', description: 'Construction and Printing connect exact Theater sites near completed wonders to locally staffed Printing houses. Tourism, civic Amphitheaters and great-person systems remain planned.' },
+  { id: 'owned-territory', name: 'Land for each town', description: 'Purchase exact connected nearby land for one town, retaining payment and beneficiary. Existing ownership and resource geography remain unchanged until an actual purchase.' },
+  { id: 'world-expansion', name: 'A wider inhabited world', description: 'Append new playable rows while retaining every existing tile, settlement, route and historical identity. New towns still own only their actual claimed center.' },
+  { id: 'forest-production', name: 'Work standing forests', description: 'Archery and Machinery connect existing land and engineering discoveries to resident-supported Lumber mills. Military units remain planned.' },
+  { id: 'water-land', name: 'Work land and supply growing towns', description: 'Animal husbandry reveals useful horse pastures; Wheel and Engineering connect completed Irrigation and actual mountain catchments to productive Water mills and local housing.' },
+  { id: 'local-growth', name: 'Housing and local growth', description: 'Masonry opens Granaries that add real town housing; later food-funded residents support work on a following season.' },
+  { id: 'unique-wonders', name: 'World wonders', description: 'Exact towns compete to complete a unique landmark; real winners, losses, refunds and chosen research boosts remain in history.' },
+  { id: 'manufacturing', name: 'Connected local manufacturing', description: 'Iron working and Apprenticeship connect real worked Mine sites to Industrial zones and resident-supported Guild workshops.' },
+  { id: 'finite-metals', name: 'Finite useful deposits', description: 'Bronze working reveals finite iron on existing hills; staffed Mines extract it for consensual exchange.' },
+  { id: 'learning-commerce', name: 'Connected learning and commerce', description: 'Currency, Mathematics, Education and Banking connect useful local institutions and paid operations.' },
+  { id: 'worked-land', name: 'People work the land', description: 'Commit an exact owned site to a timed improvement, then assign local residents to its actual output.' },
+  { id: 'mining', name: 'Work useful hills', description: 'Mining opens resident-supported material production on existing hill sites. Finite strategic deposits remain a later capability.' },
+  { id: 'district-planning', name: 'Choose a district site', description: 'A town commits its existing construction lane to an exact owned site; nearby terrain changes its later output.' },
+  { id: 'writing', name: 'Writing and local learning', description: 'Writing opens a real Campus and its own Library; specialist and great-person systems remain planned.' },
+  { id: 'coastal-founding', name: 'New shores', description: 'Navigation and a completed coastal Boat yard let existing residents found a new coastal town along a recorded ocean path.' },
+  { id: 'productive-research', name: 'Productive research', description: 'Research advances from actual science made each season; old reserves do not accelerate the current project.' },
+  { id: 'resident-capacity', name: 'People support local work', description: 'Each town uses its opening residents and complete supplies together for paid operations, so conserved founding changes later local support.' },
+  { id: 'recurring-decisions', name: 'Choose the next commitment', description: 'Research and each town retain real commitments and expose required next choices after completion without stopping other civilizations.' },
+  { id: 'settlement-turns', name: 'Five civilizations awaken', description: 'Five civilization actors and one World Director inhabit a shared, revisioned world.' },
+  { id: 'settlement-production', name: 'Working settlements', description: 'Food, materials, city focus and buildings sustain actual populations.' },
+  { id: 'settlement-research', name: 'First discoveries', description: 'Civilizations invest their knowledge in released discoveries.' },
+  { id: 'director-events', name: 'A changing world', description: 'The World Director introduces real environmental pressures and opportunities.' },
+  { id: 'history-advancement', name: 'Turning points in history', description: 'Deliberate, explained historical advances move the calendar once without changing the regular clock or unlocking unfinished capabilities.' },
+  { id: 'release-evolution', name: 'Historical release marker', description: 'Inactive historical metadata only. Fresh configurations do not enable world/save migrations before release.' },
+  { id: 'independent-actions', name: 'Civilizations act together', description: 'Independent fair tactical windows and shared strategic beats let each civilization act without waiting for another actor.' },
+  { id: 'bounded-plans', name: 'The next useful step', description: 'At most two explicit actionable intentions guide real agent decisions and retain concrete lifecycle results without automatic execution.' },
+  { id: 'building-operations', name: 'Working choices', description: 'Pause or operate constructed recipes that consume scarce inputs for useful output.' },
+  { id: 'settlement-crafts', name: 'Water and fire', description: 'Connected discoveries create distinct food and material production commitments.' },
+  { id: 'city-repair', name: 'Rebuild a working city', description: 'Materials and energy restore damage in an exactly selected owned city.' },
+  { id: 'city-specialization', name: 'Distinct settlement roles', description: 'Each settlement can choose its own focus and construction while sharing civilization supplies.' },
+  { id: 'conserved-founding', name: 'People build a frontier', description: 'New settlements transfer people from an owned source city without creating population.' },
+  { id: 'terrain-production', name: 'Useful land', description: 'Released terrain yields make food and material locations distinct productive choices.' },
+  { id: 'settlement-expansion', name: 'Beyond the first hearth', description: 'New settlements make land, migration and supply consequential.' },
+  { id: 'trade-routes', name: 'Roads between peoples', description: 'Routes exchange scarce goods and can be disrupted and repaired.' },
+  { id: 'public-projects', name: 'Promises that build', description: 'Consenting partners fund delayed shared repairs from their actual supplies.' },
+  { id: 'exact-trade-endpoints', name: 'Choose the towns that connect', description: 'A trade proposal names two exact owned towns while keeping shared civilization stocks and the existing delivery schedule.' },
+  { id: 'land-transport', name: 'Paths between towns', description: 'New consensual exchanges quote actual passable land paths and an acceptance-relative delivery interval.' },
+  { id: 'operating-resource-exchange', name: 'Fuel through cooperation', description: 'Consenting partners exchange energy and materials to support later productive work.' },
+  { id: 'statecraft', name: 'Institutions and belonging', description: 'Public institutions connect knowledge, culture, welfare and political cooperation.' },
+  { id: 'navigation', name: 'A connected world', description: 'Navigation expands the reach of exchange, exploration and influence.' },
+  { id: 'industrialization', name: 'Power and production', description: 'Energy, mass production and their social consequences reshape cities.' },
+  { id: 'planetary-networks', name: 'A planetary civilization', description: 'Communications and global dependencies connect distant decisions.' },
+  { id: 'interplanetary-logistics', name: 'Beyond Earth', description: 'Launch infrastructure and sustained supply make other worlds habitable.' },
+  { id: 'federations', name: 'Shared political futures', description: 'Negotiated commitments and delivered public goods can sustain a federation.' },
+  { id: 'cultural-networks', name: 'Influence without conquest', description: 'Attractive institutions spread voluntary cultural affiliation.' },
+  { id: 'resilient-markets', name: 'An economic world order', description: 'Independent partners depend on contestable, resilient productive networks.' },
+  { id: 'supplied-conflict', name: 'Power with consequences', description: 'Armies, occupation and reconstruction compete for the world’s resources.' },
+  { id: 'disaster-recovery', name: 'Rupture and rebuilding', description: 'Damage creates reconstruction, relief and transport decisions.' },
+  { id: 'anomalous-contact', name: 'We are not alone', description: 'Unexpected contact creates scientific opportunities and social disagreement.' },
+  { id: 'speculative-markets', name: 'Manias and markets', description: 'Speculative wealth changes investment opportunities and political risk.' },
+];
+
+export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  'commission-civic-works': ['civic-works', 'civic-bootstrap', 'resident-capacity', 'building-operations', 'recurring-decisions'],
+  'dispatch-border': ['supplied-borders'], 'respond-border': ['supplied-borders'], 'withdraw-border': ['supplied-borders'],
+  'propose-knowledge': ['knowledge-compacts'], 'respond-knowledge': ['knowledge-compacts'], 'withdraw-knowledge': ['knowledge-compacts'],
+  'propose-relief': ['consented-relief'], 'respond-relief': ['consented-relief'], 'withdraw-relief': ['consented-relief'],
+  'build-rail': ['industrial-steam', 'recurring-decisions', 'owned-territory'],
+  'choose-civic': ['civic-bootstrap'],
+  'adopt-government': ['civic-bootstrap'],
+  'acquire-tile': ['owned-territory'],
+  'build-wonder': ['unique-wonders', 'recurring-decisions'],
+  'apply-research-boost': ['unique-wonders', 'settlement-research'],
+  improve: ['worked-land', 'mining', 'recurring-decisions', 'resident-capacity'],
+  'set-improvement-operation': ['worked-land', 'resident-capacity'],
+  focus: ['settlement-production'], research: ['settlement-research'], build: ['settlement-production'],
+  'set-building-operation': ['building-operations'],
+  'settle-coast': ['settlement-expansion', 'conserved-founding', 'coastal-founding', 'navigation'],
+  settle: ['settlement-expansion'], trade: ['trade-routes'], federate: ['federations'],
+  'propose-trade': ['trade-routes'], 'respond-trade': ['trade-routes'], 'withdraw-trade': ['trade-routes'], 'stop-trade': ['trade-routes'],
+  'propose-public-project': ['public-projects'], 'respond-public-project': ['public-projects'], 'cancel-public-project': ['public-projects'],
+  'repair-city': ['city-repair'], repair: ['trade-routes'], expedition: ['interplanetary-logistics'], event: ['director-events'],
+  wait: ['settlement-turns'],
+};
+
+export const TECHNOLOGIES: TechnologyDefinition[] = [
+  { id: 'sanitation', name: 'Sanitation', requiredFeatures: ['powered-science'], era: 2, cost: 140, requires: ['construction', 'education'], capability: 'Connect Construction and Education to Chemistry. Sewer housing and disease systems remain planned.' },
+  { id: 'chemistry', name: 'Chemistry', requiredFeatures: ['powered-science'], era: 3, cost: 260, requires: ['scientific-method', 'sanitation'], capability: 'Operate an era-three Research laboratory at this town’s completed Campus using three local Power, two Credits and three residents for Science. Knowledge points and other Chemistry successors remain planned.' },
+  { id: 'scientific-method', name: 'Scientific method', requiredFeatures: ['industrial-steam'], era: 2, cost: 150, requires: ['printing', 'astronomy'], capability: 'Connect Printing and Astronomy to accepted Industrialization and finite Coal. Chemistry additionally requires Sanitation and the powered Science release; later discoveries remain planned.' },
+  { id: 'shipbuilding', name: 'Shipbuilding', requiredFeatures: ['industrial-steam'], era: 1, cost: 66, requires: ['sailing', 'celestial-navigation'], capability: 'Connect Sailing and Celestial navigation to Steam power. Shipyards and ships remain planned.' },
+  { id: 'steam-power', name: 'Steam power', requiredFeatures: ['industrial-steam'], era: 3, cost: 240, requires: ['industrialization', 'shipbuilding'], capability: 'Pay for exact owned Rail edges and propose new immutable fuel-paid steam exchanges. Canals and physical ships remain planned.' },
+  { id: 'sailing', name: 'Sailing', requiredFeatures: ['observatory-learning'], era: 0, cost: 72, requires: ['water-management'], capability: 'Connect water knowledge to Celestial navigation and the useful Astronomy branch. Fishing, Lighthouse and ships remain planned.' },
+  { id: 'celestial-navigation', name: 'Celestial navigation', requiredFeatures: ['observatory-learning'], era: 1, cost: 132, requires: ['sailing', 'writing'], capability: 'Connect written navigation and Mathematics to Astronomy. Harbor remains planned.' },
+  { id: 'astronomy', name: 'Astronomy', requiredFeatures: ['observatory-learning'], era: 2, cost: 360, requires: ['mathematics', 'celestial-navigation'], capability: 'Operate an Observatory at an own completed Campus with adjacent mountain or hill, using two Credits and three local residents for Science.' },
+  { id: 'military-engineering', name: 'Military engineering', requiredFeatures: ['foundry-production'], era: 1, cost: 240, requires: ['construction', 'iron-working'], capability: 'Connect existing engineering and iron knowledge to Gunpowder and the useful Foundry branch. Niter and Forts remain planned.' },
+  { id: 'gunpowder', name: 'Gunpowder', requiredFeatures: ['foundry-production'], era: 2, cost: 390, requires: ['military-engineering', 'apprenticeship'], capability: 'Connect practical engineering and skilled industry to Metal casting; military units remain planned.' },
+  { id: 'metal-casting', name: 'Metal casting', requiredFeatures: ['foundry-production'], era: 2, cost: 450, requires: ['gunpowder', 'machinery'], capability: 'Operate a same-town Foundry using one Iron, two Energy and three residents for useful Materials.' },
+  { id: 'construction', name: 'Construction', requiredFeatures: ['culture-production'], era: 1, cost: 150, requires: ['engineering'], capability: 'Choose an exact owned Theater square site; actual completed neighboring wonders add useful Culture.' },
+  { id: 'printing', name: 'Printing', requiredFeatures: ['culture-production'], era: 2, cost: 330, requires: ['education', 'machinery'], capability: 'Support a Printing house in this town’s completed Theater with one Material and three local residents for Culture. Tourism remains planned.' },
+  { id: 'archery', name: 'Archery', requiredFeatures: ['forest-production'], era: 0, cost: 72, requires: ['animal-husbandry'], capability: 'Develop the practical techniques that lead to Machinery and productive forest work. Archer units remain planned.' },
+  { id: 'machinery', name: 'Machinery', requiredFeatures: ['forest-production'], era: 1, cost: 234, requires: ['engineering', 'archery'], capability: 'Build a timed Lumber mill on an exact owned standing forest, then allocate a local resident to useful Materials production.' },
+  { id: 'animal-husbandry', name: 'Animal husbandry', requiredFeatures: ['water-land'], era: 0, cost: 60, requires: ['agriculture'], capability: 'Reveal retained horse sites and assign one local resident to a useful Pasture. Finite horse extraction and mounted units remain planned.' },
+  { id: 'wheel', name: 'Wheel', requiredFeatures: ['water-land'], era: 0, cost: 84, requires: ['animal-husbandry', 'kiln-firing'], capability: 'Build a Water mill in a town with completed Irrigation for later food and material production.' },
+  { id: 'engineering', name: 'Engineering', requiredFeatures: ['water-land'], era: 1, cost: 144, requires: ['wheel', 'masonry'], capability: 'Build an Aqueduct supplied by an actual adjacent mountain, adding six housing spaces without creating residents.' },
+  { id: 'masonry', name: 'Masonry', requiredFeatures: ['local-growth'], era: 0, cost: 84, requires: ['mining'], capability: 'Build a Granary for food and four additional local housing spaces. Walls, quarries and spoilage protection remain planned.' },
+  { id: 'iron-working', name: 'Iron working', requiredFeatures: ['manufacturing'], era: 1, cost: 144, requires: ['bronze-working'], capability: 'Prepare Apprenticeship and local manufacturing supported by worked land. Military units remain planned.' },
+  { id: 'apprenticeship', name: 'Apprenticeship', requiredFeatures: ['manufacturing'], era: 1, cost: 204, requires: ['currency', 'iron-working'], capability: 'Build an exact Industrial zone near completed Mines and operate its own Guild workshop.' },
+  { id: 'bronze-working', name: 'Bronze working', requiredFeatures: ['finite-metals'], era: 1, cost: 108, requires: ['mining'], capability: 'Reveal finite iron at existing hills and extract it with a staffed Mine for useful exchange.' },
+  { id: 'currency', name: 'Currency', requiredFeatures: ['learning-commerce'], era: 1, cost: 126, requires: ['writing'], capability: 'Build a Commercial hub and Market, and propose iron for food when finite metal exchange is released.' },
+  { id: 'mathematics', name: 'Mathematics', requiredFeatures: ['learning-commerce'], era: 1, cost: 132, requires: ['writing', 'currency'], capability: 'Prepare Education and its useful local University.' },
+  { id: 'education', name: 'Education', requiredFeatures: ['learning-commerce'], era: 1, cost: 216, requires: ['mathematics', 'writing'], capability: 'Support a University in a completed local Campus for productive science.' },
+  { id: 'banking', name: 'Banking', requiredFeatures: ['learning-commerce'], era: 2, cost: 360, requires: ['currency', 'education'], capability: 'Support a Bank in a local Commercial hub for credits. Loans remain planned.' },
+  { id: 'mining', name: 'Mining', requiredFeatures: ['mining', 'worked-land'], era: 0, cost: 20, requires: ['kiln-firing'], capability: 'Commit useful owned hills to Mines, then assign local residents to make building materials.' },
+  { id: 'writing', name: 'Writing', requiredFeatures: ['writing', 'district-planning'], era: 0, cost: 24, requires: ['agriculture'], capability: 'Choose an exact owned Campus site, then support its Library with credits for more productive research.' },
+  { id: 'agriculture', name: 'Cultivation', requiredFeatures: ['settlement-research'], era: 0, cost: 10, requires: [], capability: 'Cultivation supports farms, workshops and more reliable settlements.' },
+  { id: 'water-management', name: 'Water management', requiredFeatures: ['settlement-crafts'], era: 0, cost: 16, requires: ['agriculture'], capability: 'Irrigation uses materials to supply more food.' },
+  { id: 'kiln-firing', name: 'Kiln firing', requiredFeatures: ['settlement-crafts'], era: 0, cost: 16, requires: ['agriculture'], capability: 'Kilns use energy to supply more building materials.' },
+  { id: 'civic-institutions', name: 'Civic institutions', requiredFeatures: ['statecraft'], era: 1, cost: 24, requires: ['agriculture'], capability: 'Public institutions connect learning, belonging and durable cooperation.' },
+  { id: 'fuel-management', name: 'Fuel management', requiredFeatures: ['statecraft', 'settlement-crafts'], era: 1, cost: 28, requires: ['civic-institutions', 'kiln-firing'], capability: 'Fuel yards use materials to supply energy for production, trade and repairs.' },
+  { id: 'navigation', name: 'Navigation', requiredFeatures: ['navigation'], era: 2, cost: 42, requires: ['civic-institutions'], capability: 'A completed coastal Boat yard can send existing residents to a new shore beyond the ordinary frontier.' },
+  { id: 'industrialization', name: 'Industrialization', requiredFeatures: ['industrialization', 'industrial-steam'], era: 3, cost: 220, requires: ['apprenticeship', 'metal-casting', 'scientific-method'], capability: 'Reveal finite hill Coal for staffed Mines and connect Shipbuilding to Steam power. Coal power plants and Factories additionally require the local Power release, era 3 and a completed Industrial zone.' },
+  { id: 'computing', name: 'Planetary computing', requiredFeatures: ['planetary-networks'], era: 4, cost: 600, requires: ['industrialization', 'chemistry'], capability: 'Information networks connect markets and political projects across the planet.' },
+  { id: 'spaceflight', name: 'Interplanetary logistics', requiredFeatures: ['interplanetary-logistics'], era: 5, cost: 900, requires: ['computing'], capability: 'Launch infrastructure and life-support supply make off-world settlements possible.' },
+];
+
+const ERA_PRESENTATION: Array<Pick<EraDefinition, 'id' | 'name' | 'year' | 'technology'>> = [
+  { id: 'settlement', name: 'The First Hearths', year: -10000, technology: 'agriculture' },
+  { id: 'states', name: 'Cities and States', year: -3000, technology: 'civic-institutions' },
+  { id: 'connected', name: 'A Connected World', year: -500, technology: 'navigation' },
+  { id: 'industrial', name: 'The Industrial Age', year: 1750, technology: 'industrialization' },
+  { id: 'planetary', name: 'The Planetary Age', year: 2000, technology: 'computing' },
+  { id: 'interplanetary', name: 'Spacefaring preparation', year: 2150, technology: 'spaceflight' },
+];
+
+export const ERAS: EraDefinition[] = ERA_PRESENTATION.map(era => {
+  const technology = TECHNOLOGIES.find(item => item.id === era.technology);
+  if (!technology) throw new Error(`Era ${era.id} has no discovery`);
+  return { ...era, cost: technology.cost, capability: technology.capability };
+});
+
+export const IMPROVEMENTS: ImprovementDefinition[] = [
+  { id: 'river-intake', name: 'River intake', description: 'Work short local irrigated plots at an exact owned riverbank supported by this town’s completed and currently funded Irrigation. One opening Material, one remaining resident and eight available river-flow units are jointly required for three base Food on later beats. Upstream withdrawals may block this optional output; no stored Water, long canal or baseline Irrigation change.', requiredFeatures: ['river-intakes', 'worked-land', 'resident-capacity', 'recurring-decisions', 'building-operations', 'food-budget', 'water-land'], requires: ['water-management'], minEra: 0, cost: { materials: 8, credits: 4 }, requiredWork: 4, siteRange: 3, siteRequirement: 'riverbank', residentsRequired: 1, operatingInputs: { materials: 1 }, production: { food: 3 } },
+  { id: 'charcoal-clearing', name: 'Charcoal clearing', description: 'Maintain a working pad within an exact owned standing forest near its owned town. One opening Material and one remaining local resident jointly produce one base ordinary Energy on later beats. The forest remains; no output at completion, local Power or housing is added. Under renewing woodlands, operation also needs one opening local work-lot and a non-harvest season recovers at most one. Pausing saves later inputs and work support, not the occupied site.', requiredFeatures: ['charcoal-clearing', 'worked-land', 'resident-capacity', 'recurring-decisions', 'building-operations'], requires: ['kiln-firing'], minEra: 0, cost: { materials: 8, credits: 4 }, requiredWork: 4, siteRange: 3, siteRequirement: 'forest', residentsRequired: 1, operatingInputs: { materials: 1 }, production: { energy: 1 } },
+  { id: 'hill-commons', name: 'Hillside commons', description: 'Maintain a shared planted plot on an exact owned grassland hill near its town. One remaining local resident and one opening Material jointly produce three base Food on later beats; paused, blocked or unfunded sites consume nothing. No housing, wellbeing or water source is added.', requiredFeatures: ['hillside-commonworks', 'worked-land', 'resident-capacity', 'recurring-decisions', 'building-operations', 'food-budget'], requires: ['masonry', 'water-management'], minEra: 0, cost: { materials: 12, credits: 6 }, requiredWork: 6, siteRange: 3, siteRequirement: 'grassland-hill', residentsRequired: 1, operatingInputs: { materials: 1 }, production: { food: 3 } },
+  { id: 'lumber-mill', name: 'Lumber mill', description: 'Work an exact owned standing forest with one local resident for materials. Paused, unstaffed or ineligible sites make nothing. Under renewing woodlands, each funded staffed operation also needs one exact local work-lot; non-harvest seasons recover at most one, capped at eight.', requiredFeatures: ['forest-production', 'worked-land', 'resident-capacity', 'recurring-decisions'], requires: ['machinery'], minEra: 1, cost: { materials: 10, credits: 5 }, requiredWork: 6, siteRange: 3, siteRequirement: 'forest', residentsRequired: 1, production: { materials: 4 } },
+  { id: 'pasture', name: 'Pasture', description: 'Work an exact owned revealed horse site with one local resident for food. Pausing releases that resident; horse stock and mounted use remain planned.', requiredFeatures: ['water-land', 'worked-land', 'resident-capacity', 'recurring-decisions'], requires: ['animal-husbandry'], minEra: 0, cost: { materials: 6, credits: 3 }, requiredWork: 3, siteRange: 3, siteRequirement: 'revealed-horse-site', residentsRequired: 1, production: { food: 2 } },
+  { id: 'mine', name: 'Mine', description: 'Work an owned hill with one local resident to make materials. Pausing releases that resident on the next economy beat.', requiredFeatures: ['worked-land', 'mining', 'resident-capacity', 'recurring-decisions'], requires: ['mining'], minEra: 0, cost: { materials: 6, credits: 3 }, requiredWork: 4, siteRange: 3, siteRequirement: 'hill', residentsRequired: 1, production: { materials: 2 } },
+  { id: 'shore-fishery', name: 'Shore fishery', description: 'Maintain an exact owned coastal land site near its coastal town. One remaining local resident and one opening Material jointly produce three base Food on later beats; paused, blocked or unfunded sites consume nothing. Boats and fish stocks are not simulated.', requiredFeatures: ['shore-fisheries', 'worked-land', 'resident-capacity', 'recurring-decisions', 'building-operations', 'food-budget'], requires: ['water-management'], minEra: 0, cost: { materials: 8, credits: 4 }, requiredWork: 4, siteRange: 3, siteRequirement: 'coastal-land', residentsRequired: 1, operatingInputs: { materials: 1 }, production: { food: 3 } },
+];
+
+export const BUILDINGS: BuildingDefinition[] = [
+  { id: 'research-lab', name: 'Research laboratory', requiredFeatures: ['powered-science', 'local-power', 'building-operations', 'resident-capacity', 'district-planning'], minEra: 3, cost: { materials: 42, credits: 24 }, requires: ['chemistry'], requiresBuildings: ['campus'], effects: [], operatingInputs: { credits: 2 }, localPowerInput: 3, production: { science: 12 }, description: 'Reserve two opening Credits, three same-town Power and three residents atomically for twelve base Science under ordinary output modifiers. Actual Science can fund an explicitly selected research target this season. Knowledge points remain planned.' },
+  { id: 'coal-plant', name: 'Coal power plant', requiredFeatures: ['local-power', 'industrial-steam', 'building-operations', 'resident-capacity'], minEra: 3, cost: { materials: 38, credits: 22 }, requires: ['industrialization'], requiresBuildings: ['industrial-zone'], effects: [], strategicInputs: { coal: 2 }, localPowerOutput: 8, emissionsPerOperation: 4, production: {}, description: 'Reserve two opening Coal and three local residents to generate eight same-town Power before consumers. Unspent Power expires; four emissions are recorded per paid operation. No ordinary Energy is generated.' },
+  { id: 'factory', name: 'Factory', requiredFeatures: ['local-power', 'building-operations', 'resident-capacity'], minEra: 3, cost: { materials: 40, credits: 24 }, requires: ['industrialization'], requiresBuildings: ['industrial-zone'], effects: [], localPowerInput: 3, production: { materials: 12 }, description: 'Reserve three same-town Power and three residents together for twelve base Materials under existing output modifiers. An unpowered Factory spends nothing. The undefined industrial-project work bonus remains planned.' },
+  { id: 'observatory', name: 'Observatory', requiredFeatures: ['observatory-learning', 'building-operations', 'resident-capacity', 'district-planning'], minEra: 2, cost: { materials: 30, credits: 16 }, requires: ['astronomy'], requiresBuildings: ['campus'], effects: [], operatingInputs: { credits: 2 }, production: { science: 7 }, siteRequirement: 'campus-high-ground', description: 'Retain this town’s completed Campus and an actual adjacent mountain or hill. Two Credits and three local residents support Science on a later season; great-person points remain planned.' },
+  { id: 'foundry', name: 'Foundry', requiredFeatures: ['foundry-production', 'finite-metals', 'building-operations', 'resident-capacity'], minEra: 2, cost: { materials: 32, credits: 16 }, requires: ['metal-casting'], requiresBuildings: ['industrial-zone'], effects: [], operatingInputs: { energy: 2 }, strategicInputs: { iron: 1 }, production: { materials: 8 }, description: 'Reserve one Iron, two Energy and three opening local residents together for Materials. A shortage or pause spends nothing; iron arriving later this season funds a later operation.' },
+  { id: 'theater-square', name: 'Theater square', requiredFeatures: ['culture-production', 'district-planning'], minEra: 1, cost: { materials: 20, credits: 10 }, requires: ['construction'], effects: [], production: { culture: 2 }, district: { range: 3, adjacency: { wonder: true, resource: 'culture', amount: 2, maximum: 4 } }, description: 'Reserve an exact owned site for shared culture. Completed adjacent wonders add two base Culture each, capped at four; unfinished contenders do not count. Amphitheaters and great-person systems remain planned.' },
+  { id: 'printing-house', name: 'Printing house', requiredFeatures: ['culture-production', 'building-operations', 'resident-capacity'], minEra: 2, cost: { materials: 30, credits: 16 }, requires: ['printing'], requiresBuildings: ['theater-square'], effects: [], operatingInputs: { materials: 1 }, production: { culture: 6 }, description: 'Use one Material and three local residents to support this town’s Printing house. Tourism and other influence adjuncts remain planned.' },
+  { id: 'water-mill', name: 'Water mill', requiredFeatures: ['water-land'], minEra: 0, cost: { materials: 16, credits: 6 }, requires: ['wheel'], requiresBuildings: ['irrigation'], effects: [], production: { food: 1, materials: 2 }, description: 'Use this town’s completed Irrigation infrastructure to make food and materials after construction. No river is implied.' },
+  { id: 'aqueduct', name: 'Aqueduct', requiredFeatures: ['water-land', 'local-growth'], minEra: 1, cost: { materials: 22, credits: 8 }, requires: ['engineering'], effects: [], production: {}, housing: 6, siteRequirement: 'mountain-catchment', description: 'Retain an exact adjacent mountain catchment to add six local housing spaces. Later food-funded growth is still required; no residents arrive at completion.' },
+  { id: 'granary', name: 'Granary', requiredFeatures: ['local-growth'], minEra: 0, cost: { materials: 14, credits: 6 }, requires: ['masonry'], effects: [], production: { food: 2 }, housing: 4, description: 'Add four housing spaces and later food production in this town. Residents still need food-funded growth before they can support additional work. Spoilage protection remains planned.' },
+  { id: 'industrial-zone', name: 'Industrial zone', requiredFeatures: ['district-planning', 'manufacturing'], minEra: 1, cost: { materials: 24, credits: 12 }, requires: ['apprenticeship'], effects: [], production: { materials: 2 }, district: { range: 3, adjacency: { improvement: 'mine', resource: 'materials', amount: 1, maximum: 3 } }, description: 'Commit an exact owned site to local manufacturing. Completed adjacent Mines add up to 3 base materials, even while paused; unfinished orders do not count. Quarry and great-person systems remain planned.' },
+  { id: 'guild-workshop', name: 'Guild workshop', requiredFeatures: ['manufacturing', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 26, credits: 12 }, requires: ['apprenticeship'], requiresBuildings: ['industrial-zone'], effects: [], operatingInputs: { energy: 2 }, production: { materials: 6 }, description: 'Use two energy and three local residents to operate a workshop in this town’s completed Industrial zone. First output follows completion on a later season.' },
+  { id: 'commercial-hub', name: 'Commercial hub', requiredFeatures: ['district-planning', 'learning-commerce'], minEra: 1, cost: { materials: 20, credits: 10 }, requires: ['currency'], effects: [], production: { credits: 2 }, district: { range: 3 }, description: 'Reserve an exact owned site for local commerce. River and Harbor adjacency await those actual systems.' },
+  { id: 'market', name: 'Market', requiredFeatures: ['learning-commerce', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 18, credits: 10 }, requires: ['currency'], requiresBuildings: ['commercial-hub'], effects: [], operatingInputs: { credits: 1 }, production: { credits: 4 }, description: 'Use credits and three local residents to operate this town’s Market. Extra trade capacity and great-person effects remain planned.' },
+  { id: 'university', name: 'University', requiredFeatures: ['learning-commerce', 'building-operations', 'resident-capacity'], minEra: 1, cost: { materials: 28, credits: 14 }, requires: ['education'], requiresBuildings: ['campus'], effects: [], operatingInputs: { credits: 2 }, production: { science: 5 }, description: 'Use credits and three local residents to support advanced local learning. Specialists and knowledge-point effects remain planned.' },
+  { id: 'bank', name: 'Bank', requiredFeatures: ['learning-commerce', 'building-operations', 'resident-capacity'], minEra: 2, cost: { materials: 30, credits: 18 }, requires: ['banking'], requiresBuildings: ['commercial-hub'], effects: [], operatingInputs: { credits: 1 }, production: { credits: 7 }, description: 'Use credits and three local residents to operate this town’s Bank. Loan agreements remain planned.' },
+  { id: 'campus', name: 'Campus', requiredFeatures: ['district-planning', 'writing'], minEra: 0, cost: { materials: 16, credits: 8 }, requires: ['writing'], effects: [], production: { science: 1 }, district: { range: 3, adjacency: { terrain: 'mountain', resource: 'science', amount: 1, maximum: 3 } }, description: 'Commit an owned site near this town to learning. Nearby mountains add up to 3 base science; output begins after completion.' },
+  { id: 'library', name: 'Library', requiredFeatures: ['district-planning', 'writing', 'building-operations'], minEra: 0, cost: { materials: 16, credits: 8 }, requires: ['writing'], requiresBuildings: ['campus'], effects: [], production: { science: 3 }, operatingInputs: { credits: 1 }, description: 'Support the Library in this town’s completed Campus with credits and residents to produce science. Specialist and great-person effects remain planned.' },
+  { id: 'boat-yard', name: 'Boat yard', requiredFeatures: ['coastal-founding'], minEra: 0, cost: { materials: 14, credits: 10 }, requires: ['water-management'], effects: [], production: {}, capabilities: ['coastal-departure'], siteRequirement: 'coastal', description: 'Prepare boats at an ocean-adjacent town. With Navigation, transfer existing residents to a new coastal settlement.' },
+  { id: 'farm', name: 'Terraced fields', requiredFeatures: ['settlement-production'], minEra: 0, cost: { materials: 8, credits: 4 }, requires: ['agriculture'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }, { kind: 'city', field: 'wellbeing', amount: 4 }], production: { food: 4 }, description: 'Reliable harvests sustain people and leave a surplus for future growth.' },
+  { id: 'workshop', name: 'Artisan quarter', requiredFeatures: ['settlement-production'], minEra: 0, cost: { materials: 12, credits: 8 }, requires: ['agriculture'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }], production: { materials: 3, energy: 1 }, description: 'Specialized work supplies the materials other projects need.' },
+  { id: 'irrigation', name: 'Irrigation works', requiredFeatures: ['settlement-crafts', 'building-operations'], minEra: 0, cost: { materials: 12, credits: 8 }, requires: ['water-management'], effects: [], operatingInputs: { materials: 1 }, production: { food: 5 }, description: 'Use one material each economy beat to supply food. Operation can be paused.' },
+  { id: 'kiln', name: 'Kiln', requiredFeatures: ['settlement-crafts', 'building-operations'], minEra: 0, cost: { materials: 10, credits: 8 }, requires: ['kiln-firing'], effects: [], operatingInputs: { energy: 2 }, production: { materials: 4 }, description: 'Use two energy each economy beat to make materials. Operation can be paused.' },
+  { id: 'academy', name: 'House of learning', requiredFeatures: ['statecraft', 'building-operations'], minEra: 1, cost: { materials: 16, credits: 10 }, requires: ['civic-institutions'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }], operatingInputs: { culture: 2, credits: 1 }, production: { science: 3 }, description: 'Use culture and credits each economy beat to support learning. Operation can be paused.' },
+  { id: 'monument', name: 'Civic gathering place', requiredFeatures: ['statecraft'], minEra: 1, cost: { materials: 12, credits: 8 }, requires: ['civic-institutions'], effects: [{ kind: 'city', field: 'infrastructure', amount: 1 }, { kind: 'civilization', field: 'legitimacy', amount: 4 }], production: { culture: 4 }, description: 'A public place makes collective identity and political commitments visible.' },
+  { id: 'fuel-yard', name: 'Fuel yard', requiredFeatures: ['statecraft', 'settlement-crafts', 'building-operations'], minEra: 1, cost: { materials: 14, credits: 8 }, requires: ['fuel-management'], effects: [], operatingInputs: { materials: 2 }, production: { energy: 3 }, description: 'Use materials each economy beat to supply energy. Operation can be paused.' },
+  { id: 'launchpad', name: 'Launch complex', requiredFeatures: ['interplanetary-logistics', 'local-power', 'building-operations', 'resident-capacity'], minEra: 5, cost: { materials: 72, energy: 36, credits: 72 }, requires: ['spaceflight'], localPowerInput: 2, effects: [{ kind: 'city', field: 'infrastructure', amount: 2 }], production: {}, description: 'Launch infrastructure connects Earth’s industry to an off-world supply line.' },
+];
+
+export const DIRECTOR_EVENTS: DirectorEventDefinition[] = [
+  { id: 'drought', name: 'The rains fail', requiredFeatures: ['director-events'], minEra: 0, description: 'A dry season threatens a civilization’s food reserves.', consequence: 'Food scarcity tests growth choices and the wellbeing of settlements.', effects: [{ kind: 'resource', resource: 'food', amount: -12 }, { kind: 'city', field: 'wellbeing', amount: -10 }], cooldown: 2 },
+  { id: 'earthquake', name: 'The earth moves', requiredFeatures: ['director-events', 'disaster-recovery'], minEra: 0, description: 'A fault ruptures beneath settled land.', consequence: 'Damaged buildings and routes create a need for reconstruction and relief.', effects: [{ kind: 'city', field: 'damage', amount: 35 }, { kind: 'city', field: 'infrastructure', amount: -1 }, { kind: 'route', field: 'damage', amount: 25 }], releasedEffects: { requiredFeatures: ['city-repair'], effects: [{ kind: 'city', field: 'damage', amount: 35 }, { kind: 'route', field: 'damage', amount: 25 }] }, cooldown: 3 },
+  { id: 'resource-boom', name: 'A rich seam', requiredFeatures: ['director-events'], minEra: 0, description: 'A newly exposed deposit creates an unexpected opportunity.', consequence: 'Materials and energy can support growth or a new strategic investment.', effects: [{ kind: 'resource', resource: 'materials', amount: 18 }, { kind: 'resource', resource: 'energy', amount: 8 }, { kind: 'civilization', field: 'legitimacy', amount: 3 }], cooldown: 2 },
+  { id: 'crypto-boom', name: 'A speculative fever', requiredFeatures: ['director-events', 'speculative-markets'], minEra: 4, description: 'A digital-asset mania draws wealth and attention.', consequence: 'New liquidity comes with political discontent and diverted investment.', effects: [{ kind: 'resource', resource: 'credits', amount: 28 }, { kind: 'resource', resource: 'materials', amount: -5 }, { kind: 'civilization', field: 'legitimacy', amount: -8 }], cooldown: 3 },
+  { id: 'ufo-contact', name: 'Visitors in the sky', requiredFeatures: ['director-events', 'anomalous-contact'], minEra: 0, description: 'An unexplained encounter challenges what people believe.', consequence: 'A scientific opportunity arrives alongside cultural fascination and disagreement.', effects: [{ kind: 'resource', resource: 'science', amount: 24 }, { kind: 'resource', resource: 'culture', amount: 8 }, { kind: 'civilization', field: 'legitimacy', amount: -6 }], cooldown: 4 },
+  { id: 'calm', name: 'A quiet season', requiredFeatures: ['director-events'], minEra: 0, description: 'The world gives civilizations room to act.', consequence: 'Existing projects and pressures unfold without a new shock.', effects: [], cooldown: 0 },
+  ...HISTORICAL_DIRECTOR_EVENTS,
+];
+
+const initialEra = ERAS[0];
+if (!initialEra) throw new Error('The world requires a starting era');
+
+export const ECONOMY_RULES = {
+  initialYear: initialEra.year,
+  initialResources: { food: 30, materials: 24, energy: 12, credits: 20, science: 0, culture: 0 } satisfies Resources,
+  initialCity: { population: 6, wellbeing: 65, infrastructure: 1, damage: 0 },
+  initialLegitimacy: 60,
+  baseProduction: { food: 4, materials: 2, energy: 1, credits: 2, science: 1, culture: 1 } satisfies Resources,
+  focusProduction: {
+    growth: { food: 3 }, industry: { materials: 3, energy: 1 }, research: { science: 3 },
+    culture: { culture: 3 }, diplomacy: { credits: 2, culture: 1 },
+  } satisfies Record<Focus, Partial<Resources>>,
+  populationFoodUpkeep: 0.5, suppliedWellbeingGain: 1, shortageWellbeingLoss: 8,
+  shortageLegitimacyLoss: 2, starvationWellbeing: 20, starvationPopulationLoss: 1,
+  growth: { foodReserve: 10, foodCost: 6, wellbeing: 60, populationGain: 1, cityPopulationCap: 20 },
+  settle: { cost: { food: 10, materials: 12, credits: 8 }, population: 3, minimumSourcePopulation: 3 },
+  trade: { cost: { materials: 6, credits: 8 }, ownerCargo: { food: 2 }, partnerCargo: { materials: 2 }, commerceYield: { credits: 2 }, upkeep: { energy: 1 }, damageDisableAt: 50 },
+  repair: { cost: { materials: 5, energy: 2 }, damageReduction: 25 },
+  expedition: { cost: { food: 5, materials: 8, energy: 8, credits: 6 }, progress: 25, population: 1 },
+};
+
+export const SETTLEMENT_SITE_OUTPUTS: Readonly<Partial<Record<Terrain, Partial<Resources>>>> = { grassland: { food: 2 }, forest: { materials: 2 } };
+
+export const LAND_TRANSPORT_RULES = { ruleVersion: 1 as const, edgesPerBeat: 2, passable: { grassland: true, forest: true, desert: true, tundra: true, mountain: false, ocean: false } satisfies Record<Terrain, boolean> };
+export const TRADE_RULES = { offerExpiryRounds: 8, maxPendingPerPair: 1, maxActivePerPair: 1 };
+
+export const TRADE_RECIPES: TradeRecipe[] = [
+  { id: 'iron-for-food', version: 1, name: 'Iron for food', description: 'Exchange extracted iron for a partner’s food. Both sides fund transport before any cargo or commerce changes.', requiredFeatures: ['trade-routes', 'finite-metals', 'learning-commerce'], requiredTechnology: 'currency', terms: { recipeId: 'iron-for-food', recipeVersion: 1, constructionCost: { materials: 6, credits: 8 }, proposerCargo: {}, recipientCargo: { food: 5 }, strategicCargo: { proposer: { iron: 2 }, recipient: {} }, proposerUpkeep: { energy: 1 }, recipientUpkeep: { energy: 1 }, proposerYield: { credits: 2 }, recipientYield: { credits: 2 }, cadenceRounds: 4, damageDisableAt: 50 } },
+  { id: 'harvest-for-materials', version: 1, name: 'Harvest for materials', description: 'A food surplus supports a partner while materials return to build the next settlement project.', requiredFeatures: ['trade-routes'], terms: { recipeId: 'harvest-for-materials', recipeVersion: 1, constructionCost: { materials: 6, credits: 8 }, proposerCargo: { food: 4 }, recipientCargo: { materials: 3 }, proposerUpkeep: { energy: 1 }, recipientUpkeep: { energy: 1 }, proposerYield: { credits: 2 }, recipientYield: { credits: 2 }, cadenceRounds: 4, damageDisableAt: 50 } },
+  { id: 'energy-for-materials', version: 1, name: 'Energy for materials', description: 'Send energy for a partner’s later work and receive materials. Each partner also pays transport energy before receiving cargo.', requiredFeatures: ['trade-routes', 'operating-resource-exchange'], terms: { recipeId: 'energy-for-materials', recipeVersion: 1, constructionCost: { materials: 6, credits: 8 }, proposerCargo: { energy: 4 }, recipientCargo: { materials: 3 }, proposerUpkeep: { energy: 1 }, recipientUpkeep: { energy: 1 }, proposerYield: { credits: 2 }, recipientYield: { credits: 2 }, cadenceRounds: 4, damageDisableAt: 50 } },
+];
+
+export const PUBLIC_PROJECT_RULES = { maxActivePerPair: 1, maxActiveTotal: CIV_COUNT * (CIV_COUNT - 1) / 2 };
+
+export const PUBLIC_PROJECT_RECIPES: PublicProjectRecipe[] = [
+  { id: 'joint-road-repair', version: 1, name: 'Joint road repair', description: 'Both route partners promise supplies for a later shared repair. Either may cancel before completion.', requiredFeatures: ['public-projects', 'statecraft', 'trade-routes'], requiredTechnology: 'civic-institutions', requiredBuilding: 'monument', terms: { recipeId: 'joint-road-repair', recipeVersion: 1, proposerContribution: { materials: 2, energy: 1 }, recipientContribution: { materials: 2, energy: 1 }, damageReduction: 25, pendingLifetimeRounds: 4, completionDelayRounds: 2 } },
+];
+
+export const VICTORY_RULES = {
+  mars: { requiredFeatures: ['interplanetary-logistics'], minEra: 5, requiredTechnology: 'spaceflight', requiredBuilding: 'launchpad', progress: 100, population: 3, suppliedRounds: 3, upkeep: { food: 3, materials: 1, energy: 4 } as Partial<Resources> },
+  federation: { requiredFeatures: ['federations', 'planetary-networks'], minEra: 4, members: 3, infrastructurePerMember: 4, wellbeing: 60, legitimacy: 55, suppliedRounds: 4, upkeep: { food: 2, energy: 2 } as Partial<Resources> },
+};
+
+export const HISTORICAL_MILESTONES: HistoricalMilestone[] = [
+  { id: 'first-harvest', name: 'The first reliable harvest', requiredFeatures: ['settlement-production', 'settlement-research'], requiresMilestones: [], conditions: [{ kind: 'building-count', building: 'farm', minimum: 1 }, { kind: 'technology', technology: 'agriculture', civilizations: 1 }], year: -9500, era: 0, explanation: 'Cultivation and working fields have changed how people live. The released settlement systems have produced their first historical transition.' },
+  { id: 'beyond-the-hearth', name: 'Beyond the first hearths', requiredFeatures: ['settlement-expansion'], requiresMilestones: ['first-harvest'], conditions: [{ kind: 'city-count', minimum: 8 }, { kind: 'total-population', minimum: 40 }], year: -8000, era: 0, explanation: 'The expansion feature has become lived history: new communities now support a larger population.' },
+  { id: 'roads-between-peoples', name: 'Roads between peoples', requiredFeatures: ['trade-routes'], requiresMilestones: ['first-harvest'], conditions: [{ kind: 'active-routes', minimum: 2 }], year: -6000, era: 0, explanation: 'Working exchanges now connect independent civilizations. Trade is a world fact, not just a newly installed feature.' },
+  { id: 'rise-of-states', name: 'The rise of states', requiredFeatures: ['statecraft'], requiresMilestones: ['roads-between-peoples'], conditions: [{ kind: 'technology', technology: 'civic-institutions', civilizations: 2 }, { kind: 'active-routes', minimum: 3 }], year: -3000, era: 1, explanation: 'Civic discoveries and functioning exchanges have made organized states possible. Public institutions can now be built.' },
+  { id: 'connected-world', name: 'A connected world', alternative: { id: 'earned-land-integration', requiredFeatures: ['earned-land-integration', 'conserved-founding', 'exact-trade-endpoints', 'land-transport', 'trade-routes', 'earned-history'], conditions: [{ kind: 'earned-land-integration' }] }, requiredFeatures: ['navigation'], requiresMilestones: ['rise-of-states'], conditions: [{ kind: 'technology', technology: 'navigation', civilizations: 1 }, { kind: 'active-routes', minimum: 3 }, { kind: 'recorded-event-count', eventType: 'coastal-founded', minimum: 1 }], year: -500, era: 2, explanation: 'Navigation has founded an actual coastal settlement while a working exchange network connects peoples.' },
+  { id: 'industrial-world', name: 'The industrial transformation', requiredFeatures: ['industrialization', 'industrial-steam'], requiresMilestones: ['connected-world'], conditions: [{ kind: 'technology', technology: 'industrialization', civilizations: 1 }, { kind: 'industrial-evidence' }], year: 1750, era: 3, explanation: 'Two distinct towns operated supplied Foundries and a newly consented Coal-paid steam route delivered at a genuinely improved cadence. The capability era changes; the calendar does not.' },
+  { id: 'planetary-world', name: 'A planetary civilization', requiredFeatures: ['planetary-networks'], requiresMilestones: ['industrial-world'], conditions: [{ kind: 'technology', technology: 'computing', civilizations: 1 }, { kind: 'active-routes', minimum: 5 }], year: 2000, era: 4, explanation: 'Information systems and functioning global exchanges have made planetary interdependence real.' },
+  { id: 'beyond-earth', name: 'The interplanetary threshold', requiredFeatures: ['interplanetary-logistics'], requiresMilestones: ['planetary-world'], conditions: [{ kind: 'technology', technology: 'spaceflight', civilizations: 1 }, { kind: 'active-routes', minimum: 5 }], year: 2150, era: 5, explanation: 'Interplanetary knowledge can now draw on Earth’s connected economy. Launch infrastructure and a viable colony remain separate achievements.' },
+];
+
+export interface ContentCatalog {
+  civics: CivicDefinition[];
+  governments: GovernmentDefinition[];
+  policies: PolicyDefinition[];
+  civicRules: typeof CIVIC_RULES;
+  civilizations: CivilizationDefinition[];
+  features: FeatureDefinition[];
+  technologies: TechnologyDefinition[];
+  eras: EraDefinition[];
+  buildings: BuildingDefinition[];
+  improvements: ImprovementDefinition[];
+  wonders: WonderDefinition[];
+  wonderRules: typeof WONDER_RULES;
+  improvementRules: typeof IMPROVEMENT_RULES;
+  events: DirectorEventDefinition[];
+  milestones: HistoricalMilestone[];
+  actionFeatures: Record<GameAction['type'], readonly string[]>;
+  victoryRules: typeof VICTORY_RULES;
+  tradeRecipes: TradeRecipe[];
+  tradeRules: typeof TRADE_RULES;
+  landTransportRules: typeof LAND_TRANSPORT_RULES;
+  publicProjectRecipes: PublicProjectRecipe[];
+  publicProjectRules: typeof PUBLIC_PROJECT_RULES;
+  siteOutputs: typeof SETTLEMENT_SITE_OUTPUTS;
+  residentCapacityRules: typeof RESIDENT_CAPACITY_RULES;
+  metalRules: typeof METAL_RULES;
+  coalRules: typeof COAL_RULES;
+  industrialRules: typeof INDUSTRIAL_RULES;
+  pastoralRules: typeof PASTORAL_RULES;
+  territoryRules: typeof TERRITORY_RULES;
+}
+
+export const CONTENT: ContentCatalog = {
+  civics: CIVICS, governments: GOVERNMENTS, policies: POLICIES, civicRules: CIVIC_RULES,
+  civilizations: CIVILIZATIONS, features: FEATURES, technologies: TECHNOLOGIES, eras: ERAS,
+  wonders: WONDERS, wonderRules: WONDER_RULES,
+  buildings: BUILDINGS, improvements: IMPROVEMENTS, improvementRules: IMPROVEMENT_RULES, events: DIRECTOR_EVENTS, milestones: HISTORICAL_MILESTONES,
+  actionFeatures: ACTION_FEATURES, victoryRules: VICTORY_RULES, residentCapacityRules: RESIDENT_CAPACITY_RULES, metalRules: METAL_RULES, coalRules: COAL_RULES, industrialRules: INDUSTRIAL_RULES, pastoralRules: PASTORAL_RULES, territoryRules: TERRITORY_RULES,
+  tradeRecipes: TRADE_RECIPES, tradeRules: TRADE_RULES, landTransportRules: LAND_TRANSPORT_RULES, publicProjectRecipes: PUBLIC_PROJECT_RECIPES, publicProjectRules: PUBLIC_PROJECT_RULES, siteOutputs: SETTLEMENT_SITE_OUTPUTS,
+};
+
+function positive(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
+}
+
+export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
+  const errors: string[] = [];
+  if (catalog.residentCapacityRules.ruleVersion !== 1 || !Number.isSafeInteger(catalog.residentCapacityRules.communityReserve) || catalog.residentCapacityRules.communityReserve < 0 || !Number.isSafeInteger(catalog.residentCapacityRules.perPaidRecipe) || catalog.residentCapacityRules.perPaidRecipe < 1) errors.push('resident capacity: invalid version or support requirement');
+  const unique = (label: string, values: string[]) => {
+    if (new Set(values).size !== values.length) errors.push(`${label}: duplicate identifier`);
+    if (values.some(value => value.trim().length === 0)) errors.push(`${label}: empty identifier`);
+  };
+  const eraValid = (era: number) => Number.isInteger(era) && era >= 0 && era < catalog.eras.length;
+  const resources = (label: string, values: Partial<Resources>) => {
+    for (const [resource, value] of Object.entries(values)) {
+      if (!RESOURCE_IDS.some(id => id === resource) || !Number.isFinite(value) || value < 0) errors.push(`${label}: invalid resource cost or production ${resource}`);
+    }
+  };
+  for (const [terrain, outputs] of Object.entries(catalog.siteOutputs)) {
+    if (!['grassland', 'forest', 'desert', 'tundra'].includes(terrain)) errors.push(`site output ${terrain}: unsupported productive terrain`);
+    resources(`site output ${terrain}`, outputs);
+  }
+  const features = new Set(catalog.features.map(feature => feature.id));
+  const requireFeatures = (label: string, required: readonly string[]) => {
+    if (required.length === 0) errors.push(`${label}: missing release feature gate`);
+    for (const id of required) if (!features.has(id)) errors.push(`${label}: unknown feature ${id}`);
+  };
+  if (catalog.landTransportRules.ruleVersion !== 1 || !Number.isSafeInteger(catalog.landTransportRules.edgesPerBeat) || catalog.landTransportRules.edgesPerBeat < 1) errors.push('land transport: invalid version or pace');
+  if (Object.keys(catalog.landTransportRules.passable).length !== 6 || ['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].some(terrain => typeof Reflect.get(catalog.landTransportRules.passable, terrain) !== 'boolean')) errors.push('land transport: invalid terrain passability');
+  const territory = catalog.territoryRules;
+  if (territory.ruleVersion !== 1 || territory.featureId !== 'owned-territory' || !features.has(territory.featureId) || territory.range !== 3 || ![territory.baseCredits, territory.creditsPerDistance, territory.creditsPerPriorPurchase].every(value => Number.isSafeInteger(value) && value >= 0) || territory.baseCredits < 1) errors.push('territory: invalid version, feature, bounded range or price basis');
+  const pastoral = catalog.pastoralRules;
+  if (pastoral.ruleVersion !== 1 || !features.has(pastoral.featureId) || pastoral.featureId !== 'water-land' || pastoral.resource !== 'horses' || pastoral.revealTechnology !== 'animal-husbandry' || !catalog.technologies.some(technology => technology.id === pastoral.revealTechnology)) errors.push('pastoral sites: invalid version, feature, resource or reveal technology');
+  if (pastoral.placement.id !== 'pastoral-sites-1' || pastoral.placement.seedSalt !== 0x50415354 || pastoral.placement.seedMultiplier !== 0x9e3779b1 || pastoral.placement.mixMultipliers[0] !== 0x7feb352d || pastoral.placement.mixMultipliers[1] !== 0x846ca68b || ![pastoral.placement.maximumSites, pastoral.placement.frontierMinimumDistance, pastoral.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('pastoral sites: invalid versioned placement');
+  const metal = catalog.metalRules;
+  if (metal.ruleVersion !== 1 || !features.has(metal.featureId) || metal.resource !== 'iron' || !catalog.technologies.some(technology => technology.id === metal.revealTechnology)) errors.push('metals: invalid feature, resource or reveal technology');
+  if (![metal.capacityPerCity, metal.extractionPerBeat, metal.initialReserve, metal.placement.maximumDeposits, metal.placement.frontierMinimumDistance, metal.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('metals: invalid positive integer quantity');
+  if (metal.placement.id !== 'iron-placement-1' || !metal.placement.hillOnly || metal.placement.seedMultiplier !== 0x9e3779b1 || metal.placement.mixMultipliers[0] !== 0x7feb352d || metal.placement.mixMultipliers[1] !== 0x846ca68b) errors.push('metals: invalid versioned placement');
+  const coal = catalog.coalRules;
+  if (coal.ruleVersion !== 1 || coal.featureId !== 'industrial-steam' || !features.has(coal.featureId) || coal.resource !== 'coal' || coal.revealTechnology !== 'industrialization' || !catalog.technologies.some(technology => technology.id === coal.revealTechnology) || coal.placement.id !== 'coal-placement-1' || coal.placement.seedSalt !== 0x434f414c || !coal.placement.hillOnly || ![coal.capacityPerCity, coal.extractionPerBeat, coal.initialReserve, coal.placement.maximumDeposits, coal.placement.frontierMinimumDistance, coal.placement.ownedSiteRange].every(value => Number.isSafeInteger(value) && value > 0)) errors.push('coal: invalid versioned placement, reveal or finite resource quantities');
+  const industrial = catalog.industrialRules;
+  if (industrial.ruleVersion !== 1 || !features.has(industrial.featureId) || !catalog.technologies.some(technology => technology.id === industrial.requiredTechnology) || industrial.railRange !== 3 || industrial.railWork !== 2 || industrial.railWeight !== 0.25 || industrial.plainWeight !== 1 || industrial.edgesPerBeat !== 2 || industrial.shipmentCoal !== 1 || industrial.railCost.materials !== 4 || industrial.railCost.credits !== 2 || industrial.railStrategicCost.iron !== 1 || industrial.railStrategicCost.coal !== 1) errors.push('industrial steam: invalid versioned edge, work, payment or cadence rules');
+  unique('trade recipes', catalog.tradeRecipes.map(recipe => recipe.id));
+  for (const [name, value] of Object.entries(catalog.tradeRules)) {
+    if (!Number.isSafeInteger(value) || value < 1) errors.push(`trade rules: invalid ${name}`);
+  }
+  for (const recipe of catalog.tradeRecipes) {
+    const label = `trade ${recipe.id}`;
+    const terms = recipe.terms;
+    requireFeatures(label, recipe.requiredFeatures);
+    if (!Number.isSafeInteger(recipe.version) || recipe.version < 1 || terms.recipeId !== recipe.id || terms.recipeVersion !== recipe.version) errors.push(`${label}: inconsistent recipe identity`);
+    if (!Number.isSafeInteger(terms.cadenceRounds) || terms.cadenceRounds < 1 || !positive(terms.damageDisableAt) || terms.damageDisableAt > 100) errors.push(`${label}: invalid strategic cadence or damage threshold`);
+    for (const [name, values] of Object.entries({ constructionCost: terms.constructionCost, proposerCargo: terms.proposerCargo, recipientCargo: terms.recipientCargo, proposerUpkeep: terms.proposerUpkeep, recipientUpkeep: terms.recipientUpkeep, proposerYield: terms.proposerYield, recipientYield: terms.recipientYield })) resources(`${label} ${name}`, values);
+    if (recipe.requiredTechnology !== undefined && !catalog.technologies.some(technology => technology.id === recipe.requiredTechnology)) errors.push(`${label}: unknown proposer technology`);
+    if (terms.strategicCargo && !recipe.requiredFeatures.includes('finite-metals')) errors.push(`${label}: strategic cargo requires finite-metals`);
+    for (const cargo of [terms.strategicCargo?.proposer, terms.strategicCargo?.recipient]) {
+      if (cargo && Object.entries(cargo).some(([resource, amount]) => !STRATEGIC_RESOURCE_IDS.some(id => id === resource) || !Number.isSafeInteger(amount) || amount < 0)) errors.push(`${label}: invalid strategic cargo`);
+    }
+    if (![[terms.proposerCargo, terms.strategicCargo?.proposer], [terms.recipientCargo, terms.strategicCargo?.recipient]].every(vectors => vectors.some(cargo => Object.values(cargo ?? {}).some(positive)))) errors.push(`${label}: both partners require meaningful cargo`);
+  }
+  const civicRules = catalog.civicRules;
+  if (civicRules.ruleVersion !== 1 || civicRules.featureId !== 'civic-bootstrap' || !features.has(civicRules.featureId) || civicRules.governmentCredits !== 10 || civicRules.reslotCredits !== 8 || civicRules.commitmentBeats !== 4 || civicRules.transitionBeats !== 2 || civicRules.transitionOutput !== 0.75) errors.push('civics: invalid versioned reform rules');
+  const civics = new Map(catalog.civics.map(civic => [civic.id, civic]));
+  for (const [label, definitions] of [['civics', catalog.civics], ['governments', catalog.governments], ['policies', catalog.policies]] as const) {
+    unique(label, definitions.map(definition => definition.id));
+    for (const definition of definitions) {
+      requireFeatures(`${label} ${definition.id}`, definition.requiredFeatures);
+      if (!definition.requiredFeatures.includes(civicRules.featureId)) errors.push(`${label} ${definition.id}: missing civic feature`);
+      if (new Set(definition.requires).size !== definition.requires.length) errors.push(`${label} ${definition.id}: duplicate civic prerequisites`);
+      for (const id of definition.requires) if (!civics.has(id)) errors.push(`${label} ${definition.id}: missing civic prerequisite ${id}`);
+    }
+  }
+  for (const civic of catalog.civics) {
+    if (!positive(civic.cost) || civic.cost > Number.MAX_SAFE_INTEGER) errors.push(`civic ${civic.id}: invalid Culture cost`);
+    const visits = (id: string, path: Set<string>): boolean => path.has(id) || (civics.get(id)?.requires.some(required => visits(required, new Set([...path, id]))) ?? false);
+    if (visits(civic.id, new Set())) errors.push(`civic ${civic.id}: prerequisite cycle`);
+  }
+  for (const government of catalog.governments) {
+    if (Object.keys(government.slots).length !== POLICY_SLOT_TYPES.length || POLICY_SLOT_TYPES.some(slot => !Number.isSafeInteger(government.slots[slot]) || government.slots[slot] < 0) || Object.values(government.slots).reduce((sum, count) => sum + count, 0) > 16) errors.push(`government ${government.id}: invalid bounded slots`);
+    resources(`government ${government.id}`, government.baseProduction);
+    if (government.capitalConstructionWorkPercent !== undefined && (!positive(government.capitalConstructionWorkPercent) || !government.requiredFeatures.includes(SECOND_GOVERNMENT_RULES.featureId))) errors.push(`government ${government.id}: capital work requires a positive modifier and second-government feature`);
+  }
+  for (const policy of catalog.policies) {
+    const effect = policy.institutionalSciencePercent;
+    if (!['military', 'economic', 'diplomatic'].includes(policy.slotType) || !Number.isFinite(policy.constructionWork) || policy.constructionWork < 0
+      || policy.constructionWork === 0 && effect === undefined) errors.push(`policy ${policy.id}: invalid slot or productive modifier`);
+    if (policy.exclusiveGroup !== undefined && (!policy.exclusiveGroup.trim() || policy.exclusiveGroup.length > 80)) errors.push(`policy ${policy.id}: invalid exclusive group`);
+    if (effect !== undefined && (!positive(effect.percent) || effect.percent > 100 || effect.buildingIds.length === 0
+      || new Set(effect.buildingIds).size !== effect.buildingIds.length || !policy.requiredFeatures.includes(LEARNING_PATRONAGE_RULES.featureId)
+      || effect.buildingIds.some(id => {
+        const building = catalog.buildings.find(candidate => candidate.id === id);
+        return !building || !positive(building.production.science ?? 0) || !Object.values(building.operatingInputs ?? {}).some(positive)
+          || (building.localPowerInput ?? 0) > 0 || (building.localPowerOutput ?? 0) > 0;
+      }))) errors.push(`policy ${policy.id}: invalid paid institutional Science modifier`);
+  }
+  const technologies = new Map(catalog.technologies.map(technology => [technology.id, technology]));
+  const buildings = new Map(catalog.buildings.map(building => [building.id, building]));
+  const wonderRules = catalog.wonderRules;
+  if (wonderRules.ruleVersion !== 1 || !features.has(wonderRules.featureId) || wonderRules.loserMaterialRefundPercent !== 50 || wonderRules.boostLimit !== 2 || wonderRules.boostPercent !== 20 || wonderRules.boostMaximumEra !== 1) errors.push('wonders: invalid versioned resolution or boost rules');
+  unique('wonders', catalog.wonders.map(wonder => wonder.id));
+  for (const wonder of catalog.wonders) {
+    const label = `wonder ${wonder.id}`;
+    requireFeatures(label, wonder.requiredFeatures);
+    if (!wonder.requiredFeatures.includes(wonderRules.featureId) || !wonder.requiredFeatures.includes('recurring-decisions')) errors.push(`${label}: missing contest or construction gate`);
+    if (!eraValid(wonder.minEra) || !Number.isSafeInteger(wonder.requiredWork) || wonder.requiredWork < 1 || !Number.isSafeInteger(wonder.siteRange) || wonder.siteRange < 1) errors.push(`${label}: invalid work, era or site range`);
+    resources(`${label} cost`, wonder.cost);
+    resources(`${label} production`, wonder.production);
+    if (!Object.values(wonder.cost).some(positive) || !Object.values(wonder.production).some(positive)) errors.push(`${label}: requires meaningful construction cost and production`);
+    if (new Set(wonder.requires).size !== wonder.requires.length) errors.push(`${label}: duplicate prerequisites`);
+    for (const required of wonder.requires) {
+      const technology = technologies.get(required);
+      if (!technology) errors.push(`${label}: missing prerequisite ${required}`);
+      else if (technology.era > wonder.minEra) errors.push(`${label}: future prerequisite ${required}`);
+    }
+  }
+  const improvementRules = catalog.improvementRules;
+  if (improvementRules.ruleVersion !== 1 || !features.has(improvementRules.featureId) || improvementRules.allocationPriority !== 'paid-buildings-then-numeric-tile' || !Number.isFinite(improvementRules.hillElevation.minimum) || !Number.isFinite(improvementRules.hillElevation.maximum) || improvementRules.hillElevation.minimum < 0 || improvementRules.hillElevation.maximum > 100 || improvementRules.hillElevation.minimum > improvementRules.hillElevation.maximum) errors.push('improvements: invalid site or allocation rules');
+  unique('improvements', catalog.improvements.map(improvement => improvement.id));
+  for (const improvement of catalog.improvements) {
+    const label = `improvement ${improvement.id}`;
+    requireFeatures(label, improvement.requiredFeatures);
+    if (!improvement.requiredFeatures.includes(improvementRules.featureId) || !improvement.requiredFeatures.includes('resident-capacity') || !improvement.requiredFeatures.includes('recurring-decisions')) errors.push(`${label}: missing operation or construction gate`);
+    if (!eraValid(improvement.minEra) || !Number.isSafeInteger(improvement.requiredWork) || improvement.requiredWork < 1 || !Number.isSafeInteger(improvement.siteRange) || improvement.siteRange < 1 || !Number.isSafeInteger(improvement.residentsRequired) || improvement.residentsRequired < 1 || !['hill', 'revealed-horse-site', 'forest', 'coastal-land', 'grassland-hill', 'riverbank'].includes(improvement.siteRequirement)) errors.push(`${label}: invalid work, site or resident requirement`);
+    if (improvement.siteRequirement === 'coastal-land' && (!improvement.requiredFeatures.includes('shore-fisheries') || improvement.siteRange !== 3)) errors.push(`${label}: coastal land requires shore-fisheries and range three`);
+    if (improvement.siteRequirement === 'grassland-hill' && (!improvement.requiredFeatures.includes('hillside-commonworks') || improvement.siteRange !== 3)) errors.push(`${label}: grassland hill requires hillside-commonworks and range three`);
+    const intakeSite = improvement.id === 'river-intake' && improvement.requiredFeatures.includes('river-intakes') && improvement.requiredFeatures.includes('food-budget') && improvement.requiredFeatures.includes('water-land') && improvement.siteRequirement === 'riverbank' && improvement.siteRange === 3;
+    if ((improvement.id === 'river-intake' || improvement.requiredFeatures.includes('river-intakes') || improvement.siteRequirement === 'riverbank') && (!intakeSite || !improvement.operatingInputs || improvement.residentsRequired !== 1 || improvement.operatingInputs.materials !== 1 || improvement.production.food !== 3)) errors.push(`${label}: intake requires exact paid riverbank identity, support gates and recipe`);
+    const charcoalSite = improvement.id === 'charcoal-clearing' && improvement.requiredFeatures.includes('charcoal-clearing') && improvement.siteRequirement === 'forest' && improvement.siteRange === 3;
+    if ((improvement.id === 'charcoal-clearing' || improvement.requiredFeatures.includes('charcoal-clearing')) && (!charcoalSite || !improvement.operatingInputs)) errors.push(`${label}: charcoal requires its exact paid forest identity, feature and range three`);
+    if (improvement.operatingInputs) {
+      resources(`${label} operating inputs`, improvement.operatingInputs);
+      const paidFoodSite = improvement.requiredFeatures.includes('food-budget') && ['shore-fisheries', 'hillside-commonworks'].some(feature => improvement.requiredFeatures.includes(feature));
+      if (!Object.values(improvement.operatingInputs).some(positive) || !improvement.requiredFeatures.includes('building-operations') || !(paidFoodSite || charcoalSite || intakeSite)) errors.push(`${label}: paid site requires meaningful inputs and explicit operation gates`);
+    }
+    if (improvement.siteRequirement === 'forest' && !improvement.requiredFeatures.includes('forest-production') && !charcoalSite) errors.push(`${label}: forest site requires forest-production or exact charcoal-clearing gates`);
+    if (improvement.siteRequirement === 'revealed-horse-site' && !improvement.requiredFeatures.includes(pastoral.featureId)) errors.push(`${label}: horse site requires water-land feature`);
+    resources(`${label} cost`, improvement.cost);
+    resources(`${label} production`, improvement.production);
+    if (!Object.values(improvement.cost).some(positive) || !Object.values(improvement.production).some(positive)) errors.push(`${label}: requires meaningful construction cost and production`);
+    if (new Set(improvement.requires).size !== improvement.requires.length) errors.push(`${label}: duplicate prerequisites`);
+    for (const required of improvement.requires) {
+      const technology = technologies.get(required);
+      if (!technology) errors.push(`${label}: missing prerequisite ${required}`);
+      else if (technology.era > improvement.minEra) errors.push(`${label}: future prerequisite ${required}`);
+    }
+  }
+  const milestones = new Map(catalog.milestones.map(milestone => [milestone.id, milestone]));
+  unique('public project recipes', catalog.publicProjectRecipes.map(recipe => recipe.id));
+  for (const [name, value] of Object.entries(catalog.publicProjectRules)) {
+    if (!Number.isSafeInteger(value) || value < 1) errors.push(`public project rules: invalid ${name}`);
+  }
+  for (const recipe of catalog.publicProjectRecipes) {
+    const label = `public project ${recipe.id}`;
+    const terms = recipe.terms;
+    requireFeatures(label, recipe.requiredFeatures);
+    if (!technologies.has(recipe.requiredTechnology) || !buildings.has(recipe.requiredBuilding)) errors.push(`${label}: unknown civic prerequisite`);
+    if (!Number.isSafeInteger(recipe.version) || recipe.version < 1 || terms.recipeId !== recipe.id || terms.recipeVersion !== recipe.version) errors.push(`${label}: inconsistent recipe identity`);
+    if (!positive(terms.damageReduction) || terms.damageReduction > 100 || !Number.isSafeInteger(terms.pendingLifetimeRounds) || terms.pendingLifetimeRounds < 1 || !Number.isSafeInteger(terms.completionDelayRounds) || terms.completionDelayRounds < 1) errors.push(`${label}: invalid repair or timing`);
+    for (const [side, contribution] of Object.entries({ proposer: terms.proposerContribution, recipient: terms.recipientContribution })) {
+      resources(`${label} ${side}`, contribution);
+      if (!Object.values(contribution).some(positive)) errors.push(`${label}: missing ${side} contribution`);
+    }
+  }
+
+  unique('civilizations', catalog.civilizations.map(civ => civ.name));
+  unique('capitals', catalog.civilizations.map(civ => civ.capital));
+  unique('features', catalog.features.map(feature => feature.id));
+  unique('technologies', catalog.technologies.map(technology => technology.id));
+  unique('eras', catalog.eras.map(era => era.id));
+  unique('buildings', catalog.buildings.map(building => building.id));
+  unique('events', catalog.events.map(event => event.id));
+  unique('milestones', catalog.milestones.map(milestone => milestone.id));
+  if (catalog.civilizations.length !== CIV_COUNT) errors.push('civilizations: wrong actor count');
+  for (const civ of catalog.civilizations) {
+    if (!FOCUS_IDS.includes(civ.focus) || !/^#[\da-f]{6}$/i.test(civ.color)) errors.push(`civilization ${civ.name}: invalid presentation or focus`);
+  }
+  for (const technology of catalog.technologies) {
+    requireFeatures(technology.id, technology.requiredFeatures);
+    if (!eraValid(technology.era) || !positive(technology.cost)) errors.push(`technology ${technology.id}: invalid era or cost`);
+    for (const required of technology.requires) {
+      const prerequisite = technologies.get(required);
+      if (!prerequisite) errors.push(`technology ${technology.id}: missing prerequisite ${required}`);
+      else if (prerequisite.era > technology.era) errors.push(`technology ${technology.id}: future prerequisite ${required}`);
+    }
+  }
+  const visit = (id: string, path: Set<string>, completed: Set<string>, dependencies: (key: string) => readonly string[]) => {
+    if (path.has(id)) { errors.push(`${id}: prerequisite cycle`); return; }
+    if (completed.has(id)) return;
+    const next = new Set(path).add(id);
+    for (const dependency of dependencies(id)) visit(dependency, next, completed, dependencies);
+    completed.add(id);
+  };
+  const checkedTechnologies = new Set<string>();
+  for (const id of technologies.keys()) visit(id, new Set(), checkedTechnologies, key => technologies.get(key)?.requires ?? []);
+  for (const [index, era] of catalog.eras.entries()) {
+    const technology = technologies.get(era.technology);
+    if (!technology || technology.era !== index || era.cost !== technology.cost || era.capability !== technology.capability) errors.push(`era ${era.id}: discovery metadata drift`);
+    const previous = catalog.eras[index - 1];
+    if (!Number.isFinite(era.year) || (previous && era.year <= previous.year)) errors.push(`era ${era.id}: chronology out of order`);
+  }
+  const effects = (label: string, values: EffectDefinition[]) => {
+    for (const effect of values) {
+      if (!Number.isFinite(effect.amount) || effect.amount === 0) errors.push(`${label}: effects require finite nonzero amounts`);
+      if (effect.kind === 'resource' && !RESOURCE_IDS.includes(effect.resource)) errors.push(`${label}: unknown effect resource`);
+      if (effect.kind === 'city' && !['population', 'wellbeing', 'infrastructure', 'damage'].includes(effect.field)) errors.push(`${label}: unknown city field`);
+      if (effect.kind === 'civilization' && !['influence', 'legitimacy'].includes(effect.field)) errors.push(`${label}: unknown civilization field`);
+      if (effect.kind === 'route' && effect.field !== 'damage') errors.push(`${label}: unknown route field`);
+      if (!['resource', 'city', 'civilization', 'route'].includes(effect.kind)) errors.push(`${label}: unknown effect kind`);
+    }
+  };
+  for (const building of catalog.buildings) {
+    requireFeatures(building.id, building.requiredFeatures);
+    if (!eraValid(building.minEra)) errors.push(`building ${building.id}: invalid era`);
+    resources(`${building.id} cost`, building.cost);
+    resources(`${building.id} production`, building.production);
+    if (building.housing !== undefined && (!Number.isSafeInteger(building.housing) || building.housing <= 0 || !building.requiredFeatures.includes('local-growth'))) errors.push(`building ${building.id}: housing requires a positive integer and local-growth feature`);
+    resources(`${building.id} operating inputs`, building.operatingInputs ?? {});
+    if (building.strategicInputs !== undefined) {
+      if (!Object.values(building.strategicInputs).some(positive) || Object.entries(building.strategicInputs).some(([resource, amount]) => !STRATEGIC_RESOURCE_IDS.some(id => id === resource) || !Number.isSafeInteger(amount) || amount < 0)) errors.push(`building ${building.id}: invalid strategic operating inputs`);
+      if (![...STRATEGIC_RESOURCE_IDS.filter(resource => (building.strategicInputs?.[resource] ?? 0) > 0).map(resource => STRATEGIC_RESOURCE_RULES[resource].featureId), ...((building.strategicInputs.iron ?? 0) > 0 ? ['foundry-production'] : []), 'building-operations', 'resident-capacity'].every(feature => building.requiredFeatures.includes(feature))) errors.push(`building ${building.id}: strategic operating inputs require released ledger and operation gates`);
+    }
+    const powerInput = building.localPowerInput ?? 0; const powerOutput = building.localPowerOutput ?? 0; const emissions = building.emissionsPerOperation ?? 0;
+    if (![powerInput, powerOutput, emissions].every(value => Number.isSafeInteger(value) && value >= 0) || (powerInput > 0 && powerOutput > 0) || (emissions > 0 && powerOutput === 0)) errors.push(`building ${building.id}: invalid local Power recipe`);
+    if ((powerInput > 0 || powerOutput > 0) && ![LOCAL_POWER_RULES.featureId, 'building-operations', 'resident-capacity'].every(feature => building.requiredFeatures.includes(feature))) errors.push(`building ${building.id}: local Power requires released operation and resident gates`);
+    if (Object.values(building.operatingInputs ?? {}).some(positive) && !building.requiredFeatures.includes('building-operations')) errors.push(`building ${building.id}: operating inputs require the building-operations feature`);
+    const capabilities = building.capabilities ?? [];
+    for (const capability of capabilities) if (!Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability)) errors.push(`building ${building.id}: unknown capability ${capability}`);
+    if (new Set(capabilities).size !== capabilities.length) errors.push(`building ${building.id}: duplicate capabilities`);
+    if (building.siteRequirement !== undefined && !['coastal', 'mountain-catchment', 'campus-high-ground'].includes(building.siteRequirement)) errors.push(`building ${building.id}: unknown site requirement`);
+    if (building.siteRequirement === 'campus-high-ground' && (!building.requiredFeatures.includes('observatory-learning') || !building.requiresBuildings?.includes('campus'))) errors.push(`building ${building.id}: Campus high ground requires Observatory feature and own Campus`);
+    if (building.siteRequirement === 'mountain-catchment' && !building.requiredFeatures.includes(pastoral.featureId)) errors.push(`building ${building.id}: mountain catchment requires water-land feature`);
+    if (building.district) {
+      const { range, adjacency } = building.district;
+      if (!building.requiredFeatures.includes('district-planning')) errors.push(`building ${building.id}: district requires district-planning feature`);
+      if (!Number.isSafeInteger(range) || range < 1) errors.push(`building ${building.id}: invalid district range`);
+      if (adjacency && [adjacency.terrain, adjacency.improvement, adjacency.wonder].filter(selector => selector !== undefined).length !== 1) errors.push(`building ${building.id}: district adjacency requires exactly one selector`);
+      const wonderSelector: unknown = adjacency ? Reflect.get(adjacency, 'wonder') : undefined;
+      if (wonderSelector !== undefined && wonderSelector !== true) errors.push(`building ${building.id}: invalid district wonder selector`);
+      if (adjacency?.terrain !== undefined && !['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'].includes(adjacency.terrain)) errors.push(`building ${building.id}: invalid district terrain`);
+      if (adjacency?.improvement !== undefined && !catalog.improvements.some(improvement => improvement.id === adjacency.improvement)) errors.push(`building ${building.id}: invalid district improvement`);
+      if (adjacency && !RESOURCE_IDS.includes(adjacency.resource)) errors.push(`building ${building.id}: invalid district resource`);
+      if (adjacency && (!positive(adjacency.amount) || !Number.isFinite(adjacency.maximum) || adjacency.maximum < 0)) errors.push(`building ${building.id}: invalid district adjacency`);
+    }
+    const requiredBuildings = building.requiresBuildings ?? [];
+    if (new Set(requiredBuildings).size !== requiredBuildings.length) errors.push(`building ${building.id}: duplicate building prerequisite`);
+    for (const id of requiredBuildings) {
+      const prerequisite = buildings.get(id);
+      if (!prerequisite) errors.push(`building ${building.id}: missing building prerequisite ${id}`);
+      else if (prerequisite.minEra > building.minEra) errors.push(`building ${building.id}: future building prerequisite ${id}`);
+    }
+    if (capabilities.includes('coastal-departure') && (building.siteRequirement !== 'coastal' || !building.requiredFeatures.includes('coastal-founding'))) errors.push(`building ${building.id}: coastal departure requires coastal site and feature`);
+    if (!positive(powerOutput) && building.effects.length === 0 && !Object.values(building.production).some(positive) && !positive(building.housing ?? 0) && !capabilities.some(capability => Object.hasOwn(BUILDING_CAPABILITY_ACTIONS, capability))) errors.push(`building ${building.id}: no production or world effect`);
+    effects(building.id, building.effects);
+    for (const required of building.requires) {
+      const technology = technologies.get(required);
+      if (!technology) errors.push(`building ${building.id}: missing prerequisite ${required}`);
+      else if (technology.era > building.minEra) errors.push(`building ${building.id}: future prerequisite ${required}`);
+    }
+  }
+  const checkedBuildings = new Set<string>();
+  for (const id of buildings.keys()) visit(id, new Set(), checkedBuildings, key => buildings.get(key)?.requiresBuildings ?? []);
+  for (const event of catalog.events) {
+    requireFeatures(event.id, event.requiredFeatures);
+    if (!eraValid(event.minEra) || !Number.isInteger(event.cooldown) || event.cooldown < 0) errors.push(`event ${event.id}: invalid era or cooldown`);
+    if (event.id !== 'calm' && event.effects.length === 0) errors.push(`event ${event.id}: no world effect`);
+    effects(event.id, event.effects);
+    if (event.releasedEffects) {
+      requireFeatures(`${event.id} released effects`, event.releasedEffects.requiredFeatures);
+      if (event.releasedEffects.effects.length === 0) errors.push(`${event.id}: empty released effects`);
+      effects(`${event.id} released effects`, event.releasedEffects.effects);
+    }
+  }
+  for (const [action, required] of Object.entries(catalog.actionFeatures)) requireFeatures(action, required);
+  for (const milestone of catalog.milestones) {
+    requireFeatures(milestone.id, milestone.requiredFeatures);
+    if (!eraValid(milestone.era) || !Number.isFinite(milestone.year) || milestone.conditions.length === 0) errors.push(`milestone ${milestone.id}: missing world evidence or chronology`);
+    for (const required of milestone.requiresMilestones) {
+      const previous = milestones.get(required);
+      if (!previous) errors.push(`milestone ${milestone.id}: missing milestone ${required}`);
+      else if (previous.year >= milestone.year || previous.era > milestone.era) errors.push(`milestone ${milestone.id}: chronology regresses`);
+    }
+    if (milestone.alternative) {
+      requireFeatures(`${milestone.id} alternative`, milestone.alternative.requiredFeatures);
+      if (milestone.id !== 'connected-world' || milestone.alternative.id !== 'earned-land-integration' || milestone.alternative.requiredFeatures.length === 0 || !milestone.alternative.requiredFeatures.includes('earned-land-integration') || milestone.alternative.conditions.length !== 1 || milestone.alternative.conditions[0]?.kind !== 'earned-land-integration') errors.push(`milestone ${milestone.id}: invalid earned land alternative`);
+    }
+    if (milestone.conditions.some(condition => condition.kind === 'earned-land-integration')) errors.push(`milestone ${milestone.id}: earned land evidence must be an explicit alternative`);
+    for (const condition of [...milestone.conditions, ...(milestone.alternative?.conditions ?? [])]) {
+      if ('minimum' in condition && (!Number.isInteger(condition.minimum) || condition.minimum < 1)) errors.push(`milestone ${milestone.id}: invalid evidence minimum`);
+      if (condition.kind === 'building-count') {
+        const building = buildings.get(condition.building);
+        if (!building) errors.push(`milestone ${milestone.id}: missing building ${condition.building}`);
+        else {
+          const priorEra = Math.max(0, ...milestone.requiresMilestones.map(id => milestones.get(id)?.era ?? 0));
+          if (building.minEra > priorEra) errors.push(`milestone ${milestone.id}: circular building eligibility ${building.id}`);
+        }
+      }
+      if (condition.kind === 'technology' && (!technologies.has(condition.technology) || !Number.isInteger(condition.civilizations) || condition.civilizations < 1 || condition.civilizations > CIV_COUNT)) errors.push(`milestone ${milestone.id}: invalid technology evidence`);
+      if ('eventType' in condition && condition.eventType.trim().length === 0) errors.push(`milestone ${milestone.id}: empty event evidence`);
+    }
+  }
+  const checkedMilestones = new Set<string>();
+  for (const id of milestones.keys()) visit(id, new Set(), checkedMilestones, key => milestones.get(key)?.requiresMilestones ?? []);
+  const { mars, federation } = catalog.victoryRules;
+  requireFeatures('mars victory', mars.requiredFeatures);
+  requireFeatures('federation victory', federation.requiredFeatures);
+  resources('mars upkeep', mars.upkeep);
+  resources('federation upkeep', federation.upkeep);
+  if (mars.minEra !== catalog.eras.length - 1 || !technologies.has(mars.requiredTechnology) || !buildings.has(mars.requiredBuilding) || !positive(mars.progress) || !positive(mars.population) || !Number.isInteger(mars.suppliedRounds) || mars.suppliedRounds < 2) errors.push('mars: missing developed, sustained colony prerequisites');
+  if (federation.minEra < 4 || !eraValid(federation.minEra) || !Number.isInteger(federation.members) || federation.members < 3 || federation.members > CIV_COUNT || !Number.isInteger(federation.suppliedRounds) || federation.suppliedRounds < 2 || !positive(federation.infrastructurePerMember) || !positive(federation.wellbeing) || !positive(federation.legitimacy)) errors.push('federation: immediate or unsupported pact victory');
+  return errors;
+}
+
+export const TURN_RULES = { tacticalWindowMs: 10_000, actionsPerWindow: 1, strategyIntervalMs: 60_000, maximumCatchupTicks: 60, maximumPlanItems: 2 } as const;

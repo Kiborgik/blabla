@@ -2,7 +2,7 @@ use super::mission::MissionMemory;
 use super::syntax::Block;
 use super::{Memory, expect_fields, expect_keywords, list, text};
 use crate::diagnostic::Diagnostic;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 pub const FILE_NAME: &str = "goals.bla";
@@ -11,8 +11,18 @@ pub const AUTHORITY: &str = include_str!("../cli/text/authority-goal.md");
 
 pub const STATES: [&str; 3] = ["active", "done", "dropped"];
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DeliveryRequirement {
+    Required,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Goal {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<DeliveryRequirement>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applies_to: Vec<String>,
     pub name: String,
     pub serves: Vec<String>,
     pub statement: String,
@@ -140,8 +150,24 @@ pub fn build(blocks: &[Block]) -> Result<GoalMemory, Diagnostic> {
     expect_keywords(blocks, &["goal"])?;
     let mut memory = GoalMemory::default();
     for block in blocks {
-        expect_fields(block, &["statement", "expect", "state"], &["serves"])?;
+        expect_fields(
+            block,
+            &["statement", "expect", "state"],
+            &["serves", "delivery", "applies-to"],
+        )?;
+        let delivery = block
+            .field("delivery")
+            .map(|_| text(block, "delivery"))
+            .transpose()?;
+        let delivery = match delivery.as_deref() {
+            None => None,
+            Some("required") => Some(DeliveryRequirement::Required),
+            Some(_) => return Err(super::field_error(block, "delivery", "must be required")),
+        };
+        let applies_to = super::string_list(block, "applies-to")?;
         memory.goals.push(Goal {
+            delivery,
+            applies_to,
             name: block.name.clone(),
             serves: list(block, "serves"),
             statement: text(block, "statement")?,

@@ -1,0 +1,81 @@
+project AgenticCivilizations
+mission "mission.bla"
+system "system.bla"
+process "process.bla"
+goal "goals.bla"
+knowledge "../../knowledge/engineering.bla"
+knowledge "../../knowledge/testing.bla"
+knowledge "../../knowledge/reviewing.bla"
+knowledge "../../knowledge/design.bla"
+use structure "contracts/bootstrap.bla"
+use structure "contracts/spectator-preview.bla"
+use structure "contracts/architecture.bla"
+use behavior "contracts/campaign.bla"
+draft behavior "contracts/future-outcomes.bla"
+use behavior "contracts/concurrency.bla"
+use behavior "contracts/production.bla"
+use behavior "contracts/strategy.bla"
+use behavior "contracts/spectator.bla"
+use behavior "contracts/frontiers.bla"
+use behavior "contracts/recovery.bla"
+use behavior "contracts/public-projects.bla"
+draft behavior "contracts/trade-endpoints.bla"
+draft behavior "contracts/agent-observations.bla"
+draft behavior "contracts/action-receipts.bla"
+use behavior "contracts/land-transport.bla"
+use behavior "contracts/generated-controller.bla"
+draft behavior "contracts/operating-resource-exchange.bla"
+draft behavior "contracts/choice-pages.bla"
+draft behavior "contracts/route-map.bla"
+draft behavior "contracts/strategy-actions.bla"
+draft behavior "contracts/resident-capacity.bla"
+draft behavior "contracts/spectator-decisions.bla"
+draft behavior "contracts/required-decisions.bla"
+verify behavior {
+  command ["node", "cli/adapter.ts"]
+  seed 1701
+  cases 2
+  steps 256
+  timeout_ms 42000
+  shrink_budget 128
+}
+ignore from ".gitignore"
+
+draft behavior "contracts/coastal-founding.bla"
+
+draft behavior "contracts/research-investment.bla"
+draft behavior "contracts/district-learning.bla"
+draft behavior "contracts/worked-land.bla"
+
+draft behavior "contracts/metal-learning.bla"
+
+
+draft behavior "contracts/manufacturing.bla"
+
+draft behavior "contracts/owned-territory.bla"
+
+draft behavior "contracts/culture-production.bla"
+
+draft behavior "contracts/foundry-production.bla"
+
+draft behavior "contracts/observatory-learning.bla"
+
+draft behavior "contracts/civic-bootstrap.bla"
+
+draft behavior "contracts/industrial-steam.bla"
+
+draft behavior "contracts/local-power.bla"
+
+draft behavior "contracts/procedural-civilizations.bla"
+draft behavior "contracts/retained-drainage.bla"
+draft behavior "contracts/river-intakes.bla"
+draft behavior "contracts/woodland-renewal.bla"
+draft behavior "contracts/knowledge-compacts.bla"
+
+draft behavior "contracts/border-incidents.bla"
+
+draft behavior "contracts/learning-patronage.bla"
+draft behavior "contracts/civic-works.bla"
+draft behavior "contracts/regional-iron.bla"
+
+draft behavior "contracts/earned-land-integration.bla"

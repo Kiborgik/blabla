@@ -1,0 +1,50 @@
+#app .era-pill { text-align: left; text-transform: none; min-height: 44px; cursor: pointer; }
+#app .era-pill:disabled { cursor: default; }
+#app .era-pill .visual-icon { width: 13px; height: 13px; margin-left: 8px; }
+#app .journey-nav { display: none; }
+#journey-dialog { width: min(720px, calc(100vw - 28px)); max-height: calc(100dvh - 32px); }
+#journey-dialog .dialog-intro { margin-bottom: 12px; }
+#journey-refresh { min-height: 44px; margin-bottom: 12px; }
+.journey-world-records > summary, .mars-civilization > summary, .mars-receipt > summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.journey-world-records { border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.journey-world-records p, .mars-civilization p { font-size: 12px; line-height: 1.6; }
+.journey-milestones { padding: 0 0 0 20px; }
+.journey-milestones li { margin: 14px 0; }
+.journey-milestones strong, .journey-milestones span { display: block; font-size: 12px; }
+.journey-milestones span { margin-top: 4px; color: var(--muted); }
+.journey-milestones p { margin: 4px 0; }
+.mars-civilization { margin: 8px 0; padding: 0 14px; border: 1px solid var(--border); border-left: 3px solid var(--civ-color); background: var(--surface); }
+.mars-civilization > summary strong { font: 19px Georgia, serif; margin-right: 12px; }
+.mars-civilization > summary span { font-size: 12px; color: var(--muted); }
+.mars-civilization h3 { font-size: 14px; margin: 10px 0; }
+.journey-phases { list-style: none; padding: 0; margin: 4px 0 12px; }
+.journey-phase { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 12px; border-left: 2px solid var(--border); padding: 9px 0 9px 12px; }
+.journey-phase strong, .journey-phase span { font-size: 12px; line-height: 1.4; }
+.journey-phase span { color: var(--muted); }
+.journey-phase[data-status='recorded'] { border-left-color: #68a38d; }
+.journey-phase[data-status='active'] { border-left-color: var(--gold); }
+.mars-transport { padding: 8px 12px; margin: 12px 0; border: 1px solid var(--border); }
+.mars-transport button, #journey-refresh { min-height: 44px; padding: 8px 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--border); }
+.mars-transport button .visual-icon { width: 13px; height: 13px; margin-left: 8px; }
+.mars-note { color: var(--muted); }
+.mars-colony-view { margin: 12px 0; border: 1px solid #835c46; background: #251c20; color: #e4d4bc; }
+.mars-colony-view svg { width: 100%; height: 130px; display: block; }
+.mars-colony-view figcaption { padding: 7px 10px; border-top: 1px solid #835c46; font-size: 10px; line-height: 1.5; }
+.mars-ground { fill: #79503e; }
+.mars-lander { fill: #afa89a; stroke: #e0d6ba; stroke-width: 2; }
+.mars-habitat { fill: none; stroke: #c3b197; stroke-width: 2; }
+.mars-habitat.building { stroke-dasharray: 4 3; }
+.mars-habitat.complete { fill: #526b72; stroke: #c9e0da; }
+.mars-inhabited { fill: #efcd81; stroke: #ede1b9; }
+.mars-receipt { border-top: 1px solid var(--border); }
+.mars-receipt > summary { font-size: 12px; }
+.mars-receipt p { margin: 4px 0 10px; }
+@media (max-width: 1000px) {
+  #app .journey-nav { display: inline-flex; align-items: center; }
+}
+@media (max-width: 600px) {
+  #journey-dialog { padding: 18px; }
+  .mars-civilization { padding: 0 10px; }
+  .mars-civilization > summary span { display: block; margin: 5px 0 0 15px; }
+  .journey-phase { grid-template-columns: 1fr; gap: 3px; padding-block: 8px; }
+}

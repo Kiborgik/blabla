@@ -1,0 +1,158 @@
+state no_clock_era_or_milestone_change: bool
+state exact_catalogue_admission: bool
+state exact_start_cost_and_work: bool
+state one_owned_town_lane: bool
+state paid_and_installed_once: bool
+state first_operation_later: bool
+state stable_town_and_phase_order: bool
+state complete_opening_generator_reservation: bool
+state fixed_coal_power_and_emissions: bool
+state blocked_generator_has_no_effects: bool
+state later_supply_cannot_refuel: bool
+state complete_atomic_consumer_allocation: bool
+state same_town_same_beat_power: bool
+state exact_modified_materials: bool
+state blocked_consumer_has_no_effects: bool
+state no_energy_substitution: bool
+state ordinary_multipliers_exclude_power: bool
+state power_conserved_and_expired: bool
+state unused_generation_remains_paid: bool
+state no_spendable_receipt_or_carryover: bool
+state toggles_only_affect_future_opening: bool
+state toggles_preserve_receipts: bool
+state exact_versioned_operation_snapshots: bool
+state historical_identity_and_residents: bool
+state latest_attempt_distinct_from_productive: bool
+state positive_consumer_required: bool
+state bounded_self_contained_retention: bool
+state retained_events_cross_checked: bool
+state emissions_are_receipt_only: bool
+state current_paid_consumer_sequence: bool
+state replay_exact: bool
+state refused_actions_have_no_effects: bool
+
+action construct_power_building()
+action operate_local_generator()
+action operate_powered_consumer()
+action expire_local_power()
+action change_power_operation()
+action retain_local_power_receipt()
+action replay_local_power()
+
+when construct_power_building {
+    expect "local-power-buildings-use-exact-owned-town-catalogue-commitments": after.exact_catalogue_admission and after.exact_start_cost_and_work and after.one_owned_town_lane
+    expect "local-power-installation-pays-once-and-first-operates-on-a-later-beat": after.paid_and_installed_once and after.first_operation_later
+}
+when operate_local_generator {
+    expect "local-generators-reserve-full-opening-fuel-and-residents-before-consumers": after.stable_town_and_phase_order and after.complete_opening_generator_reservation and after.fixed_coal_power_and_emissions
+    expect "blocked-or-paused-generators-never-partly-pay-or-refuel-later-in-the-beat": after.blocked_generator_has_no_effects and after.later_supply_cannot_refuel
+}
+when operate_powered_consumer {
+    expect "local-powered-consumers-allocate-full-same-town-power-inputs-and-residents-atomically": after.complete_atomic_consumer_allocation and after.same_town_same_beat_power and after.blocked_consumer_has_no_effects and after.no_energy_substitution
+    expect "factory-materials-use-existing-quantized-contribution-with-fixed-power-conversion": after.exact_modified_materials and after.ordinary_multipliers_exclude_power
+}
+when expire_local_power {
+    expect "all-local-generation-is-consumed-or-expires-without-refunds-or-carryover": after.power_conserved_and_expired and after.unused_generation_remains_paid and after.no_spendable_receipt_or_carryover
+}
+when change_power_operation {
+    expect "local-power-pause-and-resume-only-change-future-opening-eligibility": after.toggles_only_affect_future_opening and after.toggles_preserve_receipts
+}
+when retain_local_power_receipt {
+    expect "local-power-history-retains-exact-versioned-operation-and-opening-resident-facts": after.exact_versioned_operation_snapshots and after.historical_identity_and_residents and after.retained_events_cross_checked
+    expect "local-power-latest-attempt-does-not-replace-the-last-positive-consumer-with-generation": after.latest_attempt_distinct_from_productive and after.positive_consumer_required and after.bounded_self_contained_retention
+    expect "local-power-emissions-remain-paid-operation-receipts-without-climate-or-calendar-effects": after.emissions_are_receipt_only and after.no_clock_era_or_milestone_change
+}
+when replay_local_power {
+    expect "a-paid-current-sequence-funds-a-real-same-town-factory-consumer": after.current_paid_consumer_sequence and after.same_town_same_beat_power and after.exact_modified_materials
+    expect "local-power-replays-and-refusals-preserve-once-only-effects": after.replay_exact and after.refused_actions_have_no_effects and after.bounded_self_contained_retention
+}
+
+state powered_science_calendar_unchanged: bool
+state sanitation_science_cost: int
+state chemistry_science_cost: int
+state powered_science_exact_prerequisites: bool
+state powered_science_release_required: bool
+state powered_science_eras_are_metadata: bool
+state powered_science_future_output_only: bool
+state powered_science_explicit_target_only: bool
+state powered_science_completion_prefix_validated: bool
+state powered_science_active_target_validated: bool
+state laboratory_materials_cost: int
+state laboratory_credits_cost: int
+state laboratory_required_work: int
+state laboratory_minimum_era: int
+state laboratory_exact_local_campus: bool
+state laboratory_chemistry_and_feature_required: bool
+state laboratory_once_only_owned_town_commitment: bool
+state laboratory_first_output_after_installation: bool
+state laboratory_power_input: int
+state laboratory_operating_credits: int
+state laboratory_residents_required: int
+state laboratory_base_science: int
+state laboratory_atomic_opening_allocation: bool
+state laboratory_shortages_and_pause_pay_nothing: bool
+state laboratory_no_cross_town_energy_or_carryover: bool
+state laboratory_no_same_beat_refuelling: bool
+state laboratory_stable_existing_allocation_order: bool
+state laboratory_with_factory_power_generated: int
+state laboratory_with_factory_power_consumed: int
+state laboratory_with_factory_power_expired: int
+state laboratory_power_and_emissions_unmodified: bool
+state laboratory_exact_modified_science: bool
+state laboratory_same_beat_productive_research: bool
+state laboratory_existing_research_caps: bool
+state laboratory_completion_not_retroactive: bool
+state laboratory_exact_versioned_recipe_and_payment: bool
+state laboratory_historical_identity_and_residents: bool
+state laboratory_old_participant_subsets_valid: bool
+state laboratory_installed_null_result_valid: bool
+state laboratory_last_attempt_and_productive_distinct: bool
+state laboratory_positive_science_required: bool
+state laboratory_receipt_identity_and_output_distinct: bool
+state laboratory_later_productive_town_beat_can_replace: bool
+state laboratory_pruned_receipts_self_contained: bool
+state laboratory_retained_events_cross_checked: bool
+state powered_science_unreleased_references_refused: bool
+state powered_science_corrupt_branch_refused: bool
+state laboratory_invalid_admission_refused: bool
+state powered_science_refusals_zero_effect: bool
+state powered_science_current_paid_sequence: bool
+state powered_science_actual_selected_research_witness: bool
+state powered_science_replay_exact: bool
+state powered_science_deferred_mechanics_absent: bool
+
+action research_powered_science()
+action construct_research_laboratory()
+action operate_research_laboratory()
+action fund_laboratory_research()
+action retain_laboratory_history()
+action refuse_powered_science()
+action replay_powered_science()
+
+when research_powered_science {
+    expect "sanitation-and-chemistry-use-exact-released-prerequisites-and-future-science-without-era-gates": after.sanitation_science_cost == 140 and after.chemistry_science_cost == 260 and after.powered_science_exact_prerequisites and after.powered_science_release_required and after.powered_science_eras_are_metadata and after.powered_science_future_output_only and after.powered_science_explicit_target_only
+    expect "powered-science-history-checks-new-completion-prefixes-and-active-target-eligibility": after.powered_science_completion_prefix_validated and after.powered_science_active_target_validated
+}
+when construct_research_laboratory {
+    expect "research-laboratories-require-chemistry-and-an-exact-owned-era-three-campus-commitment": after.laboratory_materials_cost == 42 and after.laboratory_credits_cost == 24 and after.laboratory_required_work == 18 and after.laboratory_minimum_era == 3 and after.laboratory_exact_local_campus and after.laboratory_chemistry_and_feature_required and after.laboratory_once_only_owned_town_commitment
+    expect "a-paid-laboratory-first-operates-after-its-installation-beat": after.laboratory_first_output_after_installation and after.laboratory_installed_null_result_valid
+}
+when operate_research_laboratory {
+    expect "laboratories-reserve-complete-opening-credits-local-power-and-residents-or-pay-nothing": after.laboratory_power_input == 3 and after.laboratory_operating_credits == 2 and after.laboratory_residents_required == 3 and after.laboratory_atomic_opening_allocation and after.laboratory_shortages_and_pause_pay_nothing and after.laboratory_no_cross_town_energy_or_carryover and after.laboratory_no_same_beat_refuelling
+    expect "one-supplied-plant-funds-factory-before-laboratory-and-expires-the-two-unused-power": after.laboratory_stable_existing_allocation_order and after.laboratory_with_factory_power_generated == 8 and after.laboratory_with_factory_power_consumed == 6 and after.laboratory_with_factory_power_expired == 2 and after.laboratory_power_and_emissions_unmodified
+}
+when fund_laboratory_research {
+    expect "laboratory-science-uses-ordinary-quantized-modifiers-and-the-same-beat-active-research-budget": after.laboratory_base_science == 12 and after.laboratory_exact_modified_science and after.laboratory_same_beat_productive_research and after.laboratory_existing_research_caps and after.powered_science_explicit_target_only
+    expect "research-completion-never-rewrites-the-opening-laboratory-allocation": after.laboratory_completion_not_retroactive and after.laboratory_no_same_beat_refuelling
+}
+when retain_laboratory_history {
+    expect "laboratory-power-history-retains-exact-payments-residents-and-historical-owner-with-old-subsets": after.laboratory_exact_versioned_recipe_and_payment and after.laboratory_historical_identity_and_residents and after.laboratory_old_participant_subsets_valid and after.laboratory_installed_null_result_valid and after.laboratory_retained_events_cross_checked and after.laboratory_receipt_identity_and_output_distinct
+    expect "a-laboratory-positive-town-beat-survives-nonproductive-attempts-and-pruning-until-new-productive-work": after.laboratory_last_attempt_and_productive_distinct and after.laboratory_positive_science_required and after.laboratory_pruned_receipts_self_contained and after.laboratory_later_productive_town_beat_can_replace
+}
+when refuse_powered_science {
+    expect "unreleased-branch-or-laboratory-references-and-corrupt-prerequisites-refuse-without-effects": after.powered_science_unreleased_references_refused and after.powered_science_corrupt_branch_refused and after.laboratory_invalid_admission_refused and after.powered_science_refusals_zero_effect
+}
+when replay_powered_science {
+    expect "a-paid-current-sequence-funds-laboratory-science-and-an-explicit-research-target": after.powered_science_current_paid_sequence and after.powered_science_actual_selected_research_witness and after.laboratory_exact_modified_science and after.laboratory_same_beat_productive_research
+    expect "powered-science-replay-preserves-current-receipts-and-calendar": after.powered_science_replay_exact and after.powered_science_deferred_mechanics_absent and after.powered_science_calendar_unchanged
+}

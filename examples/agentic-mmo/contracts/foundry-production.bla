@@ -1,0 +1,54 @@
+state paid_once: bool
+state same_town: bool
+state completed: bool
+state no_completion_output: bool
+state iron_paid: bool
+state energy_paid: bool
+state staffed: bool
+state materials_made: bool
+state blocked: bool
+state paused: bool
+state no_payment_or_output: bool
+state opening_stock_only: bool
+state shipment_resumed: bool
+state refused: bool
+state no_effects: bool
+state replay_exact: bool
+
+action start_foundry()
+action complete_foundry()
+action work_foundry()
+action block_foundry()
+action pause_foundry()
+action defer_arriving_iron()
+action resume_iron_exchange()
+action refuse_foundry_action()
+action replay_foundry_history()
+
+when start_foundry {
+    expect "same-town-foundry-pays-once": after.same_town and after.paid_once
+}
+when complete_foundry {
+    expect "foundry-completion-precedes-operation": after.completed and after.no_completion_output
+}
+when work_foundry {
+    expect "foundry-jointly-pays-iron-energy-and-residents": after.iron_paid and after.energy_paid and after.staffed and after.materials_made
+}
+when block_foundry {
+    expect "shortage-preserves-both-ledgers-and-residents": after.blocked and after.no_payment_or_output
+}
+when pause_foundry {
+    expect "paused-foundry-preserves-both-ledgers": after.paused and after.no_payment_or_output
+}
+when defer_arriving_iron {
+    expect "later-iron-cannot-fund-opening-operation": after.opening_stock_only
+}
+when resume_iron_exchange {
+    expect "actual-consumption-opens-capacity-for-later-shipment": after.iron_paid and after.shipment_resumed
+}
+when refuse_foundry_action {
+    expect "invalid-foundry-action-has-no-effects": after.refused and after.no_effects
+}
+when replay_foundry_history {
+    expect "foundry-history-replays-exactly": after.replay_exact
+}

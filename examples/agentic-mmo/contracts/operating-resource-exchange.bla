@@ -1,0 +1,39 @@
+state operating_exchange_available: bool
+state operating_exchange_accepted: bool
+state operating_exchange_due: bool
+state operating_exchange_funded: bool
+state operating_exchange_route_valid: bool
+state operating_exchange_delivered: bool
+state operating_exchange_exact_vectors: bool
+state operating_exchange_refusal_unchanged: bool
+state imported_fuel_spent_in_same_operation_beat: bool
+state next_operation_eligible: bool
+state next_operation_worked: bool
+state old_exchange_terms_preserved: bool
+state all_recipe_choices_preserved: bool
+
+action operating_exchange_fixture(kind: int)
+action funded_operating_exchange_fixture()
+action consent_operating_exchange()
+action resolve_operating_exchange()
+action operate_after_import()
+action observe_exchange_choices()
+action replay_existing_exchange()
+when funded_operating_exchange_fixture {
+    expect "funded-fuel-exchange-is-reachable": after.operating_exchange_available and after.operating_exchange_accepted and after.operating_exchange_due and after.operating_exchange_funded and after.operating_exchange_route_valid
+}
+when resolve_operating_exchange {
+    expect "funded-due-fuel-exchange-delivers": not (before.operating_exchange_accepted and before.operating_exchange_due and before.operating_exchange_funded and before.operating_exchange_route_valid) or after.operating_exchange_delivered
+    expect "fuel-exchange-pays-gross-cargo-and-upkeep": not after.operating_exchange_delivered or after.operating_exchange_exact_vectors
+    expect "unfunded-fuel-exchange-spends-nothing": before.operating_exchange_funded or after.operating_exchange_refusal_unchanged
+    expect "imported-fuel-does-not-fund-earlier-operation": not after.imported_fuel_spent_in_same_operation_beat
+}
+when operate_after_import {
+    expect "eligible-next-beat-operation-uses-imported-stock": not before.next_operation_eligible or after.next_operation_worked
+}
+when observe_exchange_choices {
+    expect "every-exact-recipe-choice-remains-available": after.all_recipe_choices_preserved
+}
+when replay_existing_exchange {
+    expect "new-fuel-recipe-preserves-existing-consent": after.old_exchange_terms_preserved
+}
