@@ -11,7 +11,7 @@ export interface LandscapeTerritory { key: string; owner: number; height: number
 export interface LandscapeProjection { coast: LandscapeEdge[]; borders: LandscapeEdge[]; territories: LandscapeTerritory[]; parts: VisualPart[] }
 export const LANDSCAPE_BUDGETS = { far: 384, mid: 768, close: 1152 } as const;
 export const TERRITORY_STYLE = { washOpacity: .13, borderWidth: .09, borderOpacity: .95 } as const;
-export const LANDSCAPE_COLORS = { grassland: '#86a35c', forest: '#6e8e50', desert: '#cfb47d', mountain: '#929783', tundra: '#b7beb0', water: '#193f50', shallow: '#3e8386', shore: '#d4c393' } as const;
+export const LANDSCAPE_COLORS = { grassland: '#929a70', forest: '#71845e', desert: '#c7a46c', mountain: '#89918f', tundra: '#b4bdb0', water: '#153f4a', shallow: '#5a9b98', shore: '#d9c396' } as const;
 const NEIGHBORS = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]] as const;
 const key = (tile: { q: number; r: number }): string => `${tile.q},${tile.r}`;
 const order = (a: { q: number; r: number }, b: { q: number; r: number }): number => a.r - b.r || a.q - b.q;
@@ -23,8 +23,10 @@ export function hexPosition(q: number, r: number): { x: number; z: number } {
 
 export function landscapeSurface(tile: LandscapeTile): string {
   const color = LANDSCAPE_COLORS[tile.terrain];
-  const amount = (noise(tile.q, tile.r, 0) - .5) * .055;
-  return `#${[1, 3, 5].map(offset => Math.round(Number.parseInt(color.slice(offset, offset + 2), 16) * (1 + amount)).toString(16).padStart(2, '0')).join('')}`;
+  const upland = Math.max(0, Math.min(1, (tile.height - .25) / .22));
+  const mineral = tile.terrain === 'mountain' ? '#aab6b4' : tile.terrain === 'tundra' ? '#d0d0be' : tile.terrain === 'forest' ? '#9c9c79' : tile.terrain === 'desert' ? '#e1c38d' : '#ada68a';
+  const amount = Math.sin(tile.q * .24 + tile.r * .16) * .035 + Math.cos(tile.q * .11 - tile.r * .21) * .025;
+  return `#${[1, 3, 5].map(offset => Math.round((Number.parseInt(color.slice(offset, offset + 2), 16) * (1 - upland * .42) + Number.parseInt(mineral.slice(offset, offset + 2), 16) * upland * .42) * (1 + amount)).toString(16).padStart(2, '0')).join('')}`;
 }
 
 export function territoryEdgeTriangles(edge: LandscapeEdge): number[] {
@@ -44,6 +46,22 @@ export function territoryEdgeTriangles(edge: LandscapeEdge): number[] {
 export type TerrainPoint = readonly [number, number, number];
 export interface TerrainFace { key: string; points: TerrainPoint[]; color: string; kind?: 'ground' | 'bank' | 'channel'; drainageEdgeId?: string }
 export interface TerrainSurface { key: string; center: TerrainPoint; rim: TerrainPoint[]; edgeRims: TerrainPoint[][]; faces: TerrainFace[]; cliffs: TerrainFace[] }
+
+export function projectShoreBands(coast: readonly LandscapeEdge[]): Array<{ key: string; points: [TerrainPoint, TerrainPoint, TerrainPoint, TerrainPoint]; color: string; opacity: number }> {
+  const layers = [
+    { inner: .22, outer: .57, color: '#34777e', opacity: .5 },
+    { inner: .055, outer: .24, color: LANDSCAPE_COLORS.shallow, opacity: .8 },
+    { inner: 0, outer: .06, color: LANDSCAPE_COLORS.shore, opacity: .86 },
+  ];
+  return layers.flatMap((layer, index) => coast.flatMap(edge => {
+    const dx = edge.to[0] - edge.from[0]; const dz = edge.to[1] - edge.from[1];
+    const length = Math.hypot(dx, dz);
+    if (!length) return [];
+    const at = (point: readonly [number, number], distance: number): TerrainPoint => [point[0] + dz / length * distance, .006 + index * .001, point[1] - dx / length * distance];
+    const points: [TerrainPoint, TerrainPoint, TerrainPoint, TerrainPoint] = [at(edge.from, layer.inner), at(edge.to, layer.inner), at(edge.to, layer.outer), at(edge.from, layer.outer)];
+    return [{ key: `${edge.key}:shore:${index}`, points, color: layer.color, opacity: layer.opacity }];
+  }));
+}
 
 function shadeColor(color: string, amount: number): string {
   return `#${[1, 3, 5].map(offset => Math.max(0, Math.min(255, Math.round(Number.parseInt(color.slice(offset, offset + 2), 16) * amount))).toString(16).padStart(2, '0')).join('')}`;
@@ -145,13 +163,22 @@ export function projectTerrainSurface(tiles: readonly LandscapeTile[], drainage?
       return corner ? [corner.x, corner.heights.reduce((sum, height) => sum + height, 0) / corner.heights.length, corner.z] : center;
     });
     const color = landscapeSurface(tile);
-    const faces = rim.map((point, index): TerrainFace => ({ key: `${key(tile)}:face:${index}`, points: [center, point, rim[(index + 1) % 6] ?? point],
-      color: shadeColor(color, 1 + Math.cos(index * Math.PI / 3 + 2.4) * .012 + (noise(tile.q, tile.r, index + 4) - .5) * .008) }));
+    const faces = rim.map((point, index): TerrainFace => {
+      const next = rim[(index + 1) % 6] ?? point;
+      const ax = point[0] - x; const az = point[2] - z; const ay = point[1] - tile.height;
+      const bx = next[0] - x; const bz = next[2] - z; const by = next[1] - tile.height;
+      const area = ax * bz - az * bx;
+      const slopeX = area ? (ay * bz - az * by) / area : 0;
+      const slopeZ = area ? (ax * by - ay * bx) / area : 0;
+      const relief = Math.min(1, Math.hypot(slopeX, slopeZ) / .08);
+      const shade = Math.max(-.04, Math.min(.04, (-slopeX * .7 - slopeZ * .5) * relief));
+      return { key: `${key(tile)}:face:${index}`, points: [center, point, next], color: shadeColor(color, 1 + shade) };
+    });
     const cliffs = NEIGHBORS.flatMap(([dq, dr], index): TerrainFace[] => {
       if (lookup.has(`${tile.q + dq},${tile.r + dr}`)) return [];
       const a = rim[(index + 5) % 6]; const b = rim[index];
       return a && b ? [{ key: `${key(tile)}:${index}`, points: [a, b, [b[0], 0, b[2]], [a[0], 0, a[2]]],
-        color: shadeColor('#a6a17b', .82 + Math.cos(index * Math.PI / 3 + 2.4) * .13) }] : [];
+        color: shadeColor('#a99775', .82 + Math.cos(index * Math.PI / 3 + 2.4) * .13) }] : [];
     });
     return { key: key(tile), center, rim, edgeRims: NEIGHBORS.map((_, index) => [rim[(index + 5) % 6]!, rim[index]!]), faces, cliffs };
   });
@@ -167,13 +194,14 @@ function terrainParts(tile: LandscapeTile, detail: DetailLevel): VisualPart[] {
     const offset = index === 0 ? .08 : .22 + noise(tile.q, tile.r, index + 2) * .4;
     const forest = tile.terrain === 'forest';
     const desert = tile.terrain === 'desert';
-    const height = forest ? .5 + noise(tile.q, tile.r, index) * .46 : desert ? .08 : .85 + tile.height * 1.7 + noise(tile.q, tile.r, index) * .45;
-    const width = forest ? .48 + noise(tile.q, tile.r, index + 1) * .24 : desert ? 1.1 : index === 0 ? 1.6 : 1.05;
+    const broadleaf = forest && noise(tile.q, tile.r, index + 13) > .42;
+    const height = forest ? broadleaf ? .44 + noise(tile.q, tile.r, index) * .23 : .65 + noise(tile.q, tile.r, index) * .32 : desert ? .08 : .85 + tile.height * 1.7 + noise(tile.q, tile.r, index) * .45;
+    const width = forest ? broadleaf ? .55 + noise(tile.q, tile.r, index + 1) * .21 : .36 + noise(tile.q, tile.r, index + 1) * .15 : desert ? 1.1 : index === 0 ? 1.6 : 1.05;
     const px = x + Math.cos(angle) * offset; const pz = z + Math.sin(angle) * offset;
-    parts.push({ id: `${tile.terrain}:${key(tile)}:${index}`, shape: forest || desert ? 'canopy' : 'cone',
+    parts.push({ id: `${tile.terrain}:${key(tile)}:${index}`, shape: broadleaf ? 'broadleaf' : forest || desert ? 'canopy' : 'cone',
       material: forest ? index % 3 ? 'canopy' : 'canopyLight' : desert ? 'grain' : index % 2 ? 'rockLight' : 'rock',
-      position: [px, tile.height + height / 2, pz], scale: [width, height, width * (forest ? .9 : .8)], rotation: noise(tile.q, tile.r, index) * Math.PI });
-    if (forest && detail !== 'far') parts.push({ id: `forest:${key(tile)}:trunk:${index}`, shape: 'box', material: 'timber',
+      position: [px, tile.height + height / 2 + (broadleaf ? .16 : 0), pz], scale: [width, height, width * (forest ? .9 : .8)], rotation: noise(tile.q, tile.r, index) * Math.PI });
+    if (forest && (detail !== 'far' || broadleaf)) parts.push({ id: `forest:${key(tile)}:trunk:${index}`, shape: 'box', material: 'timber',
       position: [px, tile.height + .18, pz], scale: [.08, .36, .08], rotation: angle });
     if (!forest && !desert && index === 0) parts.push({ id: `mountain:${key(tile)}:summit`, shape: 'cone', material: 'neutral',
       position: [px, tile.height + height * .88, pz], scale: [width * .24, height * .24, width * .8 * .24], rotation: noise(tile.q, tile.r, index) * Math.PI });

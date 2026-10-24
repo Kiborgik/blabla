@@ -1,3 +1,4 @@
+import { settlementPartColor } from '../visuals/settlement-homes.ts';
 import { greatLibraryVisual } from '../visuals/wonder-landmark.ts';
 import { depositParts } from '../visuals/strategic-resource-visuals.ts';
 import * as THREE from 'three';
@@ -65,7 +66,7 @@ export function createSettlementMeshes(world: AtlasWorld, material: (color: stri
     const origin = hexPosition(city.q, city.r);
     const floor = world.tiles.find(tile => tile.q === city.q && tile.r === city.r)?.height ?? .4;
     return settlementVisual(city.settlement, detail).parts.map(part => ({
-      color: part.material === 'identity' ? city.color : VISUAL_PALETTE[part.material],
+      color: settlementPartColor(part, city.color),
       part: { ...part, position: [origin.x + part.position[0] * SETTLEMENT_RENDER_SCALE, floor + part.position[1] * SETTLEMENT_RENDER_SCALE, origin.z + part.position[2] * SETTLEMENT_RENDER_SCALE],
         scale: [part.scale[0] * SETTLEMENT_RENDER_SCALE, part.scale[1] * SETTLEMENT_RENDER_SCALE, part.scale[2] * SETTLEMENT_RENDER_SCALE] },
     }));

@@ -16,7 +16,7 @@ const city: SettlementFacts = { id: 'legible-farm', worldSeed: 73, civId: 1, til
 const details: DetailLevel[] = ['far', 'mid', 'close'];
 const beds = [
   { left: .55, right: .96, back: -.48, front: -.12 },
-  { left: .55, right: .82, back: -.68, front: -.48 },
+  { left: .51, right: .78, back: -.68, front: -.48 },
 ];
 const paidOrder = (buildingId = 'farm'): NonNullable<City['construction']> => ({ active: {
   id: `paid-${buildingId}`, cityId: city.id, tileId: city.tileId, buildingId, ruleVersion: 1, startedRound: 3,
@@ -52,7 +52,7 @@ await test('installed Farm uses the exact two stepped beds and low broad crop ba
     for (const part of parts) {
       const footprint = bounds(part);
       assert.ok(beds.some(bed => footprint.left >= bed.left - 1e-10 && footprint.right <= bed.right + 1e-10 && footprint.back >= bed.back - 1e-10 && footprint.front <= bed.front + 1e-10));
-      assert.ok(transformedVertices(part).every(([x, , z]) => Math.hypot(x, z) * SETTLEMENT_RENDER_SCALE <= .75132));
+      assert.ok(transformedVertices(part).every(([x, , z]) => Math.abs(x) * SETTLEMENT_RENDER_SCALE <= Math.sqrt(3) / 2 && (Math.abs(z) + Math.abs(x) / Math.sqrt(3)) * SETTLEMENT_RENDER_SCALE <= 1));
     }
     assert.ok(flatSceneFaces(parts, .72).some(face => crops.includes(face.part)));
     assert.deepEqual(visual.landmarks, ['farm']);
@@ -85,7 +85,7 @@ await test('paid Farm beds remain unfinished through full recorded work and disa
     for (const part of parts) {
       const footprint = bounds(part);
       assert.ok(beds.some(bed => footprint.left >= bed.left - 1e-10 && footprint.right <= bed.right + 1e-10 && footprint.back >= bed.back - 1e-10 && footprint.front <= bed.front + 1e-10));
-      assert.ok(transformedVertices(part).every(([x, , z]) => Math.hypot(x, z) * SETTLEMENT_RENDER_SCALE <= .75132));
+      assert.ok(transformedVertices(part).every(([x, , z]) => Math.abs(x) * SETTLEMENT_RENDER_SCALE <= Math.sqrt(3) / 2 && (Math.abs(z) + Math.abs(x) / Math.sqrt(3)) * SETTLEMENT_RENDER_SCALE <= 1));
     }
     assert.ok(parts.some(part => part.material === 'timber'));
     assert.ok(parts.every(part => part.material !== 'crop' && part.material !== 'grain' && !part.id.startsWith('farm-')));

@@ -16,7 +16,7 @@ import { damageMapLabel } from '../visuals/damage-visuals.ts';
 import { cityKey, selectedCity } from './city-selection.ts';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createLandscapeMeshes, createTerrainMeshes } from './landscape-three.ts';
+import { createLandscapeMeshes, createTerrainMeshes, createShoreMeshes, createWaterGlints } from './landscape-three.ts';
 import { projectTerrainSurface, projectLandscape, LANDSCAPE_COLORS, TERRITORY_STYLE, territoryEdgeTriangles } from '../visuals/landscape.ts';
 import { hexPosition, routeMapPositions, routeMapAnchor } from './atlas.ts';
 import type { AtlasCue, AtlasWorld } from './atlas.ts';
@@ -41,6 +41,7 @@ export interface AtlasRenderer {
   select: (id: string) => void;
   selectRoute: (id: string | null) => void;
   frameCity: (id: string, anchor: ScreenPoint, policy?: InspectionFraming) => void;
+  framePoint: (point: { x: number; y: number; z: number }, anchor: ScreenPoint, policy?: InspectionFraming) => void;
   restoreCamera: (camera: CameraView) => void;
   setLayer: (layer: 'borders' | 'routes', visible: boolean) => void;
   snapshot: () => Pick<ViewerPreferences, 'zoom' | 'x' | 'z'>;
@@ -224,7 +225,7 @@ export function createAtlasRenderer(
   sun.shadow.camera.right = 28;
   sun.shadow.camera.top = 24;
   sun.shadow.camera.bottom = -24;
-  sun.shadow.normalBias = 0.06;
+  sun.shadow.normalBias = 0.025;
   scene.add(sun);
   const materials = new Map<string, THREE.MeshStandardMaterial>();
   const material = (color: string): THREE.MeshStandardMaterial => {
@@ -238,7 +239,8 @@ export function createAtlasRenderer(
   sea.rotation.x = -Math.PI / 2;
   sea.position.y = -.03;
   sea.receiveShadow = true;
-  scene.add(sea);
+  const waterGlints = createWaterGlints();
+  scene.add(sea, waterGlints);
   const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
   const roofGeometry = new THREE.ConeGeometry(0.74, 0.5, 4);
   const borders = createTerritoryMeshes(world);
@@ -264,18 +266,7 @@ export function createAtlasRenderer(
     return mesh;
   };
   const landscape = projectLandscape(world.tiles, world.cities, 'far', world.drainage);
-  const shorePositions = landscape.coast.flatMap(edge => {
-    const dx = edge.to[0] - edge.from[0]; const dz = edge.to[1] - edge.from[1];
-    const length = Math.hypot(dx, dz) || 1;
-    const ox = dz / length * .32; const oz = -dx / length * .32;
-    const a = [edge.from[0], .005, edge.from[1]]; const b = [edge.to[0], .005, edge.to[1]];
-    const c = [edge.to[0] + ox, .005, edge.to[1] + oz]; const d = [edge.from[0] + ox, .005, edge.from[1] + oz];
-    return [...a, ...b, ...c, ...a, ...c, ...d];
-  });
-  const shoreGeometry = new THREE.BufferGeometry();
-  shoreGeometry.setAttribute('position', new THREE.Float32BufferAttribute(shorePositions, 3));
-  const shore = new THREE.Mesh(shoreGeometry, new THREE.MeshBasicMaterial({ color: LANDSCAPE_COLORS.shallow, transparent: true, opacity: .8, side: THREE.DoubleSide }));
-  scene.add(shore, createTerrainMeshes(world.tiles, world.drainage));
+  scene.add(createShoreMeshes(landscape.coast), createTerrainMeshes(world.tiles, world.drainage));
   borders.visible = preferences.borders;
   scene.add(borders);
   const cityLabels: Array<{ element: HTMLButtonElement; point: THREE.Vector3; id: string }> = [];
@@ -517,7 +508,7 @@ export function createAtlasRenderer(
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   resize();
-  const moving =
+  let moving =
     resolveAppearance(preferences, false, window.matchMedia('(prefers-reduced-motion: reduce)').matches).motion;
   cues.setMotion(moving);
   let frame = 0;
@@ -626,10 +617,34 @@ export function createAtlasRenderer(
     const pixelsPerUnit = Math.max(.01, tilePixels / 2);
     for (const line of routeLines) line.material.dashScale = pixelsPerUnit;
     cues.update([...allocation.occupied, ...borderOccupied]);
+    if (moving) { const phase = performance.now() / 32000 * Math.PI * 2; waterGlints.position.set(Math.sin(phase) * .12, 0, Math.cos(phase) * .06); }
     renderer.render(scene, camera);
     frame = requestAnimationFrame(animate);
   };
   frame = requestAnimationFrame(animate);
+  const framePoint: AtlasRenderer['framePoint'] = (source, anchor, policy) => {
+    const point = new THREE.Vector3(source.x, source.y, source.z);
+    const damping = controls.enableDamping;
+    controls.enableDamping = false;
+    controls.update();
+    camera.updateMatrixWorld();
+    const screen = (sourcePoint: THREE.Vector3): ScreenPoint => {
+      const projected = sourcePoint.clone().project(camera);
+      return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 };
+    };
+    const current = screen(point);
+    const target = unobscuredInspectionAnchor(current, anchor, { width: container.clientWidth, height: container.clientHeight }, mapHierarchyObstacles(container), policy);
+    const unitX = screen(point.clone().add(new THREE.Vector3(1, 0, 0)));
+    const unitZ = screen(point.clone().add(new THREE.Vector3(0, 0, 1)));
+    const shift = cameraShiftForAnchor(current, target,
+      { x: unitX.x - current.x, y: unitX.y - current.y },
+      { x: unitZ.x - current.x, y: unitZ.y - current.y });
+    const translation = new THREE.Vector3(shift.x, 0, shift.z);
+    camera.position.add(translation);
+    controls.target.add(translation);
+    controls.update();
+    controls.enableDamping = damping;
+  };
   return {
     zoom: (factor) => {
       camera.zoom = THREE.MathUtils.clamp(camera.zoom * factor, MAP_ZOOM.minimum, MAP_ZOOM.maximum);
@@ -661,28 +676,9 @@ export function createAtlasRenderer(
     selectRoute: (id) => { if (id !== selectedRoute) { selectedRoute = id; drawRoutes(); } },
     frameCity: (id, anchor, policy) => {
       const city = cityLabels.find((candidate) => candidate.id === id);
-      if (!city) return;
-      const damping = controls.enableDamping;
-      controls.enableDamping = false;
-      controls.update();
-      camera.updateMatrixWorld();
-      const screen = (point: THREE.Vector3): ScreenPoint => {
-        const projected = point.clone().project(camera);
-        return { x: (projected.x + 1) / 2, y: (1 - projected.y) / 2 };
-      };
-      const current = screen(city.point);
-      const target = unobscuredInspectionAnchor(current, anchor, { width: container.clientWidth, height: container.clientHeight }, mapHierarchyObstacles(container), policy);
-      const unitX = screen(city.point.clone().add(new THREE.Vector3(1, 0, 0)));
-      const unitZ = screen(city.point.clone().add(new THREE.Vector3(0, 0, 1)));
-      const shift = cameraShiftForAnchor(current, target,
-        { x: unitX.x - current.x, y: unitX.y - current.y },
-        { x: unitZ.x - current.x, y: unitZ.y - current.y });
-      const translation = new THREE.Vector3(shift.x, 0, shift.z);
-      camera.position.add(translation);
-      controls.target.add(translation);
-      controls.update();
-      controls.enableDamping = damping;
+      if (city) framePoint(city.point, anchor, policy);
     },
+    framePoint,
     restoreCamera: (view) => {
       const damping = controls.enableDamping;
       controls.enableDamping = false;
@@ -701,6 +697,7 @@ export function createAtlasRenderer(
     showEvents: cues.show,
     clearEvents: cues.clear,
     setMotion: (value) => {
+      moving = value;
       cues.setMotion(value);
     },
     dispose: () => {

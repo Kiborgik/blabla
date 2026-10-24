@@ -11,7 +11,7 @@ export interface WoodlandVisualFacts {
 export function woodlandStandParts(parts: readonly VisualPart[], facts: WoodlandVisualFacts | null | undefined, height: number): VisualPart[] {
   if (!facts || facts.lastHarvestRound === null || !Number.isSafeInteger(facts.lastHarvestRound) || facts.lastHarvestRound < 0
     || !Number.isSafeInteger(facts.capacity) || facts.capacity <= 0 || !Number.isSafeInteger(facts.stock) || facts.stock < 0 || facts.stock >= facts.capacity) return [...parts];
-  const canopies = parts.filter(part => part.shape === 'canopy');
+  const canopies = parts.filter(part => part.shape === 'canopy' || part.shape === 'broadleaf');
   const fraction = facts.stock / facts.capacity;
   const matureCount = 1 + Math.floor(fraction * (canopies.length - 1));
   const recovering = facts.current && Number.isSafeInteger(facts.recovered) && facts.recovered > 0 && facts.recovered <= facts.stock;

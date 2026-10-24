@@ -4,15 +4,15 @@ import type { ViewerPreferences } from './viewer-state.ts';
 
 export const VIEWER_PALETTES = {
   light: {
-    paper: '#f6f3e9', panel: '#f6f3e9', ink: '#233c36', muted: '#52634f',
-    gold: '#785823', surface: '#e8eadb', border: '#707b62', selection: '#dddcc9',
+    paper: '#e5e4da', panel: '#f2efe4', ink: '#1d3347', muted: '#506173',
+    gold: '#765921', surface: '#e6e7df', border: '#77715e', selection: '#d9dfdf',
     positive: '#355b34', 'positive-surface': '#e8efd7',
     negative: '#873e29', 'negative-surface': '#f7e3d3',
     'cue-paper': '#173e45', 'cue-ink': '#f5e6bc', 'cue-border': '#dbc383',
   },
   dark: {
-    paper: '#132c30', panel: '#18363a', ink: '#f3e8cd', muted: '#b9c8bb',
-    gold: '#e5bf72', surface: '#23464a', border: '#8daba7', selection: '#31565a',
+    paper: '#0c1724', panel: '#152638', ink: '#f3ead4', muted: '#bdc9d0',
+    gold: '#d4b77d', surface: '#20384c', border: '#929da5', selection: '#2a4258',
     positive: '#c2e3a5', 'positive-surface': '#254331',
     negative: '#ffc3a2', 'negative-surface': '#542f2a',
     'cue-paper': '#102b31', 'cue-ink': '#f5e6bc', 'cue-border': '#e5bf72',

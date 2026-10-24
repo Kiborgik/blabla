@@ -1,3 +1,4 @@
+import { VIEWER_PALETTES } from '../web/viewer-appearance.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -93,14 +94,18 @@ void test('installed town evidence excludes queued work and distinguishes buildi
 void test('the history opener has explicit contrasting frame colors independent of the page theme', () => {
   const css = readFileSync(new URL('../web/spectator-hud.css', import.meta.url), 'utf8');
   const rule = css.match(/#app #events-open\s*\{([^}]*)\}/s)?.[1]; assert.ok(rule);
-  const foreground = css.match(/--hud-ink:\s*(#[a-f\d]{6})/i)?.[1]; assert.ok(foreground);
-  const background = rule.match(/background:\s*(#[a-f\d]{6})/i)?.[1]; assert.ok(background);
+  assert.match(css, /--hud-ink:\s*var\(--ink\)/);
+  assert.match(css, /--hud-surface:\s*var\(--surface\)/);
+  assert.match(rule, /background:\s*var\(--hud-surface\)/);
   assert.match(rule, /color: var\(--hud-ink\)/);
   const luminance = (hex: string): number => [.2126, .7152, .0722].reduce((sum, weight, index) => {
     const channel = parseInt(hex.slice(index * 2 + 1, index * 2 + 3), 16) / 255;
     return sum + weight * (channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
   }, 0);
-  assert.ok((Math.max(luminance(foreground), luminance(background)) + .05) / (Math.min(luminance(foreground), luminance(background)) + .05) >= 4.5);
+  for (const palette of Object.values(VIEWER_PALETTES)) {
+    const foreground = palette.ink; const background = palette.surface;
+    assert.ok((Math.max(luminance(foreground), luminance(background)) + .05) / (Math.min(luminance(foreground), luminance(background)) + .05) >= 4.5);
+  }
 });
 
 void test('construction commitments show the exact active order rather than completed assets or an invented plan', () => {

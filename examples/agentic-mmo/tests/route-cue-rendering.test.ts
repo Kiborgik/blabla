@@ -154,6 +154,32 @@ function recordingDocument(obstacles: NodeRecord[] = [], cueSize = { width: 172,
   return { nodes, restore: () => { if (old) Object.defineProperty(globalThis, 'document', old); else Reflect.deleteProperty(globalThis, 'document'); } };
 }
 
+void test('routine production remains recorded without floating cards while discoveries use an accessible locator', (context) => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const base = fixture(); const stream = createCueStream(); stream.observe(base, 3);
+  const produced = { ...ordinary('11:0'), type: 'settlement-production', effects: ['Produced 3 Food'] };
+  const operated = { ...ordinary('11:1'), type: 'building-operation', title: 'Library operated', effects: ['Produced 3 Science'] };
+  const discovery = { ...ordinary('11:2'), type: 'research-completed', title: 'Aster discovers Writing', effects: ['Technology writing unlocked'] };
+  const events = [produced, operated, discovery]; const before = structuredClone(events);
+  const batch = stream.observe({ ...base, revision: 11, events }, 3);
+  assert.deepEqual(batch.events.map(cue => cue.eventId), [discovery.id]);
+  assert.deepEqual(events, before);
+  const dom = recordingDocument([], { width: 30, height: 30 });
+  try {
+    const host = document.createElement('main');
+    const cues = createWorldCues(host, world, () => ({ x: 500, y: 350 })); cues.show(batch.events);
+    const locator = dom.nodes.find(node => node.dataset['event'] === discovery.id); assert.ok(locator);
+    assert.match(locator.className, /event-locator/);
+    assert.equal(locator.attributes.get('role'), 'img');
+    assert.match(locator.attributes.get('aria-label') ?? '', /Writing/);
+    assert.equal(locator.content().trim(), '');
+    assert.equal(dom.nodes.some(node => node.className === 'cue-deltas'), false);
+    cues.dispose();
+  } finally { dom.restore(); }
+  const blocked = { ...operated, id: '12:0', title: 'Library blocked', effects: ['Inputs unavailable'] };
+  assert.deepEqual(stream.observe({ ...base, revision: 12, events: [...events, blocked] }, 3).events.map(cue => cue.eventId), [blocked.id]);
+});
+
 void test('shared DOM adapter places two stationary exact-town marks and one result card with cleanup', (context) => {
   context.mock.timers.enable({ apis: ['setTimeout'] });
   const dom = recordingDocument();

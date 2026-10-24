@@ -64,7 +64,8 @@ export function createCueStream(): { observe: (observation: RouteCueObservation 
     const batch = projectRouteCues(cursor, observation, 3);
     cursor = batch.cursor;
     if (observation.mode === 'history' || (previous?.identity === observation.identity && observation.revision <= previous.revision)) return { events: [], routeResults: [] };
-    const events = ordinary.observe(observation.identity, observation.events.filter((event) => (!event.type.startsWith('trade-') || event.type === 'trade-fair') && !event.type.startsWith('border-')));
+    const events = ordinary.observe(observation.identity, observation.events.filter((event) => (!event.type.startsWith('trade-') || event.type === 'trade-fair') && !event.type.startsWith('border-')
+      && event.type !== 'settlement-production' && !(event.type === 'building-operation' && eventVisual(event)?.cue === 'work')));
     if (observation.mode !== 'live' || previous?.resumeBaseline) return { events: [], routeResults: [] };
     const order = new Map(observation.events.map((event, index) => [event.id, { importance: event.importance, index }]));
     const limit = Number.isFinite(slots) ? Math.min(3, Math.max(0, Math.floor(slots))) : 0;
@@ -195,10 +196,11 @@ export function createWorldCues(container: HTMLElement, world: AtlasWorld, proje
             marks.push({ element: mark, anchor: endpoint });
           }
         } else if (!('kind' in event)) {
-          element.className = `world-cue ${event.cue}`;
-          title.append(visualIcon(event.icon), document.createTextNode(event.label));
-          const deltas = document.createElement('div'); deltas.className = 'cue-deltas'; renderDeltas(deltas, event.deltas.slice(0, 3));
-          card.append(title, deltas);
+          element.className = `world-cue event-locator ${event.cue}`;
+          element.setAttribute('role', 'img');
+          element.setAttribute('aria-label', `${event.label}. ${event.detail}`);
+          element.title = `${event.label}. ${event.detail}`;
+          card.append(visualIcon(event.icon));
         }
         element.append(card); layer.append(element);
         const duration = 'kind' in event ? 2600 : event.durationMs;

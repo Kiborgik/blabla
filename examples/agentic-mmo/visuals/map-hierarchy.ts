@@ -211,7 +211,7 @@ export function allocateMapHierarchy(anchors: readonly HierarchyAnchor[], frame:
     const fontSize = item.selected && item.kind === 'town' ? 14 : 12;
     const caption = hierarchyCaption(item.shortLabel ?? item.label, item.kind, frame.width);
     const placement: HierarchyPlacement = { id: item.id, kind: item.kind, anchor: { x: item.x, y: item.y }, mark: null, symbol: null, label: null, leader: null,
-      caption, fullLabel: item.label, fontSize, symbolSize: item.kind === 'resource' ? 15 : item.kind === 'site' ? 20 : item.selected ? 26 : item.kind === 'town' ? 22 : 20,
+      caption, fullLabel: item.label, fontSize, symbolSize: item.kind === 'resource' ? 15 : item.kind === 'town' ? item.selected ? 22 : 20 : 20,
       emphasis: item.selected ? 'selected' : item.kind === 'wonder' && item.completed ? 'landmark' : item.kind === 'resource' ? 'subtle' : 'normal',
       placementMode: 'omitted', fallbackReason: null };
     const omit = (reason: string): HierarchyPlacement => { placement.fallbackReason = reason; return placement; };

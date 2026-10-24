@@ -21,8 +21,8 @@ await test('exact local woodland stock changes stand density and height but reta
   const baseline = projectLandscape([forest], [], 'close');
   const full = projectLandscape([{ ...forest, woodland: facts(8) }], [], 'close');
   const empty = projectLandscape([{ ...forest, woodland: facts(0) }], [], 'close');
-  const fullCanopies = full.parts.filter(part => part.shape === 'canopy');
-  const emptyCanopies = empty.parts.filter(part => part.shape === 'canopy');
+  const fullCanopies = full.parts.filter(part => (part.shape === 'canopy' || part.shape === 'broadleaf'));
+  const emptyCanopies = empty.parts.filter(part => (part.shape === 'canopy' || part.shape === 'broadleaf'));
   assert.ok(emptyCanopies.length < fullCanopies.length);
   assert.ok(emptyCanopies.length > 0);
   assert.ok(empty.parts.some(part => part.id.includes(':stump:')));
@@ -53,7 +53,7 @@ await test('low saplings require positive current recorded recovery rather than 
   const recovering = render(1, 1, true);
   const saplings = recovering.filter(part => part.id.includes(':sapling:'));
   assert.ok(saplings.length > 0);
-  assert.ok(saplings.every(part => part.shape === 'canopy' && part.scale[1] >= .16 && part.scale[1] <= .24));
+  assert.ok(saplings.every(part => (part.shape === 'canopy' || part.shape === 'broadleaf') && part.scale[1] >= .16 && part.scale[1] <= .24));
   assert.ok(recovering.some(part => part.id.includes(':stump:')));
   for (const [stock, recovered, current, lastHarvest] of [[1, 0, true, 8], [1, 1, false, 8], [0, 0, true, 8], [8, 0, true, null]] as const) {
     assert.ok(render(stock, recovered, current, lastHarvest).every(part => !part.id.includes(':sapling:')));
@@ -71,7 +71,7 @@ await test('stock progression restores mature canopy coverage and height without
     for (let stock = 0; stock <= 8; stock++) {
       const input = [{ ...forest, woodland: facts(stock) }]; const before = structuredClone(input);
       const parts = projectLandscape(input, [], detail).parts;
-      const canopies = parts.filter(part => part.shape === 'canopy');
+      const canopies = parts.filter(part => (part.shape === 'canopy' || part.shape === 'broadleaf'));
       const area = canopies.reduce((sum, part) => sum + part.scale[0] * part.scale[2], 0);
       const height = Math.max(...canopies.map(part => part.scale[1]));
       assert.ok(area >= previousArea && height >= previousHeight);
@@ -89,10 +89,10 @@ await test('lumber stands frame unchanged working ground while charcoal retains 
       const original = projectLandscape([forest], [site], detail);
       const full = projectLandscape([{ ...forest, woodland: facts(8) }], [site], detail);
       const empty = projectLandscape([{ ...forest, woodland: facts(0) }], [site], detail);
-      const trees = full.parts.filter(part => part.shape === 'canopy');
+      const trees = full.parts.filter(part => (part.shape === 'canopy' || part.shape === 'broadleaf'));
       assert.ok(trees.length > 0);
       assert.ok(empty.parts.some(part => part.id.includes(':stump:')));
-      assert.ok(empty.parts.some(part => part.shape === 'canopy'));
+      assert.ok(empty.parts.some(part => (part.shape === 'canopy' || part.shape === 'broadleaf')));
       assert.deepEqual(empty.parts.filter(part => part.id.startsWith('ground:')), original.parts.filter(part => part.id.startsWith('ground:')));
       if (improvementId === 'charcoal-clearing') {
         assert.deepEqual(full, original);
@@ -141,7 +141,7 @@ await test('mature trees, retained stumps and recovery saplings inherit exact ri
           const result = projectLandscape([{ ...forest, woodland }, ...tiles.slice(1)], sites, detail, drainage);
           const parts = result.parts.filter(part => !part.id.startsWith('ground:'));
           assert.ok(parts.length > 0);
-          assert.ok(parts.some(part => part.shape === 'canopy'));
+          assert.ok(parts.some(part => (part.shape === 'canopy' || part.shape === 'broadleaf')));
           for (const part of parts) {
             const radius = Math.max(part.scale[0], part.scale[2]) / 2;
             assert.ok(!corridor.some(face => overlaps(part.position[0], part.position[2], radius + DRAINAGE_STYLE.forestSetback, face.points)), `${improvementId ?? 'forest'} ${detail} ${direction} ${part.id}`);

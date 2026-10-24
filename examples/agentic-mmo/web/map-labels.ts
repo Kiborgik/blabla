@@ -1,3 +1,4 @@
+import { spectatorObstacles, SPECTATOR_OBSTACLES } from './spectator-layout.ts';
 import { hierarchyCaption, type HierarchyAnchor, type ScreenBox } from '../visuals/map-hierarchy.ts';
 import { districtParts, districtLabel } from '../visuals/district-visuals.ts';
 import { damageMapLabel } from '../visuals/damage-visuals.ts';
@@ -27,21 +28,19 @@ export function mapLabelVisibility(labels: readonly MapLabel[], selected: string
   return visible;
 }
 
-const constructionGeometry = new WeakMap<SettlementFacts, Map<DetailLevel, SiteOverlayGeometry>>();
+const townGeometry = new WeakMap<SettlementFacts, Map<DetailLevel, SiteOverlayGeometry>>();
 
-function townConstructionBounds(city: AtlasWorld['cities'][number], height: number, project: (q: number, r: number, height: number) => { x: number; y: number }): ProjectedSiteOverlay | null {
+function townArchitectureBounds(city: AtlasWorld['cities'][number], height: number, project: (q: number, r: number, height: number) => { x: number; y: number }): ProjectedSiteOverlay | null {
   const facts = city.settlement;
-  const order = facts?.construction?.active;
-  if (!facts || !order || !('buildingId' in order) || (order.tileId !== undefined && order.tileId !== facts.tileId)) return null;
+  if (!facts) return null;
   const origin = project(city.q, city.r, height);
   const diameter = project(city.q + 2 / Math.sqrt(3), city.r, height);
   const detail = settlementDetail(Math.hypot(diameter.x - origin.x, diameter.y - origin.y));
-  let cache = constructionGeometry.get(facts);
-  if (!cache) { cache = new Map(); constructionGeometry.set(facts, cache); }
+  let cache = townGeometry.get(facts);
+  if (!cache) { cache = new Map(); townGeometry.set(facts, cache); }
   let geometry = cache.get(detail);
   if (!geometry) {
     const visual = settlementVisual(facts, detail);
-    if (!visual.construction) return null;
     geometry = prepareSiteOverlayGeometry(visual.parts);
     cache.set(detail, geometry);
   }
@@ -55,7 +54,7 @@ export function mapHierarchyAnchors(world: AtlasWorld, selected: string, selecte
   const anchors: HierarchyAnchor[] = world.cities.map(city => {
     const tile = world.tiles.find(tile => tile.q === city.q && tile.r === city.r);
     const tileId = tile?.id;
-    const geometry = townConstructionBounds(city, tile?.height ?? .4, project);
+    const geometry = townArchitectureBounds(city, tile?.height ?? .4, project);
     return { id: cityKey(city), kind: 'town', ...(geometry?.bounds ? { protectedBounds: geometry.bounds } : {}), label: damageMapLabel(city.capital, city.settlement?.damage ?? 0),
       ...project(city.q, city.r, tile?.height ?? .4), selected: cityKey(city) === selected, focused: context.focusedId === cityKey(city), importance: city.population ?? 0,
       ...(tileId === undefined ? {} : { tileId }) };
@@ -82,12 +81,7 @@ export function mapHierarchyAnchors(world: AtlasWorld, selected: string, selecte
 }
 
 export function mapHierarchyObstacles(container: HTMLElement): ScreenBox[] {
-  const origin = container.getBoundingClientRect();
-  const shell = container.closest('#app') ?? container.parentElement;
-  return [...shell?.querySelectorAll('.civilization-panel, .inspection, .world-heading, .chronicle, .map-tools, .layer-controls, .connection-actions, .masthead, .footer, .era-pill') ?? []].flatMap(element => {
-    const box = element.getBoundingClientRect();
-    return box.width && box.height ? [{ left: box.left - origin.left, top: box.top - origin.top, width: box.width, height: box.height }] : [];
-  });
+  return spectatorObstacles(container);
 }
 
 export interface SiteOverlaySource {
@@ -156,7 +150,7 @@ export function createMapCaptionMeasure(): (anchors: HierarchyAnchor[], width: n
 export function observeMapHierarchyObstacles(container: HTMLElement, changed: () => void): () => void {
   const shell = container.closest('#app') ?? container.parentElement;
   if (!shell) return () => {};
-  const selector = '.civilization-panel, .inspection, .world-heading, .chronicle, .map-tools, .layer-controls, .connection-actions, .masthead, .footer, .era-pill';
+  const selector = SPECTATOR_OBSTACLES;
   const resize = new ResizeObserver(changed);
   const refresh = (): void => { resize.disconnect(); for (const element of shell.querySelectorAll(selector)) resize.observe(element); };
   refresh();

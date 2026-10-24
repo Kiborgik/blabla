@@ -1,3 +1,7 @@
+import { civilizationRibbonSummary, renderCivilizationRibbonContent, organizeSpectatorInspection } from './spectator-shell.ts';
+import { presentChronicleStories, renderChronicle, type ChronicleDestination } from './chronicle-presentation.ts';
+import { createSpectatorFollowSession, createSpectatorCameraMotion, spectatorDestinationPoint } from './spectator-follow.ts';
+import { measuredSpectatorAnchor } from './spectator-layout.ts';
 import { inspectionSectionForSiteWork, inspectionRequestNeedsRender, siteInspectionRequestKey, mapInspectionSites, retainSiteOverlayFocus, restoreSiteOverlayFocus, type SiteInspectionWork } from './site-overlay-selection.ts';
 import { knowledgeRouteRecords, renderKnowledgeRoute } from './knowledge-inspection.ts';
 import { advanceLocalSimulationAsync, disposeLocalSimulationWorker } from './local-simulation-client.ts';
@@ -13,7 +17,7 @@ import { renderMarsBodyInspection } from './mars-body-inspection.ts';
 import './spectator-hud.css';
 import './mars-observation.css';
 import { renderMarsObservation, worldJourney } from './mars-observation.ts';
-import { civilizationSummary, developingTowns, renderDevelopingTowns, ongoingCommitments, renderOngoingCommitments, installedTownEvidence, spectatorChronicle, renderSpectatorChronicle, renderRecordedPolicyChoice, type SpectatorDestination } from './spectator-hud.ts';
+import { civilizationSummary, developingTowns, renderDevelopingTowns, ongoingCommitments, renderOngoingCommitments, installedTownEvidence, spectatorChronicle, renderRecordedPolicyChoice } from './spectator-hud.ts';
 import { projectTownTerritory } from '../visuals/territory-visuals.ts';
 import { observedPastoralSites } from '../core/simulation/pastoral.ts';
 import { townDevelopmentFacts } from '../visuals/wonder-visuals.ts';
@@ -32,8 +36,6 @@ import releaseData from '../public/version.json';
 import changelog from '../public/changelog.json';
 import { RESOURCE_IDS, TECHNOLOGIES } from '../core/content.ts';
 import { createPreviewWorld, atlasCoordinateShift } from './atlas.ts';
-import { mapContentWindow } from '../visuals/map-hierarchy.ts';
-import { mapHierarchyObstacles } from './map-labels.ts';
 import type { AtlasWorld } from './atlas.ts';
 import { createAtlasRenderer } from './renderer.ts';
 import type { AtlasRenderer } from './renderer.ts';
@@ -42,7 +44,7 @@ import { acceptsSnapshot, activityLabel, formatYear, parseWorldRead, projectWorl
 import type { LiveSnapshot } from './live-world.ts';
 import { parseRelease, releaseHistoryPage } from './viewer-state.ts';
 import { createViewerUpdates, preferencesAfterUpdate } from './viewer-updates.ts';
-import { createInspectionSession, inspectionAnchor, type InspectionFraming } from './inspection-camera.ts';
+import { createInspectionSession, type InspectionFraming } from './inspection-camera.ts';
 import { eventVisual } from '../visuals/world-visuals.ts';
 import type { RouteResultCue } from '../visuals/route-cues.ts';
 import { createCueStream, renderDeltas, routeResultPresentation, visualIcon } from './world-cues.ts';
@@ -91,14 +93,14 @@ app.innerHTML = `
     <div class="mode"><span class="status-dot"></span><span id="connection-label">CONNECTING</span><span class="mode-detail">View only</span></div>
   </header>
   <main class="observatory live-observatory">
-    <div id="map" class="map"><div id="city-labels" class="city-labels"></div></div>
+    <div id="map" class="map" role="region" tabindex="0" aria-label="World map. Arrow keys pan, plus and minus zoom, Home restores overview."><div id="city-labels" class="city-labels"></div></div>
     <section class="world-heading" aria-label="Current world status"><div class="world-calendar"><span id="world-id" class="eyebrow">SHARED WORLD</span><h1 id="world-title">Connecting to the world</h1><p id="world-detail">Looking for the latest committed state.</p><span class="world-mode" hidden></span></div><div class="body-switch" role="group" aria-label="World body to observe" aria-describedby="body-context-description"><button type="button" data-body="earth" aria-pressed="true" disabled>Earth</button><button type="button" data-body="mars" aria-pressed="false" disabled>Mars</button></div><p id="body-context" class="body-context" hidden></p><span id="body-context-description" class="sr-only"></span></section>
     <button class="era-pill" id="journey-open" data-open-journey type="button" aria-haspopup="dialog" aria-controls="journey-dialog" aria-label="Inspect world history and Earth to Mars journey" disabled><span><strong id="era-name">Early settlements</strong><small id="era-detail">A GROWING WORLD</small></span></button>
     <aside class="civilization-panel panel" aria-label="Civilizations" hidden><h2 class="sr-only">Civilizations · Select to inspect</h2><div class="civilization-list"></div></aside>
     <aside class="inspection panel" aria-label="Civilization inspection" hidden></aside>
     <div class="map-tools" role="group" aria-label="Map camera"><button id="zoom-in" type="button" aria-label="Zoom in">+</button><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="reset-camera" type="button" aria-label="Reset camera">Home</button></div>
     <div class="layer-controls" role="group" aria-label="Map layers"><button data-layer="borders" type="button" aria-pressed="${preferences.borders}">Borders</button><button data-layer="routes" type="button" aria-pressed="${preferences.routes}">Routes</button></div>
-    <section class="chronicle panel" aria-label="World chronicle"><div class="chronicle-heading"><span class="eyebrow">WORLD CHRONICLE</span><button id="events-open" class="text-button" data-open-events type="button" hidden>All events</button></div><ol id="major-event-list" aria-label="Latest major events, newest first"></ol><div id="connection-story"><span id="chronicle-label" class="eyebrow">WORLD CONNECTION</span><strong id="event-title">Connecting to the world</strong><p id="event-detail">Waiting for the first recorded changes.</p><div id="event-deltas" class="story-deltas" tabindex="0" aria-label="Latest event amounts; scroll for all recorded amounts"></div></div></section>
+    <section class="chronicle panel" aria-label="World chronicle"><div class="chronicle-heading"><span class="eyebrow">WORLD CHRONICLE</span><button id="follow-events" type="button" aria-pressed="false" title="Optional camera movement toward new recorded events">Follow events</button><button id="events-open" class="text-button" data-open-events type="button" hidden>All events</button></div><ol id="major-event-list" aria-label="Latest major events, newest first"></ol><div id="connection-story"><span id="chronicle-label" class="eyebrow">WORLD CONNECTION</span><strong id="event-title">Connecting to the world</strong><p id="event-detail">Waiting for the first recorded changes.</p><div id="event-deltas" class="story-deltas" tabindex="0" aria-label="Latest event amounts; scroll for all recorded amounts"></div></div></section>
     <div class="map-hint" id="map-hint">Drag to explore · Select a civilization or town</div>
     <div id="connection-actions" class="connection-actions"><button id="sample-open" type="button" hidden>View sample atlas</button><button id="live-open" type="button" hidden>Return to observatory</button><span id="render-mode"></span></div>
   </main>
@@ -124,7 +126,9 @@ element('#journey-open').append(visualIcon('inspect'));
 
 let atlas: AtlasRenderer | null = null;
 let initialOverview = preferences.selectedCity === null && preferences.zoom === 1 && preferences.x === 0 && preferences.z === 0;
+let overviewFrame = 0;
 let selectedRoute: string | null = null;
+let inspectionDestination: { identity: string; destination: ChronicleDestination } | null = null;
 let routeListPage = 0;
 let mapFingerprint = '';
 let civilizationFingerprint = '';
@@ -161,6 +165,52 @@ let inspectedCivilization = -1;
 let inspectedCity: string | null = null;
 const narrowLayout = window.matchMedia('(max-width: 1000px)');
 const inspectionCamera = createInspectionSession();
+const spectatorFollow = createSpectatorFollowSession();
+const spectatorMotion = createSpectatorCameraMotion();
+let followFrame = 0;
+let viewerMotion = true;
+function refreshFollowButton(): void {
+  const button = element('#follow-events');
+  if (!(button instanceof HTMLButtonElement)) return;
+  button.disabled = !atlas || !snapshot || mode === 'sample' || worldBody !== 'earth';
+  const status = spectatorFollow.status();
+  button.textContent = status === 'following' ? 'Following' : status === 'paused' ? 'Resume follow' : status === 'reduced-motion' ? 'Follow on · motion off' : 'Follow events';
+  button.setAttribute('aria-pressed', String(status === 'following' || status === 'reduced-motion'));
+  button.title = !viewerMotion ? 'Following is enabled, but camera motion is off. Select an event to locate it.' : 'Follow new recorded events. Dragging, zooming or inspecting pauses follow.';
+}
+function cancelFollowMotion(): void {
+  if (followFrame) cancelAnimationFrame(followFrame);
+  followFrame = 0;
+  spectatorMotion.cancel();
+}
+function interruptFollow(): void {
+  if (overviewFrame) { cancelAnimationFrame(overviewFrame); overviewFrame = 0; initialOverview = false; }
+  cancelFollowMotion(); spectatorFollow.interrupt(); refreshFollowButton();
+}
+function observeFollow(): void {
+  const state = snapshot?.state;
+  if (!state) return;
+  const target = spectatorFollow.observe({ identity: observedWorldKey(), revision: state.revision,
+    stories: presentChronicleStories(state, spectatorChronicle(state)), eventIds: state.events.map(event => event.id), world: displayed, now: performance.now(),
+    blocked: mode === 'sample' || worldBody !== 'earth' || document.hidden || element('.observatory').dataset['inspection'] === 'true' || !!document.querySelector('dialog[open]'),
+    reducedMotion: !viewerMotion });
+  refreshFollowButton();
+  if (!target || !atlas) return;
+  const identity = observedWorldKey();
+  const from = atlas.snapshot();
+  atlas.framePoint(target.point, measuredSpectatorAnchor(element('#map')), 'focus');
+  const to = atlas.snapshot(); atlas.restoreCamera(from);
+  cancelFollowMotion();
+  if (!spectatorMotion.start(from, to, performance.now())) return;
+  const animate = (now: number): void => {
+    followFrame = 0;
+    if (!atlas || observedWorldKey() !== identity || document.hidden || !viewerMotion || element('.observatory').dataset['inspection'] === 'true' || document.querySelector('dialog[open]')) { cancelFollowMotion(); return; }
+    const view = spectatorMotion.sample(now);
+    if (view) atlas.restoreCamera(view);
+    if (spectatorMotion.active()) followFrame = requestAnimationFrame(animate);
+  };
+  followFrame = requestAnimationFrame(animate);
+}
 const eventCues = createCueStream();
 let observedRouteResults: RouteResultCue[] = [];
 const settingsDialog = document.querySelector<HTMLDialogElement>('#settings-dialog');
@@ -168,7 +218,11 @@ if (!settingsDialog) throw new Error('Viewer settings dialog is missing');
 const viewerSettings = mountViewerSettings(settingsDialog, () => preferences, (value) => {
   preferences = { ...preferences, ...value, paused: value.effects === 'calm' };
   savePreferences();
-}, (moving) => atlas?.setMotion(moving));
+}, (moving) => {
+  viewerMotion = moving; atlas?.setMotion(moving);
+  if (!moving) cancelFollowMotion();
+  observeFollow(); refreshFollowButton();
+});
 
 const capabilityDialog = document.querySelector<HTMLDialogElement>('#capability-dialog');
 if (!capabilityDialog) throw new Error('The capability tree dialog is missing');
@@ -194,7 +248,7 @@ function currentCapabilityInput(): CapabilityTreeInput | null {
 }
 
 function savePreferences(): void {
-  preferences = worldView.capture(preferences, { ...preferences, ...inspectionCamera.savedCamera(atlas?.snapshot() ?? preferences) });
+  preferences = worldView.capture(preferences, { ...preferences, ...spectatorFollow.savedCamera(inspectionCamera.savedCamera(atlas?.snapshot() ?? preferences)) });
   try { localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences)); } catch { return; }
 }
 
@@ -203,8 +257,9 @@ function observedWorldKey(): string {
 }
 
 function clearObservedHistory(): void {
+  cancelFollowMotion(); spectatorFollow.stop(); refreshFollowButton();
   eventHistoryCaptured = false; eventHistoryRevision = -1; journeyRevision = -1; journeyIdentity = '';
-  chronicleIdentity = ''; chronicleFingerprint = ''; observedRouteResults = []; selectedRoute = null; routeListPage = 0;
+  chronicleIdentity = ''; chronicleFingerprint = ''; observedRouteResults = []; selectedRoute = null; inspectionDestination = null; routeListPage = 0;
   element('#events-dialog .dialog-intro').textContent = 'Waiting for committed world history.';
   element('#event-list').textContent = 'Waiting for committed world history.';
   element('#events-refresh').hidden = true;
@@ -320,7 +375,7 @@ function renderInspection(): void {
   inspectionFingerprint = fingerprint;
   inspectedCivilization = civ.id;
   inspectedCity = preferences.selectedCity;
-  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'local' ? 'LOCAL' : mode === 'live' ? 'CONNECTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${factionCrest(civ.id)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(cities.find(city => city.id === preferences.selectedCity)?.name ?? civ.character)}</p></div></div><details class="ambition" data-inspection-section="overview"><summary>Civilization aim</summary><p>${escapeText(civ.ambition)}</p></details>${actual ? `<dl class="resources resource-rail" data-inspection-section="overview" aria-label="Civilization Earth stores">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="${resourceGuide(resource).label}: ${exactNumber(actual.resources[resource])} stored. Inspect exact value and meaning."><span class="resource-amount">${numberPresentation(actual.resources[resource]).short}</span><span class="resource-name">${resourceGuide(resource).label}</span></button></dt><dd class="sr-only">${exactNumber(actual.resources[resource])} stored</dd></div>`).join('')}</dl><section class="research-detail" data-inspection-section="overview" aria-label="Research progress"></section><button class="capability-open" data-inspection-section="overview" data-open-capabilities type="button" aria-haspopup="dialog">Technology tree <span>Research &amp; buildings</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
+  panel.innerHTML = `<button class="sheet-close" type="button" aria-label="Close civilization details">Close ×</button><div class="inspection-top"><span class="eyebrow">CIVILIZATION</span><span class="preview-tag">${mode === 'sample' ? 'SAMPLE' : mode === 'local' ? 'LOCAL' : mode === 'live' ? 'CONNECTED' : 'LAST KNOWN'}</span></div><div class="inspection-title"><span class="focus-symbol" aria-hidden="true">${factionCrest(civ.id)}</span><div><h2>${escapeText(civ.name)}</h2><p>${escapeText(cities.find(city => city.id === preferences.selectedCity)?.name ?? civ.character)}</p></div></div><details class="ambition" data-inspection-section="overview"><summary>Civilization aim</summary><p>${escapeText(civ.ambition)}</p></details>${actual ? `<p class="eyebrow stockpile-caption" data-inspection-section="overview">Civilization stockpile</p><dl class="resources resource-rail" data-inspection-section="overview" aria-label="Civilization Earth stores">${RESOURCE_IDS.map((resource) => `<div><dt><button class="resource-help" type="button" data-resource="${resource}" aria-label="${resourceGuide(resource).label}: ${exactNumber(actual.resources[resource])} stored. Inspect exact value and meaning."><span class="resource-amount">${numberPresentation(actual.resources[resource]).short}</span><span class="resource-name">${resourceGuide(resource).label}</span></button></dt><dd class="sr-only">${exactNumber(actual.resources[resource])} stored</dd></div>`).join('')}</dl><section class="research-detail" data-inspection-section="overview" aria-label="Research progress"></section><button class="capability-open" data-inspection-section="overview" data-open-capabilities type="button" aria-haspopup="dialog">Technology tree <span>Research &amp; buildings</span></button><section class="city-details" aria-label="Selected settlement"></section>` : `<div class="capital-detail"><span>Sample capital</span><strong>${escapeText(civ.capital)}</strong></div><p class="inspection-note">Illustrative data. No live decisions or deliveries.</p>`}`;
   const capabilityOpener = panel.querySelector('[data-open-capabilities]');
   if (capabilityOpener) panel.insertBefore(capabilityOpener, panel.querySelector('.city-details'));
   const navigation = document.createElement('div'); navigation.className = 'inspection-sections'; navigation.setAttribute('role', 'group'); navigation.setAttribute('aria-label', 'Town inspection sections');
@@ -412,6 +467,7 @@ function renderInspection(): void {
     focusedDevelopment?.focus({ preventScroll: true });
     renderDevelopingTowns(host, towns, id => selectCity(id), activeViewIdentity);
   }
+  organizeSpectatorInspection(panel);
   for (const disclosure of panel.querySelectorAll<HTMLDetailsElement>('[data-town-disclosure]')) {
     disclosure.open = expandedTown.has(disclosure.dataset['townDisclosure']);
     if (disclosure.dataset['townDisclosure'] === focusedTown) disclosure.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true });
@@ -438,22 +494,24 @@ function renderInspection(): void {
 
 function frameInspection(policy: InspectionFraming = 'maintain'): void {
   if (!atlas || !inspectionCamera.active()) return;
+  if (element('.inspection').hidden) return;
+  if (inspectionDestination?.identity === observedWorldKey()) {
+    const point = spectatorDestinationPoint(inspectionDestination.destination, displayed);
+    if (point) { atlas.framePoint(point, measuredSpectatorAnchor(element('#map')), policy); return; }
+    inspectionDestination = null;
+  }
   const route = displayed.routes.find((entry) => entry.id === selectedRoute);
   if (route && routeInspectionCity(route) === null) return;
-  const map = element('#map').getBoundingClientRect();
-  const sheet = element('.inspection').getBoundingClientRect();
-  if (!sheet.height || !map.height) return;
-  const heading = element('.world-heading').getBoundingClientRect();
-  const tools = element('.map-tools').getBoundingClientRect();
-  const window = narrowLayout.matches ? null : mapContentWindow(map.width, map.height, mapHierarchyObstacles(element('#map')));
-  atlas.frameCity(preferences.selectedCity ?? '', window ? { x: (window.left + window.width / 2) / map.width, y: (window.top + window.height / 2) / map.height } : inspectionAnchor(map, heading.bottom, sheet.top, tools.left), policy);
+  atlas.frameCity(preferences.selectedCity ?? '', measuredSpectatorAnchor(element('#map')), policy);
 }
 
 function setInspectionOpen(open: boolean): void {
+  if (!open) inspectionDestination = null;
   const closedRoute = !open ? selectedRoute : null;
   if (closedRoute) { selectedRoute = null; atlas?.selectRoute(null); renderInspection(); }
   element('.observatory').dataset['inspection'] = String(open);
   if (open && atlas) {
+    interruptFollow();
     inspectionCamera.begin(atlas.snapshot());
     frameInspection('focus');
   } else {
@@ -478,6 +536,7 @@ function selectRoutePage(page: number): void {
 }
 
 function selectRoute(id: string): void {
+  inspectionDestination = null;
   if (worldBody !== 'earth') changeWorldBody('earth');
   const route = displayed.routes.find((entry) => entry.id === id);
   if (!route) return;
@@ -495,6 +554,7 @@ function selectRoute(id: string): void {
 }
 
 function selectCity(id: string, workId?: SiteInspectionWork): void {
+  inspectionDestination = null;
   if (worldBody !== 'earth') changeWorldBody('earth');
   const fromRoute = selectedRoute !== null;
   const city = displayed.cities.find((entry) => cityKey(entry) === id);
@@ -514,10 +574,16 @@ function selectCity(id: string, workId?: SiteInspectionWork): void {
   savePreferences();
 }
 
-function navigateStory(destination: SpectatorDestination): void {
-  if (destination.kind === 'route') selectRoute(destination.id);
+function navigateStory(destination: ChronicleDestination): void {
+  interruptFollow();
+  if (destination.kind === 'site') selectCity(destination.cityId, destination.workId);
+  else if (destination.kind === 'route') selectRoute(destination.id);
   else if (destination.kind === 'city') selectCity(destination.id);
   else selectCivilization(destination.id);
+  if (destination.kind !== 'civilization' && spectatorDestinationPoint(destination, displayed)) {
+    inspectionDestination = { identity: observedWorldKey(), destination };
+    frameInspection('focus');
+  }
 }
 
 function selectCivilization(id: number): void {
@@ -572,10 +638,16 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
     return [civ.id, colony ? `${colony.status.replaceAll('-', ' ')} · ${colony.population} on Mars` : snapshot && mode !== 'sample' ? civilizationSummary(snapshot.state, civ.id) : 'Sample civilization'];
   }));
   const focusedCiv = document.activeElement instanceof HTMLElement ? document.activeElement.dataset['civ'] : undefined;
-  const listFingerprint = JSON.stringify(civs.map(({ id, name, character, color, symbol }) => ({ id, name, character, color, symbol, summary: summaries.get(id) })));
+  const ribbons = new Map(civs.map(civ => [civ.id, snapshot && mode !== 'sample' && !mars ? civilizationRibbonSummary(snapshot.state, civ.id) : null]));
+  const listFingerprint = JSON.stringify(civs.map(({ id, name, character, color, symbol }) => ({ id, name, character, color, symbol, summary: summaries.get(id), ribbon: ribbons.get(id) })));
   if (listFingerprint !== civilizationFingerprint) {
   element('.civilization-list').innerHTML = civs.map((civ) => `<button class="civilization-row" data-civ="${civ.id}" type="button" style="--civ-color:${escapeText(civ.color)}" aria-pressed="${civ.id === preferences.selected}"><span class="civ-emblem" aria-hidden="true">${factionCrest(civ.id)}</span><span><strong>${escapeText(civ.name)}</strong><small>${escapeText(summaries.get(civ.id) ?? civ.character)}</small></span></button>`).join('');
-  for (const row of document.querySelectorAll<HTMLElement>('[data-civ]')) row.addEventListener('click', () => selectCivilization(Number(row.dataset['civ'])));
+  for (const row of document.querySelectorAll<HTMLElement>('[data-civ]')) {
+    const ribbon = ribbons.get(Number(row.dataset['civ']));
+    const host = row.querySelector<HTMLElement>(':scope > span:last-child');
+    if (ribbon && host) { host.querySelector('small')?.remove(); renderCivilizationRibbonContent(host, ribbon); }
+    row.addEventListener('click', () => selectCivilization(Number(row.dataset['civ'])));
+  }
   civilizationFingerprint = listFingerprint;
   if (focusedCiv) document.querySelector<HTMLButtonElement>(`[data-civ="${focusedCiv}"]`)?.focus({ preventScroll: true });
   }
@@ -587,6 +659,7 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
     const presentationCamera = worldBody === 'earth' ? atlas?.snapshot() : undefined;
     savePreferences();
     if (shift && (shift.x || shift.z)) {
+      cancelFollowMotion(); spectatorFollow.translate(shift.x, shift.z);
       preferences = { ...preferences, x: preferences.x + shift.x, z: preferences.z + shift.z };
       const framing = inspectionCamera.active(); inspectionCamera.release();
       if (framing) inspectionCamera.begin(preferences);
@@ -608,7 +681,15 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
       atlas = mars ? createMarsBodyRenderer(element('#map'), element('#city-labels'), mars, preferences, selectMarsCivilization, 'flat')
         : createFlatAtlasRenderer(element('#map'), world, rendererPreferences, selectCity, selectRoute);
     }
-    if (initialOverview && (mars || world.tiles.length)) { atlas.reset(); initialOverview = false; savePreferences(); }
+    if (initialOverview && (mars || world.tiles.length)) {
+      if (overviewFrame) cancelAnimationFrame(overviewFrame);
+      const identity = observedWorldKey();
+      overviewFrame = requestAnimationFrame(() => {
+        overviewFrame = 0;
+        if (!initialOverview || observedWorldKey() !== identity || !atlas) return;
+        atlas.reset(); initialOverview = false; savePreferences();
+      });
+    }
     mapFingerprint = fingerprint;
     element('#map').dataset['siteFocusWorld'] = observedWorldKey();
     if (focusedSite) requestAnimationFrame(() => {
@@ -671,15 +752,16 @@ function renderConnection(): void {
   renderDeltas(element('#event-deltas'), story?.deltas ?? routeResult?.deltas ?? visual?.deltas ?? []);
   element('#event-detail').hidden = !story?.summary || !!story.deltas.length;
   element('#events-open').hidden = !state?.events.length;
-  const stories = state ? spectatorChronicle(state) : [];
+  const stories = state ? presentChronicleStories(state, spectatorChronicle(state)) : [];
   const nextChronicle = JSON.stringify(stories);
   const nextChronicleIdentity = observedWorldKey();
   if (nextChronicleIdentity !== chronicleIdentity || nextChronicle !== chronicleFingerprint && !element('#major-event-list').contains(document.activeElement)) {
-    renderSpectatorChronicle(element('#major-event-list'), stories, navigateStory, nextChronicleIdentity);
+    renderChronicle(element('#major-event-list'), stories, navigateStory, nextChronicleIdentity);
     chronicleFingerprint = nextChronicle;
     chronicleIdentity = nextChronicleIdentity;
   }
   element('#connection-story').hidden = stories.length > 0;
+  observeFollow();
   element('#sample-open').hidden = snapshot !== null || mode === 'sample' || mode === 'loading';
   element('#live-open').hidden = mode !== 'sample';
   for (const button of document.querySelectorAll<HTMLButtonElement>('.map-tools button, .layer-controls button')) button.disabled = atlas === null || button.hasAttribute('data-layer') && worldBody === 'mars';
@@ -779,18 +861,38 @@ async function readWorld(): Promise<void> {
   finally { reading = false; renderConnection(); }
 }
 
-for (const [id, factor] of [['#zoom-in', 1.2], ['#zoom-out', 1 / 1.2]] as const) element(id).addEventListener('click', () => { atlas?.zoom(factor); frameInspection('focus'); savePreferences(); });
-element('#reset-camera').addEventListener('click', () => { setInspectionOpen(false); inspectionCamera.release(); atlas?.reset(); savePreferences(); });
+for (const [id, factor] of [['#zoom-in', 1.2], ['#zoom-out', 1 / 1.2]] as const) element(id).addEventListener('click', () => { interruptFollow(); atlas?.zoom(factor); frameInspection('focus'); savePreferences(); });
+element('#reset-camera').addEventListener('click', () => { interruptFollow(); setInspectionOpen(false); inspectionCamera.release(); atlas?.reset(); savePreferences(); });
+element('#follow-events').addEventListener('click', () => {
+  if (!atlas || !snapshot || mode === 'sample' || worldBody !== 'earth') return;
+  if (spectatorFollow.status() === 'following' || spectatorFollow.status() === 'reduced-motion') { cancelFollowMotion(); spectatorFollow.stop(); }
+  else { spectatorFollow.resume(atlas.snapshot()); }
+  observeFollow(); refreshFollowButton();
+});
 let mapPointer: { id: number; x: number; y: number } | null = null;
 element('#map').addEventListener('pointerdown', (event) => {
   if (event.target instanceof Element && event.target.closest('.flat-city, .city-label, .flat-route, .route-map-label')) return;
+  interruptFollow();
   mapPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
 }, { capture: true });
 element('#map').addEventListener('pointermove', (event) => {
-  if (mapPointer?.id === event.pointerId && Math.hypot(event.clientX - mapPointer.x, event.clientY - mapPointer.y) > 5) inspectionCamera.release();
+  if (mapPointer?.id === event.pointerId && Math.hypot(event.clientX - mapPointer.x, event.clientY - mapPointer.y) > 5) { inspectionCamera.release(); inspectionDestination = null; interruptFollow(); }
 }, { capture: true });
 for (const type of ['pointerup', 'pointercancel']) element('#map').addEventListener(type, () => { mapPointer = null; }, { capture: true });
-element('#map').addEventListener('wheel', () => inspectionCamera.release(), { passive: true });
+element('#map').addEventListener('wheel', () => { inspectionCamera.release(); inspectionDestination = null; interruptFollow(); }, { passive: true });
+element('#map').addEventListener('keydown', event => {
+  if (!(event.target instanceof Element) || event.target.closest('button, input, select, textarea, a') || worldBody !== 'earth' || !atlas) return;
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-', 'Home'].includes(event.key)) return;
+  event.preventDefault(); interruptFollow(); inspectionCamera.release(); inspectionDestination = null;
+  const camera = atlas.snapshot(); const step = 2 / camera.zoom;
+  if (event.key === 'ArrowLeft') atlas.restoreCamera({ ...camera, x: camera.x - step });
+  else if (event.key === 'ArrowRight') atlas.restoreCamera({ ...camera, x: camera.x + step });
+  else if (event.key === 'ArrowUp') atlas.restoreCamera({ ...camera, z: camera.z - step });
+  else if (event.key === 'ArrowDown') atlas.restoreCamera({ ...camera, z: camera.z + step });
+  else if (event.key === 'Home') atlas.reset();
+  else atlas.zoom(event.key === '-' ? 1 / 1.2 : 1.2);
+  savePreferences();
+});
 const inspectionResize = new ResizeObserver(() => frameInspection());
 inspectionResize.observe(element('#map'));
 inspectionResize.observe(element('.inspection'));
@@ -938,7 +1040,7 @@ function mountDeploymentUpdates(): ReturnType<typeof createViewerUpdates> {
       return await response.json() as unknown;
     },
     now: () => Date.now(), href: () => window.location.href,
-    preferences: () => worldView.capture(preferences, { ...preferences, ...inspectionCamera.savedCamera(atlas?.snapshot() ?? preferences) }),
+    preferences: () => worldView.capture(preferences, { ...preferences, ...spectatorFollow.savedCamera(inspectionCamera.savedCamera(atlas?.snapshot() ?? preferences)) }),
     attempts: { read: () => sessionStorage.getItem(RELOAD_KEY), write: (value) => sessionStorage.setItem(RELOAD_KEY, value) },
     readHistory: () => history.state as unknown,
     replaceHistory: (state, href) => history.replaceState(state, '', href),
@@ -955,13 +1057,13 @@ function mountDeploymentUpdates(): ReturnType<typeof createViewerUpdates> {
 }
 let deploymentUpdates = mountDeploymentUpdates();
 element('#update-action').addEventListener('click', () => deploymentUpdates.act());
-window.addEventListener('pagehide', () => deploymentUpdates.dispose());
+window.addEventListener('pagehide', () => { cancelFollowMotion(); deploymentUpdates.dispose(); });
 window.addEventListener('pageshow', (event) => {
   if (event.persisted) { deploymentUpdates = mountDeploymentUpdates(); void deploymentUpdates.check(); }
 });
 window.setInterval(() => { void readWorld(); }, 5000);
 window.setInterval(() => { void deploymentUpdates.check(); }, 30000);
-window.addEventListener('visibilitychange', () => { if (document.hidden) quietCues(); else { if (mode === 'local') observeLocalSimulation(); void readWorld(); void deploymentUpdates.check(); } });
+window.addEventListener('visibilitychange', () => { if (document.hidden) { quietCues(); cancelFollowMotion(); } else { if (mode === 'local') observeLocalSimulation(); void readWorld(); void deploymentUpdates.check(); } });
 renderConnection();
 if (new URL(window.location.href).searchParams.get('sample') === '1') showSample();
 else changeWorldSource(parseWorldSource(new URL(window.location.href).searchParams.get('world')) ?? worldSource);

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { AtlasWorld } from './atlas.ts';
-import { projectTerrainSurface, projectLandscape } from '../visuals/landscape.ts';
+import { projectTerrainSurface, projectLandscape, projectShoreBands } from '../visuals/landscape.ts';
 import { VISUAL_PALETTE } from '../visuals/world-visuals.ts';
 import { createPartMeshes } from './settlement-three.ts';
 
@@ -32,4 +32,32 @@ export function createTerrainMeshes(tiles: Parameters<typeof projectTerrainSurfa
     mesh.receiveShadow = true; mesh.castShadow = true; group.add(mesh);
   }
   return group;
+}
+
+export function createShoreMeshes(coast: Parameters<typeof projectShoreBands>[0]): THREE.Group {
+  const group = new THREE.Group();
+  const bands = projectShoreBands(coast);
+  for (const color of new Set(bands.map(band => band.color))) {
+    const selected = bands.filter(band => band.color === color);
+    const first = selected[0];
+    if (!first) continue;
+    const positions = selected.flatMap(band => [band.points[0], band.points[2], band.points[1], band.points[0], band.points[3], band.points[2]].flat());
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: first.opacity, side: THREE.DoubleSide, depthWrite: false }));
+    mesh.userData['shoreBands'] = selected.map(band => band.key);
+    group.add(mesh);
+  }
+  return group;
+}
+
+export function createWaterGlints(): THREE.LineSegments {
+  const positions: number[] = [];
+  for (let z = -44; z <= 44; z += 2.4) for (let x = -62; x <= 62; x += 4) {
+    const offset = Math.sin(x * 1.7 + z * 3.1) * .6;
+    positions.push(x + offset, -.012, z, x + offset + .6, -.012, z + .025);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  return new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: '#b4d1c6', transparent: true, opacity: .13, depthWrite: false }));
 }

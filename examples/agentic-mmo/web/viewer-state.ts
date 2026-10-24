@@ -31,7 +31,7 @@ export const DEFAULT_PREFERENCES: ViewerPreferences = {
   paused: false,
   borders: true,
   routes: true,
-  theme: 'system',
+  theme: 'dark',
   effects: 'rich',
 };
 

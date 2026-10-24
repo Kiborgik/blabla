@@ -15,7 +15,7 @@ export type { DetailLevel, VisualIcon } from './visual-language.ts';
 
 export interface VisualPart {
   id: string;
-  shape: 'box' | 'gable' | 'cylinder' | 'cone' | 'canopy';
+  shape: 'box' | 'gable' | 'cylinder' | 'cone' | 'canopy' | 'broadleaf';
   material: keyof typeof VISUAL_PALETTE | 'identity';
   position: readonly [number, number, number];
   scale: readonly [number, number, number];
@@ -40,7 +40,7 @@ export interface SettlementVisual {
   summarizedBuildings: string[];
 }
 
-export const SETTLEMENT_RENDER_SCALE = .7;
+export const SETTLEMENT_RENDER_SCALE = .88;
 
 const POPULATION_STEPS = [1, 4, 7, 10, 14, 20, 28, 40] as const;
 export type SettlementFacts = Pick<City, 'id' | 'civId' | 'tileId' | 'name' | 'population' | 'wellbeing' | 'damage' | 'buildings' | 'buildingOperations' | 'construction' | 'localPower'> & { worldSeed?: number; round?: number; terminal?: boolean; civicWorks?: CivicWorksView };

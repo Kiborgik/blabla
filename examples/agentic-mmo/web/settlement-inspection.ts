@@ -266,7 +266,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     picker.value = city.id; picker.addEventListener('change', () => onSelect(picker.value)); label.append(picker); townPicker = label;
   }
   const heading = text('h3', city.name, 'town-heading');
-  const people = text('p', `${city.population}${development?.growth ? ` / ${development.growth.capacity} housing` : ' people'} · ${city.wellbeing}% wellbeing`, 'settlement-facts');
+  const people = text('p', `${city.population} residents${development?.growth ? ` · Housing ${development.growth.capacity}` : ''} · ${city.wellbeing}% wellbeing`, 'settlement-facts');
   people.prepend(visualIcon('population'));
   host.append(heading, people, text('p', `Focus: ${city.focus} · ${city.damage}% damage`, 'settlement-facts'));
   if (townPicker) host.append(townPicker);

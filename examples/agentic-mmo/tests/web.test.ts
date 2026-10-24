@@ -543,31 +543,37 @@ await test('damage labels retain readable screen metrics and real repair cues an
   assert.ok(contrastRatio('#efaa79', '#153d54') >= 3);
 });
 
-await test('compact desktop story is height-scoped and retains scrolling numbers and a large history target', () => {
-  const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
-  const compactStart = css.indexOf('@media (min-width: 1001px) and (max-height: 850px)');
-  const compact = css.slice(compactStart, css.indexOf('\n}', compactStart) + 2);
+await test('canonical compact story fits bounded headlines without scrolling and preserves passive locator styling', () => {
+  const css = readFileSync(new URL('../web/spectator-hud.css', import.meta.url), 'utf8');
   const declarations = (selector: string): Map<string, string> => {
-    const start = compact.indexOf(`${selector} {`);
+    const start = css.indexOf(`${selector} {`);
     assert.ok(start >= 0);
-    const block = compact.slice(compact.indexOf('{', start) + 1, compact.indexOf('}', start));
-    return new Map(block.split(';').filter((entry) => entry.trim()).map((entry) => {
+    const block = css.slice(css.indexOf('{', start) + 1, css.indexOf('}', start));
+    return new Map(block.split(';').filter(entry => entry.trim()).map(entry => {
       const colon = entry.indexOf(':');
       return [entry.slice(0, colon).trim(), entry.slice(colon + 1).trim()];
     }));
   };
-  assert.ok(compact.startsWith('@media (min-width: 1001px) and (max-height: 850px)'));
-  const card = declarations('.live-observatory .chronicle');
-  assert.equal(card.get('overflow'), 'auto');
-  assert.equal(Number.parseInt(card.get('max-height') ?? ''), 126);
-  assert.equal(Number.parseInt(card.get('bottom') ?? ''), 28);
-  const history = declarations('.live-observatory #events-open');
+  const card = declarations('#app .chronicle');
+  assert.equal(card.get('overflow'), 'hidden');
+  assert.ok(Number.parseInt(card.get('width') ?? '') <= 280);
+  assert.equal(card.get('max-height'), 'none');
+  assert.equal(declarations('#app .chronicle-story strong').get('-webkit-line-clamp'), '2');
+  assert.equal(declarations('#app .chronicle-result').get('-webkit-line-clamp'), '1');
+  assert.equal(declarations('#app .chronicle-location').get('display'), 'none');
+  assert.ok(Number.parseInt(card.get('bottom') ?? '') >= 44);
+  const history = declarations('#app #events-open');
   assert.ok(Number.parseInt(history.get('min-height') ?? '') >= 44);
   assert.ok(Number.parseInt(history.get('min-width') ?? '') >= 44);
-  assert.equal(history.get('grid-row'), '1 / 3');
-  assert.equal(declarations('.live-observatory .chronicle .story-deltas').get('grid-column'), '1 / -1');
-  assert.ok(Number.parseInt(declarations('.live-observatory .chronicle #event-title').get('font-size') ?? '') >= 16);
-  assert.ok(!compact.includes('.inspection'));
+  assert.ok(Number.parseInt(declarations('#app .chronicle-story').get('min-height') ?? '') >= 44);
+  assert.match(css, /\.chronicle-story strong[^}]*14px\/1.35/);
+  const map = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
+  assert.match(map, /\.world-cue\.event-locator\s*\{[^}]*width: 30px;[^}]*height: 30px;/);
+  assert.match(map, /\.event-locator \.cue-card\s*\{[^}]*padding: 0;[^}]*background: #f4f0df;[^}]*border: 1.5px solid #20384c;[^}]*border-radius: 50%/);
+  assert.match(map, /#app \.world-cue\.event-locator::before, #app \.world-cue\.event-locator::after\s*\{[^}]*display: none;[^}]*content: none/);
+  assert.match(map, /\.world-cue\.route-result-card\s*\{[^}]*width: 180px; height: 44px/);
+  assert.match(map, /\.route-result-card \.cue-card\s*\{[^}]*height: 44px;[^}]*padding: 5px 8px/);
+
 });
 
 await test('the committed inspector wires canonical exact-town capability projection and semantic history', () => {
@@ -597,13 +603,13 @@ await test('Events remains a primary navigation control and returns focus to its
 });
 
 await test('small spectator layout keeps named dock and all story facts reachable without vertical clipping', () => {
-  const css = readFileSync(new URL('../web/styles.css', import.meta.url), 'utf8');
-  const responsive = css.slice(css.indexOf('@media (max-width: 1000px)', css.indexOf('.events-nav:focus-visible')));
+  const css = readFileSync(new URL('../web/spectator-hud.css', import.meta.url), 'utf8');
+  const responsive = css.slice(css.indexOf('@media (max-width: 1000px)'));
   assert.match(responsive, /\.civilization-row\s*\{[^}]*flex-direction: column/);
   assert.match(responsive, /\.civilization-row strong\s*\{[^}]*white-space: nowrap/);
   assert.match(responsive, /\.chronicle \.story-deltas\s*\{[^}]*flex-wrap: nowrap[^}]*overflow-x: auto/);
   assert.match(responsive, /\.map-tools\s*\{[^}]*flex-direction: row/);
-  assert.match(responsive, /\.layer-controls\s*\{[^}]*display: none/);
+  assert.match(responsive, /\.layer-controls[^{]*\{[^}]*display: none/);
   const main = readFileSync(new URL('../web/main.ts', import.meta.url), 'utf8');
   assert.match(main, /class="settings-layers"[\s\S]*?data-layer="borders"[\s\S]*?data-layer="routes"/);
 });

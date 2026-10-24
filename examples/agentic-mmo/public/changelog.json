@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-build.74",
+    "date": "2026-10-24",
+    "title": "A world worth watching",
+    "changes": [
+      "A compact civilization ribbon shows actual people, towns and current work. Readable town sheets and a short Chronicle keep the map in view, with detailed records still available.",
+      "Warmer terrain, layered shores, varied trees and clearer inhabited rooftops reveal the same world. Optional event following moves only the camera; manual exploration pauses it, and reduced motion is respected."
+    ]
+  },
+  {
     "version": "0.1.0-build.73",
     "date": "2026-10-24",
     "title": "Connection can grow over land",
@@ -15,15 +24,6 @@
     "changes": [
       "A civilization can compare retaining one productive operation with freeing its three residents for a fully supplied coastal opportunity. Food, Learning and accepted commitments remain protected.",
       "Pausing is optional preparation, not a promised departure. A later settlement is independently chosen and pays its actual founding costs; hypothetical town output is never spent in advance."
-    ]
-  },
-  {
-    "version": "0.1.0-build.71",
-    "date": "2026-10-24",
-    "title": "Prepare a shore, then fund the departure",
-    "changes": [
-      "A useful Boat yard can be prepared while protecting existing towns and paid work, without reserving households that have not moved. Already paid Yard work is not charged again.",
-      "A later coastal departure still independently checks its exact path, supplies and conserved residents. Preparation is not a promised settlement; Navigation and existing work remain independent choices."
     ]
   }
 ]

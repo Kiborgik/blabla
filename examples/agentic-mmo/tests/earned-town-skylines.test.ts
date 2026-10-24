@@ -38,7 +38,7 @@ const baseHeight = (stage: 'industrial' | 'launch', index: number, tier: number)
   : index === 1 ? stage === 'launch' ? .49 + tier * .045 : .44 + tier * .04 : .34 + tier * .035;
 const order = (buildingId: string): NonNullable<City['construction']> => ({ active: { id: `order-${buildingId}`, cityId: city.id, buildingId, ruleVersion: 1, startedRound: 5, paid: { materials: 12 }, workRequired: 24, workDone: 24 }, lastCompleted: null });
 
-await test('primitive and civic homes retain their exact legacy plain values across families, tiers and detail', () => {
+await test('primitive earth roofs retain one identity accent while civic homes retain earned family values', () => {
   for (const worldSeed of [0, 1701, 200346405]) for (const [civId, family] of legacyFamilies.entries()) {
     for (const primitive of [true, false]) for (const population of populations) for (const detail of details) {
       const input = { ...city, worldSeed, civId, population, buildings: primitive ? [] : ['academy'] };
@@ -51,7 +51,7 @@ await test('primitive and civic homes retain their exact legacy plain values acr
         const roofHeight = primitive ? .25 : family[3];
         return [
           { id: `home-${index}-wall`, shape: primitive ? 'cylinder' : 'box', material: primitive ? 'timber' : family[0], position: [x, height / 2, z], scale: [width, height, width], rotation: 0 },
-          { id: `home-${index}-roof`, shape: primitive ? 'cone' : family[2], material: primitive ? index % 2 ? 'grain' : family[1] : family[1], position: [x, height + roofHeight / 2, z], scale: [width + .055, roofHeight, width + .055], rotation: primitive ? 0 : family[4] },
+          { id: `home-${index}-roof`, shape: primitive ? 'cone' : family[2], material: primitive ? index === 0 ? family[1] : index % 2 ? 'grain' : 'roof' : family[1], position: [x, height + roofHeight / 2, z], scale: [width + .055, roofHeight, width + .055], rotation: primitive ? 0 : family[4] },
         ];
       });
       assert.equal(visual.development.stage, primitive ? 'primitive' : 'civic');

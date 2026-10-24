@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { settlementPartColor } from '../visuals/settlement-homes.ts';
 import test from 'node:test';
 import { projectLandscape, LANDSCAPE_BUDGETS, TERRITORY_STYLE, territoryEdgeTriangles, landscapeSurface } from '../visuals/landscape.ts';
 import type { LandscapeTile } from '../visuals/landscape.ts';
-import { settlementVisual, DETAIL_BUDGETS, SETTLEMENT_RENDER_SCALE, VISUAL_PALETTE } from '../visuals/world-visuals.ts';
+import { settlementVisual, DETAIL_BUDGETS, SETTLEMENT_RENDER_SCALE } from '../visuals/world-visuals.ts';
 import type { VisualPart } from '../visuals/world-visuals.ts';
 import { townPlanV1 } from '../visuals/town-plan.ts';
 import * as THREE from 'three';
@@ -76,7 +77,7 @@ await test('population still changes a town silhouette after far-detail house co
     assert.equal(visual.development.stage, 'primitive');
     const roofs = visual.parts.filter(part => /^home-\d+-roof$/.test(part.id));
     assert.equal(roofs.length, visual.houses);
-    assert.deepEqual(roofs.map(part => [part.shape, part.material]), [['cone', 'identity'], ['cone', 'grain'], ['cone', 'identity']]);
+    assert.deepEqual(roofs.map(part => [part.shape, part.material]), [['cone', 'identity'], ['cone', 'grain'], ['cone', 'roof']]);
   }
 });
 
@@ -105,7 +106,7 @@ await test('Three landscape uses the same active parts, batches geometry and rel
 });
 
 await test('terrain solids remain outward-facing and SVG scene faces paint in shared depth order', () => {
-  for (const shape of ['cone', 'canopy'] as const) {
+  for (const shape of ['cone', 'canopy', 'broadleaf'] as const) {
     const triangles = shapeTriangles(shape);
     let volume = 0;
     for (let index = 0; index < triangles.length; index += 9) {
@@ -368,7 +369,7 @@ await test('shared inhabited parts remain the exact Three instances at every det
     }
     const expected = new Map<string, string[]>();
     for (const part of parts) {
-      const color = part.material === 'identity' ? town.color : VISUAL_PALETTE[part.material];
+      const color = settlementPartColor(part, town.color);
       const key = JSON.stringify([shapeTriangles(part.shape).map(Math.fround), color.toLowerCase()]);
       const matrix = new THREE.Matrix4().compose(
         new THREE.Vector3(origin.x + part.position[0] * SETTLEMENT_RENDER_SCALE, floor + part.position[1] * SETTLEMENT_RENDER_SCALE, origin.z + part.position[2] * SETTLEMENT_RENDER_SCALE),

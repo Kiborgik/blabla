@@ -25,8 +25,18 @@ const CANOPY: PartShape = {
   faces: [...Array.from({ length: 6 }, (_, i) => [i, (i + 1) % 6, (i + 1) % 6 + 6, i + 6]), ...Array.from({ length: 6 }, (_, i) => [i + 6, (i + 1) % 6 + 6, 12]), ...Array.from({ length: 6 }, (_, i) => [(i + 1) % 6, i, 13])],
 };
 
+const BROADLEAF: PartShape = {
+  vertices: [...Array.from({ length: 24 }, (_, i): Point3 => {
+    const ring = Math.floor(i / 8); const radius = ring === 0 ? .28 : ring === 1 ? .5 : .39;
+    return [Math.cos(i % 8 * Math.PI / 4) * radius, ring === 0 ? -.42 : ring === 1 ? -.04 : .32, Math.sin(i % 8 * Math.PI / 4) * radius];
+  }), [0, .5, 0], [0, -.5, 0]],
+  faces: [...Array.from({ length: 16 }, (_, i) => { const next = Math.floor(i / 8) * 8 + (i + 1) % 8; return [i, next, next + 8, i + 8]; }),
+    ...Array.from({ length: 8 }, (_, i) => [i + 16, (i + 1) % 8 + 16, 24]),
+    ...Array.from({ length: 8 }, (_, i) => [(i + 1) % 8, i, 25])],
+};
+
 export function partShape(shape: VisualPart['shape']): PartShape {
-  return shape === 'gable' ? GABLE : shape === 'cylinder' ? CYLINDER : shape === 'cone' ? CONE : shape === 'canopy' ? CANOPY : BOX;
+  return shape === 'broadleaf' ? BROADLEAF : shape === 'gable' ? GABLE : shape === 'cylinder' ? CYLINDER : shape === 'cone' ? CONE : shape === 'canopy' ? CANOPY : BOX;
 }
 
 export function transformedVertices(part: VisualPart): Point3[] {

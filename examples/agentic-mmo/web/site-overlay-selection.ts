@@ -41,7 +41,7 @@ export function bindSiteInspection(element: HTMLElement | SVGElement, cityId: st
 export function handoffSiteOverlayFocus(element: HTMLElement | SVGElement, container: HTMLElement, cityId: string, workId: SiteInspectionWork | undefined, select: SiteInspectionSelect): void {
   if (document.activeElement !== element) return;
   element.blur();
-  container.tabIndex = -1;
+  if (!container.hasAttribute('tabindex')) container.tabIndex = -1;
   container.focus({ preventScroll: true });
   queueMicrotask(() => {
     if (document.activeElement !== container) return;
@@ -51,7 +51,7 @@ export function handoffSiteOverlayFocus(element: HTMLElement | SVGElement, conta
     const target = panel?.querySelector<HTMLElement>(panel.dataset['inspectionView'] === 'work' ? '.work-picker' : '[data-inspection-focus="overview"]')
       ?? panel?.querySelector<HTMLElement>('.sheet-close');
     if (target) target.focus({ preventScroll: true });
-    else { container.tabIndex = -1; container.focus({ preventScroll: true }); }
+    else { if (!container.hasAttribute('tabindex')) container.tabIndex = -1; container.focus({ preventScroll: true }); }
   });
 }
 
@@ -74,7 +74,7 @@ export function retainSiteOverlayFocus(container: HTMLElement, world: string): S
   const active = document.activeElement;
   const id = active?.getAttribute('data-site-id');
   if (!id || !active || !container.contains(active) || container.dataset['siteFocusWorld'] !== world) return null;
-  container.tabIndex = -1;
+  if (!container.hasAttribute('tabindex')) container.tabIndex = -1;
   container.focus({ preventScroll: true });
   return { id, world };
 }

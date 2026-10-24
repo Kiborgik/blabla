@@ -206,7 +206,7 @@ await test('river junctions stay within channel width and decorative forest foot
   };
   for (const detail of ['far', 'mid', 'close'] as const) {
     const before = projectLandscape(tiles, [], detail); const after = projectLandscape(tiles, [], detail, view);
-    const canopies = after.parts.filter(part => part.shape === 'canopy');
+    const canopies = after.parts.filter(part => (part.shape === 'canopy' || part.shape === 'broadleaf'));
     assert.ok(canopies.length > 0);
     assert.ok(canopies.every(part => !corridor.some(face => overlaps(part.position[0], part.position[2], Math.max(part.scale[0], part.scale[2]) / 2 + DRAINAGE_STYLE.forestSetback - 1e-10, face.points))));
     const originals = new Map(before.parts.map(part => [part.id, part]));

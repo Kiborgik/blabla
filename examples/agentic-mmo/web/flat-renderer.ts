@@ -1,3 +1,4 @@
+import { settlementPartColor } from '../visuals/settlement-homes.ts';
 import { RIVER_INTAKE_MARK_PATH } from '../visuals/river-intake-visuals.ts';
 import { selectedAcquiredLand } from '../visuals/territory-visuals.ts';
 import { allocateMapHierarchy, fitMapOverview, mapContentWindow, type ScreenBox } from '../visuals/map-hierarchy.ts';
@@ -9,7 +10,7 @@ import { visibleRoutePaths } from '../visuals/route-paths.ts';
 import { routeLabelKey, routeTitle, routeVisual, routeMapLabel } from '../visuals/route-visuals.ts';
 import { damageMapLabel } from '../visuals/damage-visuals.ts';
 import { cityKey, selectedCity } from './city-selection.ts';
-import { projectTerrainSurface, projectLandscape, LANDSCAPE_COLORS, DRAINAGE_STYLE, TERRITORY_STYLE } from '../visuals/landscape.ts';
+import { projectTerrainSurface, projectLandscape, projectShoreBands, LANDSCAPE_COLORS, DRAINAGE_STYLE, TERRITORY_STYLE } from '../visuals/landscape.ts';
 import { hexPosition, routeMapPositions, routeMapAnchor } from './atlas.ts';
 import type { RouteView } from '../visuals/route-visuals.ts';
 import type { AtlasWorld } from './atlas.ts';
@@ -175,6 +176,7 @@ export function createFlatAtlasRenderer(
   const definitions = node('defs', {});
   const waves = node('pattern', { id: 'atlas-wave-pattern', width: '4', height: '2.4', patternUnits: 'userSpaceOnUse' });
   waves.append(node('path', { d: 'M.3 .9 Q.8 .72 1.3 .9 M2.3 1.8 Q2.8 1.62 3.3 1.8', fill: 'none', stroke: '#87bcc0', 'stroke-opacity': '.09', 'stroke-width': '.025' }));
+  waves.append(node('animateTransform', { attributeName: 'patternTransform', type: 'translate', from: '0 0', to: '4 2.4', dur: '32s', repeatCount: 'indefinite' }));
   definitions.append(waves);
   ocean.append(node('rect', { x: '-500', y: '-500', width: '1000', height: '1000', fill: LANDSCAPE_COLORS.water }), node('rect', { x: '-500', y: '-500', width: '1000', height: '1000', fill: 'url(#atlas-wave-pattern)' }));
   const coast = node('g', { 'pointer-events': 'none' });
@@ -209,20 +211,19 @@ export function createFlatAtlasRenderer(
   let z = preferences.z;
   const tileLookup = new Map(world.tiles.map(tile => [`${tile.q},${tile.r}`, tile]));
   const landscape = projectLandscape(world.tiles, world.cities, 'far', world.drainage);
-  const coastPath = landscape.coast.map(edge => `M${flatPoints([[edge.from[0], 0, edge.from[1]], [edge.to[0], 0, edge.to[1]]]).replace(' ', 'L')}`).join(' ');
-  coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shallow, 'stroke-opacity': '.42', 'stroke-width': '.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
-  coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shallow, 'stroke-width': '.38', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
-  coast.append(node('path', { d: coastPath, fill: 'none', stroke: LANDSCAPE_COLORS.shore, 'stroke-width': '.08', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+  for (const band of projectShoreBands(landscape.coast)) coast.append(node('polygon', {
+    points: flatPoints(band.points), fill: band.color, 'fill-opacity': String(band.opacity), 'data-shore-band': band.key,
+  }));
   borders.append(acquired);
   const paintParts = (host: SVGGElement, parts: Parameters<typeof flatSceneFaces>[0], identity: string): void => {
     host.replaceChildren();
     for (const part of parts) {
-      if (part.shape !== 'canopy' && part.shape !== 'cone') continue;
-      const base = flatMapPoint(part.position[0], part.position[2], part.position[1] - part.scale[1] / 2);
-      host.append(node('ellipse', { cx: String(base.x + part.scale[1] * .16), cy: String(base.z + part.scale[1] * .12), rx: String(part.scale[0] * .47), ry: String(part.scale[2] * .24), fill: '#1b3529', 'fill-opacity': '.17', 'pointer-events': 'none' }));
+      if (part.shape !== 'canopy' && part.shape !== 'broadleaf' && part.shape !== 'cone' && !/wall$|body$|trunk:/.test(part.id)) continue;
+      const base = flatMapPoint(part.position[0], part.position[2], part.position[1] - part.scale[1] / 2 - (part.shape === 'broadleaf' ? .16 : 0));
+      host.append(node('ellipse', { cx: String(base.x + part.scale[1] * .16), cy: String(base.z + part.scale[1] * .12), rx: String(part.scale[0] * .47), ry: String(part.scale[2] * .24), fill: '#263d35', 'fill-opacity': '.23', 'pointer-events': 'none' }));
     }
     for (const face of flatSceneFaces(parts, .72)) {
-      const color = face.part.material === 'identity' ? identity : VISUAL_PALETTE[face.part.material];
+      const color = settlementPartColor(face.part, identity);
       const shaded = `#${[1, 3, 5].map((offset, index) => Math.round(Number.parseInt(color.slice(offset, offset + 2), 16) * (1 - face.shade) + ([24, 56, 46][index] ?? 0) * face.shade).toString(16).padStart(2, '0')).join('')}`;
       host.append(node('polygon', { 'data-part': face.part.id, points: face.points, fill: shaded }));
     }
@@ -324,7 +325,8 @@ export function createFlatAtlasRenderer(
     const box = svg.viewBox.baseVal;
     return { x: (point.x - box.x) / box.width * container.clientWidth, y: (point.z - box.y) / box.height * container.clientHeight };
   });
-  cues.setMotion(resolveAppearance(preferences, false, window.matchMedia('(prefers-reduced-motion: reduce)').matches).motion);
+  const setMotion = (value: boolean): void => { cues.setMotion(value); if (value) svg.unpauseAnimations?.(); else svg.pauseAnimations?.(); };
+  setMotion(resolveAppearance(preferences, false, window.matchMedia('(prefers-reduced-motion: reduce)').matches).motion);
   const resize = (): void => {
     const aspect = container.clientWidth / Math.max(container.clientHeight, 1);
     const halfHeight = (aspect < 1 ? 26 : 16) / zoom;
@@ -528,6 +530,18 @@ export function createFlatAtlasRenderer(
   });
   svg.addEventListener('pointerup', () => { pointer = null; });
   svg.addEventListener('pointercancel', () => { pointer = null; });
+  const framePoint: AtlasRenderer['framePoint'] = (source, anchor, policy) => {
+    const point = flatMapPoint(source.x, source.z, source.y);
+    const box = svg.viewBox.baseVal;
+    const current = { x: (point.x - box.x) / box.width, y: (point.z - box.y) / box.height };
+    const target = unobscuredInspectionAnchor(current, anchor, { width: container.clientWidth, height: container.clientHeight }, mapHierarchyObstacles(container), policy);
+    const shift = cameraShiftForAnchor(
+      current, target, { x: 1 / box.width, y: 0 }, { x: 0, y: .72 / box.height },
+    );
+    x += shift.x;
+    z += shift.z;
+    resize();
+  };
   return {
     zoom: (factor) => { zoom = Math.min(MAP_ZOOM.maximum, Math.max(MAP_ZOOM.minimum, zoom * factor)); resize(); },
     reset: () => {
@@ -543,23 +557,16 @@ export function createFlatAtlasRenderer(
     frameCity: (id, anchor, policy) => {
       const city = world.cities.find((candidate) => cityKey(candidate) === id);
       if (!city) return;
-      const point = flatHexPosition(city.q, city.r, tileLookup.get(`${city.q},${city.r}`)?.height ?? .4);
-      const box = svg.viewBox.baseVal;
-      const current = { x: (point.x - box.x) / box.width, y: (point.z - box.y) / box.height };
-      const target = unobscuredInspectionAnchor(current, anchor, { width: container.clientWidth, height: container.clientHeight }, mapHierarchyObstacles(container), policy);
-      const shift = cameraShiftForAnchor(
-        current, target, { x: 1 / box.width, y: 0 }, { x: 0, y: .72 / box.height },
-      );
-      x += shift.x;
-      z += shift.z;
-      resize();
+      const point = hexPosition(city.q, city.r);
+      framePoint({ x: point.x, z: point.z, y: tileLookup.get(`${city.q},${city.r}`)?.height ?? .4 }, anchor, policy);
     },
+    framePoint,
     restoreCamera: (camera) => { x = camera.x; z = camera.z; zoom = camera.zoom; resize(); },
     setLayer: (layer, visible) => { (layer === 'borders' ? borders : routes).style.display = visible ? '' : 'none'; resize(); },
     snapshot: () => ({ zoom, x, z }),
     showEvents: cues.show,
     clearEvents: cues.clear,
-    setMotion: cues.setMotion,
+    setMotion,
     dispose: () => { observer.disconnect(); stopObstacles(); cues.dispose(); svg.remove(); },
   };
 }

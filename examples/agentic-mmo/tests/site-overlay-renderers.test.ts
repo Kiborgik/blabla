@@ -323,3 +323,18 @@ await test('event cue placement consumes reserved overlay rectangles even when t
     cues.update([]); assert.equal(cue.hidden, false);
   } finally { cues.dispose(); }
 }));
+
+await test('exact-site focus handoffs preserve an explicitly keyboard-reachable map', async () => withOverlayDom(async () => {
+  const { map, picker } = overlayShell(); map.dataset['siteFocusWorld'] = 'world:keyboard'; map.setAttribute('tabindex', '0'); map.tabIndex = 0;
+  assert.ok(map instanceof HTMLElement);
+  const old = new OverlayElement('button'); old.dataset['siteId'] = district.id; map.append(old); old.focus();
+  const retained = retainSiteOverlayFocus(map, 'world:keyboard'); assert.ok(retained);
+  assert.equal(map.tabIndex, 0);
+  old.remove();
+  const chosen: string[] = [];
+  restoreSiteOverlayFocus(map, retained, 'world:keyboard', { cityId: district.cityId, workId: 'commercial-hub' }, (city, work) => { chosen.push(`${city}:${work}`); });
+  await Promise.resolve();
+  assert.equal(map.tabIndex, 0);
+  assert.equal(dom.activeElement, picker);
+  assert.deepEqual(chosen, ['harbor:commercial-hub']);
+}));

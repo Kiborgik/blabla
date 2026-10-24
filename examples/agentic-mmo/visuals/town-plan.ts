@@ -3,7 +3,7 @@ import type { BuildingSite } from './building-visuals.ts';
 export interface TownLot extends BuildingSite { id: string }
 export const TOWN_FARM_LOTS: readonly [TownLot, TownLot] = [
   { id: 'farm-main', x: .755, z: -.3, width: .41, depth: .36, height: 1 },
-  { id: 'farm-rear', x: .685, z: -.58, width: .27, depth: .2, height: 1 },
+  { id: 'farm-rear', x: .645, z: -.58, width: .27, depth: .2, height: 1 },
 ];
 
 export interface TownPlanV1 {
@@ -38,8 +38,8 @@ export function townPlanV1(city: { id: string; worldSeed?: number }): TownPlanV1
       : topology === 'split-court' ? .43
       : side < 0 ? .65 - .15 * row : .4 + .03 * row;
     const z = topology === 'crescent' ? .06 + .32 * row
-      : topology === 'split-court' ? .12 + .3 * row
-      : side < 0 ? .04 + .31 * row : .14 + .3 * row;
+      : topology === 'split-court' ? .08 + .27 * row
+      : side < 0 ? .04 + .27 * row : .1 + .27 * row;
     return lot(`home-${index}`, side * x + offsetX, z + offsetZ, .29, .29);
   });
   return {

@@ -34,3 +34,56 @@ void test('event pages bound visible cards to six while preserving every selecte
   assert.ok(filtered.rows.every(row => row.participants.some(person => person.name === 'Aster')));
   assert.equal(eventLogPage(rows, { actor: 'Missing', family: 'all', page: 0 }).rows.length, 0);
 });
+
+import type { AtlasWorld } from '../web/atlas.ts';
+import { mapHierarchyAnchors } from '../web/map-labels.ts';
+import { allocateMapHierarchy } from '../visuals/map-hierarchy.ts';
+import { DEFAULT_PREFERENCES, parsePreferences } from '../web/viewer-state.ts';
+import { flatMapPoint, transformedVertices } from '../web/settlement-parts.ts';
+import { settlementVisual, settlementDetail, SETTLEMENT_RENDER_SCALE } from '../visuals/world-visuals.ts';
+
+const town = { id: 0, cityId: 'town-a', name: 'Aster', shortName: 'Aster', capital: 'Hearth', color: '#ad914b', symbol: 'A', character: '', ambition: '', q: 0, r: 0, population: 9,
+  settlement: { id: 'town-a', worldSeed: 1701, civId: 0, tileId: 1, name: 'Hearth', population: 9, wellbeing: 70, damage: 0, buildings: ['farm', 'granary'] } };
+const world: AtlasWorld = { cities: [town], tiles: [{ id: 1, q: 0, r: 0, height: .4, terrain: 'grassland', owner: 0 }], routes: [] };
+const overlaps = (a: { left: number; top: number; width: number; height: number }, b: typeof a): boolean => a.left < b.left + b.width && a.left + a.width > b.left && a.top < b.top + b.height && a.top + a.height > b.top;
+
+void test('town crests protect complete installed roof and field geometry without requiring active construction', () => {
+  const before = structuredClone(world);
+  for (const scale of [16, 42, 65]) {
+    const project = (q: number, r: number, height: number) => { const p = flatMapPoint(Math.sqrt(3) * (q + r / 2), 1.5 * r, height); return { x: 350 + p.x * scale, y: 300 + p.z * scale }; };
+    const anchor = mapHierarchyAnchors(world, 'town-a', null, project)[0];
+    assert.ok(anchor?.protectedBounds);
+    const box = anchor.protectedBounds;
+    const visual = settlementVisual(town.settlement, settlementDetail(scale * 2));
+    for (const part of visual.parts) for (const [x, y, z] of transformedVertices(part)) {
+      const p = project((x / Math.sqrt(3) - z / 3) * SETTLEMENT_RENDER_SCALE, z / 1.5 * SETTLEMENT_RENDER_SCALE, .4 + y * SETTLEMENT_RENDER_SCALE);
+      assert.ok(p.x >= box.left && p.x <= box.left + box.width && p.y >= box.top && p.y <= box.top + box.height, part.id);
+    }
+    const placed = allocateMapHierarchy([anchor], { width: 1182, height: 758, tileDiameter: scale * 2 }).items[0];
+    assert.ok(placed?.mark);
+    assert.equal(placed.placementMode, 'exterior');
+    assert.equal(overlaps(placed.mark, box), false);
+    assert.ok(placed.mark.width >= 44 && placed.mark.height >= 44);
+    assert.ok(placed.symbolSize <= 22);
+  }
+  assert.deepEqual(world, before);
+});
+
+void test('new viewers use a dark shell while explicit saved theme choices remain unchanged', () => {
+  assert.equal(DEFAULT_PREFERENCES.theme, 'dark');
+  assert.equal(parsePreferences(null).theme, 'dark');
+  for (const theme of ['light', 'system', 'dark'] as const) assert.equal(parsePreferences({ schemaVersion: 1, theme }).theme, theme);
+});
+
+void test('safe camera anchors use actual desktop and narrow obstacle bounds', async () => {
+  const { spectatorSafeAnchor } = await import('../web/spectator-layout.ts');
+  for (const [width, height, obstacles] of [
+    [1182, 758, [{ left: 0, top: 0, width: 1182, height: 130 }, { left: 810, top: 144, width: 352, height: 550 }, { left: 0, top: 710, width: 1182, height: 48 }]],
+    [390, 844, [{ left: 0, top: 0, width: 390, height: 140 }, { left: 10, top: 430, width: 370, height: 300 }, { left: 0, top: 744, width: 390, height: 100 }]],
+  ] as const) {
+    const anchor = spectatorSafeAnchor(width, height, obstacles);
+    const x = anchor.x * width; const y = anchor.y * height;
+    assert.ok(x > 0 && x < width && y > 0 && y < height);
+    for (const box of obstacles) assert.ok(x < box.left || x > box.left + box.width || y < box.top || y > box.top + box.height);
+  }
+});

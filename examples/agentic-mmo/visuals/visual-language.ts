@@ -35,8 +35,8 @@ export const METRIC_LABELS = {
 export type VisualMetric = keyof typeof METRIC_LABELS;
 
 export const VISUAL_PALETTE = {
-  plaster: '#f0d9ab', timber: '#70513a', roof: '#b86443', stone: '#b1ab91',
-  canopy: '#3f714c', canopyLight: '#63884e', rock: '#8b927e', rockLight: '#c8c6a7', settled: '#b8a377',
+  plaster: '#f3dfb7', timber: '#806044', roof: '#b66a49', stone: '#b5b09b',
+  canopy: '#3b6753', canopyLight: '#708958', rock: '#78888b', rockLight: '#bcc3b6', settled: '#b4a184',
   soil: '#765638', crop: '#8eaa53', grain: '#d7bd60', metal: '#687b7e',
   positive: '#a6c982', negative: '#efaa79', neutral: '#f5e6bc', water: '#153d54', studyLight: '#93cbd6',
 } as const;

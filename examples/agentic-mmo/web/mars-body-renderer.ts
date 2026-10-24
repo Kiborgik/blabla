@@ -216,6 +216,13 @@ export function createMarsBodyRenderer(
   measure(); render();
   return {
     zoom, reset, select, snapshot: () => ({ ...view }), restoreCamera: next => { measure(); camera(next); },
+    framePoint: (worldPoint, anchor) => {
+      if (![worldPoint.x, worldPoint.y, worldPoint.z, anchor.x, anchor.y].every(Number.isFinite)) return;
+      measure(); render();
+      const point = flatMapPoint(worldPoint.x, worldPoint.z, worldPoint.y);
+      camera({ ...view, x: point.x - 1 - (bounded(anchor.x, .05, .95, .5) * width - origin.x) / pixels,
+        z: (point.z - (bounded(anchor.y, .05, .95, .5) * height - origin.y) / pixels) / .72 + 4 });
+    },
     frameCity: (id, anchor) => {
       const site: MarsBodySite | undefined = scene.sites.find(candidate => candidate.selectionId === id) ?? scene.transits.find(candidate => candidate.selectionId === id);
       if (!site || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y)) return;

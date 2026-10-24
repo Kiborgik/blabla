@@ -1,4 +1,4 @@
-import { civilizationIdentity } from './visual-language.ts';
+import { civilizationIdentity, VISUAL_PALETTE } from './visual-language.ts';
 import type { SettlementDevelopment } from './settlement-development.ts';
 import type { TownLot } from './town-plan.ts';
 import type { SettlementFacts, VisualPart } from './world-visuals.ts';
@@ -60,8 +60,14 @@ export function settlementHomeParts(city: HomeFacts, stage: SettlementDevelopmen
       { id: `home-${index}-wall`, shape: earned ? earned.wallShape : primitive ? 'cylinder' : 'box', material: earned ? earned.wall : primitive ? 'timber' : identity.wall,
         position: [x, height / 2, z], scale: [width, height, width], rotation: 0 },
       { id: `home-${index}-roof`, shape: earned ? earned.roofShape : primitive ? 'cone' : identity.roofShape,
-        material: earned ? earned.roof : primitive ? index % 2 ? 'grain' : identity.roof : identity.roof,
+        material: earned ? earned.roof : primitive ? index === 0 ? identity.roof : index % 2 ? 'grain' : 'roof' : identity.roof,
         position: [x, height + roofHeight / 2, z], scale: [roofWidth, roofHeight, roofWidth], rotation: primitive ? 0 : identity.rotation },
     ];
   });
+}
+
+export function settlementPartColor(part: Pick<VisualPart, 'id' | 'material'>, identity: string): string {
+  const color = part.material === 'identity' ? identity : VISUAL_PALETTE[part.material];
+  if (!/^home-\d+-roof$/.test(part.id)) return color;
+  return `#${[1, 3, 5].map(offset => Math.round(Number.parseInt(color.slice(offset, offset + 2), 16) * .76).toString(16).padStart(2, '0')).join('')}`;
 }
