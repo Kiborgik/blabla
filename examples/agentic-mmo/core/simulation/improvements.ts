@@ -1,3 +1,5 @@
+import type { WoodlandPlan } from '../woodland-types.ts';
+import { isWoodlandImprovement, reserveWoodlandHarvest, woodlandOperationReceipt } from './woodlands.ts';
 import { isCoastalSite } from './coastal.ts';
 import { purchasedSiteBlock } from './site-binding.ts';
 import { IMPROVEMENTS, IMPROVEMENT_RULES, RESIDENT_CAPACITY_RULES, RESOURCE_IDS } from '../content.ts';
@@ -106,10 +108,13 @@ export function installImprovement(state: WorldState, city: City, order: Improve
   city.construction.lastCompleted = structuredClone(completion);
 }
 
-export function allocateImprovements(state: WorldState, city: City, available: number, budget: Resources): number {
+export function allocateImprovements(state: WorldState, city: City, available: number, budget: Resources, woodlandPlan: WoodlandPlan | null = null): number {
   if (!hasFeatures(state, [IMPROVEMENT_RULES.featureId])) return available;
   for (const improvement of orderedImprovements(city)) {
     if (improvement.improvementId === RIVER_INTAKE_RULES.improvementId) continue;
+    const woodland = hasFeatures(state, ['renewing-worked-woodlands']) && isWoodlandImprovement(improvement.improvementId);
+    if (woodland && !woodlandPlan) throw new RangeError('Forest allocation requires its prepared woodland opening');
+    if (woodland && improvement.completion.completedRound >= state.round) continue;
     const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
     if (!definition) throw new RangeError('Installed improvement requires a known definition');
     const inputs = definition.operatingInputs ? RESOURCE_IDS.flatMap(resource => {
@@ -117,7 +122,7 @@ export function allocateImprovements(state: WorldState, city: City, available: n
       return required > 0 ? [{ resource, required, available: budget[resource] }] : [];
     }) : undefined;
     const result: NonNullable<typeof improvement.operation.lastResult> = {
-      round: state.round, status: 'paused', paid: {}, produced: {}, blockedReason: null, ...(inputs ? { inputs, shortages: [] } : {}),
+      round: state.round, status: 'paused', paid: {}, produced: {}, blockedReason: null, ...(woodland && woodlandPlan ? { woodland: woodlandOperationReceipt(woodlandPlan, improvement.tileId) } : {}), ...(inputs ? { inputs, shortages: [] } : {}),
       residents: { ruleVersion: RESIDENT_CAPACITY_RULES.ruleVersion, openingPopulation: city.population, communityReserve: RESIDENT_CAPACITY_RULES.communityReserve, required: definition.residentsRequired, available, allocated: 0 },
     };
     improvement.operation.lastResult = result;
@@ -131,6 +136,10 @@ export function allocateImprovements(state: WorldState, city: City, available: n
     }
     if (available < definition.residentsRequired) {
       result.status = 'blocked'; result.blockedReason = 'resident-shortage'; continue;
+    }
+    if (woodland && woodlandPlan) {
+      if (result.woodland!.opening < result.woodland!.required) { result.status = 'blocked'; result.blockedReason = 'woodland-shortage'; continue; }
+      result.woodland = reserveWoodlandHarvest(woodlandPlan, city, improvement);
     }
     if (inputs) {
       const civilization = civilizationById(state, city.civId);

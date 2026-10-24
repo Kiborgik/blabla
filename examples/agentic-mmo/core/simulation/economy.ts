@@ -24,6 +24,7 @@ import { resolveTrade } from './trade.ts';
 import { openingConstructionWork, resolveConstruction } from './construction.ts';
 import { hasFeatures } from './history.ts';
 import { extractCityMetals } from './metals.ts';
+import { prepareWoodlandBeat, recordWoodlands } from './woodlands.ts';
 import { recordRiverFlow } from './river-intakes.ts';
 
 function quantize(value: number): number {
@@ -183,10 +184,11 @@ function resolveResearch(state: WorldState, civilizationId: number, producedScie
 }
 
 export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
+  const woodlandPlan = prepareWoodlandBeat(state);
   const openingWork = openingConstructionWork(state);
   const researchBudgets = new Map<number, number>();
   const civicBudgets = new Map<number, number>();
-  const riverFlowPlan = allocateOperations(state);
+  const riverFlowPlan = allocateOperations(state, woodlandPlan);
   for (const city of state.cities.toSorted((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)) extractCityMetals(state, city);
   for (const civilization of state.civilizations) {
     let culture = 0;
@@ -232,6 +234,7 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
       importance: 1,
     });
   }
+  recordWoodlands(state, woodlandPlan, events);
   recordRiverFlow(state, riverFlowPlan, events);
   resolveTrade(state, events);
   resolvePublicProjects(state, events);

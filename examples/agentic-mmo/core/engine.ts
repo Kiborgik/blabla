@@ -12,6 +12,7 @@ import { CIVIC_RULES, CIVILIZATIONS, ECONOMY_RULES, INDUSTRIAL_RULES, LOCAL_GROW
 import { CURRENT_RELEASE, RELEASES } from './release.ts';
 import { initializeSpaceflight } from './simulation/spaceflight.ts';
 import { createReliefState } from './simulation/relief-charters.ts';
+import { createWoodlands } from './simulation/woodlands.ts';
 import { createKnowledgeState } from './simulation/knowledge-compacts.ts';
 import { completeAttachedPlan, observeActionPlan, validateAttachedPlan } from './planning.ts';
 import {
@@ -169,6 +170,7 @@ export function createWorld(seed: number, clockEpoch?: string, registeredRulesId
   if (hasFeatures(state, ['consented-relief'])) state.relief = createReliefState(state);
   if (hasFeatures(state, ['knowledge-compacts'])) state.knowledge = createKnowledgeState(state);
   if (hasFeatures(state, ['supplied-borders'])) state.border = createBorderState(state);
+  if (hasFeatures(state, ['renewing-worked-woodlands'])) state.woodlands = createWoodlands(state.tiles);
   if (hasFeatures(state, ['river-intakes'])) state.riverFlow = { ruleVersion: 1, ruleId: 'uniform-runoff-1', lastBeat: null };
   const event: GameEvent = {
     id: '0:foundation',

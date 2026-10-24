@@ -1,3 +1,4 @@
+import type { WoodlandVisualFacts } from '../visuals/woodland-visuals.ts';
 import type { RiverFlowBeat } from '../core/river-intake-types.ts';
 import type { DrainageView } from '../visuals/drainage-visuals.ts';
 import type { BorderIncidentView } from '../visuals/border-visuals.ts';
@@ -36,6 +37,7 @@ export interface AtlasCivilization {
 }
 
 export interface AtlasTile {
+  woodland?: WoodlandVisualFacts | null;
   id?: number;
   q: number;
   r: number;

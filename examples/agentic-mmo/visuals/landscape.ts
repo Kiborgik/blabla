@@ -1,8 +1,10 @@
 import type { DrainageEdgeView, DrainageView } from './drainage-visuals.ts';
+import { woodlandStandParts } from './woodland-visuals.ts';
+import type { WoodlandVisualFacts } from './woodland-visuals.ts';
 import { populationFootprint, SETTLEMENT_RENDER_SCALE } from './world-visuals.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
-export interface LandscapeTile { id?: number; q: number; r: number; owner: number | null; terrain: 'grassland' | 'forest' | 'desert' | 'mountain' | 'tundra'; height: number }
+export interface LandscapeTile { id?: number; q: number; r: number; owner: number | null; terrain: 'grassland' | 'forest' | 'desert' | 'mountain' | 'tundra'; height: number; woodland?: WoodlandVisualFacts | null }
 export interface LandscapeTown { q: number; r: number; population?: number; improvementId?: string; tileId?: number; worldSeed?: number }
 export interface LandscapeEdge { key: string; owner: number | null; from: readonly [number, number]; to: readonly [number, number]; height: number; fromHeight?: number; toHeight?: number }
 export interface LandscapeTerritory { key: string; owner: number; height: number; points: Array<readonly [number, number]> }
@@ -198,7 +200,24 @@ function charcoalForestParts(tile: LandscapeTile, site: LandscapeTown, detail: D
   });
 }
 
-function forestOutsideChannels(tile: LandscapeTile, parts: VisualPart[], surfaces: ReadonlyMap<string, TerrainSurface>): VisualPart[] {
+function lumberForestParts(tile: LandscapeTile, detail: DetailLevel): VisualPart[] {
+  const positions = detail === 'far' ? [[-.795, -.1], [.795, -.1], [-.795, .07]]
+    : detail === 'mid' ? [[-.76, -.1], [.76, -.1], [-.76, .07], [.76, .07]]
+      : [[-.76, -.27], [.76, -.27], [-.76, -.1], [.76, -.1], [-.76, .07], [.76, .07]];
+  const { x, z } = hexPosition(tile.q, tile.r);
+  return positions.flatMap(([dx, dz], index): VisualPart[] => {
+    const height = .42 + noise(tile.q, tile.r, index + 11) * .08;
+    const width = detail === 'far' ? .13 : .2;
+    const base = detail === 'far' ? 0 : .18;
+    const parts: VisualPart[] = [{ id: `lumber-forest:${key(tile)}:${index}`, shape: 'canopy', material: index % 2 ? 'canopyLight' : 'canopy',
+      position: [x + dx!, tile.height + base + height / 2, z + dz!], scale: [width, height, width * .9], rotation: 0 }];
+    if (detail !== 'far') parts.push({ id: `lumber-forest:${key(tile)}:trunk:${index}`, shape: 'box', material: 'timber',
+      position: [x + Math.sign(dx!) * .795, tile.height + .14, z + dz!], scale: [.04, .28, .04], rotation: 0 });
+    return parts;
+  });
+}
+
+function forestOutsideChannels(tile: LandscapeTile, parts: VisualPart[], surfaces: ReadonlyMap<string, TerrainSurface>, site?: LandscapeTown): VisualPart[] {
   const corridor = [[0, 0], ...NEIGHBORS].flatMap(([dq, dr]) => surfaces.get(`${tile.q + dq!},${tile.r + dr!}`)?.faces.filter(face => face.kind === 'channel' || face.kind === 'bank') ?? []);
   if (!corridor.length) return parts;
   const clear = (x: number, z: number, radius: number): boolean => !corridor.some(face => {
@@ -214,20 +233,25 @@ function forestOutsideChannels(tile: LandscapeTile, parts: VisualPart[], surface
   });
   const groups = new Map<string, VisualPart[]>();
   for (const part of parts) {
-    const id = `${part.position[0]},${part.position[2]}`;
+    const id = part.id.replace(':trunk:', ':');
     const group = groups.get(id) ?? []; group.push(part); groups.set(id, group);
   }
   const center = hexPosition(tile.q, tile.r);
+  const outsideSite = (x: number, z: number, radius: number): boolean => site?.improvementId === 'lumber-mill'
+    ? Math.abs(x - center.x) >= .75 && z - center.z <= .07 + 1e-10
+    : site?.improvementId !== 'charcoal-clearing' || Math.hypot(x - center.x, z - center.z) - radius > .5;
   return [...groups.values()].flatMap((group, index) => {
     const first = group[0]!;
-    const radius = Math.max(...group.map(part => Math.max(part.scale[0], part.scale[2]) / 2)) + DRAINAGE_STYLE.forestSetback;
+    const radius = Math.max(...group.map(part => Math.hypot(part.position[0] - first.position[0], part.position[2] - first.position[2]) + Math.max(part.scale[0], part.scale[2]) / 2)) + DRAINAGE_STYLE.forestSetback;
     if (clear(first.position[0], first.position[2], radius)) return group;
     const angle = noise(tile.q, tile.r, index + 31) * Math.PI * 2;
-    const candidates = [.46, .58, .7, .82].flatMap(distance => Array.from({ length: 24 }, (_, step) => ({ x: center.x + Math.cos(angle + step * Math.PI / 12) * distance, z: center.z + Math.sin(angle + step * Math.PI / 12) * distance })))
+    const candidates = (site?.improvementId === 'lumber-mill'
+      ? [-.4, -.32, -.27, -.2, -.1, 0, .07].map(offset => ({ x: first.position[0], z: center.z + offset }))
+      : [.46, .58, .7, .82].flatMap(distance => Array.from({ length: 24 }, (_, step) => ({ x: center.x + Math.cos(angle + step * Math.PI / 12) * distance, z: center.z + Math.sin(angle + step * Math.PI / 12) * distance }))))
       .sort((a, b) => Math.hypot(a.x - first.position[0], a.z - first.position[2]) - Math.hypot(b.x - first.position[0], b.z - first.position[2]));
-    const target = candidates.find(point => NEIGHBORS.every((_, direction) => (point.x - center.x) * Math.cos(direction * Math.PI / 3) + (point.z - center.z) * Math.sin(direction * Math.PI / 3) + radius - DRAINAGE_STYLE.forestSetback <= Math.sqrt(3) / 2) && clear(point.x, point.z, radius));
+    const target = candidates.find(point => outsideSite(point.x, point.z, radius - DRAINAGE_STYLE.forestSetback) && NEIGHBORS.every((_, direction) => (point.x - center.x) * Math.cos(direction * Math.PI / 3) + (point.z - center.z) * Math.sin(direction * Math.PI / 3) + radius - DRAINAGE_STYLE.forestSetback <= Math.sqrt(3) / 2) && clear(point.x, point.z, radius));
     if (!target) return [];
-    return group.map(part => ({ ...part, position: [target.x, part.position[1], target.z] as const }));
+    return group.map(part => ({ ...part, position: [target.x + (part.position[0] - first.position[0]), part.position[1], target.z + (part.position[2] - first.position[2])] as const }));
   });
 }
 
@@ -236,7 +260,7 @@ export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonl
   const lookup = new Map(ordered.map(tile => [key(tile), tile]));
   const surfaces = new Map(projectTerrainSurface(ordered, drainage).map(tile => [tile.key, tile]));
   const townSites = new Set(towns.map(key));
-  const charcoalSites = new Map(towns.filter(site => site.improvementId === 'charcoal-clearing').map(site => [key(site), site]));
+  const woodlandSites = new Map(towns.filter(site => site.improvementId === 'charcoal-clearing' || site.improvementId === 'lumber-mill').map(site => [key(site), site]));
   const coast: LandscapeEdge[] = [];
   const borders: LandscapeEdge[] = [];
   const territories: LandscapeTerritory[] = [];
@@ -280,9 +304,11 @@ export function projectLandscape(tiles: readonly LandscapeTile[], towns: readonl
     return [{ id: `ground:${key(town)}`, shape: 'cylinder', material: 'settled', position: [x, tile.height + .016, z], scale: [radius * 2.3, .025, radius * 1.9], rotation: .15 }];
   }).slice(0, LANDSCAPE_BUDGETS[detail]);
   const groups = ordered.flatMap(tile => {
-    const charcoal = charcoalSites.get(key(tile));
-    const parts = charcoal && tile.terrain === 'forest' ? charcoalForestParts(tile, charcoal, detail) : !townSites.has(key(tile)) ? terrainParts(tile, detail) : [];
-    return [tile.terrain === 'forest' ? forestOutsideChannels(tile, parts, surfaces) : parts];
+    const site = woodlandSites.get(key(tile));
+    const parts = site && tile.terrain === 'forest'
+      ? site.improvementId === 'charcoal-clearing' ? charcoalForestParts(tile, site, detail) : tile.woodland ? lumberForestParts(tile, detail) : []
+      : !townSites.has(key(tile)) ? terrainParts(tile, detail) : [];
+    return [tile.terrain === 'forest' ? woodlandStandParts(forestOutsideChannels(tile, parts, surfaces, site), tile.woodland, tile.height) : parts];
   });
   for (let index = 0; index < 14 && parts.length < LANDSCAPE_BUDGETS[detail]; index++) {
     for (const group of groups) {

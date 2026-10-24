@@ -1,3 +1,4 @@
+import { createWoodlands } from './simulation/woodlands.ts';
 import { createWorld, legalActions } from './engine.ts';
 import { generateGeography, GENERATED_GEOGRAPHY_VERSION } from './generated-geography.ts';
 import { COAL_RULES, METAL_RULES, PASTORAL_RULES } from './content.ts';
@@ -12,15 +13,16 @@ import { generatePlaceName } from './place-names.ts';
 import { isCoastalSite } from './simulation/coastal.ts';
 import { civilizationBehaviorProfile, behaviorPolicyVersion } from './behavior-profiles.ts';
 
-export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' | 'settlement-hillside-commonworks-1' | 'settlement-supported-studies-1' | 'settlement-supplied-borders-1' | 'settlement-funded-landwork-1' | 'settlement-charcoal-clearing-1' | 'settlement-productive-frontiers-1' | 'settlement-river-intakes-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion, temperamentVersion?: StrategicTemperamentVersion): WorldState {
+export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' | 'settlement-hillside-commonworks-1' | 'settlement-supported-studies-1' | 'settlement-supplied-borders-1' | 'settlement-funded-landwork-1' | 'settlement-charcoal-clearing-1' | 'settlement-productive-frontiers-1' | 'settlement-river-intakes-1' | 'settlement-renewing-worked-woodlands-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion, temperamentVersion?: StrategicTemperamentVersion): WorldState {
   if (namingVersion !== undefined && namingVersion !== 'cultural-toponyms-v1') throw new RangeError('Generated worlds require a supported naming version');
-  if (temperamentVersion !== undefined && (temperamentVersion !== 'strategic-temperaments-v1' || !['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1', 'settlement-funded-landwork-1', 'settlement-charcoal-clearing-1', 'settlement-productive-frontiers-1', 'settlement-river-intakes-1'].includes(initialReleaseId))) throw new RangeError('Strategic temperaments require their supported version and Food-budget genesis');
+  if (temperamentVersion !== undefined && (temperamentVersion !== 'strategic-temperaments-v1' || !['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1', 'settlement-funded-landwork-1', 'settlement-charcoal-clearing-1', 'settlement-productive-frontiers-1', 'settlement-river-intakes-1', 'settlement-renewing-worked-woodlands-1'].includes(initialReleaseId))) throw new RangeError('Strategic temperaments require their supported version and Food-budget genesis');
   if (parseUtcTimestamp(clockEpoch) === null) throw new RangeError('Generated worlds require an explicit UTC clock epoch');
   const geography = generateGeography(seed);
   const state = createWorld(seed, clockEpoch, initialReleaseId);
   state.width = geography.width;
   state.height = geography.height;
   state.tiles = geography.tiles;
+  if (state.unlockedFeatures.includes('renewing-worked-woodlands')) state.woodlands = createWoodlands(state.tiles);
   state.drainage = geography.drainage;
   state.rng = geography.rng;
   state.origin = { kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed: state.seed, clockEpoch, ...(namingVersion ? { namingVersion } : {}), ...(temperamentVersion ? { temperamentVersion } : {}), ...(initialReleaseId !== 'settlement-interplanetary-1' ? { initialReleaseId } : {}) };

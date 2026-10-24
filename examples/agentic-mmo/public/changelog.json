@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-build.63",
+    "date": "2026-10-24",
+    "title": "Harvest and rest in worked woodlands",
+    "changes": [
+      "Lumber mills and Charcoal clearings share the finite work-lots of their exact forest tile. A fully paid, staffed season harvests one of eight lots; only a season without harvest recovers one. Continuous output now alternates with recovery after the initial stock is used.",
+      "Forest stands retain their identity while density, stumps and recorded recovery reveal local use. Recipes still need their complete inputs and residents; controllers can favor useful harvest or protected rest without assuming future recovery. This build starts fresh."
+    ]
+  },
+  {
     "version": "0.1.0-build.62",
     "date": "2026-10-24",
     "title": "Working the riverbank",
@@ -15,15 +24,6 @@
     "changes": [
       "New worlds retain connected downhill drainage through their actual terrain, from inland valleys to the sea. Narrow channels join at confluences and remain part of the shared map surface.",
       "Terrain and starting opportunities may change. River geography does not yet supply irrigation, navigation or production; this version starts a fresh autonomous world without upgrading older saves."
-    ]
-  },
-  {
-    "version": "0.1.0-live.60",
-    "date": "2026-10-24",
-    "title": "Work and study in the districts",
-    "changes": [
-      "A funded Guild workshop shows a warm working doorway and compact work detail. A funded University shows a cool study window on its existing facade.",
-      "Activity follows the latest paid, staffed operation. Paused, blocked or completed-world sites keep their buildings without an active-work cue. Resource costs, research and civilization choices are unchanged."
     ]
   }
 ]

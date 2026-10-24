@@ -1,3 +1,6 @@
+import { woodlandOperationDesired } from './behavior-woodlands.ts';
+import { isWoodlandImprovement } from './simulation/woodlands.ts';
+import { WOODLAND_RULES } from './woodland-content.ts';
 import { fundedPaidFoodSites, paidFoodSite } from './behavior-paid-food-sites.ts';
 import { improvementSiteBlock } from './simulation/improvements.ts';
 import { civilizationFoodUpkeep } from './simulation/food-security.ts';
@@ -122,6 +125,12 @@ function planOperations(state: WorldState, actor: Civilization, cities: readonly
       if (improvements.has(improvementKey(city.id, improvement.tileId))) continue;
       const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
       if (!definition || !hasFeatures(state, definition.requiredFeatures) || improvementSiteBlock(state, city, definition, improvement.tileId, true)) continue;
+      if (hasFeatures(state, [WOODLAND_RULES.featureId]) && isWoodlandImprovement(definition.id)) {
+        const stock = state.woodlands?.stands[String(improvement.tileId)]?.stock;
+        const economicDesired = definition.id !== 'lumber-mill' || plan.shortages.materials >= 3 || stock === WOODLAND_RULES.capacity;
+        if (!woodlandOperationDesired(state, actor.id, city.id, improvement.tileId, economicDesired)) continue;
+        if (stock === 0) { if (improvement.operation.enabled) improvements.add(improvementKey(city.id, improvement.tileId)); continue; }
+      }
       const residents = definition.residentsRequired;
       if (available < residents || RESOURCE_IDS.some(resource => budget[resource] < (definition.operatingInputs?.[resource] ?? 0))) continue;
       improvements.add(improvementKey(city.id, improvement.tileId)); available -= residents;

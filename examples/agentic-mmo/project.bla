@@ -69,6 +69,7 @@ draft behavior "contracts/local-power.bla"
 draft behavior "contracts/procedural-civilizations.bla"
 draft behavior "contracts/retained-drainage.bla"
 draft behavior "contracts/river-intakes.bla"
+draft behavior "contracts/woodland-renewal.bla"
 draft behavior "contracts/knowledge-compacts.bla"
 
 draft behavior "contracts/border-incidents.bla"

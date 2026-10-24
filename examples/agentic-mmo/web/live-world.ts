@@ -1,3 +1,6 @@
+import { isWoodlandState } from '../core/woodland-validation.ts';
+import { projectOperationAllocation } from '../core/simulation/operations.ts';
+import type { WoodlandVisualFacts } from '../visuals/woodland-visuals.ts';
 import { isRiverFlowState } from '../core/river-intake-validation.ts';
 import { projectTerrainSurface, type TerrainSurface } from '../visuals/landscape.ts';
 import { improvementSiteBlock } from '../core/simulation/improvements.ts';
@@ -58,12 +61,21 @@ export function presentationColor(value: string): string {
 
 export function projectWorld(state: WorldState): AtlasWorld {
   const drainage = projectDrainage(state);
+  const woodlandEnabled = state.unlockedFeatures.includes('renewing-worked-woodlands');
+  const woodlandValid = woodlandEnabled && isWoodlandState(state.woodlands, state);
+  const woodlandForecast = woodlandValid && state.outcome === null ? projectOperationAllocation(state) : null;
+  const woodlandByTile = new Map<number, WoodlandVisualFacts>();
+  if (woodlandValid && state.woodlands) for (const [key, stand] of Object.entries(state.woodlands.stands)) {
+    const entry = state.woodlands.lastBeat?.entries.find(entry => entry.tileId === Number(key));
+    const current = state.outcome === null && state.woodlands.lastBeat?.round === state.round;
+    woodlandByTile.set(Number(key), { stock: stand.stock, capacity: 8, lastHarvestRound: stand.lastHarvestRound, recovered: current ? entry?.recovered ?? 0 : 0, current });
+  }
   const intakeReceiptValid = state.riverFlow !== undefined && isRiverFlowState(state.riverFlow, state);
   const centerQ = (state.width - 1) / 2;
   const centerR = (state.height - 1) / 2;
   const civilizations = new Map(state.civilizations.map((civ) => [civ.id, civ]));
   const tiles = new Map(state.tiles.map((tile) => [tile.id, tile]));
-  const atlasTiles: AtlasTile[] = state.tiles.flatMap(tile => tile.terrain === 'ocean' ? [] : [{ id: tile.id, q: tile.q - centerQ, r: tile.r - centerR, owner: tile.owner, terrain: tile.terrain, height: mapTileHeight(tile.elevation) }]);
+  const atlasTiles: AtlasTile[] = state.tiles.flatMap(tile => tile.terrain === 'ocean' ? [] : [{ id: tile.id, q: tile.q - centerQ, r: tile.r - centerR, owner: tile.owner, terrain: tile.terrain, height: mapTileHeight(tile.elevation), ...(woodlandByTile.has(tile.id) ? { woodland: woodlandByTile.get(tile.id)! } : {}) }]);
   let intakeSurfaces: Map<string, TerrainSurface> | undefined;
   const cities: AtlasCivilization[] = state.cities.map((city) => {
     const civ = civilizations.get(city.civId);
@@ -124,6 +136,15 @@ export function projectWorld(state: WorldState): AtlasWorld {
       const tile = tiles.get(record.tileId);
       const definition = IMPROVEMENTS.find(item => item.id === record.improvementId);
       if (!tile || !definition || tile.terrain === 'ocean') return [];
+      let woodland: ImprovementView['woodland'] = null;
+      if (woodlandEnabled && (definition.id === 'lumber-mill' || definition.id === 'charcoal-clearing')) {
+        const facts = woodlandByTile.get(tile.id);
+        const last = record.operation?.lastResult;
+        const next = woodlandForecast?.cities.find(town => town.id === city.id)?.improvements?.[String(tile.id)]?.operation.lastResult;
+        const siteEligible = hasFeatures(state, definition.requiredFeatures) && improvementSiteBlock(state, city, definition, tile.id, !!record.completion, record.construction?.id) === null;
+        const current = facts?.current === true && last?.round === state.round && last.woodland?.tileId === tile.id;
+        if (facts) woodland = { ...facts, eligible: siteEligible && next?.status === 'operated', productive: current && siteEligible && record.operation?.enabled === true && last?.status === 'operated' && last.woodland?.harvested === 1 && Object.values(last.produced).some(amount => amount > 0), reason: state.outcome !== null ? 'The world has ended; no future operation is scheduled' : !record.completion ? 'Construction must finish before a later operating season' : !siteEligible ? 'Exact site or support is not eligible' : record.operation?.enabled !== true ? 'This installed site is paused' : next?.blockedReason === 'woodland-shortage' ? 'No opening woodland work-lot; a non-harvest season may recover one' : next?.blockedReason === 'resident-shortage' ? 'No remaining local resident after earlier work' : next?.blockedReason === 'input-shortage' ? 'Complete opening operating inputs are unavailable' : next?.status === 'operated' ? null : 'Next opening operation is unavailable' };
+      }
       let riverIntake: ImprovementView['riverIntake'] = null;
       if (definition.id === 'river-intake') {
         intakeSurfaces ??= new Map(projectTerrainSurface(atlasTiles, drainage).map(surface => [surface.key, surface]));
@@ -141,7 +162,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
         improvementId: record.improvementId, name: definition.name, tileId: tile.id, worldSeed: state.seed, q: tile.q - centerQ, r: tile.r - centerR,
         height: mapTileHeight(tile.elevation), color: town.color, status: record.construction ? 'building' : 'built',
         construction: structuredClone(record.construction), completion: structuredClone(record.completion), operation: structuredClone(record.operation),
-        baseProduction: structuredClone(definition.production), residentsRequired: definition.residentsRequired, ...(definition.id === 'river-intake' ? { riverIntake } : {}) }];
+        baseProduction: structuredClone(definition.production), residentsRequired: definition.residentsRequired, ...(woodlandEnabled && (definition.id === 'lumber-mill' || definition.id === 'charcoal-clearing') ? { woodland } : {}), ...(definition.id === 'river-intake' ? { riverIntake } : {}) }];
     });
   }).toSorted((a, b) => a.tileId - b.tileId || a.id.localeCompare(b.id));
   const town = (id: string) => {

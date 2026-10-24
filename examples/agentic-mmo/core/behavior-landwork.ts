@@ -1,3 +1,6 @@
+import { woodlandContinuousCapacity } from './behavior-woodlands.ts';
+import { isWoodlandImprovement } from './simulation/woodlands.ts';
+import { WOODLAND_RULES } from './woodland-content.ts';
 import { exchangePromisedResources } from './behavior-knowledge.ts';
 import { foodAllocation, selectedInstitutionsFunded } from './behavior-paid-food-sites.ts';
 import { BUILDINGS, ECONOMY_RULES, IMPROVEMENTS, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TURN_RULES } from './content.ts';
@@ -79,7 +82,8 @@ function installFootprint(state: WorldState, cityId: string, definition: Buildin
   const city = state.cities.find(city => city.id === cityId)!;
   if ('residentsRequired' in definition) {
     city.improvements ??= {};
-    city.improvements[String(tileId)] = { improvementId: definition.id, tileId: tileId!, completion: { kind: 'improvement', orderId: 'conditional-landwork', cityId, improvementId: definition.id, tileId: tileId!, startedRound: definition.id === 'river-intake' ? state.round - 1 : state.round, completedRound: definition.id === 'river-intake' ? state.round - 1 : state.round, paid: {}, workRequired: definition.requiredWork, eventId: 'conditional-landwork' }, operation: { enabled: true, lastResult: null } };
+    const completedRound = definition.id === 'river-intake' || hasFeatures(state, [WOODLAND_RULES.featureId]) && isWoodlandImprovement(definition.id) ? state.round - 1 : state.round;
+    city.improvements[String(tileId)] = { improvementId: definition.id, tileId: tileId!, completion: { kind: 'improvement', orderId: 'conditional-landwork', cityId, improvementId: definition.id, tileId: tileId!, startedRound: completedRound, completedRound, paid: {}, workRequired: definition.requiredWork, eventId: 'conditional-landwork' }, operation: { enabled: true, lastResult: null } };
   } else {
     city.buildings = [...city.buildings, definition.id];
     if (definition.district) city.districtSites = { ...city.districtSites, [definition.id]: tileId! };
@@ -127,7 +131,7 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
     const baseline = projectOperationAllocation(state, opening => {
       if (installed) opening.cities.find(city => city.id === installed.cityId)!.improvements![String(installed.tileId)]!.operation.enabled = false;
     }); const retained = operated(baseline, civId); const pending: PendingUse[] = [];
-    const prepared = { baseline, retained, pending, horizon: 1, targetOperationBeats: 2, requiredByBorder: false, failure: null as string | null };
+    const prepared = { baseline, retained, pending, horizon: 1, targetOperationBeats: installed && state.cities.find(city => city.id === installed.cityId)?.improvements?.[String(installed.tileId)]?.improvementId === 'lumber-mill' ? 1 : 2, requiredByBorder: false, failure: null as string | null };
     preparations.set(key, prepared);
     const reject = (reason: string) => { prepared!.failure ??= reason; };
     if (!actor || !safe(actor.resources, actor.strategicResources)) reject('unsafe-accounting: opening resources are not safely representable');
@@ -188,7 +192,7 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
     const city = state.cities.find(city => city.id === cityId && city.civId === civId); const tile = state.tiles.find(tile => tile.id === tileId);
     if (!actor || !city || !tile) return refuse('missing-exact-site: existing civilization, town and tile are required');
     const installed = operationOnly ? city.improvements?.[String(tileId)] : undefined;
-    if (operationOnly && (!installed || !['charcoal-clearing', 'river-intake'].includes(installed.improvementId))) return refuse('missing-installed-paid-site: operation requires its exact completed site');
+    if (operationOnly && (!installed || !['charcoal-clearing', 'river-intake', 'lumber-mill'].includes(installed.improvementId))) return refuse('missing-installed-paid-site: operation requires its exact completed site');
     const shared = prepare(operationOnly ? { cityId, tileId } : undefined); if (shared.failure) return refuse(shared.failure);
     let acquisitionCost: Partial<Resources> = {}; let ownedState = state;
     if (tile.owner !== civId) {
@@ -222,6 +226,8 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
       const workBeats = Math.ceil(candidate.work / work); const firstOperationBeat = startDelayBeats + workBeats + 1; const horizon = Math.max(firstOperationBeat + 1, shared.horizon);
       if (!Number.isSafeInteger(workBeats) || workBeats < (operationOnly ? 0 : 1) || firstOperationBeat > 8) { reason = 'first-operation-horizon: candidate cannot operate within eight beats'; continue; }
       if (!Number.isSafeInteger(horizon) || !Number.isSafeInteger(state.round + horizon)) { reason = 'unsafe-accounting: protected horizon exceeds safe rounds'; continue; }
+      const protectedWoodland = shared.baseline.cities.filter(town => town.civId === civId).flatMap(town => Object.values(town.improvements ?? {})).filter(site => site.operation.lastResult?.status === 'operated');
+      if (protectedWoodland.some(site => !woodlandContinuousCapacity(state, site.improvementId, site.tileId, horizon)) || shared.pending.some(use => 'residentsRequired' in use.definition && !woodlandContinuousCapacity(state, use.definition.id, use.order.tileId!, horizon)) || 'residentsRequired' in candidate.definition && !woodlandContinuousCapacity(state, candidate.definition.id, tileId, operationOnly ? shared.targetOperationBeats : 2)) { reason = 'woodland-horizon: opening local stock cannot fund every protected operation without assuming recovery'; continue; }
       const external = exchangePromisedResources(state, civId, horizon);
       const ordinary = { ...external.ordinary }; const strategic = { ...external.strategic };
       add(ordinary, acquisitionCost); add(ordinary, candidate.definition.cost);
@@ -269,6 +275,12 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
   };
   return {
     quote: (cityId: string, tileId: number): LandworkAssessment => assess(cityId, tileId),
+    lumberOperation(cityId: string, tileId: number): FundedImprovementOperationQuote | null {
+      const installed = state.cities.find(city => city.id === cityId)?.improvements?.[String(tileId)];
+      if (installed?.improvementId !== 'lumber-mill') return null;
+      const quote = assess(cityId, tileId, true).quotes[0];
+      return quote ? freeze({ ...quote, targetOperationBeats: prepare({ cityId, tileId }).targetOperationBeats, requiredByBorder: prepare({ cityId, tileId }).requiredByBorder, action: { type: 'set-improvement-operation', cityId, tileId, improvementId: 'lumber-mill', enabled: true } }) : null;
+    },
     charcoalOperation(cityId: string, tileId: number): FundedCharcoalOperationQuote | null {
       const quote = assess(cityId, tileId, true).quotes[0];
       return quote ? freeze({ ...quote, targetOperationBeats: prepare({ cityId, tileId }).targetOperationBeats, requiredByBorder: prepare({ cityId, tileId }).requiredByBorder, action: { type: 'set-improvement-operation', cityId, tileId, improvementId: 'charcoal-clearing', enabled: true } }) : null;

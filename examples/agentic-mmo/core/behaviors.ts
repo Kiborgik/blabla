@@ -1,3 +1,6 @@
+import { woodlandOperationAllowed } from './behavior-woodlands.ts';
+import { isWoodlandImprovement } from './simulation/woodlands.ts';
+import { WOODLAND_RULES } from './woodland-content.ts';
 import { createRiverIntakePolicy, riverIntakeReason } from './behavior-river-intakes.ts';
 import { createCharcoalClearingPolicy } from './behavior-charcoal.ts';
 import { createProductiveFrontierAssessment } from './behavior-frontier.ts';
@@ -565,6 +568,7 @@ function protectedCandidate(option: ActionOption, context: Situation): boolean {
 }
 
 function scoreCandidates(context: Situation, options: readonly ActionOption[], lanes: Map<string, Set<string>>): Candidate[] {
+  const woodlandPlanner = hasFeatures(context.state, [WOODLAND_RULES.featureId]) ? createLandworkPlanner(context.state, context.actor.id) : null;
   return options.map(option => {
     const action = option.action;
     const progressed = progressionWeight(option, actionWeight(option, context), context.state, context.actor, context.profile, context.progression);
@@ -577,7 +581,11 @@ function scoreCandidates(context: Situation, options: readonly ActionOption[], l
     const assessed = context.border ? borderWeight(option, knowledgeable, context.border) : knowledgeable;
     const refusedCharcoal = action.type === 'set-improvement-operation' && action.improvementId === 'charcoal-clearing' && action.enabled && !context.charcoal(action);
     const refusedIntake = (action.type === 'improve' || action.type === 'set-improvement-operation' && action.enabled) && action.improvementId === 'river-intake' && !context.riverIntake(action);
-    const weight = refusedCharcoal || refusedIntake || usesStrategicTemperaments(context.memory.policyVersion) && protectedCandidate(option, context) ? 0 : assessed;
+    const woodlandToggle = !!woodlandPlanner && action.type === 'set-improvement-operation' && isWoodlandImprovement(action.improvementId);
+    const woodlandDesired = woodlandToggle && action.type === 'set-improvement-operation' ? action.improvementId === 'charcoal-clearing' ? !!context.charcoal({ ...action, enabled: true }) : context.progression.shortages.materials >= 3 || context.state.woodlands?.stands[String(action.tileId)]?.stock === WOODLAND_RULES.capacity : true;
+    const refusedWoodland = woodlandToggle && action.type === 'set-improvement-operation' && (!woodlandOperationAllowed(context.state, context.actor.id, action, woodlandDesired) || action.improvementId === 'lumber-mill' && action.enabled && !woodlandPlanner!.lumberOperation(action.cityId, action.tileId)) || !!woodlandPlanner && action.type === 'improve' && isWoodlandImprovement(action.improvementId) && !woodlandPlanner.quote(action.cityId, action.tileId).quotes.some(quote => quote.action.type === 'improve' && quote.action.improvementId === action.improvementId);
+    const restWeight = woodlandToggle && action.type === 'set-improvement-operation' && !action.enabled && !refusedWoodland ? Math.max(4, assessed) : assessed;
+    const weight = refusedWoodland || refusedCharcoal || refusedIntake || usesStrategicTemperaments(context.memory.policyVersion) && protectedCandidate(option, context) ? 0 : restWeight;
     return { option, weight, ...classify(option.action), lane: laneOf(option.action, lanes) };
   });
 }
@@ -624,7 +632,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
   const context = situation(state, actor, profile, memory, options);
   const lanes = requiredLanes(state, seat);
   const candidates = assessSituation(context, options, lanes);
-  const required = candidates.filter(candidate => candidate.lane !== null && (candidate.option.action.type !== 'improve' || !['charcoal-clearing', 'river-intake'].includes(candidate.option.action.improvementId) || candidate.weight > 0) && (!context.diplomacy || !diplomacyProtects(candidate.option, context.diplomacy)) && (!context.relief || !reliefProtects(candidate.option, context.relief)) && (!context.border || !borderProtects(candidate.option, context.border)));
+  const required = candidates.filter(candidate => candidate.lane !== null && (candidate.option.action.type !== 'improve' || !['charcoal-clearing', 'river-intake'].includes(candidate.option.action.improvementId) && !(hasFeatures(state, [WOODLAND_RULES.featureId]) && isWoodlandImprovement(candidate.option.action.improvementId)) || candidate.weight > 0) && (!context.diplomacy || !diplomacyProtects(candidate.option, context.diplomacy)) && (!context.relief || !reliefProtects(candidate.option, context.relief)) && (!context.border || !borderProtects(candidate.option, context.border)));
   let emergencies = candidates.filter(candidate => candidate.weight > 0 && urgent(candidate, context));
   if (context.relief) {
     const priorityOf = (candidate: Candidate): number => Math.max(reliefPriority(candidate.option, context.relief!), context.diplomacy ? diplomacyPriority(candidate.option, context.diplomacy) : 0);

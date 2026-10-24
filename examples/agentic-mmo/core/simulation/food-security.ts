@@ -5,7 +5,7 @@ import { buildingBaseProduction } from './districts.ts';
 import { governmentModifiers } from './government.ts';
 import { hasFeatures } from './history.ts';
 import { orderedImprovements } from './improvements.ts';
-import { allocateOperations, paidRecipe, productiveBuildings } from './operations.ts';
+import { projectOperationAllocation, paidRecipe, productiveBuildings } from './operations.ts';
 import { siteProduction } from './sites.ts';
 import { wonderBaseProduction } from './wonders.ts';
 import { cityProductivity } from './world.ts';
@@ -69,25 +69,15 @@ export function allocatedCityFoodProduction(state: WorldState, city: City): Allo
   return { total: amount, buildings: buildingsProduced, improvements: improvementsProduced };
 }
 
-function projectedOperations(state: WorldState): WorldState {
-  const projected = {
-    ...state,
-    round: state.round + 1,
-    civilizations: state.civilizations.map(civilization => ({ ...civilization, resources: { ...civilization.resources }, ...(civilization.strategicResources ? { strategicResources: { ...civilization.strategicResources } } : {}) })),
-    cities: state.cities.map(city => ({ ...city, ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}), ...(city.improvements ? { improvements: structuredClone(city.improvements) } : {}) })),
-  };
-  allocateOperations(projected);
-  return projected;
-}
 
 export function forecastCityFoodProduction(state: WorldState, city: City): number {
-  const projected = projectedOperations(state);
+  const projected = projectOperationAllocation(state);
   const retained = projected.cities.find(candidate => candidate.id === city.id && candidate.civId === city.civId);
   if (!retained) throw new RangeError('Food forecast requires an exact existing town');
   return allocatedCityFoodProduction(projected, retained).total;
 }
 
 export function forecastCivilizationFoodProduction(state: WorldState, civId: number): number {
-  const projected = projectedOperations(state);
+  const projected = projectOperationAllocation(state);
   return quantize(projected.cities.filter(city => city.civId === civId).reduce((total, city) => total + allocatedCityFoodProduction(projected, city).total, 0));
 }

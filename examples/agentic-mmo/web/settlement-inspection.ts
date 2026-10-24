@@ -346,7 +346,13 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     card.dataset['improvementTile'] = String(site.tileId);
     const siteHeading = text('h4', `${definition?.name ?? site.improvementId} · Tile ${site.tileId}`);
     siteHeading.prepend(visualIcon(definition?.production.food ? 'food' : 'materials'));
-    card.append(siteHeading, text('p', `Built · ${site.operation.enabled ? site.improvementId === 'river-intake' ? 'Enabled' : 'On' : 'Paused'} now`, 'building-current'));
+    card.append(siteHeading, text('p', `Built · ${site.operation.enabled ? site.improvementId === 'river-intake' || site.improvementId === 'lumber-mill' || site.improvementId === 'charcoal-clearing' ? 'Enabled' : 'On' : 'Paused'} now`, 'building-current'));
+    const woodland = improvements.find(view => view.cityId === city.id && view.tileId === site.tileId)?.woodland;
+    if (woodland) {
+      card.append(text('p', `Woodland work-lots: ${woodland.stock} / ${woodland.capacity}. Last harvest: ${woodland.lastHarvestRound === null ? 'none' : `round ${woodland.lastHarvestRound}`}.`, 'woodland-stock'));
+      card.append(text('p', woodland.reason ?? 'Next-opening forecast: one local work-lot, complete inputs and one remaining resident are available. This is not recorded output.', 'woodland-readiness'));
+      card.append(text('p', 'A full operation harvests one local work-lot. Only a non-harvest economy season recovers one, capped at eight; recovery is not produced Materials or Energy.', 'woodland-rule'));
+    }
     if (site.improvementId === 'river-intake') for (const fact of riverIntakeReadiness(site, improvements.find(view => view.cityId === city.id && view.tileId === site.tileId)?.riverIntake)) card.append(text('p', fact, 'river-intake-readiness'));
     if (definition) card.append(text('p', `Needs ${definition.residentsRequired} local resident each operating season. People stay in this town.`, 'building-summary'),
       amountLine('Base before town productivity', RESOURCE_IDS.flatMap(resource => { const amount = definition.production[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
@@ -367,6 +373,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
         amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
       for (const input of last.inputs ?? []) receipt.append(text('p', `${METRIC_LABELS[input.resource]} needed ${exactNumber(input.required)} · Available before that attempt ${exactNumber(input.available)}`, 'operation-input'));
       for (const shortage of last.shortages ?? []) receipt.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
+      if (last.woodland) receipt.append(text('p', `Woodland Tile ${last.woodland.tileId}: ${last.woodland.opening} opening − ${last.woodland.harvested} harvested + ${last.woodland.recovered} recovered = ${last.woodland.closing} closing work-lots.`, 'woodland-receipt'));
       if (site.improvementId === 'river-intake') for (const fact of riverIntakeFacts(last)) receipt.append(text('p', fact, 'river-intake-fact'));
       if (last.extraction) for (const fact of extractionFacts(last.extraction)) receipt.append(text('p', fact, 'extraction-fact'));
       card.append(receipt);

@@ -1,3 +1,4 @@
+import { woodlandOperationCapacity } from './behavior-woodlands.ts';
 import { BORDER_RULES } from './border-content.ts';
 import type { BorderDepartureQuote, BorderPromises } from './border-types.ts';
 import type { BehaviorProfile } from './behavior-profiles.ts';
@@ -44,16 +45,16 @@ function usefulSite(state: WorldState, actorId: number, cityId: string, tileId: 
   const result: SiteValue = { value: 0, use: null };
   if (!city || !actor || promises.failure || city.construction?.active || RESOURCE_IDS.some(resource => actor.resources[resource] < 0)) return result;
   const availableResidents = city.population - RESIDENT_CAPACITY_RULES.communityReserve - promises.operationForecast.filter(operation => operation.cityId === cityId).reduce((sum, operation) => sum + operation.residents, 0);
-  const retain = (outputs: Partial<Resources>, inputs: Partial<Resources>, cost: Partial<Resources>, name: string): void => {
+  const retain = (outputs: Partial<Resources>, inputs: Partial<Resources>, cost: Partial<Resources>, name: string, operations: number = BORDER_RULES.maximumFieldBeats): void => {
     const net = resourceValue(outputs, profile) - resourceValue(inputs, profile);
-    const value = Math.max(0, net) * BORDER_RULES.maximumFieldBeats / (1 + resourceValue(cost, profile) / 30);
+    const value = Math.max(0, net) * operations / (1 + resourceValue(cost, profile) / 30);
     if (value > result.value) { result.value = value; result.use = name; }
   };
   for (const definition of IMPROVEMENTS) {
     if (definition.id === 'charcoal-clearing' || availableResidents < definition.residentsRequired || improvementSiteBlock(state, city, definition, tileId)
       || improvementEligibility(state, actorId, definition, cityId).blockers.length
       || RESOURCE_IDS.some(resource => actor.resources[resource] < (definition.cost[resource] ?? 0) + (definition.operatingInputs?.[resource] ?? 0) * BORDER_RULES.householdReserveBeats)) continue;
-    retain(definition.production, definition.operatingInputs ?? {}, definition.cost, definition.name);
+    retain(definition.production, definition.operatingInputs ?? {}, definition.cost, definition.name, woodlandOperationCapacity(state, definition.id, tileId, BORDER_RULES.maximumFieldBeats));
   }
   for (const definition of BUILDINGS) {
     if (!definition.district || districtSiteBlock(state, city, definition, tileId)) continue;

@@ -1,3 +1,4 @@
+import type { WoodlandVisualFacts } from './woodland-visuals.ts';
 import { RESOURCE_IDS } from '../core/content.ts';
 import { METRIC_LABELS } from './visual-language.ts';
 import { workedLandCompositionV1 } from './worked-land-composition.ts';
@@ -29,6 +30,7 @@ export interface ImprovementView {
   baseProduction: Partial<Resources>;
   residentsRequired: number;
   riverIntake?: RiverIntakeVisualFacts | null;
+  woodland?: (WoodlandVisualFacts & { eligible: boolean; productive: boolean; reason: string | null }) | null;
 }
 
 export const IMPROVEMENT_PART_BUDGETS = { far: 10, mid: 15, close: 20 } as const;
@@ -47,6 +49,7 @@ export function improvementLastLabel(result: CityImprovement['operation']['lastR
   if (!result) return 'No operating record yet';
   if (result.status === 'paused') return 'Paused that season';
   if (result.status === 'blocked') {
+    if (result.blockedReason === 'woodland-shortage') return 'Woodland needs a resting season';
     if (result.blockedReason === 'resident-shortage') return 'Not enough local support';
     if (result.blockedReason === 'input-shortage') {
       const missing = RESOURCE_IDS.filter(resource => result.shortages?.some(shortage => shortage.resource === resource)).map(resource => METRIC_LABELS[resource]);
@@ -60,11 +63,13 @@ export function improvementLastLabel(result: CityImprovement['operation']['lastR
 
 export function improvementParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
   if (view.improvementId === 'river-intake') return riverIntakeParts(view, detail);
-  return workedLandCompositionV1(view, improvementRecipeParts(view, detail));
+  const parts = improvementRecipeParts(view, detail);
+  const footprint = view.improvementId === 'lumber-mill' && Object.hasOwn(view, 'woodland') ? parts.map((part): VisualPart => ({ ...part, position: [part.position[0] * .9, part.position[1], part.position[2] * .9], scale: [part.scale[0] * .9, part.scale[1], part.scale[2] * .9] })) : parts;
+  return workedLandCompositionV1(view, footprint);
 }
 
 function improvementRecipeParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
-  if (view.improvementId === 'charcoal-clearing') return charcoalClearingParts(view, detail);
+  if (view.improvementId === 'charcoal-clearing') return charcoalClearingParts(Object.hasOwn(view, 'woodland') && !view.woodland?.productive && view.operation ? { ...view, operation: { ...view.operation, lastResult: null } } : view, detail);
   if (view.improvementId === 'hill-commons') return hillsideCommonworksParts(view, detail);
   if (view.improvementId === 'shore-fishery') return shoreFisheryParts(view, detail);
   if (view.improvementId === 'lumber-mill') return lumberParts(view, detail);

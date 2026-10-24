@@ -1,3 +1,4 @@
+import { isWoodlandState, isWoodlandOperationResult } from './woodland-validation.ts';
 import { validateDrainage } from './drainage.ts';
 import { isRiverFlowState, isRiverIntakeOperationResult } from './river-intake-validation.ts';
 import { isBorderState, validBorderEvent } from './border-validation.ts';
@@ -1218,6 +1219,7 @@ function paidImprovementResult(value: unknown, definition: ImprovementDefinition
 }
 
 function improvementResult(value: unknown, improvementId: unknown, completedRound: number, round: number, features: string[]): boolean {
+  if (features.includes('renewing-worked-woodlands') && (improvementId === 'lumber-mill' || improvementId === 'charcoal-clearing')) return isWoodlandOperationResult(value, improvementId, completedRound, round);
   const definition = IMPROVEMENTS.find(candidate => candidate.id === improvementId);
   if (definition?.operatingInputs) return paidImprovementResult(value, definition, completedRound, round, features);
   if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'residents', 'blockedReason', ...(Object.hasOwn(value, 'extraction') ? ['extraction'] : [])])
@@ -1848,6 +1850,9 @@ export function isWorldState(value: unknown): value is WorldState {
   const knowledgeEnabled = features.includes('knowledge-compacts');
   if (knowledgeEnabled !== Object.hasOwn(value, 'knowledge') || knowledgeEnabled && !isKnowledgeState(value.knowledge, value as unknown as WorldState)
     || !knowledgeEnabled && value.events.some(event => Object.hasOwn(event, 'knowledgeCompact') || Object.hasOwn(event, 'knowledgeStudy') || Object.hasOwn(event, 'knowledgeResult') || event.type.startsWith('knowledge-'))) return false;
+  const woodlandEnabled = features.includes('renewing-worked-woodlands');
+  if (woodlandEnabled !== Object.hasOwn(value, 'woodlands') || woodlandEnabled && !isWoodlandState(value.woodlands, value as unknown as WorldState)
+    || !woodlandEnabled && value.events.some(event => event.type === 'woodland-beat')) return false;
   const intakeEnabled = features.includes('river-intakes');
   if (intakeEnabled !== Object.hasOwn(value, 'riverFlow') || intakeEnabled && !isRiverFlowState(value.riverFlow, value as unknown as WorldState)
     || !intakeEnabled && value.events.some(event => event.type === 'river-flow')) return false;

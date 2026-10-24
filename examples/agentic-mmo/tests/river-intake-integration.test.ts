@@ -39,9 +39,9 @@ function operatingWorld() {
   assert.fail('bounded paid engine fixture must reach an actual funded intake season');
 }
 
-void test('current-only local genesis uses fresh intake rules and exact same-version controller restart', () => {
-  const run = createLocalSimulation(1701); assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-river-intakes-1');
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:river-intakes-v1');
+void test('current-only local genesis retains fresh intake facts and exact same-version controller restart', () => {
+  const run = createLocalSimulation(1701); assert.equal(run.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
+  assert.ok(LOCAL_SIMULATION_STORAGE_KEY.startsWith('civitas:procedural-observatory:'));
   assert.equal(run.state.origin!.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID); assert.deepEqual(run.state.riverFlow, { ruleVersion: 1, ruleId: 'uniform-runoff-1', lastBeat: null });
   assert.ok(run.state.cities.every(city => !Object.values(city.improvements ?? {}).some(site => site.improvementId === 'river-intake')));
   assert.deepEqual(run.state.events.map(event => event.type), ['world-founded']);

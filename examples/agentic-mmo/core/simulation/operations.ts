@@ -1,4 +1,6 @@
 import { localPowerBuildingOrder, participatesInLocalPower } from './local-power.ts';
+import { prepareWoodlandBeat } from './woodlands.ts';
+import type { WoodlandPlan } from '../woodland-types.ts';
 import { allocateImprovements } from './improvements.ts';
 import { BUILDINGS, LOCAL_POWER_RULES, RESIDENT_CAPACITY_RULES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS } from '../content.ts';
 import type { BuildingDefinition, City, GameEvent, Observation, WorldState } from '../types.ts';
@@ -19,7 +21,7 @@ export function orderedBuildings(city: City): BuildingDefinition[] {
   });
 }
 
-export function allocateOperations(state: WorldState): RiverFlowPlan | null {
+export function allocateOperations(state: WorldState, woodlandPlan: WoodlandPlan | null = prepareWoodlandBeat(state)): RiverFlowPlan | null {
   if (!hasFeatures(state, ['building-operations'])) return null;
   const residentEnabled = hasFeatures(state, ['resident-capacity']);
   const powerEnabled = hasFeatures(state, [LOCAL_POWER_RULES.featureId]);
@@ -85,7 +87,7 @@ export function allocateOperations(state: WorldState): RiverFlowPlan | null {
       }
       operation.lastResult = { ...result, status: 'operated', paid };
     }
-    residentBudgets.set(city.id, allocateImprovements(state, city, available, budget));
+    residentBudgets.set(city.id, allocateImprovements(state, city, available, budget, woodlandPlan));
   }
   return allocateRiverIntakes(state, budgets, residentBudgets);
 }
@@ -94,6 +96,7 @@ export function projectOperationAllocation(state: WorldState, prepare?: (project
   const projected: WorldState = {
     ...state,
     round: state.round + 1,
+    ...(state.woodlands ? { woodlands: structuredClone(state.woodlands) } : {}),
     ...(state.riverFlow ? { riverFlow: structuredClone(state.riverFlow) } : {}),
     civilizations: state.civilizations.map(civilization => ({ ...civilization, resources: { ...civilization.resources }, ...(civilization.strategicResources ? { strategicResources: { ...civilization.strategicResources } } : {}) })),
     cities: state.cities.map(city => ({ ...city, ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}), ...(city.improvements ? { improvements: structuredClone(city.improvements) } : {}) })),

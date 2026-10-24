@@ -1,3 +1,4 @@
+import { woodlandContinuousCapacity } from '../behavior-woodlands.ts';
 import { BORDER_RULES } from '../border-content.ts';
 import type { BorderAction, BorderClashReceipt, BorderDepartureAction, BorderDepartureQuote, BorderEvent, BorderIncident, BorderParty, BorderPromises, BorderQuoteResult, BorderResolution, BorderState, BorderStepReceipt } from '../border-types.ts';
 import { isBorderAction } from '../border-validation.ts';
@@ -84,6 +85,7 @@ export function borderPromisedResources(state: WorldState, actorId: number, roun
       if (receipt?.status !== 'operated') continue;
       result.operationForecast.push({ kind: 'improvement', cityId: city.id, id: improvement.improvementId, tileId: improvement.tileId, round: projected.round, horizon, inputs: { ...receipt.paid }, strategicInputs: {}, residents: receipt.residents.allocated });
       addOrdinary(result.ordinary, receipt.paid, horizon);
+      if (!woodlandContinuousCapacity(state, improvement.improvementId, improvement.tileId, horizon)) result.failure ??= `Woodland ${city.id}/${improvement.tileId} cannot fund ${horizon} continuous operations from its opening stock`;
     }
   }
   for (const compact of accepted) {

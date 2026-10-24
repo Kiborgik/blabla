@@ -1,3 +1,6 @@
+import { woodlandContinuousCapacity } from './behavior-woodlands.ts';
+import { isWoodlandImprovement } from './simulation/woodlands.ts';
+import { WOODLAND_RULES } from './woodland-content.ts';
 import { exchangePromisedResources } from './behavior-knowledge.ts';
 import { selectedInstitutionsFunded } from './behavior-paid-food-sites.ts';
 import { BUILDINGS, ECONOMY_RULES, IMPROVEMENTS, LOCAL_GROWTH_RULES, RESIDENT_CAPACITY_RULES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TRADE_RECIPES, WONDERS } from './content.ts';
@@ -99,7 +102,7 @@ function installPending(state: WorldState, pending: Pending): void {
   city.construction = { ...city.construction!, active: null };
   if ('residentsRequired' in definition) {
     const tileId = pending.order.tileId!; city.improvements ??= {};
-    city.improvements[String(tileId)] = { improvementId: definition.id, tileId, completion: { kind: 'improvement', orderId: pending.order.id, cityId: city.id, improvementId: definition.id, tileId, startedRound: pending.order.startedRound, completedRound: state.round, paid: { ...pending.order.paid }, workRequired: pending.order.workRequired, eventId: 'conditional-frontier' }, operation: { enabled: true, lastResult: null } };
+    city.improvements[String(tileId)] = { improvementId: definition.id, tileId, completion: { kind: 'improvement', orderId: pending.order.id, cityId: city.id, improvementId: definition.id, tileId, startedRound: pending.order.startedRound, completedRound: hasFeatures(state, [WOODLAND_RULES.featureId]) && isWoodlandImprovement(definition.id) ? state.round - 1 : state.round, paid: { ...pending.order.paid }, workRequired: pending.order.workRequired, eventId: 'conditional-frontier' }, operation: { enabled: true, lastResult: null } };
   } else {
     city.buildings = [...city.buildings, definition.id];
     if (definition.district) city.districtSites = { ...city.districtSites, [definition.id]: pending.order.tileId! };
@@ -210,6 +213,8 @@ export function createProductiveFrontierAssessment(state: WorldState, civId: num
     const reject = (reason: string) => { const result = { facts: null, reason }; funding.set(key, result); return result; };
     const shared = prepare(); if (shared.failure) return reject(shared.failure);
     if (!Number.isSafeInteger(horizon) || !Number.isSafeInteger(state.round + horizon)) return reject('unsafe-accounting: protected horizon exceeds safe rounds');
+    const woodlandSites = ownCities.flatMap(town => Object.values(town.improvements ?? {})).filter(site => site.operation.enabled);
+    if (woodlandSites.some(site => !woodlandContinuousCapacity(state, site.improvementId, site.tileId, horizon)) || shared.pending.some(pending => 'residentsRequired' in pending.definition && !woodlandContinuousCapacity(state, pending.definition.id, pending.order.tileId!, horizon))) return reject('woodland-horizon: protected sites need enough opening local stock without assuming recovery');
     const promised = exchangePromisedResources(state, civId, horizon);
     const ordinary = { ...promised.ordinary }; const strategic = { ...promised.strategic };
     const oneOperation = empty(); const oneStrategic: StrategicResources = {};
