@@ -1,3 +1,4 @@
+import type { ScreenBox } from '../visuals/map-hierarchy.ts';
 import { numberPresentation } from './number-format.ts';
 import { projectRouteCues } from '../visuals/route-cues.ts';
 import { routeLabelPlacement } from '../visuals/route-visuals.ts';
@@ -111,7 +112,7 @@ export function latestCueEvent(events: readonly GameEvent[]): GameEvent | undefi
 type MapAnchor = NonNullable<ReturnType<typeof eventAnchor>>;
 
 export function createWorldCues(container: HTMLElement, world: AtlasWorld, project: (x: number, z: number, height: number) => { x: number; y: number }): {
-  show: (events: readonly AtlasCue[]) => void; update: () => void; clear: () => void; setMotion: (moving: boolean) => void; dispose: () => void;
+  show: (events: readonly AtlasCue[]) => void; update: (overlays?: readonly ScreenBox[]) => void; clear: () => void; setMotion: (moving: boolean) => void; dispose: () => void;
 } {
   const layer = document.createElement('div');
   layer.className = 'world-cues';
@@ -122,13 +123,18 @@ export function createWorldCues(container: HTMLElement, world: AtlasWorld, proje
   const cues: Cue[] = [];
   const remove = (cue: Cue): void => { clearTimeout(cue.timer); cue.element.remove(); for (const mark of cue.marks) mark.element.remove(); const index = cues.indexOf(cue); if (index >= 0) cues.splice(index, 1); };
   const clear = (): void => { while (cues.length) { const cue = cues[0]; if (cue) remove(cue); } };
-  const update = (): void => {
+  let overlayBounds: readonly ScreenBox[] | null = null;
+  const update = (overlays?: readonly ScreenBox[]): void => {
+    if (overlays) overlayBounds = overlays;
     const limit = container.clientWidth < 700 ? 1 : 3;
     while (cues.length > limit) { const first = cues[0]; if (first) remove(first); }
     const bounds = container.getBoundingClientRect();
-    const occupied = cues.length ? [...document.querySelectorAll<HTMLElement>('.masthead, .panel, .world-heading, .era-pill, .map-tools, .layer-controls, .chronicle, .connection-actions, .map-hint, .city-label, .flat-city, .route-map-label, .flat-route-label')]
+    const selector = '.masthead, .panel, .world-heading, .era-pill, .map-tools, .layer-controls, .chronicle, .connection-actions, .map-hint'
+      + (overlayBounds === null ? ', .city-label, .flat-city, .route-map-label, .flat-route-label' : '');
+    const occupied = cues.length ? [...document.querySelectorAll<HTMLElement>(selector)]
       .map((node) => node.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0)
       .map((rect) => ({ x: rect.left - bounds.left + rect.width / 2, y: rect.top - bounds.top, width: rect.width, height: rect.height })) : [];
+    occupied.push(...(overlayBounds ?? []).map(box => ({ x: box.left + box.width / 2, y: box.top, width: box.width, height: box.height })));
     for (const cue of cues) {
       const point = project(cue.anchor.x, cue.anchor.z, cue.anchor.height);
       const outside = point.x < 0 || point.x > container.clientWidth || point.y < 0 || point.y > container.clientHeight;
@@ -144,9 +150,13 @@ export function createWorldCues(container: HTMLElement, world: AtlasWorld, proje
       }
       for (const mark of cue.marks) {
         const endpoint = project(mark.anchor.x, mark.anchor.z, mark.anchor.height);
-        mark.element.hidden = endpoint.x < 20 || endpoint.x > container.clientWidth - 40 || endpoint.y < 20 || endpoint.y > container.clientHeight - 20;
-        mark.element.style.left = `${endpoint.x + 20}px`;
-        mark.element.style.top = `${endpoint.y - 20}px`;
+        const box = { x: endpoint.x + 20, y: endpoint.y - 34, width: 34, height: 34 };
+        const collision = occupied.some(other => box.x - box.width / 2 < other.x + other.width / 2 + 4 && box.x + box.width / 2 + 4 > other.x - other.width / 2
+          && box.y < other.y + other.height + 4 && box.y + box.height + 4 > other.y);
+        mark.element.hidden = collision || box.x - box.width / 2 < 8 || box.x + box.width / 2 > container.clientWidth - 8 || box.y < 8 || box.y + box.height > container.clientHeight - 8;
+        mark.element.style.left = `${box.x}px`;
+        mark.element.style.top = `${box.y + box.height / 2}px`;
+        if (!mark.element.hidden) occupied.push(box);
       }
     }
   };

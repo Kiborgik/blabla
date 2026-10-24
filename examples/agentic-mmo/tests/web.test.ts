@@ -305,7 +305,7 @@ await test('renderer projection carries exact committed settlement facts and nor
   land[1].elevation = 99;
   const world = projectWorld(state);
   assert.deepEqual(world.cities[0]?.settlement, { id: city.id, civId: city.civId, tileId: city.tileId, name: city.name,
-    population: city.population, wellbeing: 34, damage: 12, buildings: ['farm', 'workshop'], round: state.round, terminal: false });
+    population: city.population, wellbeing: 34, damage: 12, buildings: ['farm', 'workshop'], worldSeed: state.seed, round: state.round, terminal: false });
   assert.equal(world.tiles.find((tile) => tile.id === land[0]?.id)?.height, .25);
   assert.equal(world.tiles.find((tile) => tile.id === land[1]?.id)?.height, .25 + .99 * .22);
 });
@@ -337,16 +337,16 @@ await test('Three settlement instances use only active detail and reuse their ge
   const world = projectWorld(state);
   const material = new THREE.MeshBasicMaterial();
   const meshes = createSettlementMeshes(world, () => material);
-  assert.equal(meshes.update(60), 'close');
+  assert.equal(meshes.update(60), 'mid');
   const count = (): number => meshes.group.children.reduce((sum, child) => sum + (child instanceof THREE.InstancedMesh ? child.count : 0), 0);
-  const closeCount = count();
-  assert.equal(closeCount, state.cities.reduce((sum, entry) => sum + settlementVisual(entry, 'close').parts.length, 0));
+  const midCount = count();
+  assert.equal(midCount, world.cities.reduce((sum, entry) => sum + settlementVisual(entry.settlement!, 'mid').parts.length, 0));
   const first = meshes.group.children[0];
-  meshes.update(58);
+  assert.equal(meshes.update(58), 'mid');
   assert.equal(meshes.group.children[0], first);
   assert.equal(meshes.update(18), 'far');
-  assert.ok(count() < closeCount);
-  assert.equal(count(), state.cities.reduce((sum, entry) => sum + settlementVisual(entry, 'far').parts.length, 0));
+  assert.ok(count() < midCount);
+  assert.equal(count(), world.cities.reduce((sum, entry) => sum + settlementVisual(entry.settlement!, 'far').parts.length, 0));
   assert.ok(meshes.group.children.every((child) => child instanceof THREE.InstancedMesh && child.boundingSphere !== null));
   meshes.dispose();
   assert.equal(meshes.group.children.length, 0);

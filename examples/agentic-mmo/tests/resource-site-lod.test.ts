@@ -152,6 +152,19 @@ class SvgElement {
   remove(): void { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(child => child !== this); }
   getBoundingClientRect(): { left: number; top: number; width: number; height: number } { return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight }; }
   descendants(): SvgElement[] { return this.children.flatMap(child => [child, ...child.descendants()]); }
+  getAttribute(name: string): string | null { return this.attributes[name] ?? null; }
+  getContext(): null { return null; }
+  replaceWith(replacement: SvgElement): void {
+    const parent = this.parentElement;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    if (index < 0) return;
+    replacement.parentElement = parent; parent.children.splice(index, 1, replacement); this.parentElement = null;
+  }
+  querySelectorAll(selector: string): SvgElement[] {
+    const classes = selector.split(',').map(value => value.trim().slice(1));
+    return this.descendants().filter(element => (element.attributes['class'] ?? '').split(' ').some(value => classes.includes(value)));
+  }
   closest(): null { return null; }
 }
 
@@ -180,7 +193,7 @@ await test('actual flat consumer keeps all sites at town detail while generic la
   const world = rendererWorld();
   const before = structuredClone(world);
   const container = new SvgElement('div');
-  const selected: Array<[string, string | undefined]> = [];
+  const selected: Array<[string, string | null | undefined]> = [];
   const renderer = createFlatAtlasRenderer(container as unknown as HTMLElement, world,
     { ...DEFAULT_PREFERENCES, selectedCity: 'frontier', x: 0, z: 0, zoom: 30 * 16 / container.clientHeight }, (id, workId) => selected.push([id, workId]), () => {});
   try {
@@ -198,7 +211,7 @@ await test('actual flat consumer keeps all sites at town detail while generic la
         const group = sites.find(element => element.attributes['data-district-id'] === view.id); assert.ok(group);
         assert.equal(group.attributes['data-tile-id'], String(view.tileId));
         assert.equal(group.attributes['data-status'], view.status);
-        assert.equal(group.attributes['aria-label'], `Inspect ${improvementLabel(view)} of ${view.townName}, tile ${view.tileId}`);
+        assert.equal(group.attributes['aria-label'], `Inspect ${improvementLabel(view)} of ${view.townName}, tile ${view.tileId}. ${view.status === 'building' ? 'Under construction' : 'Built'} improvement`);
         const origin = hexPosition(view.q, view.r);
         const point = flatMapPoint(origin.x, origin.z, view.height);
         assert.equal(group.attributes['transform'], `translate(${point.x} ${point.z})`);

@@ -1,10 +1,9 @@
 import { RIVER_INTAKE_MARK_PATH } from '../visuals/river-intake-visuals.ts';
 import { civilizationIdentity } from '../visuals/visual-language.ts';
 import { selectedAcquiredLand } from '../visuals/territory-visuals.ts';
-import { allocateMapHierarchy, mapContentWindow } from '../visuals/map-hierarchy.ts';
+import { allocateMapHierarchy, mapContentWindow, type ScreenBox } from '../visuals/map-hierarchy.ts';
 import { MAP_ZOOM } from './viewer-state.ts';
 import { PASTORAL_MARK_PATH, CATCHMENT_MARK_PATH, pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
-import { wonderSiteLabel } from '../visuals/wonder-visuals.ts';
 import { WONDER_MARK_PATH } from '../visuals/wonder-landmark.ts';
 import { depositLabel, SITE_MARK_PATHS } from '../visuals/strategic-resource-visuals.ts';
 import { visibleRoutePaths } from '../visuals/route-paths.ts';
@@ -25,16 +24,16 @@ import type { ViewerPreferences } from './viewer-state.ts';
 import { resolveAppearance } from './viewer-appearance.ts';
 import { cameraShiftForAnchor, unobscuredInspectionAnchor } from './inspection-camera.ts';
 import type { CameraView, ScreenPoint, InspectionFraming } from './inspection-camera.ts';
-import { createPartMeshes, createSettlementMeshes, createDistrictMeshes, createImprovementMeshes, createDepositMeshes, createWonderMeshes } from './settlement-three.ts';
-import { CHARCOAL_MARK_PATH, LUMBER_MARK_PATH, improvementLabel, improvementMark } from '../visuals/improvement-visuals.ts';
+import { createPartMeshes, createSettlementMeshes, createDepositMeshes, createWonderMeshes } from './settlement-three.ts';
+import { CHARCOAL_MARK_PATH, LUMBER_MARK_PATH } from '../visuals/improvement-visuals.ts';
 import { SHORE_FISHERY_MARK_PATH } from '../visuals/shore-fishery-visuals.ts';
 import { HILLSIDE_COMMONWORKS_MARK_PATH } from '../visuals/hillside-commonworks-visuals.ts';
-import { districtAdjacencySummary, districtMark, districtLabel } from '../visuals/district-visuals.ts';
 import { createWorldCues } from './world-cues.ts';
-import { mapHierarchyAnchors, mapHierarchyObstacles } from './map-labels.ts';
+import { createSiteOverlaySources, projectMapSiteGeometry, createMapCaptionMeasure, mapHierarchyAnchors, mapHierarchyObstacles } from './map-labels.ts';
 import { borderPartyAnchor, borderPartyBadgeOffsets, borderPartyLabel, borderPartyWorldParts, borderTargetOutline, projectBorderParties } from '../visuals/border-visuals.ts';
 import type { BorderIncidentView, BorderPartyMarker } from '../visuals/border-visuals.ts';
-import type { DetailLevel } from '../visuals/world-visuals.ts';
+import { settlementDetail, VISUAL_PALETTE, type DetailLevel } from '../visuals/world-visuals.ts';
+import { bindSiteInspection, mapInspectionSites, handoffSiteOverlayFocus, siteInspectionName, type SiteInspectionSelect } from './site-overlay-selection.ts';
 
 export interface AtlasRenderer {
   zoom: (factor: number) => void;
@@ -157,12 +156,26 @@ export function updateBorderPartyLabels(markers: readonly BorderPartyLabel[], de
   }
 }
 
+export function createSiteMapMarks(sites: ReturnType<typeof mapInspectionSites>, labels: HTMLElement, onSelect: SiteInspectionSelect) {
+  return sites.map(site => {
+    const point = hexPosition(site.q, site.r); const element = document.createElement('button');
+    element.type = 'button'; element.className = 'site-map-mark';
+    element.dataset['status'] = site.status; element.dataset['siteId'] = site.id; element.dataset['tileId'] = String(site.tileId); element.style.setProperty('--civ-color', site.color);
+    element.setAttribute('aria-label', siteInspectionName(site));
+    element.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${site.mark === 'wonder' ? WONDER_MARK_PATH : site.mark === 'intake' ? RIVER_INTAKE_MARK_PATH : site.mark === 'charcoal' ? CHARCOAL_MARK_PATH : site.mark === 'commons' ? HILLSIDE_COMMONWORKS_MARK_PATH : site.mark === 'fishery' ? SHORE_FISHERY_MARK_PATH : site.mark === 'pasture' ? PASTORAL_MARK_PATH : site.mark === 'lumber' ? LUMBER_MARK_PATH : site.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[site.mark]}"/></svg>`;
+    bindSiteInspection(element, site.cityId, 'workId' in site ? site.workId : undefined, onSelect); labels.append(element);
+    const leader = document.createElement('span'); leader.className = 'site-map-leader'; leader.setAttribute('aria-hidden', 'true'); labels.append(leader);
+    const anchorDot = document.createElement('span'); anchorDot.className = 'site-map-anchor'; anchorDot.setAttribute('aria-hidden', 'true'); labels.append(anchorDot);
+    return { element, leader, anchorDot, id: site.id, cityId: site.cityId, workId: 'workId' in site ? site.workId : undefined, family: site.mark, point: new THREE.Vector3(point.x, site.height + .4, point.z) };
+  });
+}
+
 export function createAtlasRenderer(
   container: HTMLElement,
   labels: HTMLElement,
   world: AtlasWorld,
   preferences: ViewerPreferences,
-  onSelect: (id: string, workId?: string) => void,
+  onSelect: SiteInspectionSelect,
   onRoute: (id: string) => void,
 ): AtlasRenderer {
   const scene = new THREE.Scene();
@@ -342,19 +355,19 @@ export function createAtlasRenderer(
     cityLabels.push({ element, point: new THREE.Vector3(x, floor + 1.45, z), id: cityKey(city) });
   }
   const settlements = createSettlementMeshes(world, material);
-  const districtMeshes = createDistrictMeshes(world, material);
-  const improvementMeshes = createImprovementMeshes(world, material);
+  const siteSources = createSiteOverlaySources(world);
+  const measureCaptions = createMapCaptionMeasure();
+  const siteMeshes = createPartMeshes(detail => siteSources.flatMap(source => {
+    const origin = hexPosition(source.q, source.r);
+    return source.parts(detail).map(part => ({ color: part.material === 'identity' ? source.color : VISUAL_PALETTE[part.material],
+      part: { ...part, position: [origin.x + part.position[0], source.height + part.position[1], origin.z + part.position[2]] as const } }));
+  }), material, settlementDetail);
   const depositMeshes = createDepositMeshes(world, material);
   const wonderMeshes = createWonderMeshes(world, material);
   const borderMeshes = createBorderPartyMeshes(world.borderIncidents ?? [], material);
   const borderTargets = createBorderTargetMeshes(world.borderIncidents ?? []);
   const borderMarkers = createBorderPartyLabels(world.borderIncidents ?? [], labels, onSelect);
-  const sites = [
-    ...(world.catchments ?? []).map(site => ({ ...site, mark: 'catchment' as const, label: `Aqueduct mountain source${site.status === 'building' ? ' · Building' : ''}` })),
-    ...(world.districts ?? []).map(site => ({ ...site, mark: districtMark(site), label: districtLabel(site) })),
-    ...(world.improvements ?? []).map(site => ({ ...site, mark: improvementMark(site), workId: site.status === 'building' ? `active:${site.construction?.id ?? ''}` : String(site.tileId), label: improvementLabel(site) })),
-    ...(world.wonders ?? []).map(site => ({ ...site, mark: 'wonder' as const, label: wonderSiteLabel(site) })),
-  ];
+  const sites = mapInspectionSites(world);
   const districtLabels = sites.map(district => {
     const point = hexPosition(district.q, district.r);
     const element = document.createElement('span');
@@ -363,23 +376,11 @@ export function createAtlasRenderer(
     element.dataset['districtId'] = district.id; element.dataset['tileId'] = String(district.tileId);
     element.style.setProperty('--civ-color', district.color);
     element.textContent = district.label;
-    element.setAttribute('aria-label', `Inspect ${district.label} of ${district.townName}, tile ${district.tileId}${'adjacency' in district && district.adjacency ? `. ${districtAdjacencySummary(district.adjacency)}` : ''}`);
+    element.setAttribute('aria-label', siteInspectionName(district));
     labels.append(element);
     return { element, point: new THREE.Vector3(point.x, district.height + .8, point.z), id: district.id };
   });
-  const siteMarks = sites.map(site => {
-    const point = hexPosition(site.q, site.r); const element = document.createElement('button');
-    element.type = 'button'; element.className = 'site-map-mark';
-    element.dataset['status'] = site.status; element.style.setProperty('--civ-color', site.color);
-    element.setAttribute('aria-label', `Inspect ${site.label} of ${site.townName}, tile ${site.tileId}${'adjacency' in site && site.adjacency ? `. ${districtAdjacencySummary(site.adjacency)}` : ''}`);
-    element.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${site.mark === 'wonder' ? WONDER_MARK_PATH : site.mark === 'intake' ? RIVER_INTAKE_MARK_PATH : site.mark === 'charcoal' ? CHARCOAL_MARK_PATH : site.mark === 'commons' ? HILLSIDE_COMMONWORKS_MARK_PATH : site.mark === 'fishery' ? SHORE_FISHERY_MARK_PATH : site.mark === 'pasture' ? PASTORAL_MARK_PATH : site.mark === 'lumber' ? LUMBER_MARK_PATH : site.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[site.mark]}"/></svg>`;
-    if ('adjacency' in site && site.adjacency?.source === 'improvement') {
-      const bonus = document.createElement('span'); bonus.className = 'site-base-bonus'; bonus.textContent = `+${site.adjacency.bonus} base`; element.append(bonus);
-    }
-    element.addEventListener('click', () => onSelect(site.cityId, 'workId' in site ? site.workId : undefined)); labels.append(element);
-    const leader = document.createElement('span'); leader.className = 'site-map-leader'; leader.setAttribute('aria-hidden', 'true'); leader.style.background = site.color; labels.append(leader);
-    return { element, leader, id: site.id, cityId: site.cityId, family: site.mark, point: new THREE.Vector3(point.x, site.height + .4, point.z) };
-  });
+  const siteMarks = createSiteMapMarks(sites, labels, onSelect);
   const pastoralMarks = (world.pastoralSites ?? []).map(site => {
     const point = hexPosition(site.q, site.r); const element = document.createElement('span');
     element.className = 'deposit-map-mark pastoral-map-mark'; element.setAttribute('role', 'img'); element.setAttribute('aria-label', pastoralSiteLabel(site.tileId));
@@ -395,7 +396,7 @@ export function createAtlasRenderer(
     labels.append(element); return { element, caption, id: site.id, point: new THREE.Vector3(point.x, site.height + .6, point.z) };
   });
   const landscapeMeshes = createLandscapeMeshes(world, material);
-  scene.add(landscapeMeshes.group, settlements.group, districtMeshes.group, improvementMeshes.group, depositMeshes.group, wonderMeshes.group, borderMeshes.group, borderTargets);
+  scene.add(landscapeMeshes.group, settlements.group, siteMeshes.group, depositMeshes.group, wonderMeshes.group, borderMeshes.group, borderTargets);
   const cues = createWorldCues(container, world, (x, z, height) => {
     const point = new THREE.Vector3(x, height, z).project(camera);
     return { x: (point.x + 1) / 2 * container.clientWidth, y: (1 - point.y) / 2 * container.clientHeight };
@@ -529,8 +530,7 @@ export function createAtlasRenderer(
     const tilePixels = Math.hypot((right.x - left.x) * container.clientWidth / 2, (right.y - left.y) * container.clientHeight / 2);
     settlements.update(tilePixels);
     const detail = landscapeMeshes.update(tilePixels);
-    districtMeshes.update(tilePixels);
-    improvementMeshes.update(tilePixels);
+    const siteDetail = siteMeshes.update(tilePixels);
     depositMeshes.update(tilePixels);
     wonderMeshes.update(tilePixels);
     const borderDetail = borderMeshes.update(tilePixels);
@@ -543,13 +543,26 @@ export function createAtlasRenderer(
       const ground = hexPosition(q, r); const point = new THREE.Vector3(ground.x, height, ground.z).project(camera);
       return { x: (point.x + 1) * container.clientWidth / 2, y: (1 - point.y) * container.clientHeight / 2 };
     };
-    const allocation = allocateMapHierarchy(mapHierarchyAnchors(world, selected, routes.visible ? selectedRoute : null, project), {
-      width: container.clientWidth, height: container.clientHeight, tileDiameter: tilePixels, previousDetail: detail, blocked: mapHierarchyObstacles(container),
+    const viewport = { width: container.clientWidth, height: container.clientHeight };
+    const geometry = projectMapSiteGeometry(siteSources, siteDetail, (x, y, z) => {
+      const point = new THREE.Vector3(x, y, z).project(camera);
+      return { x: (point.x + 1) * viewport.width / 2, y: (1 - point.y) * viewport.height / 2 };
+    }, viewport);
+    const borderOccupied: ScreenBox[] = borderMarkers.filter(marker => !marker.element.hidden).map(marker => ({
+      left: Number.parseFloat(marker.element.style.left) - Number.parseFloat(marker.element.style.width) / 2,
+      top: Number.parseFloat(marker.element.style.top) - Number.parseFloat(marker.element.style.height) / 2,
+      width: Number.parseFloat(marker.element.style.width), height: Number.parseFloat(marker.element.style.height),
+    }));
+    const anchors = mapHierarchyAnchors(world, selected, routes.visible ? selectedRoute : null, project,
+      { geometry, focusedId: document.activeElement?.getAttribute('data-site-id') ?? document.activeElement?.getAttribute('data-city-id') ?? null });
+    const allocation = allocateMapHierarchy(measureCaptions(anchors, viewport.width), {
+      ...viewport, tileDiameter: tilePixels, previousDetail: detail, blocked: [...mapHierarchyObstacles(container), ...borderOccupied],
     });
     const placements = new Map(allocation.items.map(item => [item.id, item]));
     labels.dataset['mapMarks'] = String(allocation.items.filter(item => item.mark).length);
     for (const city of cityLabels) {
       const placement = placements.get(city.id); const mark = placement?.mark;
+      if (!mark) handoffSiteOverlayFocus(city.element, container, city.id, undefined, onSelect);
       city.element.hidden = !mark;
       if (!placement || !mark) continue;
       city.element.style.left = `${mark.left}px`; city.element.style.top = `${mark.top}px`;
@@ -566,14 +579,21 @@ export function createAtlasRenderer(
     }
     for (const mark of siteMarks) {
       const placement = placements.get(mark.id); const box = placement?.mark;
-      mark.element.hidden = !box; mark.leader.hidden = !box;
+      if (!box) handoffSiteOverlayFocus(mark.element, container, mark.cityId, mark.workId, onSelect);
+      mark.element.hidden = !box; mark.leader.hidden = !placement?.leader; mark.anchorDot.hidden = !placement?.leader;
+      mark.element.dataset['placementMode'] = placement?.placementMode ?? 'omitted';
+      mark.element.dataset['placementReason'] = placement?.fallbackReason ?? '';
       if (!placement || !box) continue;
       const x = box.left + box.width / 2; const y = box.top + box.height / 2;
       mark.element.style.left = `${x}px`; mark.element.style.top = `${y}px`;
       mark.element.style.setProperty('--symbol-size', `${placement.symbolSize}px`);
-      mark.leader.style.left = `${placement.anchor.x}px`; mark.leader.style.top = `${placement.anchor.y}px`;
-      mark.leader.style.width = `${Math.hypot(x - placement.anchor.x, y - placement.anchor.y)}px`;
-      mark.leader.style.transform = `rotate(${Math.atan2(y - placement.anchor.y, x - placement.anchor.x)}rad)`;
+      if (placement.leader) {
+        const { from, to } = placement.leader;
+        mark.leader.style.left = `${from.x}px`; mark.leader.style.top = `${from.y}px`;
+        mark.leader.style.width = `${Math.hypot(to.x - from.x, to.y - from.y)}px`;
+        mark.leader.style.transform = `rotate(${Math.atan2(to.y - from.y, to.x - from.x)}rad)`;
+        mark.anchorDot.style.left = `${placement.anchor.x}px`; mark.anchorDot.style.top = `${placement.anchor.y}px`;
+      }
     }
     for (const label of districtLabels) {
       const placement = placements.get(label.id); label.element.hidden = !placement?.label;
@@ -605,7 +625,7 @@ export function createAtlasRenderer(
     }
     const pixelsPerUnit = Math.max(.01, tilePixels / 2);
     for (const line of routeLines) line.material.dashScale = pixelsPerUnit;
-    cues.update();
+    cues.update([...allocation.occupied, ...borderOccupied]);
     renderer.render(scene, camera);
     frame = requestAnimationFrame(animate);
   };
@@ -688,8 +708,7 @@ export function createAtlasRenderer(
       observer.disconnect();
       controls.dispose();
       settlements.dispose();
-      districtMeshes.dispose();
-      improvementMeshes.dispose();
+      siteMeshes.dispose();
       depositMeshes.dispose();
       wonderMeshes.dispose();
       borderMeshes.dispose();

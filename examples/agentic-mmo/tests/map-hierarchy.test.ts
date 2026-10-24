@@ -164,3 +164,80 @@ void test('the actual360 Home-fit cluster retains all town targets and the selec
   assert.equal(result.items.filter(item => item.mark).length, 6);
   assert.ok(result.items.find(item => item.emphasis === 'selected')?.label);
 });
+
+void test('all targets are allocated before optional captions and attachment names do not displace another identity', () => {
+  const anchors: HierarchyAnchor[] = [town('selected', 180, 180, true),
+    { id: 'mine', kind: 'site', label: 'Mine', x: 180, y: 245, related: true },
+    { id: 'campus', kind: 'site', label: 'Campus + Library + University + Observatory', shortLabel: 'Campus', x: 270, y: 210, related: true }];
+  const current = { width: 440, height: 600, tileDiameter: 84 };
+  const result = allocateMapHierarchy(anchors, current);
+  const altered = allocateMapHierarchy(anchors.map(item => ({ ...item, label: item.label.repeat(8) })), current);
+  assert.deepEqual(result.items.map(item => [item.id, item.mark]), altered.items.map(item => [item.id, item.mark]));
+  assert.ok(result.items.every(item => item.mark));
+  const campus = result.items.find(item => item.id === 'campus');
+  assert.equal(campus?.caption, 'Campus'); assert.equal(campus.fullLabel, anchors[2]?.label);
+});
+
+void test('focused sites retain far-detail priority without changing immutable site anchors or IDs', () => {
+  const anchors: HierarchyAnchor[] = [town('selected', 180, 200, true),
+    { id: 'focused-site', kind: 'site', label: 'Mine', x: 180, y: 200, focused: true },
+    { id: 'unrelated-site', kind: 'site', label: 'Pasture', x: 280, y: 300 }];
+  const before = structuredClone(anchors);
+  const result = allocateMapHierarchy(anchors, frame);
+  assert.equal(result.items[0]?.id, 'focused-site'); assert.ok(result.items[0]?.mark);
+  assert.equal(result.items.find(item => item.id === 'unrelated-site')?.fallbackReason, 'far-detail');
+  assert.deepEqual(anchors, before);
+});
+
+void test('compact own-architecture overlap is explicit, bounded and never reported as exterior success', () => {
+  const bounds = { left: 8, top: 8, width: 344, height: 491 };
+  const result = allocateMapHierarchy([{ id: 'huge', kind: 'site', label: 'Huge', x: 180, y: 220, related: true, protectedBounds: bounds }],
+    { ...frame, tileDiameter: 84 });
+  const item = result.items[0]; assert.ok(item?.mark);
+  assert.equal(item.placementMode, 'compact'); assert.equal(item.fallbackReason, 'exterior-blocked');
+  assert.ok(overlaps(item.mark, bounds)); assert.equal(item.label, null);
+  const hidden = allocateMapHierarchy([{ id: 'covered', kind: 'site', label: 'Covered', x: 180, y: 220, protectedBounds: bounds }],
+    { ...frame, tileDiameter: 84, blocked: [{ left: 0, top: 0, width: 360, height: 507 }] }).items[0];
+  assert.equal(hidden?.placementMode, 'omitted'); assert.equal(hidden.fallbackReason, 'no-safe-placement');
+  assert.equal(hidden.mark, null); assert.equal(hidden.symbol, null); assert.equal(hidden.leader, null);
+});
+
+void test('every caption and unrelated target protects a site whose own mark is suppressed', () => {
+  const site = { id: 'unrelated', kind: 'site' as const, label: 'Industrial zone', x: 180, y: 220,
+    protectedBounds: { left: 145, top: 125, width: 70, height: 110 } };
+  const result = allocateMapHierarchy([town('selected', 180, 260, true), site,
+    { id: 'route', kind: 'route', label: 'Trade route', x: 260, y: 220, related: true }], frame);
+  assert.equal(result.items.find(item => item.id === site.id)?.fallbackReason, 'far-detail');
+  assert.ok(result.items.find(item => item.id === 'selected')?.mark);
+  for (const box of result.occupied) assert.ok(!overlaps(box, site.protectedBounds));
+});
+
+void test('focus paint, measured caption padding and malformed bounds never leak past allocated rectangles', () => {
+  const result = allocateMapHierarchy([{ id: 'site', kind: 'site', label: 'Mine', shortLabel: 'Mine', captionWidth: 103,
+    focused: true, x: 180, y: 220, protectedBounds: { left: NaN, top: 1, width: 1, height: 1 } }], { ...frame, tileDiameter: 84 });
+  const item = result.items[0]; assert.ok(item?.mark && item.symbol && item.label);
+  assert.equal(item.fallbackReason, 'invalid-protected-bounds'); assert.equal(item.label.width, 115);
+  assert.deepEqual(result.occupied[0], { left: item.mark.left - 3, top: item.mark.top - 3, width: 50, height: 50 });
+  assert.ok(result.occupied.every(box => Object.values(box).every(Number.isFinite)));
+  assert.equal(item.symbol.width, 20); assert.equal(item.mark.width, 44);
+});
+
+void test('site leaders stop at the badge edge and do not cross another architecture envelope or target', () => {
+  const anchors: HierarchyAnchor[] = [
+    { id: 'one', kind: 'site', label: 'Mine', x: 180, y: 230, protectedBounds: { left: 155, top: 195, width: 50, height: 50 } },
+    { id: 'two', kind: 'site', label: 'Pasture', x: 265, y: 220, protectedBounds: { left: 240, top: 185, width: 50, height: 50 } },
+  ];
+  const result = allocateMapHierarchy(anchors, { width: 440, height: 600, tileDiameter: 84 });
+  assert.ok(result.items.every(item => item.mark && item.leader));
+  for (const item of result.items) {
+    assert.ok(item.mark && item.leader);
+    const to = item.leader.to;
+    assert.ok(Math.abs(to.x - item.mark.left) < 1e-8 || Math.abs(to.x - item.mark.left - item.mark.width) < 1e-8
+      || Math.abs(to.y - item.mark.top) < 1e-8 || Math.abs(to.y - item.mark.top - item.mark.height) < 1e-8);
+    for (let t = 0; t <= 1; t += .02) {
+      const point = { left: item.leader.from.x + (to.x - item.leader.from.x) * t, top: item.leader.from.y + (to.y - item.leader.from.y) * t, width: .01, height: .01 };
+      for (const other of anchors) if (other.id !== item.id && other.protectedBounds) assert.ok(!overlaps(point, other.protectedBounds));
+      for (const other of result.items) if (other.id !== item.id && other.mark) assert.ok(!overlaps(point, other.mark));
+    }
+  }
+});

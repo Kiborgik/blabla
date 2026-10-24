@@ -1281,10 +1281,13 @@ dialog h2 {
 .flat-district:focus .district-hit { stroke: #fff3b6; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .district-label { min-width: 44px; min-height: 44px; font-size: 12px; }
 
-.site-map-mark { position: absolute; width: 44px; height: 44px; min-width: 44px; padding: 10px; transform: translate(-50%, -50%); background: transparent; border: 0; z-index: 2; pointer-events: auto; }
-.site-map-mark svg { width: 24px; height: 24px; padding: 3px; border-radius: 50%; border: 2px solid var(--civ-color); background: #173a3c; fill: none; stroke: #fff3c6; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.site-map-mark { position: absolute; display: grid; place-items: center; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; transform: translate(-50%, -50%); background: transparent; border: 0; z-index: 2; pointer-events: auto; }
+.site-map-mark svg { width: 20px; height: 20px; padding: 2px; border-radius: 50%; border: 1.5px solid #294348; background: #f4f0df; fill: none; stroke: #294348; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .site-map-mark[data-status="building"] svg { border-style: dashed; }
-.site-map-leader { position: absolute; height: 1px; transform-origin: left center; pointer-events: none; }
+.site-map-leader { position: absolute; height: 1px; background: #d9dfcbb3; transform-origin: left center; pointer-events: none; }
+.site-map-anchor { position: absolute; width: 3px; height: 3px; background: #d9dfcbb3; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.site-map-mark:focus-visible { outline: 2px solid #fff5d8; outline-offset: 1px; }
+.site-map-leader[hidden], .site-map-anchor[hidden] { display: none; }
 .deposit-map-mark { position: absolute; width: 14px; height: 14px; transform: translate(-50%, -100%); pointer-events: none; border-radius: 50%; background: #edf1e6; color: #293c43; border: 1px solid currentColor; }
 .deposit-map-mark svg { fill: none; stroke: currentColor; stroke-width: 2; }
 .district-label { pointer-events: none; }
@@ -1363,15 +1366,17 @@ dialog h2 {
 
 .live-observatory:not([data-inspection='true']) .inspection { display: none; }
 .sheet-close { display: block; position: sticky; float: right; top: 0; min-width: 74px; min-height: 44px; padding: 8px 10px; margin: -4px -4px 0 8px; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; z-index: 2; }
-.map-caption { position: absolute; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0 4px; min-width: 0; min-height: 0; background: #173a3ce8; border: 0; border-radius: 3px; color: #fff5d8; font: 12px Arial, sans-serif; white-space: nowrap; text-align: center; transform: none; pointer-events: none; }
+.map-caption { position: absolute; box-sizing: border-box; overflow: hidden; display: flex; align-items: center; justify-content: center; margin: 0; padding: 0 4px; min-width: 0; min-height: 0; background: #173a3ce8; border: 0; border-radius: 3px; color: #fff5d8; font: 12px Arial, sans-serif; white-space: nowrap; text-align: center; transform: none; pointer-events: none; }
 .city-label.map-town-mark { transform: none; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; box-shadow: none; }
+.city-label .map-caption { font-family: Arial, sans-serif; font-weight: 400; letter-spacing: 0; }
 .city-label.map-town-mark[hidden] { display: none; }
 .city-label.map-town-mark::after { display: none; }
 .map-town-badge { width: var(--symbol-size, 22px); height: var(--symbol-size, 22px); border: 2px solid var(--civ-color); border-radius: 50%; background: #173a3c; color: #fff5d8; display: flex; align-items: center; justify-content: center; font-size: 12px; }
 .map-town-mark.selected .map-town-badge { background: #466c5c; box-shadow: 0 0 0 2px #fff5d833; }
-.map-town-mark:focus-visible { outline: 2px solid #fff5d8; outline-offset: 2px; }
+.map-town-mark:focus-visible { outline: 2px solid #fff5d8; outline-offset: 1px; }
 .site-map-mark svg { box-sizing: border-box; width: var(--symbol-size, 20px); height: var(--symbol-size, 20px); }
 .site-base-bonus { display: none; }
+.map-caption.district-label { background: transparent; text-shadow: -1px -1px 1px #173a3c, 1px -1px 1px #173a3c, -1px 1px 1px #173a3c, 1px 1px 1px #173a3c; }
 .deposit-map-mark { width: 15px; height: 15px; transform: translate(-50%, -50%); }
 .route-map-label.map-route-mark { width: 44px; min-width: 44px; height: 44px; padding: 0; transform: none; }
 .flat-city.selected > .city-marker, .flat-city:focus > .city-marker { stroke-width: 2px; vector-effect: non-scaling-stroke; }

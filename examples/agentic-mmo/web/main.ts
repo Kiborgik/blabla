@@ -1,3 +1,4 @@
+import { inspectionSectionForSiteWork, inspectionRequestNeedsRender, siteInspectionRequestKey, mapInspectionSites, retainSiteOverlayFocus, restoreSiteOverlayFocus, type SiteInspectionWork } from './site-overlay-selection.ts';
 import { knowledgeRouteRecords, renderKnowledgeRoute } from './knowledge-inspection.ts';
 import { advanceLocalSimulationAsync, disposeLocalSimulationWorker } from './local-simulation-client.ts';
 import { localSimulationSnapshot } from './local-simulation.ts';
@@ -155,7 +156,7 @@ let lastRead = '';
 let observedAt = '';
 const catalogue = capabilityCatalogue();
 let inspectionFingerprint = '';
-let pendingInspectionWork: string | undefined;
+let pendingInspectionWork: SiteInspectionWork | undefined;
 let inspectedCivilization = -1;
 let inspectedCity: string | null = null;
 const narrowLayout = window.matchMedia('(max-width: 1000px)');
@@ -289,12 +290,13 @@ function renderInspection(): void {
   const capabilities = state && actual && observedAt ? projectCapabilities(state, actual.id, preferences.selectedCity, observedAt) : null;
   const territory = state && capabilities ? projectTownTerritory(state, capabilities) : undefined;
   const localChoice = mode === 'local' ? localSimulation?.decisions.find(decision => decision.seat === civ.id) : undefined;
-  const fingerprint = JSON.stringify([civ, actual, localChoice, cities, residentSupport, research, development, pastoral, territory, capabilities?.governance, capabilities?.decisions?.civic, capabilities?.rail, capabilities?.strategic, capabilities?.industrialEvidence, capabilities?.localPower, preferences.selectedCity, displayed.routes, routeListPage, mode, pendingInspectionWork]);
-  if (fingerprint === inspectionFingerprint) return;
+  const fingerprint = JSON.stringify([civ, actual, localChoice, cities, residentSupport, research, development, pastoral, territory, capabilities?.governance, capabilities?.decisions?.civic, capabilities?.rail, capabilities?.strategic, capabilities?.industrialEvidence, capabilities?.localPower, preferences.selectedCity, displayed.routes, routeListPage, mode, siteInspectionRequestKey(pendingInspectionWork)]);
+  if (!inspectionRequestNeedsRender(pendingInspectionWork, fingerprint, inspectionFingerprint)) return;
   const sameCity = inspectedCivilization === civ.id && inspectedCity === preferences.selectedCity;
-  const previousScroll = sameCity && !pendingInspectionWork ? panel.scrollTop : 0;
-  const selectedSection = pendingInspectionWork ? 'work' : sameCity ? panel.dataset['inspectionView'] ?? 'overview' : 'overview';
-  const selectedWork = pendingInspectionWork ?? (sameCity ? panel.querySelector<HTMLElement>('.city-details')?.dataset['selectedWork'] ?? '' : '');
+  const workRequest = pendingInspectionWork;
+  const previousScroll = sameCity && workRequest === undefined ? panel.scrollTop : 0;
+  const selectedSection = sameCity ? panel.dataset['inspectionView'] ?? 'overview' : 'overview';
+  const selectedWork = workRequest === undefined ? (sameCity ? panel.querySelector<HTMLElement>('.city-details')?.dataset['selectedWork'] ?? '' : '') : workRequest ?? '';
   const landElement = sameCity ? panel.querySelector<HTMLElement>('.territory-detail') : null;
   const retainedTerritory = { view: landElement?.dataset['landView'] ?? 'purchases', page: Number(landElement?.dataset['landPage'] ?? 0) };
   pendingInspectionWork = undefined;
@@ -422,7 +424,9 @@ function renderInspection(): void {
   const routes = document.createElement('section'); routes.dataset['inspectionSection'] = 'routes';
   renderRouteList(routes, displayed.routes.filter(candidate => candidate.from === preferences.selectedCity || candidate.to === preferences.selectedCity), selectedRoute, routeListPage, selectRoute, selectRoutePage);
   if (!routes.childElementCount) routes.textContent = 'No recorded routes for this town.';
-  panel.append(routes); chooseSection(selectedSection);
+  panel.append(routes);
+  const availableWork = [...panel.querySelectorAll<HTMLOptionElement>('.work-picker option')].map(option => option.value);
+  chooseSection(inspectionSectionForSiteWork(workRequest, availableWork, selectedSection));
   if (focusedInspection) [...panel.querySelectorAll<HTMLElement>('[data-inspection-focus]')].find(node => node.dataset['inspectionFocus'] === focusedInspection)?.focus({ preventScroll: true });
   if (focusedRoute) [...panel.querySelectorAll<HTMLElement>('[data-route-focus]')].find((node) => node.dataset['routeFocus'] === focusedRoute)?.focus({ preventScroll: true });
   panel.scrollTop = previousScroll;
@@ -490,7 +494,7 @@ function selectRoute(id: string): void {
   element('.inspection').querySelector<HTMLButtonElement>('.route-close')?.focus({ preventScroll: true });
 }
 
-function selectCity(id: string, workId?: string): void {
+function selectCity(id: string, workId?: SiteInspectionWork): void {
   if (worldBody !== 'earth') changeWorldBody('earth');
   const fromRoute = selectedRoute !== null;
   const city = displayed.cities.find((entry) => cityKey(entry) === id);
@@ -556,6 +560,7 @@ function renderBodyControls(state: WorldState | null): void {
 function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
   renderBodyControls(mode === 'sample' ? null : snapshot?.state ?? null);
   const shift = retainCoordinates && worldBody === 'earth' ? atlasCoordinateShift(displayed, world) : null;
+  const previousWorld = displayed;
   displayed = world;
   if (!world.routes.some((route) => route.id === selectedRoute)) selectedRoute = null;
   preferences = { ...preferences, ...bodySelection(worldBody, world, preferences) };
@@ -577,6 +582,8 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
   for (const row of document.querySelectorAll<HTMLElement>('[data-civ]')) row.setAttribute('aria-pressed', String(Number(row.dataset['civ']) === preferences.selected));
   const fingerprint = JSON.stringify([worldBody, mars ?? world]);
   if (fingerprint !== mapFingerprint) {
+    const focusedSite = retainSiteOverlayFocus(element('#map'), observedWorldKey());
+    const focusedDescriptor = focusedSite ? mapInspectionSites(previousWorld).find(site => site.id === focusedSite.id) : undefined;
     const presentationCamera = worldBody === 'earth' ? atlas?.snapshot() : undefined;
     savePreferences();
     if (shift && (shift.x || shift.z)) {
@@ -603,6 +610,11 @@ function renderWorld(world: AtlasWorld, retainCoordinates = false): void {
     }
     if (initialOverview && (mars || world.tiles.length)) { atlas.reset(); initialOverview = false; savePreferences(); }
     mapFingerprint = fingerprint;
+    element('#map').dataset['siteFocusWorld'] = observedWorldKey();
+    if (focusedSite) requestAnimationFrame(() => {
+      const current = mapInspectionSites(displayed).find(site => site.id === focusedSite.id) ?? focusedDescriptor;
+      restoreSiteOverlayFocus(element('#map'), focusedSite, observedWorldKey(), current && displayed.cities.some(city => cityKey(city) === current.cityId) ? current : undefined, selectCity);
+    });
     if (shift && (shift.x || shift.z)) savePreferences();
     viewerSettings.refresh();
   }

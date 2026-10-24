@@ -118,13 +118,13 @@ void test('local settlement display scale preserves every installed part instead
   const world = projectWorld(state); world.cities = world.cities.filter(town => town.cityId === city.id);
   const appearance = new THREE.MeshBasicMaterial();
   const meshes = createSettlementMeshes(world, () => appearance);
-  meshes.update(60);
+  assert.equal(meshes.update(60), 'mid');
   const key = (values: readonly number[]): string => values.map(value => value.toFixed(5)).join(',');
   const actual = meshes.group.children.flatMap(child => {
     if (!(child instanceof THREE.InstancedMesh)) return [];
     return Array.from({ length: child.count }, (_, index) => { const matrix = new THREE.Matrix4(); child.getMatrixAt(index, matrix); return key(new THREE.Vector3().setFromMatrixScale(matrix).toArray()); });
   }).sort();
-  const expected = settlementVisual(city, 'close').parts.map(part => key(part.scale.map(value => value * SETTLEMENT_RENDER_SCALE))).sort();
+  const expected = settlementVisual(world.cities[0]!.settlement!, 'mid').parts.map(part => key(part.scale.map(value => value * SETTLEMENT_RENDER_SCALE))).sort();
   assert.deepEqual(actual, expected);
   assert.ok(SETTLEMENT_RENDER_SCALE < 1 && SETTLEMENT_RENDER_SCALE > .5);
   meshes.dispose(); appearance.dispose();

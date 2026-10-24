@@ -1,9 +1,8 @@
 import { RIVER_INTAKE_MARK_PATH } from '../visuals/river-intake-visuals.ts';
 import { selectedAcquiredLand } from '../visuals/territory-visuals.ts';
-import { allocateMapHierarchy, fitMapOverview, mapContentWindow } from '../visuals/map-hierarchy.ts';
+import { allocateMapHierarchy, fitMapOverview, mapContentWindow, type ScreenBox } from '../visuals/map-hierarchy.ts';
 import { MAP_ZOOM } from './viewer-state.ts';
 import { PASTORAL_MARK_PATH, CATCHMENT_MARK_PATH, pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
-import { wonderSiteLabel } from '../visuals/wonder-visuals.ts';
 import { greatLibraryVisual, WONDER_MARK_PATH } from '../visuals/wonder-landmark.ts';
 import { depositParts, depositLabel, SITE_MARK_PATHS } from '../visuals/strategic-resource-visuals.ts';
 import { visibleRoutePaths } from '../visuals/route-paths.ts';
@@ -23,13 +22,13 @@ import { civilizationIdentity } from '../visuals/visual-language.ts';
 import type { DetailLevel } from '../visuals/world-visuals.ts';
 import { flatMapPoint, flatSceneFaces } from './settlement-parts.ts';
 import { createWorldCues } from './world-cues.ts';
-import { mapHierarchyAnchors, mapHierarchyObstacles } from './map-labels.ts';
-import { CHARCOAL_MARK_PATH, LUMBER_MARK_PATH, improvementLabel, improvementMark, improvementParts } from '../visuals/improvement-visuals.ts';
+import { createSiteOverlaySources, projectMapSiteGeometry, createMapCaptionMeasure, observeMapHierarchyObstacles, mapHierarchyAnchors, mapHierarchyObstacles } from './map-labels.ts';
+import { CHARCOAL_MARK_PATH, LUMBER_MARK_PATH } from '../visuals/improvement-visuals.ts';
 import { SHORE_FISHERY_MARK_PATH } from '../visuals/shore-fishery-visuals.ts';
 import { HILLSIDE_COMMONWORKS_MARK_PATH } from '../visuals/hillside-commonworks-visuals.ts';
-import { districtAdjacencySummary, districtMark, districtLabel, districtParts } from '../visuals/district-visuals.ts';
 import { borderPartyAnchor, borderPartyBadgeOffsets, borderPartyLabel, borderPartyWorldParts, borderTargetOutline, projectBorderParties } from '../visuals/border-visuals.ts';
 import type { BorderIncidentView } from '../visuals/border-visuals.ts';
+import { bindSiteInspection, mapInspectionSites, handoffSiteOverlayFocus, siteInspectionName, type SiteInspectionSelect } from './site-overlay-selection.ts';
 
 export function cityScreenMetrics(pixelsPerUnit: number): { targetRadius: number; markerRadius: number; markerFont: number; labelFont: number; labelY: number } {
   const scale = Math.max(0.01, pixelsPerUnit);
@@ -168,7 +167,7 @@ export function createFlatAtlasRenderer(
   container: HTMLElement,
   world: AtlasWorld,
   preferences: ViewerPreferences,
-  onSelect: (id: string, workId?: string) => void,
+  onSelect: SiteInspectionSelect,
   onRoute: (id: string) => void,
 ): AtlasRenderer {
   const svg = node('svg', { class: 'flat-atlas', role: 'group', 'aria-label': `${world.illustrative ? 'Sample' : 'Committed world'} two dimensional map. Select a city to inspect.` });
@@ -193,13 +192,12 @@ export function createFlatAtlasRenderer(
   const deposits = node('g', { class: 'flat-deposits', 'pointer-events': 'none' });
   const pastoralNodes: Array<{ element: SVGGElement; mark: SVGGElement; label: SVGTextElement; id: string; q: number; r: number; revealedTo: number[] }> = [];
   const depositNodes: Array<{ parts: SVGGElement; mark: SVGGElement; label: SVGTextElement; index: number }> = [];
-  const sites = [
-    ...(world.catchments ?? []).map(site => ({ ...site, kind: 'catchment', mark: 'catchment' as const, caption: 'Aqueduct source', label: `Aqueduct mountain source${site.status === 'building' ? ' · Building' : ''}`, parts: (_level: DetailLevel) => [] })),
-    ...(world.districts ?? []).map(site => ({ ...site, kind: 'district', mark: districtMark(site), caption: site.name ?? 'Campus', label: districtLabel(site), parts: (level: DetailLevel) => districtParts(site, level) })),
-    ...(world.improvements ?? []).map(site => ({ ...site, kind: 'improvement', mark: improvementMark(site), workId: site.status === 'building' ? `active:${site.construction?.id ?? ''}` : String(site.tileId), caption: site.name, label: improvementLabel(site), parts: (level: DetailLevel) => improvementParts(site, level) })),
-    ...(world.wonders ?? []).map(site => ({ ...site, kind: 'wonder', mark: 'wonder' as const, caption: site.name, label: wonderSiteLabel(site), parts: (level: DetailLevel) => greatLibraryVisual(site.record, level).parts })),
-  ];
-  const districtNodes: Array<{ element: SVGGElement; parts: SVGGElement; hit: SVGCircleElement; label: SVGTextElement; leader: SVGLineElement; mark: SVGGElement; markLeader: SVGLineElement; index: number; placed: boolean }> = [];
+  const siteSources = createSiteOverlaySources(world);
+  const sourceById = new Map(siteSources.map(source => [source.id, source]));
+  const measureCaptions = createMapCaptionMeasure();
+  const sites = mapInspectionSites(world).map(site => ({ ...site, caption: 'name' in site ? site.name ?? 'Campus' : 'Aqueduct source',
+    parts: (level: DetailLevel) => site.kind === 'wonder' ? greatLibraryVisual(site.record, level).parts : sourceById.get(site.id)?.parts(level) ?? [] }));
+  const districtNodes: Array<{ element: SVGGElement; parts: SVGGElement; hit: SVGCircleElement; label: SVGTextElement; leader: SVGLineElement; mark: SVGGElement; markLeader: SVGLineElement; anchorDot: SVGCircleElement; index: number }> = [];
   const settlements: Array<{ element: SVGGElement; index: number }> = [];
   let detail: DetailLevel | undefined;
   let townDetail: DetailLevel | undefined;
@@ -262,25 +260,21 @@ export function createFlatAtlasRenderer(
   for (const [index, district] of sites.entries()) {
     const point = flatHexPosition(district.q, district.r, district.height);
     const group = node('g', { class: `flat-district flat-${district.kind}`, 'data-district-id': district.id, 'data-tile-id': String(district.tileId), 'data-status': district.status,
-      transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'aria-label': `Inspect ${district.label} of ${district.townName}, tile ${district.tileId}${'adjacency' in district && district.adjacency ? `. ${districtAdjacencySummary(district.adjacency)}` : ''}` });
+      transform: `translate(${point.x} ${point.z})`, role: 'button', tabindex: '0', 'data-site-id': district.id, 'aria-label': siteInspectionName(district) });
     const parts = node('g', { 'pointer-events': 'none' });
     const hit = node('circle', { class: 'district-hit', fill: 'transparent', r: '1' });
     const label = node('text', { 'text-anchor': 'middle', fill: '#fff5d8', 'font-family': 'Arial, sans-serif', stroke: '#173a3c', 'stroke-width': '.09', 'paint-order': 'stroke', 'pointer-events': 'none' });
     const leader = node('line', { x1: '0', y1: '0', stroke: district.color, 'stroke-width': '1', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
     label.textContent = district.caption;
     const mark = node('g', { 'pointer-events': 'none', 'aria-hidden': 'true' });
-    mark.append(node('circle', { r: '12', fill: '#173a3c', stroke: district.color, 'stroke-width': '2', 'stroke-dasharray': district.status === 'building' ? '3 2' : 'none' }), node('path', { d: district.mark === 'wonder' ? WONDER_MARK_PATH : district.mark === 'intake' ? RIVER_INTAKE_MARK_PATH : district.mark === 'charcoal' ? CHARCOAL_MARK_PATH : district.mark === 'commons' ? HILLSIDE_COMMONWORKS_MARK_PATH : district.mark === 'fishery' ? SHORE_FISHERY_MARK_PATH : district.mark === 'pasture' ? PASTORAL_MARK_PATH : district.mark === 'lumber' ? LUMBER_MARK_PATH : district.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[district.mark], transform: 'translate(-9 -9) scale(.75)', fill: 'none', stroke: '#fff3c6', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
-    if ('adjacency' in district && district.adjacency?.source === 'improvement') {
-      const bonus = node('text', { x: '0', y: '25', 'text-anchor': 'middle', 'font-size': '11', 'font-family': 'Arial, sans-serif', fill: '#fff3c6', stroke: '#173a3c', 'stroke-width': '3', 'paint-order': 'stroke' });
-      bonus.textContent = `+${district.adjacency.bonus} base`;
-      mark.append(bonus);
-    }
-    const markLeader = node('line', { stroke: district.color, 'stroke-width': '1.5', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
-    group.append(leader, parts, markLeader, hit, mark, label);
-    group.addEventListener('click', () => onSelect(district.cityId, 'workId' in district ? district.workId : undefined));
-    group.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect(district.cityId, 'workId' in district ? district.workId : undefined); } });
+    mark.append(node('circle', { r: '11', fill: '#f4f0df', stroke: '#294348', 'stroke-width': '2', 'stroke-dasharray': district.status === 'building' ? '3 2' : 'none' }), node('path', { d: district.mark === 'wonder' ? WONDER_MARK_PATH : district.mark === 'intake' ? RIVER_INTAKE_MARK_PATH : district.mark === 'charcoal' ? CHARCOAL_MARK_PATH : district.mark === 'commons' ? HILLSIDE_COMMONWORKS_MARK_PATH : district.mark === 'fishery' ? SHORE_FISHERY_MARK_PATH : district.mark === 'pasture' ? PASTORAL_MARK_PATH : district.mark === 'lumber' ? LUMBER_MARK_PATH : district.mark === 'catchment' ? CATCHMENT_MARK_PATH : SITE_MARK_PATHS[district.mark], transform: 'translate(-9 -9) scale(.75)', fill: 'none', stroke: '#294348', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }));
+    const markLeader = node('line', { stroke: '#d9dfcb', 'stroke-opacity': '.7', 'stroke-width': '1', 'vector-effect': 'non-scaling-stroke', 'pointer-events': 'none' });
+    const anchorDot = node('circle', { r: '0', fill: '#d9dfcb', 'fill-opacity': '.7', 'pointer-events': 'none', 'aria-hidden': 'true' });
+    group.append(leader, parts, markLeader, anchorDot, hit, mark, label);
+    bindSiteInspection(group, district.cityId, 'workId' in district ? district.workId : undefined, onSelect);
+    group.addEventListener('focus', () => resize());
     districts.append(group);
-    districtNodes.push({ element: group, parts, hit, label, leader, mark, markLeader, index, placed: false });
+    districtNodes.push({ element: group, parts, hit, label, leader, mark, markLeader, anchorDot, index });
   }
   for (const [index, deposit] of (world.deposits ?? []).entries()) {
     const point = flatHexPosition(deposit.q, deposit.r, deposit.height);
@@ -373,15 +367,26 @@ export function createFlatAtlasRenderer(
       const point = flatHexPosition(q, r, height);
       return { x: (point.x - box.x) * pixelsPerUnit, y: (point.z - box.y) * pixelsPerUnit };
     };
-    const allocation = allocateMapHierarchy(mapHierarchyAnchors(world, selected, routes.style.display === 'none' ? null : selectedRoute, project), {
-      width: container.clientWidth, height: container.clientHeight, tileDiameter: pixelsPerUnit * 2,
-      previousDetail: detail, blocked: mapHierarchyObstacles(container),
+    const viewport = { width: container.clientWidth, height: container.clientHeight };
+    const geometry = projectMapSiteGeometry(siteSources, townDetail ?? 'far', (px, py, pz) => {
+      const point = flatMapPoint(px, pz, py); return { x: (point.x - box.x) * pixelsPerUnit, y: (point.z - box.y) * pixelsPerUnit };
+    }, viewport);
+    const borderOccupied: ScreenBox[] = [...borderParties.querySelectorAll<SVGGElement>('.flat-border-party')].map(marker => {
+      const radius = detail === 'far' ? 12 : 16;
+      return { left: (Number(marker.getAttribute('data-border-x')) - box.x) * pixelsPerUnit + Number(marker.getAttribute('data-screen-offset-x')) - radius,
+        top: (Number(marker.getAttribute('data-border-z')) - box.y) * pixelsPerUnit + Number(marker.getAttribute('data-screen-offset-y')) - radius, width: radius * 2, height: radius * 2 };
+    });
+    const anchors = mapHierarchyAnchors(world, selected, routes.style.display === 'none' ? null : selectedRoute, project,
+      { geometry, focusedId: document.activeElement?.getAttribute('data-site-id') ?? document.activeElement?.getAttribute('data-city-id') ?? null });
+    const allocation = allocateMapHierarchy(measureCaptions(anchors, viewport.width), {
+      ...viewport, tileDiameter: pixelsPerUnit * 2, previousDetail: detail, blocked: [...mapHierarchyObstacles(container), ...borderOccupied],
     });
     svg.dataset['mapMarks'] = String(allocation.items.filter(item => item.mark).length);
     const placements = new Map(allocation.items.map(item => [item.id, item]));
     for (const city of cityNodes) {
       const placement = placements.get(city.id);
       const mark = placement?.mark;
+      if (!mark) handoffSiteOverlayFocus(city.element, container, city.id, undefined, onSelect);
       city.element.style.visibility = mark ? 'visible' : 'hidden';
       city.element.setAttribute('tabindex', mark ? '0' : '-1');
       if (!mark) { city.label.style.visibility = 'hidden'; city.banner.style.visibility = 'hidden'; }
@@ -395,7 +400,8 @@ export function createFlatAtlasRenderer(
       city.ring.setAttribute('stroke-width', String(2 / pixelsPerUnit));
       const crestSize = placement.symbolSize * .66 / pixelsPerUnit;
       city.marker.setAttribute('transform', `translate(${dx - crestSize / 2} ${dy - crestSize / 2}) scale(${crestSize / 24})`);
-      city.leader.setAttribute('x2', String(dx)); city.leader.setAttribute('y2', String(dy));
+      city.leader.style.visibility = placement.leader ? 'visible' : 'hidden';
+      if (placement.leader) { city.leader.setAttribute('x2', String((placement.leader.to.x - placement.anchor.x) / pixelsPerUnit)); city.leader.setAttribute('y2', String((placement.leader.to.y - placement.anchor.y) / pixelsPerUnit)); }
       city.label.style.visibility = placement.label ? 'visible' : 'hidden';
       city.banner.style.visibility = placement.label ? 'visible' : 'hidden';
       if (placement.label) {
@@ -436,7 +442,11 @@ export function createFlatAtlasRenderer(
     }
     for (const entry of districtNodes) {
       const site = sites[entry.index]; const placement = site && placements.get(site.id); const mark = placement?.mark;
-      entry.mark.style.visibility = mark ? 'visible' : 'hidden'; entry.markLeader.style.visibility = mark ? 'visible' : 'hidden';
+      entry.mark.style.visibility = mark ? 'visible' : 'hidden'; entry.markLeader.style.visibility = placement?.leader ? 'visible' : 'hidden';
+      entry.anchorDot.style.visibility = placement?.leader ? 'visible' : 'hidden';
+      entry.element.dataset['placementMode'] = placement?.placementMode ?? 'omitted';
+      entry.element.dataset['placementReason'] = placement?.fallbackReason ?? '';
+      if (!mark && site) handoffSiteOverlayFocus(entry.element, container, site.cityId, 'workId' in site ? site.workId : undefined, onSelect);
       entry.hit.style.pointerEvents = mark ? 'all' : 'none'; entry.element.setAttribute('tabindex', mark ? '0' : '-1');
       entry.element.setAttribute('aria-hidden', String(!mark));
       entry.label.style.visibility = placement?.label ? 'visible' : 'hidden'; entry.leader.style.visibility = 'hidden';
@@ -444,7 +454,11 @@ export function createFlatAtlasRenderer(
       const dx = (mark.left + mark.width / 2 - placement.anchor.x) / pixelsPerUnit;
       const dy = (mark.top + mark.height / 2 - placement.anchor.y) / pixelsPerUnit;
       entry.mark.setAttribute('transform', `translate(${dx} ${dy}) scale(${placement.symbolSize / 24 / pixelsPerUnit})`);
-      entry.markLeader.setAttribute('x2', String(dx)); entry.markLeader.setAttribute('y2', String(dy));
+      if (placement.leader) {
+        entry.markLeader.setAttribute('x1', String((placement.leader.from.x - placement.anchor.x) / pixelsPerUnit)); entry.markLeader.setAttribute('y1', String((placement.leader.from.y - placement.anchor.y) / pixelsPerUnit));
+        entry.markLeader.setAttribute('x2', String((placement.leader.to.x - placement.anchor.x) / pixelsPerUnit)); entry.markLeader.setAttribute('y2', String((placement.leader.to.y - placement.anchor.y) / pixelsPerUnit));
+      }
+      entry.anchorDot.setAttribute('r', String(1.5 / pixelsPerUnit));
       entry.hit.setAttribute('cx', String(dx)); entry.hit.setAttribute('cy', String(dy)); entry.hit.setAttribute('r', String(22 / pixelsPerUnit));
       if (placement.label) {
         entry.label.textContent = placement.caption;
@@ -468,8 +482,9 @@ export function createFlatAtlasRenderer(
         }
       }
     }
-    cues.update();
+    cues.update([...allocation.occupied, ...borderOccupied]);
   };
+  const stopObstacles = observeMapHierarchyObstacles(container, resize);
   const observer = new ResizeObserver(resize);
   observer.observe(container);
   resize();
@@ -545,6 +560,6 @@ export function createFlatAtlasRenderer(
     showEvents: cues.show,
     clearEvents: cues.clear,
     setMotion: cues.setMotion,
-    dispose: () => { observer.disconnect(); cues.dispose(); svg.remove(); },
+    dispose: () => { observer.disconnect(); stopObstacles(); cues.dispose(); svg.remove(); },
   };
 }

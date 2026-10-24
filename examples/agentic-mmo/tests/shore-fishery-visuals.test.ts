@@ -227,6 +227,19 @@ class SvgElement {
   remove(): void { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(child => child !== this); }
   getBoundingClientRect(): { left: number; top: number; width: number; height: number } { return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight }; }
   descendants(): SvgElement[] { return this.children.flatMap(child => [child, ...child.descendants()]); }
+  getAttribute(name: string): string | null { return this.attributes[name] ?? null; }
+  getContext(): null { return null; }
+  replaceWith(replacement: SvgElement): void {
+    const parent = this.parentElement;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    if (index < 0) return;
+    replacement.parentElement = parent; parent.children.splice(index, 1, replacement); this.parentElement = null;
+  }
+  querySelectorAll(selector: string): SvgElement[] {
+    const classes = selector.split(',').map(value => value.trim().slice(1));
+    return this.descendants().filter(element => (element.attributes['class'] ?? '').split(' ').some(value => classes.includes(value)));
+  }
   closest(): null { return null; }
 }
 
@@ -250,7 +263,7 @@ await test('actual flat renderer consumes fishery parts at unchanged town LOD wi
     const { world, view } = retainedStateFixture(status);
     const before = structuredClone(world);
     const container = new SvgElement('div'); container.clientWidth = width;
-    const selected: Array<[string, string | undefined]> = [];
+    const selected: Array<[string, string | null | undefined]> = [];
     const origin = hexPosition(view.q, view.r);
     const point = flatMapPoint(origin.x, origin.z, view.height);
     const zoomBase = width < container.clientHeight ? 26 : 16;
@@ -268,7 +281,7 @@ await test('actual flat renderer consumes fishery parts at unchanged town LOD wi
         const site: SvgElement | undefined = svg.descendants().find(element => element.attributes['data-district-id'] === view.id); assert.ok(site);
         assert.equal(site.attributes['data-tile-id'], String(view.tileId));
         assert.equal(site.attributes['data-status'], view.status);
-        assert.equal(site.attributes['aria-label'], `Inspect ${improvementLabel(view)} of ${view.townName}, tile ${view.tileId}`);
+        assert.equal(site.attributes['aria-label'], `Inspect ${improvementLabel(view)} of ${view.townName}, tile ${view.tileId}. ${view.status === 'building' ? 'Under construction' : 'Built'} improvement`);
         assert.equal(site.attributes['transform'], `translate(${point.x} ${point.z})`);
         const parts = improvementParts(view, detail);
         const polygons: SvgElement[] = site.descendants().filter(element => element.attributes['data-part']);
