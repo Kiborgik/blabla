@@ -62,7 +62,7 @@ export function createWorld(seed: number, clockEpoch?: string, registeredRulesId
   if (rules.featureIds.includes('independent-actions') && clockEpoch === undefined)
     throw new RangeError('Independent worlds require an explicit epoch');
   const regionalIron = rules.featureIds.includes('regional-iron');
-  if (regionalIron && geography === undefined) return createGeneratedWorld(normalized, clockEpoch!, rules.id as 'settlement-regional-iron-1' | 'settlement-staged-coastal-1' | 'settlement-expansion-labor-1');
+  if (regionalIron && geography === undefined) return createGeneratedWorld(normalized, clockEpoch!, rules.id as 'settlement-regional-iron-1' | 'settlement-staged-coastal-1' | 'settlement-expansion-labor-1' | 'settlement-earned-land-integration-1');
   if (geography !== undefined) {
     const canonical = regionalIron && geography.width === WORLD_EXPANSION_RULES.width && geography.height === WORLD_EXPANSION_RULES.height ? reconstructGeneratedGeography(normalized, geography.width, geography.height, geography.attempt) : null;
     if (!canonical || JSON.stringify(canonical) !== JSON.stringify(geography)) throw new RangeError('Fresh regional bootstrap requires the exact generated candidate for this seed');
@@ -101,7 +101,7 @@ export function createWorld(seed: number, clockEpoch?: string, registeredRulesId
   };
   if (geography) {
     state.drainage = structuredClone(geography.drainage);
-    state.origin = { kind: 'generated', generatorVersion: geography.version, seed: normalized, clockEpoch: clockEpoch!, initialReleaseId: rules.id as 'settlement-regional-iron-1' | 'settlement-staged-coastal-1' | 'settlement-expansion-labor-1', geographyAttempt: geography.attempt };
+    state.origin = { kind: 'generated', generatorVersion: geography.version, seed: normalized, clockEpoch: clockEpoch!, initialReleaseId: rules.id as 'settlement-regional-iron-1' | 'settlement-staged-coastal-1' | 'settlement-expansion-labor-1' | 'settlement-earned-land-integration-1', geographyAttempt: geography.attempt };
   }
   if (usesIndependentTurns(state) && clockEpoch !== undefined) {
     state.independentTurns = createIndependentTurns(clockEpoch);

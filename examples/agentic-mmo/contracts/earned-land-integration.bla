@@ -1,0 +1,12 @@
+type EarnedLandObservation {
+    cases: int, founding_errors: int, delivery_errors: int, identity_errors: int,
+    timing_errors: int, history_errors: int, replay_errors: int, preserved_gate_errors: int
+}
+state earned_land_observations: [EarnedLandObservation]
+action observe_earned_land_integration()
+when observe_earned_land_integration {
+    expect "ordinary-founding-conserves-and-pays-before-recording": count(after.earned_land_observations) > 0 and all(after.earned_land_observations, s => s.cases > 0 and s.founding_errors == 0)
+    expect "only-new-paid-foreign-land-delivery-to-that-town-connects": all(after.earned_land_observations, s => s.delivery_errors == 0 and s.identity_errors == 0 and s.timing_errors == 0)
+    expect "one-frozen-witness-keeps-earned-history-through-pruning": all(after.earned_land_observations, s => s.history_errors == 0 and s.replay_errors == 0)
+    expect "coastal-first-and-later-physical-gates-remain": all(after.earned_land_observations, s => s.preserved_gate_errors == 0)
+}

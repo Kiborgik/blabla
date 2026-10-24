@@ -1,3 +1,4 @@
+import { earnedLandRecords, validLandIntegrationEvent } from './land-integration-validation.ts';
 import { regionalIronPlanForWorld, REGIONAL_IRON_PLACEMENT_ID } from './regional-iron.ts';
 import { isCivicWorksOperation, isCivicWorksState, validCivicWorksEvent } from './civic-works-validation.ts';
 import { validPolicyExclusivity, validInstitutionalScienceOperation } from './learning-patronage-validation.ts';
@@ -1652,7 +1653,7 @@ function territoryRecords(present: boolean, value: unknown, cities: City[], tile
 
 export function isGameEvent(value: unknown): value is GameEvent {
   return (
-    record(value) && validMarsEvent(value) && validReliefEvent(value) && validKnowledgeEvent(value) && validBorderEvent(value) && validCivicWorksEvent(value) &&
+    record(value) && validLandIntegrationEvent(value) && validMarsEvent(value) && validReliefEvent(value) && validKnowledgeEvent(value) && validBorderEvent(value) && validCivicWorksEvent(value) &&
     (!Object.hasOwn(value, 'regionalEvent') || isHistoricalEventReceipt(value.regionalEvent) && value.regionalEvent.eventId === value.id && value.regionalEvent.round === value.round && value.regionalEvent.eventKind === value.type && value.actor === DIRECTOR_SEAT && value.target === value.regionalEvent.civId && value.tileId === value.regionalEvent.selection.local.tileId) &&
     ['id', 'type', 'title', 'cause'].every((field) => text(value[field])) &&
     typeof value.detail === 'string' &&
@@ -1876,6 +1877,6 @@ export function isWorldState(value: unknown): value is WorldState {
   const reliefEnabled = features.includes('consented-relief');
   if (reliefEnabled !== Object.hasOwn(value, 'relief') || (reliefEnabled && !isReliefState(value.relief, value as unknown as WorldState))
     || (!reliefEnabled && value.events.some(event => Object.hasOwn(event, 'reliefResult') || event.type.startsWith('relief-')))) return false;
-  if (!spaceflightRecords(value as unknown as WorldState) || !generatedHistoryRecords(value as unknown as WorldState)) return false;
+  if (!earnedLandRecords(value as unknown as WorldState) || !spaceflightRecords(value as unknown as WorldState) || !generatedHistoryRecords(value as unknown as WorldState)) return false;
   return industrialRecords({ seed: value.seed, tiles, cities, civilizations: value.civilizations, events: value.events, routes: value.routes, unlockedFeatures: features, revision: value.revision, round, calendarMilestones: value.calendarMilestones, coalDeposits: value.coalDeposits, railEdges: value.railEdges, industrialEvidence: value.industrialEvidence, strategicDeposits: value.strategicDeposits, pastoralSites: value.pastoralSites, tradeOffers: Array.isArray(value.tradeOffers) && value.tradeOffers.every(tradeOffer) ? value.tradeOffers : [], presentFields: Object.keys(value) });
 }

@@ -1,5 +1,4 @@
 import { borderDealFailure } from './border-incidents.ts';
-import type { ResolvedTradeDelivery } from '../knowledge-types.ts';
 import { ACTION_FEATURES, INDUSTRIAL_RULES, METAL_RULES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TRADE_RECIPES, TRADE_RULES } from '../content.ts';
 import type {
   ActionOption,
@@ -7,6 +6,7 @@ import type {
   GameAction,
   GameEvent,
   Resources,
+  ResolvedTradeDelivery,
   Route,
   SteamDeliveryReceipt,
   StrategicResources,
@@ -496,13 +496,17 @@ export function resolveTrade(state: WorldState, events: GameEvent[]): ResolvedTr
       event.steamDelivery = structuredClone(receipt); agreement.lastSteamDelivery = structuredClone(receipt);
       if (state.industrialEvidence && !state.industrialEvidence.steamDelivery && terms.cadenceRounds < terms.transport.unrailedCadence && terms.transport.railEdges.length > 0) state.industrialEvidence.steamDelivery = structuredClone(receipt);
     }
-    if (hasFeatures(state, ['knowledge-compacts'])) {
+    const knowledge = hasFeatures(state, ['knowledge-compacts']);
+    const paidLand = terms.transport?.mode === 'land' && hasFeatures(state, ['earned-land-integration']);
+    if (knowledge || paidLand) {
       const from = state.cities.find(city => city.id === route.from)!; const to = state.cities.find(city => city.id === route.to)!;
-      deliveries.push({ ruleVersion: 1, routeId: route.id, agreementOfferId: agreement.offerId, agreementAcceptedRound: agreement.acceptedRound,
+      const delivery: ResolvedTradeDelivery = { ruleVersion: 1, routeId: route.id, agreementOfferId: agreement.offerId, agreementAcceptedRound: agreement.acceptedRound,
         owner: route.owner, partner: route.partner, fromCityId: from.id, toCityId: to.id, fromTileId: from.tileId, toTileId: to.tileId,
         round: state.round, revision: state.revision, eventId: event.id, deliveryCount: agreement.deliveryCount, tradeTerms: structuredClone(terms),
         proposerPaid: obligations(terms.proposerCargo, terms.proposerUpkeep), recipientPaid: obligations(terms.recipientCargo, terms.recipientUpkeep),
-        proposerStrategicPaid: structuredClone(proposerStrategicPaid), recipientStrategicPaid: structuredClone(recipientStrategicPaid) });
+        proposerStrategicPaid: structuredClone(proposerStrategicPaid), recipientStrategicPaid: structuredClone(recipientStrategicPaid) };
+      if (knowledge) deliveries.push(delivery);
+      if (paidLand) event.paidTradeDelivery = structuredClone(delivery);
     }
   }
   return deliveries;

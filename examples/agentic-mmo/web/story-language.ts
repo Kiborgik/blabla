@@ -7,6 +7,8 @@ import { recordedPublicProjectResult, type EventLogEntry } from './event-log.ts'
 import { exactNumber } from './number-format.ts';
 import { formatYear } from './live-world.ts';
 import { parseUtcTimestamp } from '../core/simulation/time.ts';
+import { isLandIntegrationWitness, validLandIntegrationEvent } from '../core/land-integration-validation.ts';
+import type { LandIntegrationWitness } from '../core/land-integration-types.ts';
 
 export interface StoryLanguage {
   title: string;
@@ -35,6 +37,16 @@ function boundedRecord(state: StoryNames, value: string): string {
 function amounts(vector: Partial<Resources>): string {
   return RESOURCE_IDS.filter(resource => (vector[resource] ?? 0) > 0)
     .map(resource => `${exactNumber(vector[resource] ?? 0)} ${METRIC_LABELS[resource]}`).join(', ');
+}
+
+export function landIntegrationExplanation(state: StoryNames, witness: LandIntegrationWitness): string {
+  const currentTown = (id: string, fallback: string): string => {
+    const name = state.cities.find(city => city.id === id)?.name;
+    return name ? `${name.length <= 48 ? name : `${name.slice(0, 47).trimEnd()}…`} (current name)` : fallback;
+  };
+  const { founding, delivery } = witness;
+  const other = delivery.fromCityId === founding.foundedCityId ? delivery.toCityId : delivery.fromCityId;
+  return `${currentTown(founding.foundedCityId, 'The recorded founded town')} was founded with transferred residents and paid supplies. It completed a paid land exchange with the foreign town ${currentTown(other, 'named in the record')}. Both partners paid cargo and upkeep.`;
 }
 
 function metricLabel(field: string): string | null {
@@ -193,6 +205,21 @@ function historicalStory(state: StoryNames, event: GameEvent): StoryLanguage | n
     }
   }
   if (event.type === 'history-milestone') {
+    if (isLandIntegrationWitness(event.landIntegration) && validLandIntegrationEvent(event)) {
+      const witness = event.landIntegration;
+      const facts = exactEffects(event, [/^Capability stage (\d+) attained in year (-?\d+)$/, /^Historical milestone connected-world recorded$/, /^Founding ([^ ]+) → ([^ ]+); paid exchange ([^ ]+) ↔ ([^ ]+)$/, /^The calendar changes only through its separate earned history advance$/]);
+      const milestone = HISTORICAL_MILESTONES.find(candidate => candidate.id === 'connected-world')!;
+      const stage = Number(facts?.[0]?.[1]); const year = Number(facts?.[0]?.[2]); const era = ERAS[stage];
+      if (facts && era && stage === milestone.era && Number.isSafeInteger(year)
+        && facts[2]![1] === witness.founding.sourceCityId && facts[2]![2] === witness.founding.foundedCityId
+        && facts[2]![3] === witness.delivery.fromCityId && facts[2]![4] === witness.delivery.toCityId
+        && event.cause === `Ordinary founding ${witness.founding.eventId} and successful paid land delivery ${witness.delivery.eventId} satisfied connected-world`) {
+        return { title: milestone.name, cause: landIntegrationExplanation(state, witness),
+          consequence: `${era.name} was reached in ${formatYear(year)}; the calendar was unchanged. This records a shared capability, not changes to every town.` };
+      }
+      return null;
+    }
+    if (event.landIntegration !== undefined) return null;
     const facts = exactEffects(event, [/^Capability stage (\d+) attained in year (-?\d+)$/, /^Historical milestone ([a-z0-9-]+) recorded$/]);
     const milestone = HISTORICAL_MILESTONES.find(candidate => candidate.id === facts?.[1]?.[1]);
     const stage = Number(facts?.[0]?.[1]); const year = Number(facts?.[0]?.[2]); const era = ERAS[stage];

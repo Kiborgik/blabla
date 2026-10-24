@@ -124,7 +124,11 @@ const expansionLaborRelease: RegisteredRulesDefinition = {
   id: 'settlement-expansion-labor-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
   featureIds: [...stagedCoastalRelease.featureIds, 'expansion-labor-reallocation'],
 };
-export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease, hillsideRelease, studiesRelease, borderRelease, fundedLandworkRelease, charcoalRelease, productiveFrontierRelease, riverIntakeRelease, woodlandRelease, learningPatronageRelease, civicWorksRelease, regionalIronRelease, stagedCoastalRelease, expansionLaborRelease];
+const earnedLandIntegrationRelease: RegisteredRulesDefinition = {
+  id: 'settlement-earned-land-integration-1', gameVersion: GAME_VERSION, schemaVersion: SCHEMA_VERSION,
+  featureIds: [...expansionLaborRelease.featureIds, 'earned-land-integration'],
+};
+export const RELEASES: readonly RegisteredRulesDefinition[] = [...historicalReleases, interplanetaryRelease, partnershipRelease, reliefRelease, regionalRelease, foodRelease, shoreRelease, knowledgeRelease, hillsideRelease, studiesRelease, borderRelease, fundedLandworkRelease, charcoalRelease, productiveFrontierRelease, riverIntakeRelease, woodlandRelease, learningPatronageRelease, civicWorksRelease, regionalIronRelease, stagedCoastalRelease, expansionLaborRelease, earnedLandIntegrationRelease];
 
 function currentRelease(): RegisteredRulesDefinition {
   const release = RELEASES.find((candidate) => candidate.id === 'settlement-foundations-1');

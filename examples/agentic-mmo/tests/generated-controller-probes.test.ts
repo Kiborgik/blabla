@@ -23,7 +23,7 @@ function geographyHolds(s: GeneratedControllerSample): boolean {
 
 function genesisHolds(s: GeneratedControllerSample): boolean {
   return s.genesis_errors === 0 && s.policy_version === 'weighted-civilizations-v7-expansion-labor'
-    && s.release_id === 'settlement-expansion-labor-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
+    && s.release_id === 'settlement-earned-land-integration-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
 }
 
 function decisionHolds(d: GeneratedControllerDecision): boolean {
@@ -367,6 +367,9 @@ await test('current labor genesis preserves requested rules and seeded funded po
   assert.equal(ACTIVE_LOCAL_POLICY_VERSION, EXPANSION_LABOR_BEHAVIOR_POLICY_VERSION);
   assert.equal(local.policyVersion, ACTIVE_LOCAL_POLICY_VERSION);
   assert.ok(local.state.unlockedFeatures.includes('expansion-labor-reallocation'));
+  assert.ok(local.state.unlockedFeatures.includes('earned-land-integration'));
+  assert.ok(local.state.cities.every(city => city.landFounding === undefined));
+  assert.equal(local.state.milestoneProofs?.['connected-world'], undefined);
   assert.ok(local.state.unlockedFeatures.includes('regional-iron'));
   assert.deepEqual(local.state.strategicDeposits, direct.strategicDeposits);
   assert.equal(behaviorDrawVersion(EXPANSION_LABOR_BEHAVIOR_POLICY_VERSION), behaviorDrawVersion(FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION));

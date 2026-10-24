@@ -9,8 +9,8 @@ import { isGameAction } from '../core/planning.ts';
 import { isWorldState } from '../core/validation.ts';
 import type { LiveSnapshot } from './live-world.ts';
 
-export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:expansion-labor-v1';
-export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-expansion-labor-1';
+export const LOCAL_SIMULATION_STORAGE_KEY = 'civitas:procedural-observatory:earned-land-integration-v1';
+export const ACTIVE_LOCAL_RELEASE_ID = 'settlement-earned-land-integration-1';
 export const ACTIVE_LOCAL_POLICY_VERSION = EXPANSION_LABOR_BEHAVIOR_POLICY_VERSION;
 export const LOCAL_SIMULATION_STEP_MS = 10_000;
 const EPOCH = '2000-01-01T00:00:00.000Z';

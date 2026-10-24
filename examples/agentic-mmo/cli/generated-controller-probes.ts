@@ -10,7 +10,7 @@ import { ACTIVE_LOCAL_POLICY_VERSION, ACTIVE_LOCAL_RELEASE_ID, createLocalSimula
 
 const EPOCH = '2000-01-01T00:00:00.000Z';
 const POLICY = 'weighted-civilizations-v7-expansion-labor';
-const RELEASE = 'settlement-expansion-labor-1';
+const RELEASE = 'settlement-earned-land-integration-1';
 const TERRAINS = ['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'];
 const DIRECTIONS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]] as const;
 const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined';

@@ -1,3 +1,4 @@
+import type { LandFoundingReceipt, LandIntegrationWitness, ConnectionWitness } from './land-integration-types.ts';
 import type { CivicWorksAction, CivicWorksState, CivicWorksReceipt } from './civic-works-types.ts';
 import type { WoodlandState, WoodlandOperationReceipt } from './woodland-types.ts';
 import type { RiverFlowState, RiverIntakeFlowReceipt } from './river-intake-types.ts';
@@ -19,7 +20,7 @@ export type Resource = 'food' | 'materials' | 'energy' | 'credits' | 'science' |
 export type Resources = Record<Resource, number>;
 export type PlaceNamingVersion = 'cultural-toponyms-v1';
 export type StrategicTemperamentVersion = 'strategic-temperaments-v1';
-export interface GeneratedWorldOrigin { geographyAttempt?: number; namingVersion?: PlaceNamingVersion; temperamentVersion?: StrategicTemperamentVersion; kind: 'generated'; generatorVersion: 'drainage-geography-v2'; seed: number; clockEpoch: string; initialReleaseId?: 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' | 'settlement-hillside-commonworks-1' | 'settlement-supported-studies-1' | 'settlement-supplied-borders-1' | 'settlement-funded-landwork-1' | 'settlement-charcoal-clearing-1' | 'settlement-productive-frontiers-1' | 'settlement-river-intakes-1' | 'settlement-renewing-worked-woodlands-1' | 'settlement-learning-patronage-1' | 'settlement-civic-works-1' | 'settlement-regional-iron-1' | 'settlement-staged-coastal-1' | 'settlement-expansion-labor-1' }
+export interface GeneratedWorldOrigin { geographyAttempt?: number; namingVersion?: PlaceNamingVersion; temperamentVersion?: StrategicTemperamentVersion; kind: 'generated'; generatorVersion: 'drainage-geography-v2'; seed: number; clockEpoch: string; initialReleaseId?: 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' | 'settlement-hillside-commonworks-1' | 'settlement-supported-studies-1' | 'settlement-supplied-borders-1' | 'settlement-funded-landwork-1' | 'settlement-charcoal-clearing-1' | 'settlement-productive-frontiers-1' | 'settlement-river-intakes-1' | 'settlement-renewing-worked-woodlands-1' | 'settlement-learning-patronage-1' | 'settlement-civic-works-1' | 'settlement-regional-iron-1' | 'settlement-staged-coastal-1' | 'settlement-expansion-labor-1' | 'settlement-earned-land-integration-1' }
 export type MarsMissionKind = 'settle' | 'resupply';
 export interface MarsMissionQuote { ruleVersion: 1; civId: number; mission: MarsMissionKind; sourceCityId: string; departureRound: number; arrivalRound: number; settlers: number; launchCost: Partial<Resources>; cargo: Partial<Resources>; totalCost: Partial<Resources>; sourcePopulationBefore: number; sourcePopulationAfter: number }
 export interface MarsMission extends MarsMissionQuote { id: string; eventId: string; paid: Partial<Resources> }
@@ -29,7 +30,7 @@ export interface MarsUpkeepReceipt { ruleVersion: 1; civId: number; round: numbe
 export interface MarsHabitatReceipt { ruleVersion: 1; civId: number; round: number; eventId: string; paid: Partial<Resources>; progressBefore: number; progressAfter: number }
 export interface MarsCivilizationState { missionsLaunched: number; activeMission: MarsMission | null; colony: MarsColony | null; lastDeparture: MarsMission | null; lastArrival: MarsArrivalReceipt | null; lastUpkeep: MarsUpkeepReceipt | null; lastHabitatWork: MarsHabitatReceipt | null }
 export interface SpaceflightState { ruleVersion: 1; civilizations: MarsCivilizationState[] }
-export interface EarnedMilestoneProof { ruleVersion: 1; milestoneId: string; round: number; revision: number; eventId: string; year: number; targetYear: number; era: number }
+export interface EarnedMilestoneProof { connection?: ConnectionWitness; ruleVersion: 1; milestoneId: string; round: number; revision: number; eventId: string; year: number; targetYear: number; era: number }
 export type StrategicResource = 'iron' | 'coal';
 export type StrategicResources = Partial<Record<StrategicResource, number>>;
 export interface StrategicDeposit { tileId: number; resource: StrategicResource; initialReserve: number; remaining: number }
@@ -99,7 +100,7 @@ export interface CoastalFoundingReceipt { ruleVersion: 1; sourceCityId: string; 
 export interface CityHousing { ruleVersion: 1; baseCapacity: number; establishedRound: number; origin: 'initial-capital' | 'founded' }
 export interface CityGrowthFacts { reservedReturning?: number; cityId: string; ruleVersion: 1; population: number; baseCapacity: number; sources: Array<{ buildingId: string; capacity: number }>; capacity: number; nextGrowthFoodCost: number }
 export interface PopulationGrowthReceipt { ruleVersion: 1; cityId: string; civId: number; round: number; eventId: string; populationBefore: number; populationAfter: number; capacity: number; foodPaid: number }
-export interface City { lastFoodSupply?: FoodSupplyReceipt; localPower?: CityLocalPower; buildingHighGround?: Record<string, CampusHighGroundSite>; buildingCatchments?: Record<string, number>; housing?: CityHousing; improvements?: Record<string, CityImprovement>; districtSites?: Record<string, number>; coastalFounding?: CoastalFoundingReceipt; id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
+export interface City { landFounding?: LandFoundingReceipt; lastFoodSupply?: FoodSupplyReceipt; localPower?: CityLocalPower; buildingHighGround?: Record<string, CampusHighGroundSite>; buildingCatchments?: Record<string, number>; housing?: CityHousing; improvements?: Record<string, CityImprovement>; districtSites?: Record<string, number>; coastalFounding?: CoastalFoundingReceipt; id: string; name: string; civId: number; tileId: number; population: number; wellbeing: number; infrastructure: number; focus: Focus; damage: number; buildings: string[]; buildingOperations?: Record<string, BuildingOperation>; construction?: CityConstruction }
 export interface Civilization { civics?: CivicState; government?: GovernmentState; strategicResources?: StrategicResources; id: number; name: string; color: string; adjective: string; objective: string; era: number; resources: Resources; technologies: string[]; researchTarget: string; researchProgress: number; lastResearchCompletion?: ResearchCompletion; influence: number; legitimacy: number; marsProgress: number; marsPopulation: number; marsSupplyStreak: number; federationStreak: number; score: number }
 export interface Route { id: string; from: string; to: string; owner: number; partner: number; active: boolean; damage: number; volume: number; agreement?: TradeAgreement }
 export interface LandTransportQuote { mode: 'land'; ruleVersion: 1; tileIds: number[]; edges: number }
@@ -118,7 +119,7 @@ export interface PublicProjectBase { id: string; routeId: string; agreementOffer
 export type PublicProject = PublicProjectBase & ({ status: 'pending'; expiresRound: number } | { status: 'committed'; acceptedRound: number; dueRound: number });
 export interface PublicProjectResult { projectId: string; routeId: string; agreementOfferId: string; outcome: 'completed' | 'declined' | 'cancelled' | 'expired' | 'failed' | 'no-work-needed'; reason: string; proposer: number; recipient: number; proposerPaid: Partial<Resources>; recipientPaid: Partial<Resources>; damageBefore: number | null; damageAfter: number | null }
 export interface Treaty { id: string; a: number; b: number; kind: 'trade' | 'federation' | 'peace'; since: number }
-export interface GameEvent { civicWorks?: CivicWorksReceipt; border?: BorderEvent; knowledgeCompact?: KnowledgeCompact; knowledgeStudy?: KnowledgeStudyEvent; knowledgeResult?: KnowledgeResult; reliefResult?: ReliefResult; regionalEvent?: HistoricalEventReceipt; marsDeparture?: MarsMission; marsArrival?: MarsArrivalReceipt; marsUpkeep?: MarsUpkeepReceipt; marsHabitat?: MarsHabitatReceipt; localPower?: LocalPowerBeatReceipt; steamDelivery?: SteamDeliveryReceipt; industrialFoundry?: IndustrialFoundryReceipt; railCompletion?: RailCompletion; territoryAcquisition?: TileAcquisitionReceipt; populationGrowth?: PopulationGrowthReceipt; wonderCompletion?: WonderCompletion; wonderLoss?: WonderLossReceipt; researchBoost?: ResearchBoostReceipt; strategicExtraction?: StrategicExtractionResult; strategicShipment?: StrategicShipmentResult; id: string; round: number; type: string; title: string; detail: string; actor: number | null; target: number | null; tileId: number | null; cause: string; effects: string[]; importance: number; publicProjectResult?: PublicProjectResult; coastalFounding?: CoastalFoundingReceipt }
+export interface GameEvent { landFounding?: LandFoundingReceipt; paidTradeDelivery?: ResolvedTradeDelivery; landIntegration?: LandIntegrationWitness; civicWorks?: CivicWorksReceipt; border?: BorderEvent; knowledgeCompact?: KnowledgeCompact; knowledgeStudy?: KnowledgeStudyEvent; knowledgeResult?: KnowledgeResult; reliefResult?: ReliefResult; regionalEvent?: HistoricalEventReceipt; marsDeparture?: MarsMission; marsArrival?: MarsArrivalReceipt; marsUpkeep?: MarsUpkeepReceipt; marsHabitat?: MarsHabitatReceipt; localPower?: LocalPowerBeatReceipt; steamDelivery?: SteamDeliveryReceipt; industrialFoundry?: IndustrialFoundryReceipt; railCompletion?: RailCompletion; territoryAcquisition?: TileAcquisitionReceipt; populationGrowth?: PopulationGrowthReceipt; wonderCompletion?: WonderCompletion; wonderLoss?: WonderLossReceipt; researchBoost?: ResearchBoostReceipt; strategicExtraction?: StrategicExtractionResult; strategicShipment?: StrategicShipmentResult; id: string; round: number; type: string; title: string; detail: string; actor: number | null; target: number | null; tileId: number | null; cause: string; effects: string[]; importance: number; publicProjectResult?: PublicProjectResult; coastalFounding?: CoastalFoundingReceipt }
 export interface Outcome { kind: VictoryKind; winners: number[]; round: number; reason: string }
 export interface IndependentTurns { epoch: string; strategyTicks: number; lastActionWindow: number[]; actionsInWindow: number[] }
 export interface TurnAdmission { mode: 'sequential' | 'independent'; nextActionAt: string | null; nextStrategyAt: string | null }
@@ -184,6 +185,7 @@ export interface BuildingDefinition { localPowerInput?: number; localPowerOutput
 export interface FeatureDefinition { id: string; name: string; description: string }
 export interface ReleaseDefinition { id: string; gameVersion: string; featureIds: readonly string[] }
 export type MilestoneCondition =
+  | { kind: 'earned-land-integration' }
   | { kind: 'industrial-evidence' }
   | { kind: 'city-count'; minimum: number }
   | { kind: 'building-count'; building: string; minimum: number }
@@ -192,7 +194,7 @@ export type MilestoneCondition =
   | { kind: 'active-routes'; minimum: number }
   | { kind: 'event'; eventType: string }
   | { kind: 'technology'; technology: string; civilizations: number };
-export interface HistoricalMilestone { id: string; name: string; requiredFeatures: readonly string[]; requiresMilestones: readonly string[]; conditions: readonly MilestoneCondition[]; year: number; era: number; explanation: string }
+export interface HistoricalMilestone { alternative?: { id: 'earned-land-integration'; requiredFeatures: readonly string[]; conditions: readonly MilestoneCondition[] }; id: string; name: string; requiredFeatures: readonly string[]; requiresMilestones: readonly string[]; conditions: readonly MilestoneCondition[]; year: number; era: number; explanation: string }
 
 export interface DirectorTickCommand { expectedRevision: number; kind: 'event' | 'review' | 'clock'; intervalId: string; timestamp: string; event: EventKind; target: number; regional?: HistoricalEventSelection }
 
@@ -202,3 +204,25 @@ export interface HistoryAdvanceReceipt { cause: HistoryCause; reason: string; de
 export interface RegisteredRulesDefinition extends ReleaseDefinition { schemaVersion: number }
 
 export interface StrategyCatchupResult extends TransitionResult { remainingTicks: number }
+
+export interface ResolvedTradeDelivery {
+  ruleVersion: 1;
+  routeId: string;
+  agreementOfferId: string;
+  agreementAcceptedRound: number;
+  owner: number;
+  partner: number;
+  fromCityId: string;
+  toCityId: string;
+  fromTileId: number;
+  toTileId: number;
+  round: number;
+  revision: number;
+  eventId: string;
+  deliveryCount: number;
+  tradeTerms: TradeTerms;
+  proposerPaid: Partial<Resources>;
+  recipientPaid: Partial<Resources>;
+  proposerStrategicPaid: StrategicResources;
+  recipientStrategicPaid: StrategicResources;
+}

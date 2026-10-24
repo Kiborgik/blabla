@@ -16,7 +16,7 @@ void test('the journey keeps a reachable narrow-screen opener, theme-owned butto
   assert.match(main, /journeyOpener = button; window\.location\.hash = 'journey'/);
   assert.match(main, /narrowLayout\.matches \? '#journey-nav' : '#journey-open'/);
   assert.match(main, /#journey-refresh'\)\.addEventListener\('click', \(\) => \{ renderJourney\(true\)/);
-  assert.match(main, /preserveInspection && current\?\.identity === journeyIdentity/);
+  assert.match(main, /preserveInspection && observedWorldKey\(\) === journeyIdentity/);
   assert.match(main, /scrollHost: element\('#journey-dialog'\), scrollTop: element\('#journey-dialog'\)\.scrollTop/);
   assert.match(main, /#era-name'\)\.textContent = journey\?\.headline/);
   assert.match(main, /journey\?\.outcome \? journey\.roundLabel/);

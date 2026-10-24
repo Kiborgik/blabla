@@ -221,8 +221,9 @@ export function executeAction(
       if (!tile) throw new RangeError('Settlement site is missing');
       const conserved = hasFeatures(state, ['conserved-founding']);
       const source = conserved ? cities.find((candidate) => candidate.id === action.sourceCityId) : firstCity;
+      const sourcePopulationBefore = source?.population;
       const city = foundSettlement(state, seat, tile, source, conserved);
-      emitEvent(state, events, {
+      const event = emitEvent(state, events, {
         type: 'settlement-founded',
         title: `${city.name} is founded`,
         detail: conserved ? `${ECONOMY_RULES.settle.population} people moved from ${source?.name} with material supplies` : 'People and material supplies established a new settlement on the shared map',
@@ -238,6 +239,15 @@ export function executeAction(
         ],
         importance: 4,
       });
+      if (hasFeatures(state, ['earned-land-integration', 'conserved-founding']) && source && sourcePopulationBefore !== undefined) {
+        city.landFounding = {
+          ruleVersion: 1, mode: 'ordinary', civId: seat, sourceCityId: source.id, foundedCityId: city.id,
+          sourceTileId: source.tileId, destinationTileId: city.tileId, population: city.population,
+          sourcePopulationBefore, sourcePopulationAfter: source.population, paid: structuredClone(ECONOMY_RULES.settle.cost),
+          round: state.round, revision: state.revision, eventId: event.id,
+        };
+        event.landFounding = structuredClone(city.landFounding);
+      }
       return;
     }
     case 'propose-public-project':

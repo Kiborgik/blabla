@@ -1,5 +1,5 @@
 import type { KNOWLEDGE_INSTITUTION_IDS, KNOWLEDGE_TECHNOLOGY_IDS } from './knowledge-content.ts';
-import type { BuildingOperationResult, Resources, StrategicResources, TradeTerms } from './types.ts';
+import type { BuildingOperationResult, Resources, TradeTerms } from './types.ts';
 
 export type KnowledgeTechnologyId = typeof KNOWLEDGE_TECHNOLOGY_IDS[number];
 export type KnowledgeInstitutionId = typeof KNOWLEDGE_INSTITUTION_IDS[number];
@@ -8,27 +8,7 @@ export type KnowledgeAction =
   | { type: 'respond-knowledge'; compactId: string; accept: boolean }
   | { type: 'withdraw-knowledge'; compactId: string };
 
-export interface ResolvedTradeDelivery {
-  ruleVersion: 1;
-  routeId: string;
-  agreementOfferId: string;
-  agreementAcceptedRound: number;
-  owner: number;
-  partner: number;
-  fromCityId: string;
-  toCityId: string;
-  fromTileId: number;
-  toTileId: number;
-  round: number;
-  revision: number;
-  eventId: string;
-  deliveryCount: number;
-  tradeTerms: TradeTerms;
-  proposerPaid: Partial<Resources>;
-  recipientPaid: Partial<Resources>;
-  proposerStrategicPaid: StrategicResources;
-  recipientStrategicPaid: StrategicResources;
-}
+export type { ResolvedTradeDelivery } from './types.ts';
 
 export interface KnowledgeTerms {
   ruleVersion: 2;

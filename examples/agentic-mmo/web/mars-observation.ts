@@ -1,8 +1,10 @@
 import { BUILDINGS, ERAS, HISTORICAL_MILESTONES, RESOURCE_IDS, SPACEFLIGHT_RULES, VICTORY_RULES } from '../core/content.ts';
-import type { MarsCivilizationState, Resources, WorldState } from '../core/types.ts';
+import type { MarsCivilizationState, Resources, StrategicResources, WorldState } from '../core/types.ts';
 import { METRIC_LABELS } from '../visuals/visual-language.ts';
 import { exactNumber } from './number-format.ts';
 import { visualIcon } from './world-cues.ts';
+import { isLandIntegrationWitness } from '../core/land-integration-validation.ts';
+import { landIntegrationExplanation } from './story-language.ts';
 
 export function worldJourney(state: WorldState) {
   const stage = ERAS[Math.max(...state.civilizations.map(civilization => civilization.era))]?.name ?? 'Stage unavailable';
@@ -18,9 +20,17 @@ export function worldJourney(state: WorldState) {
     milestones: HISTORICAL_MILESTONES.map(definition => {
       const proof = state.milestoneProofs?.[definition.id];
       const recorded = state.calendarMilestones.includes(definition.id);
-      return { id: definition.id, name: definition.name, explanation: definition.explanation,
-        status: recorded ? 'recorded' : definition.requiredFeatures.every(feature => state.unlockedFeatures.includes(feature)) ? 'not-yet-recorded' : 'unreleased',
-        proof: proof ? { ...proof } : null };
+      const alternativeReleased = definition.alternative?.requiredFeatures.every(feature => state.unlockedFeatures.includes(feature)) ?? false;
+      const connection = definition.id === 'connected-world' ? proof?.connection : undefined;
+      const explanation = definition.id === 'connected-world' && recorded && isLandIntegrationWitness(connection)
+        ? `${landIntegrationExplanation(state, connection)} This records a shared capability, not changes to every town. The milestone did not advance the calendar.`
+        : definition.id === 'connected-world' && !recorded && alternativeReleased
+          ? 'After states rise, either Navigation with a founded coastal settlement and a working exchange network, or an ordinary-founded town’s actual paid foreign land exchange can earn this stage. Neither path is recorded yet.'
+          : definition.id === 'connected-world' && recorded && state.unlockedFeatures.includes('earned-land-integration') && connection?.kind !== 'coastal'
+            ? 'The connection was recorded, but its detailed founding and exchange proof is unavailable.' : definition.explanation;
+      return { id: definition.id, name: definition.name, explanation,
+        status: recorded ? 'recorded' : alternativeReleased || definition.requiredFeatures.every(feature => state.unlockedFeatures.includes(feature)) ? 'not-yet-recorded' : 'unreleased',
+        proof: proof ? structuredClone(proof) : null };
     }),
   };
 }
@@ -76,6 +86,10 @@ function resourceAmounts(resources: Partial<Resources>, includeZero = false): st
   return values.join(' · ') || 'None recorded';
 }
 
+function strategicAmounts(resources: StrategicResources): string {
+  return Object.entries(resources).filter(([, amount]) => amount > 0).map(([resource, amount]) => `${exactNumber(amount)} ${resource === 'iron' ? 'Iron' : 'Coal'}`).join(' · ') || 'None recorded';
+}
+
 function receipt(identity: string, label: string, lines: string[]): HTMLDetailsElement {
   const details = text('details', '', 'mars-receipt'); details.dataset['journeyRecord'] = identity; details.append(text('summary', label));
   for (const line of lines) details.append(text('p', line));
@@ -115,7 +129,20 @@ export function renderMarsObservation(host: HTMLElement, state: WorldState, sele
   const milestones = text('ol', '', 'journey-milestones');
   for (const milestone of journey.milestones) {
     const row = text('li', ''); row.dataset['status'] = milestone.status;
-    row.append(text('strong', milestone.name), text('span', milestone.status === 'recorded' ? milestone.proof ? `Recorded round ${milestone.proof.round}` : 'Recorded milestone · Detailed proof unavailable' : milestone.status === 'unreleased' ? 'Not released' : 'Not yet recorded'), text('p', milestone.explanation)); milestones.append(row);
+    row.append(text('strong', milestone.name), text('span', milestone.status === 'recorded' ? milestone.proof ? `Recorded round ${milestone.proof.round}` : 'Recorded milestone · Detailed proof unavailable' : milestone.status === 'unreleased' ? 'Not released' : 'Not yet recorded'), text('p', milestone.explanation));
+    if (milestone.status === 'recorded' && isLandIntegrationWitness(milestone.proof?.connection)) {
+      const { founding, delivery } = milestone.proof.connection;
+      row.append(receipt(`milestone:${milestone.id}`, 'Founding and exchange record', [
+        `Founding: ${founding.sourceCityId} → ${founding.foundedCityId} · Round ${founding.round} · Event ${founding.eventId}`,
+        `Residents transferred: ${founding.population}. Source population: ${founding.sourcePopulationBefore} before · ${founding.sourcePopulationAfter} after. Founding supplies paid: ${resourceAmounts(founding.paid)}.`,
+        `Paid exchange: ${delivery.fromCityId} ↔ ${delivery.toCityId} · Round ${delivery.round} · Route ${delivery.routeId} · Event ${delivery.eventId}`,
+        `Agreement: ${delivery.agreementOfferId} · Accepted round ${delivery.agreementAcceptedRound} · Delivery ${delivery.deliveryCount}.`,
+        `${delivery.fromCityId} paid cargo and upkeep: ${resourceAmounts(delivery.proposerPaid)}. Strategic cargo: ${strategicAmounts(delivery.proposerStrategicPaid)}.`,
+        `${delivery.toCityId} paid cargo and upkeep: ${resourceAmounts(delivery.recipientPaid)}. Strategic cargo: ${strategicAmounts(delivery.recipientStrategicPaid)}.`,
+        `Milestone event: ${milestone.proof.eventId}. These are recorded facts, not a claim that the route is still active.`,
+      ]));
+    }
+    milestones.append(row);
   }
   history.append(milestones); host.append(history);
   for (const civilization of state.civilizations) {
