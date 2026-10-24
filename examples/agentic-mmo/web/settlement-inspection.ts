@@ -8,10 +8,10 @@ import { strategicResourceAmounts, strategicResourceLabel, SITE_MARK_PATHS, type
 import type { observedStrategicResources } from '../core/simulation/metals.ts';
 import { improvementLastLabel, type ImprovementView } from '../visuals/improvement-visuals.ts';
 import { damageCondition } from '../visuals/damage-visuals.ts';
-import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
+import { BUILDINGS, IMPROVEMENTS, POLICIES, RESOURCE_IDS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
 import { hasFeatures } from '../core/simulation/history.ts';
 import { observedResidentCapacity } from '../core/simulation/operations.ts';
-import type { City, WorldState, ResidentCapacityObservation, Resources, RailObservation, RailConstructionOrder, RailCompletion, CityLocalPower, LocalPowerBeatReceipt, BuildingOperationResult } from '../core/types.ts';
+import type { City, WorldState, ResidentCapacityObservation, Resources, RailObservation, RailConstructionOrder, RailCompletion, CityLocalPower, LocalPowerBeatReceipt, BuildingOperationResult, InstitutionalScienceContribution } from '../core/types.ts';
 import { buildingAppearance } from '../visuals/building-visuals.ts';
 import { operationVisual } from '../visuals/operation-visuals.ts';
 import type { ResourceAmount } from '../visuals/operation-visuals.ts';
@@ -38,6 +38,12 @@ function amountLine(label: string, amounts: Array<ResourceAmount | StrategicAmou
     line.append(item);
   }
   return line;
+}
+
+function appendPolicyContribution(host: HTMLElement, contribution: InstitutionalScienceContribution | undefined): void {
+  if (!contribution) return;
+  const name = POLICIES.find(policy => policy.id === contribution.policyId)?.name ?? 'Recorded policy';
+  host.append(text('p', `${name}: +${exactNumber(contribution.bonusScience)} Science (+${exactNumber(contribution.percent)}%; ${exactNumber(contribution.unboostedScience)} before policy). Included in Made.`, 'operation-policy-contribution'));
 }
 
 export function residentSupportForWorld(state: WorldState | null, cities: City[]): ResidentCapacityObservation | undefined {
@@ -438,6 +444,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
           text('p', 'This is the recorded allocation for that round. Support is assigned again each season.'));
       } else if (support) receipt.append(text('p', 'Resident support was not recorded for this result.'));
       receipt.append(amountLine('Paid', [...view.last.paid, ...view.last.strategicPaid ?? []]), amountLine('Made', view.last.produced));
+      appendPolicyContribution(receipt, view.last.policyContribution);
       for (const shortage of view.last.shortages) {
         receipt.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${shortage.required}; ${shortage.available} left in opening stock at round ${view.last.round}.`, 'operation-shortage'));
       }
@@ -502,6 +509,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
         results.append(amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
           amountLine('Used', [...RESOURCE_IDS.flatMap(resource => { const amount = last.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; }), ...strategicResourceAmounts('strategicPaid' in last ? last.strategicPaid : undefined)]));
         preview.append(results);
+        if (operation?.lastResult?.status === 'operated') appendPolicyContribution(preview, operation.lastResult.policyContribution);
         if (last.status === 'blocked' && 'shortages' in last) for (const shortage of last.shortages ?? []) preview.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
         if ('strategicShortages' in last) for (const shortage of last.strategicShortages ?? []) preview.append(text('p', `${strategicResourceLabel(shortage.resource)} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
         if (last.status === 'blocked' && operation) preview.append(text('p', operationVisual(operation).last?.label ?? 'Could not operate', 'work-record-round'));

@@ -1,0 +1,14 @@
+type CivicPriorityObservation {
+    round: int, accepted_arrangements: int, exclusive_group_errors: int,
+    paid_operation_errors: int, excluded_output_errors: int,
+    commitment_errors: int, choice_errors: int, restart_errors: int,
+    observer_errors: int
+}
+state civic_priority_observations: [CivicPriorityObservation]
+action observe_learning_patronage()
+when observe_learning_patronage {
+    expect "economic-priority-is-exclusive-across-all-slots": count(after.civic_priority_observations) > 0 and all(after.civic_priority_observations, o => o.accepted_arrangements > 0 and o.exclusive_group_errors == 0)
+    expect "only-paid-institution-science-earns-exact-policy-contribution": all(after.civic_priority_observations, o => o.paid_operation_errors == 0 and o.excluded_output_errors == 0)
+    expect "supported-priorities-preserve-costs-locks-and-independent-choice": all(after.civic_priority_observations, o => o.commitment_errors == 0 and o.choice_errors == 0)
+    expect "current-restart-and-observer-preserve-earned-policy-facts": all(after.civic_priority_observations, o => o.restart_errors == 0 and o.observer_errors == 0)
+}

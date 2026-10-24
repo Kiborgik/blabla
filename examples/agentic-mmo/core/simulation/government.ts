@@ -33,13 +33,15 @@ export function governmentActionBlock(state: WorldState, seat: number, governmen
   const definition = GOVERNMENTS.find(candidate => candidate.id === governmentId);
   if (!definition || !prerequisites(state, seat, definition)) return 'The target government requires its own released capabilities and completed civics';
   if (government.pending) return 'The current government transition must finish first';
-  const occupied = new Set<string>(); const usedPolicies = new Set<string>();
+  const occupied = new Set<string>(); const usedPolicies = new Set<string>(); const exclusiveGroups = new Set<string>();
   for (const assignment of assignments) {
     if (!POLICY_SLOT_TYPES.includes(assignment.slotType) || !Number.isSafeInteger(assignment.slotIndex) || assignment.slotIndex < 0 || assignment.slotIndex >= definition.slots[assignment.slotType]) return 'The exact target slot does not exist';
     const key = `${assignment.slotType}:${assignment.slotIndex}`;
     const policy = POLICIES.find(candidate => candidate.id === assignment.policyId);
     if (occupied.has(key) || usedPolicies.has(assignment.policyId)) return 'A slot and a policy may each be assigned only once';
     if (!policy || !prerequisites(state, seat, policy) || (assignment.slotType !== 'wildcard' && assignment.slotType !== policy.slotType)) return 'The exact policy is unavailable or incompatible with the target slot';
+    if (policy.exclusiveGroup && exclusiveGroups.has(policy.exclusiveGroup)) return `Only one policy in exclusive group ${policy.exclusiveGroup} may be assigned across all slots`;
+    if (policy.exclusiveGroup) exclusiveGroups.add(policy.exclusiveGroup);
     occupied.add(key); usedPolicies.add(assignment.policyId);
   }
   const current = government.active;
@@ -56,7 +58,7 @@ function arrangements(state: WorldState, seat: number, definition: GovernmentDef
   let values: PolicyAssignment[][] = [[]];
   for (const slot of slots) {
     const eligible = POLICIES.filter(policy => prerequisites(state, seat, policy) && (slot.slotType === 'wildcard' || policy.slotType === slot.slotType));
-    values = values.flatMap(value => [value, ...eligible.filter(policy => !value.some(assignment => assignment.policyId === policy.id)).map(policy => [...value, { ...slot, policyId: policy.id }])]);
+    values = values.flatMap(value => [value, ...eligible.filter(policy => !value.some(assignment => assignment.policyId === policy.id || policy.exclusiveGroup !== undefined && POLICIES.find(candidate => candidate.id === assignment.policyId)?.exclusiveGroup === policy.exclusiveGroup)).map(policy => [...value, { ...slot, policyId: policy.id }])]);
   }
   return values;
 }

@@ -1,3 +1,4 @@
+import { validInstitutionalScienceReceipt, validInstitutionalScienceOperation } from './learning-patronage-validation.ts';
 import { ACTION_FEATURES, BUILDINGS, RESIDENT_CAPACITY_RULES, RESOURCE_IDS, STRATEGIC_RESOURCE_IDS, TECHNOLOGIES, TRADE_RECIPES } from './content.ts';
 import { KNOWLEDGE_INSTITUTION_IDS, KNOWLEDGE_RULES, KNOWLEDGE_TECHNOLOGY_IDS } from './knowledge-content.ts';
 import type { KnowledgeAction, KnowledgeBalances, KnowledgeCompact, KnowledgeInstitutionProof, KnowledgeResult, KnowledgeState, KnowledgeStudyAttempt, KnowledgeStudyProof, KnowledgeStudySeason, KnowledgeTerms, ResolvedTradeDelivery } from './knowledge-types.ts';
@@ -99,7 +100,7 @@ export function isKnowledgeInstitutionProof(value: unknown): value is KnowledgeI
   if (!record(value) || !keys(value, ['civId', 'cityId', 'tileId', 'institutionId', 'inputs', 'residentsRequired', 'result', 'operationEventId']) || !integer(value.civId, 0, CIV_COUNT - 1) || !text(value.cityId) || !integer(value.tileId) || !institution(value.institutionId)
     || !eventId(value.operationEventId) || !vector(value.inputs) || value.residentsRequired !== RESIDENT_CAPACITY_RULES.perPaidRecipe || !record(value.result)) return false;
   const definition = BUILDINGS.find(item => item.id === value.institutionId)!; const result = value.result;
-  if (!equal(value.inputs, definition.operatingInputs) || !keys(result, ['round', 'status', 'paid', 'produced', 'shortages', 'residents']) || !integer(result.round) || result.status !== 'operated'
+  if (!equal(value.inputs, definition.operatingInputs) || !keys(result, ['round', 'status', 'paid', 'produced', 'shortages', 'residents', ...(Object.hasOwn(result, 'policyContribution') ? ['policyContribution'] : [])]) || !validInstitutionalScienceReceipt(result, value.institutionId) || !integer(result.round) || result.status !== 'operated'
     || !equal(result.paid, value.inputs) || !vector(result.produced) || !keys(result.produced, ['science']) || !(result.produced.science! > 0)
     || !dense(result.shortages, 0) || !record(result.residents)) return false;
   const residents = result.residents;
@@ -114,7 +115,8 @@ export function knowledgeOperationEventMatches(event: GameEvent, proof: Knowledg
   const result = proof.result; const residents = result.residents!;
   const effects = [...RESOURCE_IDS.filter(resource => (result.paid[resource] ?? 0) > 0).map(resource => `Paid ${result.paid[resource]} ${resource}`),
     ...RESOURCE_IDS.filter(resource => (result.produced[resource] ?? 0) > 0).map(resource => `Produced ${result.produced[resource]} ${resource}`),
-    `Residents: required ${residents.required}, opening capacity remaining ${residents.available}, allocated ${residents.allocated}; population is not consumed`];
+    `Residents: required ${residents.required}, opening capacity remaining ${residents.available}, allocated ${residents.allocated}; population is not consumed`,
+    ...(result.policyContribution ? [`Learning patronage: +${result.policyContribution.bonusScience} science from ${result.policyContribution.unboostedScience} at ${result.policyContribution.percent}%`] : [])];
   return equal(event.effects, effects);
 }
 
@@ -257,6 +259,7 @@ export function validKnowledgeEvent(value: unknown): boolean {
 function retainedOperations(attempt: Pick<KnowledgeStudyAttempt, 'teacher' | 'learner'>, state: WorldState): boolean {
   return [attempt.teacher, attempt.learner].every(proof => {
     if (!proof) return true;
+    if (!validInstitutionalScienceOperation(proof.result, proof.institutionId, state.unlockedFeatures)) return false;
     const event = state.events.find(item => item.id === proof.operationEventId);
     return event ? knowledgeOperationEventMatches(event, proof) : !state.events.length || precedes(proof.operationEventId, state.events[0]!.id);
   });

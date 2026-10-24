@@ -358,7 +358,13 @@ await test('synthetic records for all four construction families do not acquire 
   }
   const completed = governmentInput(secondGovernment.built);
   const retained = civicProgressPresentation(completed)?.constructionRecord;
-  assert.match(retained ?? '', /^Last completed · Theater square/);
+  const completion = completed.city?.construction?.lastCompleted;
+  assert.ok(completion);
+  const target = 'buildingId' in completion ? completion.buildingId : 'improvementId' in completion ? completion.improvementId : 'wonderId' in completion ? completion.wonderId : null;
+  const label = target ? [...completed.catalogue.buildings, ...completed.catalogue.improvements, ...completed.catalogue.wonders].find(definition => definition.id === target)?.name
+    : 'kind' in completion && completion.kind === 'rail' ? `Rail · Tiles ${completion.tileId} ↔ ${completion.toTileId} · Edge ${completion.edgeId}` : null;
+  assert.ok(label);
+  assert.equal(retained, `Last completed · ${label} · Round ${completion.completedRound} · Event ${completion.eventId}`);
   assert.ok(completed.projection.governance);
   completed.projection.governance.modifiers.capitalConstructionWorkPercent = 0;
   assert.equal(civicProgressPresentation(completed)?.constructionRecord, retained);

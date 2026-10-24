@@ -17,6 +17,7 @@ export const SPACEFLIGHT_RULES = {
 export const CIVIC_RULES = { ruleVersion: 1, featureId: 'civic-bootstrap', governmentCredits: 10, reslotCredits: 8, commitmentBeats: 4, transitionBeats: 2, transitionOutput: 0.75 } as const;
 export const POWERED_SCIENCE_RULES = { ruleVersion: 1, featureId: 'powered-science' } as const;
 export const SECOND_GOVERNMENT_RULES = { ruleVersion: 1, featureId: 'second-government' } as const;
+export const LEARNING_PATRONAGE_RULES = { ruleVersion: 1, featureId: 'learning-patronage', exclusiveGroup: 'economic-priority' } as const;
 export const POLICY_SLOT_TYPES = ['military', 'economic', 'diplomatic', 'wildcard'] as const;
 export const CIVICS: CivicDefinition[] = [
   { id: 'code-of-laws', name: 'Code of laws', requiredFeatures: ['civic-bootstrap'], requires: [], cost: 16, capability: 'Choose Chiefdom and explicitly assign Urban planning to fund additional local construction work.' },
@@ -31,7 +32,8 @@ export const GOVERNMENTS: GovernmentDefinition[] = [
   { id: 'autocracy', name: 'Autocracy', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['political-philosophy'], slots: { military: 2, economic: 1, diplomatic: 0, wildcard: 1 }, baseProduction: {}, capitalConstructionWorkPercent: 15 },
 ];
 export const POLICIES: PolicyDefinition[] = [
-  { id: 'urban-planning', name: 'Urban planning', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slotType: 'economic', constructionWork: 1 },
+  { id: 'urban-planning', name: 'Urban planning', requiredFeatures: ['civic-bootstrap'], requires: ['code-of-laws'], slotType: 'economic', constructionWork: 1, exclusiveGroup: LEARNING_PATRONAGE_RULES.exclusiveGroup },
+  { id: 'learning-patronage', name: 'Learning patronage', requiredFeatures: ['civic-bootstrap', LEARNING_PATRONAGE_RULES.featureId], requires: ['state-workforce'], slotType: 'economic', constructionWork: 0, exclusiveGroup: LEARNING_PATRONAGE_RULES.exclusiveGroup, institutionalSciencePercent: { percent: 25, buildingIds: ['library', 'academy', 'university'] } },
 ];
 
 export const RESOURCE_IDS: readonly Resource[] = ['food', 'materials', 'energy', 'credits', 'science', 'culture'];
@@ -87,6 +89,7 @@ export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'nav
 
 export const FEATURES: FeatureDefinition[] = [
   { id: 'renewing-worked-woodlands', name: 'Renewing worked woodlands', description: 'Lumbermills and Charcoal clearings harvest one of eight exact local forest work-lots only with their complete existing paid and staffed operation. Non-harvest economy beats recover one lot, capped at eight; continuous depleted supply is not promised and the forest biome remains.' },
+  { id: 'learning-patronage', name: 'Competing civic priorities', description: 'Choose one economic priority: Urban planning construction or Learning patronage for fully supported Library, House of learning and University Science.' },
   { id: 'river-intakes', name: 'Funded river intakes', description: 'Optional exact-site intakes use one opening Material, one local resident and eight renewable uniform-runoff units for three base Food after funded same-town Irrigation. Physical upstream withdrawals reduce downstream residual flow; no Water stock, treaty right or baseline Irrigation loss is implied.' },
   { id: 'productive-frontier-founding', name: 'Productive frontier towns', description: 'Civilizations assess affordable three-person satellites while protecting home work, households and commitments. A new town may independently choose paid Terraced fields; founding itself creates no farm, promised trade or future income.' },
   { id: 'charcoal-clearing', name: 'Charcoal clearings', description: 'Kiln firing opens paid working pads within retained owned forest near their town. One opening Material and one remaining resident make one base ordinary Energy on later beats; no forest removal or local Power is implied. When renewing woodlands are active, complete operations also consume one exact local work-lot.' },
@@ -464,7 +467,19 @@ export function validateContent(catalog: ContentCatalog = CONTENT): string[] {
     resources(`government ${government.id}`, government.baseProduction);
     if (government.capitalConstructionWorkPercent !== undefined && (!positive(government.capitalConstructionWorkPercent) || !government.requiredFeatures.includes(SECOND_GOVERNMENT_RULES.featureId))) errors.push(`government ${government.id}: capital work requires a positive modifier and second-government feature`);
   }
-  for (const policy of catalog.policies) if (!['military', 'economic', 'diplomatic'].includes(policy.slotType) || !positive(policy.constructionWork)) errors.push(`policy ${policy.id}: invalid slot or productive modifier`);
+  for (const policy of catalog.policies) {
+    const effect = policy.institutionalSciencePercent;
+    if (!['military', 'economic', 'diplomatic'].includes(policy.slotType) || !Number.isFinite(policy.constructionWork) || policy.constructionWork < 0
+      || policy.constructionWork === 0 && effect === undefined) errors.push(`policy ${policy.id}: invalid slot or productive modifier`);
+    if (policy.exclusiveGroup !== undefined && (!policy.exclusiveGroup.trim() || policy.exclusiveGroup.length > 80)) errors.push(`policy ${policy.id}: invalid exclusive group`);
+    if (effect !== undefined && (!positive(effect.percent) || effect.percent > 100 || effect.buildingIds.length === 0
+      || new Set(effect.buildingIds).size !== effect.buildingIds.length || !policy.requiredFeatures.includes(LEARNING_PATRONAGE_RULES.featureId)
+      || effect.buildingIds.some(id => {
+        const building = catalog.buildings.find(candidate => candidate.id === id);
+        return !building || !positive(building.production.science ?? 0) || !Object.values(building.operatingInputs ?? {}).some(positive)
+          || (building.localPowerInput ?? 0) > 0 || (building.localPowerOutput ?? 0) > 0;
+      }))) errors.push(`policy ${policy.id}: invalid paid institutional Science modifier`);
+  }
   const technologies = new Map(catalog.technologies.map(technology => [technology.id, technology]));
   const buildings = new Map(catalog.buildings.map(building => [building.id, building]));
   const wonderRules = catalog.wonderRules;

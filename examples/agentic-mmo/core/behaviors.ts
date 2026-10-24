@@ -1,3 +1,4 @@
+import { createPatronagePolicy } from './behavior-patronage.ts';
 import { woodlandOperationAllowed } from './behavior-woodlands.ts';
 import { isWoodlandImprovement } from './simulation/woodlands.ts';
 import { WOODLAND_RULES } from './woodland-content.ts';
@@ -156,6 +157,7 @@ interface Situation {
   charcoal: ReturnType<typeof createCharcoalClearingPolicy>;
   riverIntake: ReturnType<typeof createRiverIntakePolicy>;
   frontier: ReturnType<typeof createProductiveFrontierAssessment> | null;
+  patronage: ReturnType<typeof createPatronagePolicy> | null;
 }
 
 function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
@@ -178,7 +180,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, fundedLandwork: null, frontier: hasFeatures(state, ['productive-frontier-founding']) ? createProductiveFrontierAssessment(state, actor.id) : null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), riverIntake: createRiverIntakePolicy(state, actor.id, weights, profile.priorities.construction), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
+  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, patronage: hasFeatures(state, ['learning-patronage']) ? createPatronagePolicy(state, actor.id, weights, profile.priorities) : null, fundedLandwork: null, frontier: hasFeatures(state, ['productive-frontier-founding']) ? createProductiveFrontierAssessment(state, actor.id) : null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), riverIntake: createRiverIntakePolicy(state, actor.id, weights, profile.priorities.construction), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
   if (memory.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION) context.fundedLandwork = deriveFundedLandworkPlan(context, options);
   return context;
 }
@@ -344,7 +346,7 @@ function governmentValue(governmentId: string, assignments: ReadonlyArray<{ poli
   const foodValue = (definition.baseProduction.food ?? 0) * context.cities.length * (context.foodRisk ? 8 : 0.5);
   const capital = context.cities.find(city => city.id === `city-${context.actor.id}`);
   const capitalValue = (definition.capitalConstructionWorkPercent ?? 0) / 100 * (capital?.construction?.active ? 20 : 8) * context.profile.priorities.construction;
-  return foodValue + capitalValue + assignments.reduce((sum, assignment) => sum + (POLICIES.find(policy => policy.id === assignment.policyId)?.constructionWork ?? 0) * 4, 0);
+  return foodValue + capitalValue + (context.patronage ? 0 : assignments.reduce((sum, assignment) => sum + (POLICIES.find(policy => policy.id === assignment.policyId)?.constructionWork ?? 0) * 4, 0));
 }
 
 function actionWeight(option: ActionOption, context: Situation): number {
@@ -442,7 +444,10 @@ function actionWeight(option: ActionOption, context: Situation): number {
       const current = actor.government?.active;
       const value = governmentValue(action.governmentId, action.assignments, context);
       const previous = current ? governmentValue(current.governmentId, current.assignments, context) : 0;
-      return value > previous + 0.5 ? 15 + value - previous : 0;
+      const priority = context.patronage?.(action);
+      if (priority && !priority.supported) return 0;
+      const gain = value - previous + (priority?.priorityGain ?? 0);
+      return gain > 0.5 ? 15 + gain : 0;
     }
     case 'apply-research-boost': return 30;
     case 'propose-public-project': {
@@ -610,6 +615,7 @@ export function assessCivilizationBehavior(state: WorldState, seat: number, prev
   return { phase: context.phase, foodRisk: context.foodRisk, severeFoodRisk: context.severeFoodRisk, upkeep: context.upkeep,
     commitmentUntilRound: (context.phase === memory.phase ? memory.phaseSinceRound : state.round) + profile.commitmentRounds,
     candidates: candidates.map(candidate => ({ ...candidate, protected: protectedCandidate(candidate.option, context), urgent: urgent(candidate, context),
+      ...(candidate.option.action.type === 'adopt-government' && context.patronage ? { economicPriority: context.patronage(candidate.option.action) } : {}),
       ordinaryWeight: usesStrategicTemperaments(memory.policyVersion) ? ordinaryPhaseWeight(candidate.option.action, candidate.weight, context.phase) : candidate.weight })) };
 }
 
@@ -691,6 +697,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
     const assessment = context.riverIntake(choice.option.action);
     if (assessment) reason = riverIntakeReason(assessment);
   }
+  if (choice.option.action.type === 'adopt-government' && context.patronage) reason = context.patronage(choice.option.action).reason;
   return committedDecision(state, memory, choice, context.phase, reason, profile, isUrgent);
 }
 

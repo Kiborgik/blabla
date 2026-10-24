@@ -18,6 +18,7 @@ export interface OperationVisual {
     produced: ResourceAmount[];
     shortages: BuildingOperationResult['shortages'];
     residents?: BuildingOperationResult['residents'];
+    policyContribution?: BuildingOperationResult['policyContribution'];
   } | null;
 }
 
@@ -42,6 +43,7 @@ export function operationVisual(operation: BuildingOperation | undefined): Opera
     ...(result.strategicPaid !== undefined ? { strategicPaid: strategicResourceAmounts(result.strategicPaid) } : {}),
     ...(result.strategicShortages !== undefined ? { strategicShortages: result.strategicShortages.map(shortage => ({ ...shortage })) } : {}),
     ...(result.residents ? { residents: { ...result.residents } } : {}),
+    ...(result.status === 'operated' && result.policyContribution ? { policyContribution: { ...result.policyContribution } } : {}),
   } : null;
   return {
     current: operation.enabled ? 'On' : 'Paused',

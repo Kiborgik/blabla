@@ -110,7 +110,7 @@ function recordedAmount(value: string | undefined): number | null {
 
 function governmentPolicies(detail: string, government: (typeof GOVERNMENTS)[number]): string | null {
   if (detail === 'All policy slots explicitly empty') return 'No policies were selected.';
-  const used = new Set<string>(); const occupied = new Set<string>(); const names: string[] = [];
+  const used = new Set<string>(); const occupied = new Set<string>(); const groups = new Set<string>(); const names: string[] = []; const priorities: string[] = [];
   for (const part of detail.split(', ')) {
     const assignment = /^(military|economic|diplomatic|wildcard):(\d+) ([a-z0-9-]+)$/.exec(part);
     if (!assignment) return null;
@@ -118,10 +118,15 @@ function governmentPolicies(detail: string, government: (typeof GOVERNMENTS)[num
     const index = Number(assignment[2]); const policy = POLICIES.find(candidate => candidate.id === assignment[3]);
     const key = `${slot}:${index}`;
     if (!policy || !Number.isSafeInteger(index) || index >= government.slots[slot] || used.has(policy.id) || occupied.has(key)
-      || slot !== 'wildcard' && slot !== policy.slotType) return null;
+      || slot !== 'wildcard' && slot !== policy.slotType || policy.exclusiveGroup !== undefined && groups.has(policy.exclusiveGroup)) return null;
     used.add(policy.id); occupied.add(key); names.push(policy.name);
+    if (policy.exclusiveGroup) groups.add(policy.exclusiveGroup);
+    if (policy.institutionalSciencePercent) {
+      const alternatives = policy.exclusiveGroup ? POLICIES.filter(candidate => candidate.id !== policy.id && candidate.exclusiveGroup === policy.exclusiveGroup).map(candidate => candidate.name) : [];
+      priorities.push(`Economic priority: paid, staffed learning${alternatives.length ? ` instead of ${alternatives.join(' or ')}` : ''}.`);
+    } else if (policy.constructionWork > 0) priorities.push('Economic priority: faster construction.');
   }
-  return `Policies: ${names.join(', ')}.`;
+  return `Policies: ${names.join(', ')}.${priorities.length ? ` ${priorities.join(' ')}` : ''}`;
 }
 
 function historicalStory(state: StoryNames, event: GameEvent): StoryLanguage | null {

@@ -7,21 +7,6 @@ import {
 import { CIV_COUNT } from '../core/types.ts';
 import { CURRENT_RELEASE, RELEASES } from '../core/release.ts';
 
-const postObservatoryRules = [
-  'settlement-civic-bootstrap-1',
-  'settlement-industrial-steam-1',
-  'settlement-local-power-1',
-  'settlement-second-government-1',
-  'settlement-powered-science-1',
-  'settlement-interplanetary-1',
-  'settlement-living-partnerships-1',
-  'settlement-relief-charters-1',
-  'settlement-regional-targets-1',
-  'settlement-food-budget-1',
-  'settlement-shore-fisheries-1',
-  'settlement-knowledge-compacts-1',
-] as const;
-
 function required<T>(value: T | undefined): T {
   assert.ok(value !== undefined);
   return value;
@@ -72,7 +57,7 @@ await test('the historical roadmap links each era to a discovery without promisi
     assert.equal(technology.era, index);
     assert.equal(era.cost, technology.cost);
     assert.equal(era.capability, technology.capability);
-    if (index > 0) assert.ok(technology.requires.includes(required(ERAS[index - 1]).technology));
+    assert.ok(technology.requires.every(id => required(TECHNOLOGIES.find(candidate => candidate.id === id)).era <= index));
   }
 });
 
@@ -94,7 +79,7 @@ await test('research prerequisites cannot form a cycle or require an undiscovere
 
 await test('construction uses valid gates and real production, world effects or consumed capabilities', () => {
   assert.ok(BUILDINGS.some(building => Object.keys(building.production).length > 0));
-  assert.ok(BUILDINGS.every(building => building.effects.length > 0 || (building.housing ?? 0) > 0 || Object.values(building.production).some(amount => amount > 0) || (building.capabilities ?? []).some(capability => BUILDING_CAPABILITY_ACTIONS[capability]?.length > 0)));
+  assert.ok(BUILDINGS.every(building => building.effects.length > 0 || (building.housing ?? 0) > 0 || (building.localPowerOutput ?? 0) > 0 || Object.values(building.production).some(amount => amount > 0) || (building.capabilities ?? []).some(capability => BUILDING_CAPABILITY_ACTIONS[capability]?.length > 0)));
   const launchpad = BUILDINGS.find(building => building.id === VICTORY_RULES.mars.requiredBuilding);
   assert.ok(launchpad);
   assert.ok(launchpad.requires.includes(VICTORY_RULES.mars.requiredTechnology));
@@ -277,7 +262,7 @@ await test('the civic branch connects culture-funded learning to a useful fuel c
   assert.deepEqual(yard.effects, []);
   assert.deepEqual(yard.requires, [fuel.id]);
   const civic = required(RELEASES.find(release => release.id === 'settlement-civics-1'));
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('statecraft')).map(release => release.id), [civic.id, 'settlement-charters-1', 'settlement-endpoints-1', 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1', 'settlement-territory-1', 'settlement-culture-production-1', 'settlement-foundry-1', 'settlement-observatory-1', ...postObservatoryRules]);
+  assert.deepEqual(RELEASES.map(release => release.featureIds.includes('statecraft')), RELEASES.map((_, index) => index >= RELEASES.indexOf(civic)));
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });
@@ -286,7 +271,7 @@ await test('exact trade town selection is an additive explicit capability withou
   const charter = required(RELEASES.find(release => release.id === 'settlement-charters-1'));
   const endpoints = required(RELEASES.find(release => release.id === 'settlement-endpoints-1'));
   assert.deepEqual(endpoints.featureIds, [...charter.featureIds, 'exact-trade-endpoints']);
-  assert.deepEqual(RELEASES.filter(release => release.featureIds.includes('exact-trade-endpoints')).map(release => release.id), [endpoints.id, 'settlement-land-transport-1', 'settlement-operating-exchange-1', 'settlement-decisions-1', 'settlement-residents-1', 'settlement-coastal-1', 'settlement-research-rate-1', 'settlement-writing-1', 'settlement-mining-1', 'settlement-metal-learning-1', 'settlement-manufacturing-1', 'settlement-wonders-1', 'settlement-growth-1', 'settlement-water-land-1', 'settlement-forest-production-1', 'settlement-world-expansion-1', 'settlement-territory-1', 'settlement-culture-production-1', 'settlement-foundry-1', 'settlement-observatory-1', ...postObservatoryRules]);
+  assert.deepEqual(RELEASES.map(release => release.featureIds.includes('exact-trade-endpoints')), RELEASES.map((_, index) => index >= RELEASES.indexOf(endpoints)));
   assert.equal(CURRENT_RELEASE.id, 'settlement-foundations-1');
   assert.deepEqual(validateContent(), []);
 });

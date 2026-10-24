@@ -74,11 +74,22 @@ export function civicProgressPresentation(input: CivicProgressInput) {
   const pending = government?.pending;
   const reform = civic?.reformEntitlement;
   const modifiers = governance.modifiers;
+  const releasedPolicies = input.catalogue.policies.filter(policy => policy.requiredFeatures.every(feature => input.projection.unlockedFeatures.includes(feature)));
+  const activePolicies = (current?.assignments ?? []).flatMap(assignment => releasedPolicies.find(policy => policy.id === assignment.policyId) ?? []);
+  const exclusiveGroups = [...new Set(releasedPolicies.flatMap(policy => policy.exclusiveGroup ?? []))];
+  const priorityRule = exclusiveGroups.flatMap(group => {
+    const names = releasedPolicies.filter(policy => policy.exclusiveGroup === group).map(policy => policy.name);
+    return names.length > 1 ? [`${names.join(' and ')} cannot be combined, even in wildcard slots.`] : [];
+  }).join(' ');
   const effects = RESOURCE_IDS.flatMap(resource => {
     const amount = modifiers.baseProduction[resource];
     return amount ? [`${amount > 0 ? '+' : ''}${exactNumber(amount)} base ${METRIC_LABELS[resource]}`] : [];
   });
   if (modifiers.constructionWork) effects.push(`${modifiers.constructionWork > 0 ? '+' : ''}${exactNumber(modifiers.constructionWork)} base construction work`);
+  for (const policy of activePolicies) {
+    const effect = policy.institutionalSciencePercent;
+    if (effect) effects.push(`+${exactNumber(effect.percent)}% Science from fully funded, staffed ${effect.buildingIds.map(id => input.catalogue.buildings.find(building => building.id === id)?.name ?? id).join(', ')} only`);
+  }
   const capitalPercent = modifiers.capitalConstructionWorkPercent;
   const capitalId = governance.originalCapitalCityId;
   let capitalApplicability: string | null = null;
@@ -106,7 +117,7 @@ export function civicProgressPresentation(input: CivicProgressInput) {
       pending: pending ? [`Pending arrangement · ${name(input, 'governments', pending.targetGovernmentId)}`, `Accepted round ${pending.acceptedRound} · Recorded transition end ${pending.completionRound}`, 'Current effects still use the active arrangement. The pending arrangement does not apply early.', `Paid ${exactNumber(pending.paidCredits)} Credits`, `Reform used · ${pending.spentCompletionEventId ?? 'None'}`, ...slots(input, pending.targetGovernmentId, pending.targetAssignments)] : [],
       reform: reform ? `Unused reform · ${name(input, 'civics', reform.civicId)} · Round ${reform.completedRound} · Event ${reform.completionEventId}` : 'No unused reform recorded.',
       targets: governance.targets.map(target => governmentChoice(input, target)),
-      choiceExplanation: 'Prerequisites and price are not permission to act. Adoption needs an explicit agent choice and the current action rules. Civic completion does not adopt a government or assign a policy.',
+      choiceExplanation: `Prerequisites and price are not permission to act. Adoption needs an explicit agent choice and the current action rules. Civic completion does not adopt a government or assign a policy.${priorityRule ? ` ${priorityRule}` : ''}`,
       events: (input.events ?? []).filter(event => event.actor === input.projection.civilizationId && (event.type === 'arrangement-accepted' || event.type === 'transition-completed')).slice(-2).map(event => `${event.title} · Round ${event.round} · Event ${event.id}`),
     },
     effects,

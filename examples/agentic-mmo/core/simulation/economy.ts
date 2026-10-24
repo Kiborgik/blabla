@@ -6,19 +6,17 @@ import { resolveReliefCharters } from './relief-charters.ts';
 import { resolveSpaceflight } from './spaceflight.ts';
 import { recordLocalPower } from './local-power.ts';
 import { recordIndustrialFoundry } from './industrial-evidence.ts';
-import { governmentModifiers, resolveGovernmentTransitions } from './government.ts';
+import { resolveGovernmentTransitions } from './government.ts';
 import { resolveCivics } from './civics.ts';
 import { cityGrowthFacts } from './growth.ts';
-import { wonderBaseProduction } from './wonders.ts';
 import { completeResearch } from './research.ts';
-import { emitImprovements, orderedImprovements } from './improvements.ts';
-import { buildingBaseProduction } from './districts.ts';
-import { ECONOMY_RULES, LOCAL_GROWTH_RULES, IMPROVEMENTS, IMPROVEMENT_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
-import type { City, GameEvent, Resources, WorldState } from '../types.ts';
-import { siteProduction } from './sites.ts';
+import { emitImprovements } from './improvements.ts';
+import { ECONOMY_RULES, LOCAL_GROWTH_RULES, RESEARCH_INVESTMENT_RULES, RESOURCE_IDS, TECHNOLOGIES } from '../content.ts';
+import { cityResourceProduction } from '../learning-patronage.ts';
+import type { City, GameEvent, WorldState } from '../types.ts';
 import { emitEvent } from './events.ts';
-import { citiesOf, civilizationById, cityProductivity, clamp } from './world.ts';
-import { allocateOperations, emitOperations, paidRecipe, productiveBuildings } from './operations.ts';
+import { citiesOf, civilizationById, clamp } from './world.ts';
+import { allocateOperations, emitOperations } from './operations.ts';
 import { resolvePublicProjects } from './public-projects.ts';
 import { resolveTrade } from './trade.ts';
 import { openingConstructionWork, resolveConstruction } from './construction.ts';
@@ -36,17 +34,7 @@ function produceCity(
   city: City,
 ): { food: number; science: number; culture: number } {
   const civilization = civilizationById(state, city.civId);
-  const focus: Partial<Resources> = ECONOMY_RULES.focusProduction[city.focus];
-  const site = state.tiles.find((tile) => tile.id === city.tileId);
-  const government = governmentModifiers(state, city.civId);
-  const productivity = cityProductivity(city);
-  const siteOutputs = site ? siteProduction(state, site) : {};
   const produced = { food: 0, science: 0, culture: 0 };
-  const buildings = productiveBuildings(state, city);
-  const free = buildings.filter((building) => !paidRecipe(building));
-  const paid = buildings.filter(paidRecipe);
-  const improvements = hasFeatures(state, [IMPROVEMENT_RULES.featureId]) ? orderedImprovements(city).filter(improvement => improvement.operation.lastResult?.status === 'operated') : [];
-  const freeOutputs = [...free.map(building => buildingBaseProduction(state, city, building)), wonderBaseProduction(state, city)];
   for (const resource of RESOURCE_IDS) {
     if (resource === 'food' && hasFeatures(state, [FOOD_BUDGET_RULES.featureId])) {
       const output = allocatedCityFoodProduction(state, city);
@@ -62,26 +50,17 @@ function produceCity(
       produced.food = output.total;
       continue;
     }
-    const terrain = siteOutputs[resource] ?? 0;
-    let raw = (ECONOMY_RULES.baseProduction[resource] ?? 0) + (government.baseProduction[resource] ?? 0) + (focus[resource] ?? 0)
-      + freeOutputs.reduce((total, output) => total + (output[resource] ?? 0), 0) + terrain;
-    let amount = quantize(raw * productivity * government.ordinaryOutputMultiplier);
-    for (const building of paid) {
-      raw += building.production[resource] ?? 0;
-      const next = quantize(raw * productivity * government.ordinaryOutputMultiplier);
-      const result = city.buildingOperations?.[building.id]?.lastResult;
-      const contribution = quantize(next - amount);
-      if (result?.status === 'operated' && contribution > 0) result.produced[resource] = contribution;
-      amount = next;
+    const output = cityResourceProduction(state, city, resource);
+    for (const contribution of output.buildings) {
+      const result = city.buildingOperations?.[contribution.buildingId]?.lastResult;
+      if (result?.status === 'operated' && contribution.amount > 0) result.produced[resource] = contribution.amount;
+      if (result?.status === 'operated' && contribution.policyContribution) result.policyContribution = contribution.policyContribution;
     }
-    for (const improvement of improvements) {
-      const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
-      raw += definition?.production[resource] ?? 0;
-      const next = quantize(raw * productivity * government.ordinaryOutputMultiplier);
-      const contribution = quantize(next - amount);
-      if (improvement.operation.lastResult && contribution > 0) improvement.operation.lastResult.produced[resource] = contribution;
-      amount = next;
+    for (const contribution of output.improvements) {
+      const result = city.improvements?.[String(contribution.tileId)]?.operation.lastResult;
+      if (result && contribution.amount > 0) result.produced[resource] = contribution.amount;
     }
+    const amount = output.total;
     civilization.resources[resource] = quantize(
       clamp(civilization.resources[resource] + amount, 0),
     );

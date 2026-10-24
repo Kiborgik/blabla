@@ -1,3 +1,4 @@
+import { validPolicyExclusivity, validInstitutionalScienceOperation } from './learning-patronage-validation.ts';
 import { isWoodlandState, isWoodlandOperationResult } from './woodland-validation.ts';
 import { validateDrainage } from './drainage.ts';
 import { isRiverFlowState, isRiverIntakeOperationResult } from './river-intake-validation.ts';
@@ -255,7 +256,7 @@ function civicState(value: unknown, features: string[], round: number, revision:
 
 function governmentAssignments(value: unknown, governmentId: unknown, features: string[], completed: string[]): boolean {
   const definition = GOVERNMENTS.find(candidate => candidate.id === governmentId);
-  if (!definition || !civicDefinitionAvailable(definition, features, completed) || !Array.isArray(value)) return false;
+  if (!definition || !civicDefinitionAvailable(definition, features, completed) || !Array.isArray(value) || !validPolicyExclusivity(value)) return false;
   const occupied = new Set<string>(); const policies = new Set<string>(); let previous = -1;
   for (const assignment of value) {
     if (!record(assignment) || !exactKeys(assignment, ['slotType', 'slotIndex', 'policyId'])) return false;
@@ -741,7 +742,7 @@ function residentAllocation(value: unknown): value is ResidentAllocationResult {
 }
 
 function operationResult(value: unknown, round: number, features: string[], strategicRecipe: boolean): boolean {
-  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages', ...(strategicRecipe ? ['strategicPaid', 'strategicShortages'] : []), ...(Object.hasOwn(value, 'residents') ? ['residents'] : [])])
+  if (!record(value) || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'shortages', ...(strategicRecipe ? ['strategicPaid', 'strategicShortages'] : []), ...(Object.hasOwn(value, 'residents') ? ['residents'] : []), ...(Object.hasOwn(value, 'policyContribution') ? ['policyContribution'] : [])])
     || !integer(value.round, 0, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
     || !Array.isArray(value.shortages)) return false;
   const strategic: string[] = [];
@@ -918,7 +919,7 @@ function buildingOperations(value: City, round: number, features: string[]): boo
   if (!features.includes('building-operations') || !record(operations) || !exactKeys(operations, paid)) return false;
   return Object.entries(operations).every(([id, operation]) => record(operation)
     && exactKeys(operation, ['enabled', 'lastResult']) && typeof operation.enabled === 'boolean'
-    && (operation.lastResult === null || (powerParticipant(definitions.find(building => building.id === id))
+    && (operation.lastResult === null || validInstitutionalScienceOperation(operation.lastResult, id, features) && (powerParticipant(definitions.find(building => building.id === id))
       ? features.includes(LOCAL_POWER_RULES.featureId) && powerOperation(operation.lastResult, definitions.find(building => building.id === id), round)
       : operationResult(operation.lastResult, round, features, (definitions.find(building => building.id === id)?.strategicInputs?.iron ?? 0) > 0))));
 }

@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-build.64",
+    "date": "2026-10-24",
+    "title": "Learning or building",
+    "changes": [
+      "Civilizations that complete State workforce can choose Learning patronage instead of Urban planning, even when a wildcard slot is available. Existing reform prices, commitments and government transitions still apply.",
+      "A fully paid and staffed Library, House of learning or University earns 25% more of its actual Science under patronage. Construction keeps its separate priority; receipts show the exact earned contribution. New worlds start fresh."
+    ]
+  },
+  {
     "version": "0.1.0-build.63",
     "date": "2026-10-24",
     "title": "Harvest and rest in worked woodlands",
@@ -15,15 +24,6 @@
     "changes": [
       "Towns with funded Irrigation can build an exact-site river intake and local plots. Each later operating season needs one Material, one remaining resident and eight available river-flow units for three base Food.",
       "Upstream withdrawals physically reduce downstream flow. Dry or paused intakes keep their structures; receipts separate current eligibility from actual paid output. Existing Irrigation and mountain catchments remain unchanged. New worlds start fresh."
-    ]
-  },
-  {
-    "version": "0.1.0-live.61",
-    "date": "2026-10-24",
-    "title": "Rivers shaped by the land",
-    "changes": [
-      "New worlds retain connected downhill drainage through their actual terrain, from inland valleys to the sea. Narrow channels join at confluences and remain part of the shared map surface.",
-      "Terrain and starting opportunities may change. River geography does not yet supply irrigation, navigation or production; this version starts a fresh autonomous world without upgrading older saves."
     ]
   }
 ]
