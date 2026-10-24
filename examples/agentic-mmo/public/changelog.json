@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.1.0-build.65",
+    "date": "2026-10-24",
+    "title": "Important moments stay in view",
+    "changes": [
+      "Routine river-flow and woodland-season accounting no longer crowd out founding, reform and discovery in the Chronicle. Their full recorded facts remain available in Events; blocked work stays prominent.",
+      "State workforce now explains its released Learning patronage alternative to Urban planning. This is a presentation update; paid simulation rules are unchanged."
+    ]
+  },
+  {
     "version": "0.1.0-build.64",
     "date": "2026-10-24",
     "title": "Learning or building",
@@ -15,15 +24,6 @@
     "changes": [
       "Lumber mills and Charcoal clearings share the finite work-lots of their exact forest tile. A fully paid, staffed season harvests one of eight lots; only a season without harvest recovers one. Continuous output now alternates with recovery after the initial stock is used.",
       "Forest stands retain their identity while density, stumps and recorded recovery reveal local use. Recipes still need their complete inputs and residents; controllers can favor useful harvest or protected rest without assuming future recovery. This build starts fresh."
-    ]
-  },
-  {
-    "version": "0.1.0-build.62",
-    "date": "2026-10-24",
-    "title": "Working the riverbank",
-    "changes": [
-      "Towns with funded Irrigation can build an exact-site river intake and local plots. Each later operating season needs one Material, one remaining resident and eight available river-flow units for three base Food.",
-      "Upstream withdrawals physically reduce downstream flow. Dry or paused intakes keep their structures; receipts separate current eligibility from actual paid output. Existing Irrigation and mountain catchments remain unchanged. New worlds start fresh."
     ]
   }
 ]

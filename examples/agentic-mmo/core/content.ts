@@ -24,7 +24,7 @@ export const CIVICS: CivicDefinition[] = [
   { id: 'craftsmanship', name: 'Craftsmanship', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['code-of-laws'], cost: 22, capability: 'Combine practical craft with Early empire to develop State workforce.' },
   { id: 'foreign-trade', name: 'Foreign trade', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['code-of-laws'], cost: 24, capability: 'Develop Early empire and contribute the exchange tradition required by Political philosophy.' },
   { id: 'early-empire', name: 'Early empire', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['foreign-trade'], cost: 30, capability: 'Combine organized settlements with Craftsmanship to develop State workforce.' },
-  { id: 'state-workforce', name: 'State workforce', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['craftsmanship', 'early-empire'], cost: 40, capability: 'Prepare Political philosophy through coordinated civic work.' },
+  { id: 'state-workforce', name: 'State workforce', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['craftsmanship', 'early-empire'], cost: 40, capability: 'Prepare Political philosophy and unlock Learning patronage where released; choosing it replaces Urban planning.' },
   { id: 'political-philosophy', name: 'Political philosophy', requiredFeatures: ['civic-bootstrap', 'second-government'], requires: ['state-workforce', 'foreign-trade'], cost: 48, capability: 'Choose Autocracy for fifteen percent more construction work in the still-owned original capital, instead of Chiefdom Food across towns.' },
 ];
 export const GOVERNMENTS: GovernmentDefinition[] = [

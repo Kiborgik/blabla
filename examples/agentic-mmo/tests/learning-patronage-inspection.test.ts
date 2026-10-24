@@ -209,3 +209,17 @@ await test('unknown and impossible across-slot historical arrangements retain bo
     assert.ok(result.consequence.length <= 180);
   }
 });
+
+void test('State workforce purpose names the released Learning patronage alternative without implying adoption', () => {
+  const state = preparedWorld();
+  const catalogue = capabilityCatalogue();
+  const civic = catalogue.civics.find(item => item.id === 'state-workforce');
+  const policy = catalogue.policies.find(item => item.id === 'learning-patronage');
+  assert.ok(civic && policy);
+  assert.match(civic.capability, /Prepare Political philosophy/);
+  assert.match(civic.capability, /unlock Learning patronage where released/);
+  assert.match(civic.capability, /choosing it replaces Urban planning/);
+  assert.ok(policy.requires.includes(civic.id));
+  assert.ok(policy.requiredFeatures.every(feature => state.unlockedFeatures.includes(feature)));
+  assert.equal(state.civilizations[0]!.government?.active, null);
+});
