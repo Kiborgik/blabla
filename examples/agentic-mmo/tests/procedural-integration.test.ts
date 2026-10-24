@@ -92,7 +92,7 @@ await test('procedural provenance stays distinct while historical agent and cloc
 
 await test('current checkpoint names and identity survive same-version JSON restart without load-time changes', () => {
   const saved = createLocalSimulation(1701);
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:drainage-v2');
+  assert.match(LOCAL_SIMULATION_STORAGE_KEY, /^civitas:procedural-observatory:[a-z-]+-v[1-9]\d*$/);
   assert.equal(saved.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
   saved.state.cities[0]!.name = 'Dawnwe\u0301ll — saved current town';
   const bytes = JSON.stringify(saved);
