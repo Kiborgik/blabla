@@ -1,5 +1,5 @@
 use blabla::application::{AppConfig, Application};
-use blabla::report::{Call, RunOptions, RunStatus};
+use blabla::report::{Call, CoverageStatus, RunOptions, RunStatus};
 use blabla::runtime::AppSession;
 use blabla::semantics::compile;
 use blabla::verify::run;
@@ -64,7 +64,7 @@ fn preserves_all_three_recorded_semantic_regressions_and_persists_them() {
 }
 
 #[test]
-fn lease_campaign_checks_generated_action_combinations() {
+fn finite_lease_campaign_checks_generated_combinations_and_exposes_uncovered_guard() {
     let contract = compile("leases.bla", include_str!("../examples/leases.bla")).unwrap();
     let options = RunOptions {
         seed: 1234,
@@ -73,21 +73,88 @@ fn lease_campaign_checks_generated_action_combinations() {
         shrink_budget: 64,
     };
     let report = run(&contract, &options, || AppSession::spawn(&config())).unwrap();
+    assert_eq!(report.steps_executed, options.steps);
+    assert_eq!(report.metrics.total_actions, options.steps);
+    assert!(report.failure.is_none(), "{:?}", report.failure);
+    assert_eq!(report.coverage_summary.violated, 0);
+
+    let direct_guard = "invalid-renew-noop/root.invalid.1.2.0";
+    let coverage = &report.coverage_summary.coverage;
+    let guard = coverage.iter().find(|p| p.id == direct_guard).unwrap();
+    let uncovered: Vec<_> = coverage
+        .iter()
+        .filter(|p| p.witnesses == 0)
+        .map(|p| (&p.id, &p.required_witness))
+        .collect();
+    for obligation in coverage {
+        assert_eq!(obligation.failures, 0, "{}", obligation.id);
+        if obligation.id != direct_guard {
+            assert_eq!(obligation.status, CoverageStatus::Verified, "{uncovered:?}");
+            assert!(obligation.witnesses > 0, "{uncovered:?}");
+        }
+    }
+    let expected_status = if guard.witnesses == 0 {
+        assert_eq!(guard.status, CoverageStatus::Unexercised);
+        RunStatus::Yellow
+    } else {
+        assert_eq!(guard.status, CoverageStatus::Verified);
+        RunStatus::Green
+    };
     assert_eq!(
-        report.status,
-        RunStatus::Green,
-        "{:?}",
-        report
-            .coverage_summary
-            .coverage
-            .iter()
-            .filter(|p| p.witnesses == 0)
-            .map(|p| (&p.id, &p.required_witness))
-            .collect::<Vec<_>>()
+        report.status, expected_status,
+        "native campaign coverage: {uncovered:?}"
+    );
+    eprintln!(
+        "finite generated lease campaign: {:?}; unexercised obligations: {uncovered:?}",
+        report.status
     );
     for name in ["claim", "renew", "release", "tick", "restart"] {
         assert!(report.sequences[0].iter().any(|call| call.action == name));
     }
+}
+
+#[test]
+fn direct_missing_resource_renew_guard_preserves_lease_and_persistence() {
+    let contract = compile("leases.bla", include_str!("../examples/leases.bla")).unwrap();
+    let mut app = AppSession::spawn(&config()).unwrap();
+    app.reset().unwrap();
+    app.call(&Call {
+        action: "claim".into(),
+        args: vec![json!("existing-resource"), json!("holder"), json!(6)],
+    })
+    .unwrap();
+    let before = app.observe(&contract.state).unwrap();
+    assert_eq!(
+        before,
+        json!({"leases":[{"resource":"existing-resource","holder":"holder","ticks":6}]})
+    );
+
+    let mut renewal = Call {
+        action: "renew".into(),
+        args: vec![json!("missing-resource"), json!("holder"), json!(2)],
+    };
+    let leases = before["leases"].as_array().unwrap();
+    assert!((1..=8).contains(&renewal.args[2].as_i64().unwrap()));
+    assert!(leases.iter().any(|lease| {
+        lease["resource"] != renewal.args[0] && lease["holder"] == renewal.args[1]
+    }));
+    assert!(!leases.iter().any(|lease| {
+        lease["resource"] == renewal.args[0] && lease["holder"] == renewal.args[1]
+    }));
+    assert_ne!(leases[0]["ticks"], renewal.args[2]);
+
+    app.call(&renewal).unwrap();
+    assert_eq!(app.observe(&contract.state).unwrap(), before);
+    app.restart().unwrap();
+    assert_eq!(app.observe(&contract.state).unwrap(), before);
+
+    renewal.args[0] = leases[0]["resource"].clone();
+    app.call(&renewal).unwrap();
+    let renewed = json!({"leases":[{"resource":"existing-resource","holder":"holder","ticks":2}]});
+    assert_eq!(app.observe(&contract.state).unwrap(), renewed);
+    app.restart().unwrap();
+    assert_eq!(app.observe(&contract.state).unwrap(), renewed);
+    app.finish().unwrap();
 }
 
 #[path = "support/cli.rs"]
