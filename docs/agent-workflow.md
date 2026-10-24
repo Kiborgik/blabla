@@ -70,6 +70,8 @@ blabla task ready fix-cache
 
 Use the packs your role consults, not the ones in this example. `task show` prints the next routes for a task; `blabla task --help` lists every verb.
 
+Attest your actual model ID with `task accept --model`; effort is separate, and spelling is preserved exactly. Acceptance records the assignment, not model permission: text and JSON warn immediately when the ID is outside the role's exact models and declared aliases without an approved nonsuperseded exception, or when registered policy is unavailable. Resolve this before work using `task propose-model NAME MODEL --reason ...` and the owner's `task approve-model NAME MODEL --approval ...` ruling, or repair unavailable policy; never claim a different model to fit the list. Approval preserves the acceptance epoch and existing evidence and still requires normal carry confirmation; reacceptance starts a new epoch. This local diagnostic does not replace the process's immediate post-acceptance challenge or authorize other guarded operations.
+
 When registered process memory declares roles, `task open --role NAME` must name
 one exactly. Unknown names are refused before creating task-store files, with the
 available roles listed; they cannot silently discard model or lens obligations.

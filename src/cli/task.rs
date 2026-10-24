@@ -3,6 +3,7 @@ pub(crate) mod delivery;
 pub(super) mod effort;
 pub(super) mod evidence_reuse;
 pub(super) mod freshness;
+mod model_acceptance;
 mod progress;
 mod ready_receipts;
 
@@ -22,6 +23,8 @@ use std::io::{self, Write};
 
 #[derive(Serialize)]
 struct TaskView<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model_acceptance: Option<model_acceptance::Guidance>,
     #[serde(skip_serializing_if = "Option::is_none")]
     delivery: Option<serde_json::Value>,
     readiness_summary: serde_json::Value,
@@ -455,6 +458,7 @@ fn view<'a>(project: &Project, task: &'a Task) -> TaskView<'a> {
     };
     let affected_intent = affected_intent(project, task, &tree);
     TaskView {
+        model_acceptance: None,
         evidence_progress: progress::summary(&project.manifest.root, task),
         delivery: delivery::task_view(project, task, &tree),
         readiness_summary: delivery::readiness_summary(project, task, &tree),
@@ -1115,7 +1119,7 @@ fn create(project: &Project, task: &mut Task, json: bool, swallowed: &[String]) 
     if let Some(identity) = recovery::running() {
         task.build = Some(identity.stamp());
     }
-    write_record(project, task, json, true, swallowed)
+    write_record(project, task, json, true, swallowed, false)
 }
 
 fn stamp(task: &mut Task, json: bool) -> Result<(), i32> {
@@ -1139,7 +1143,7 @@ fn store_with(project: &Project, task: &mut Task, json: bool, swallowed: &[Strin
     if let Err(exit) = stamp(task, json) {
         return exit;
     }
-    write_record(project, task, json, false, swallowed)
+    write_record(project, task, json, false, swallowed, false)
 }
 
 fn report_leftovers(root: &std::path::Path, name: &str, failure: &io::Error) {
@@ -1172,6 +1176,7 @@ fn write_record(
     json: bool,
     whole_view: bool,
     swallowed: &[String],
+    accepting: bool,
 ) -> i32 {
     let task = &*task;
     if let Err(failure) = task::write(&project.manifest.root, task) {
@@ -1181,11 +1186,21 @@ fn write_record(
             2,
         );
     }
+    let guidance = accepting
+        .then(|| model_acceptance::guidance(project, task))
+        .flatten();
     let result = if !json && !whole_view {
-        write_task_line(task)
+        write_task_line(task).and_then(|()| {
+            if let Some(guidance) = guidance {
+                writeln!(io::stdout().lock(), "Model policy: {}", guidance.message)
+            } else {
+                Ok(())
+            }
+        })
     } else {
         let mut shown = view(project, task);
         shown.swallowed_check_argv = swallowed.to_vec();
+        shown.model_acceptance = guidance;
         if json {
             write_json(&shown)
         } else {
@@ -2515,7 +2530,12 @@ pub(super) fn accept(project: &Project, name: &str, model: &str, json: bool) -> 
         Err(exit) => return exit,
     };
     match prepare_acceptance(project, task, model, json) {
-        Ok(mut task) => store(project, &mut task, json),
+        Ok(mut task) => {
+            if let Err(exit) = stamp(&mut task, json) {
+                return exit;
+            }
+            write_record(project, &mut task, json, false, &[], true)
+        }
         Err(exit) => exit,
     }
 }
