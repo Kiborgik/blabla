@@ -1,3 +1,5 @@
+import { createGeneratedWorld } from './generated-world.ts';
+import { reconstructGeneratedGeography, type GeneratedGeography } from './generated-geography.ts';
 import { borderFieldPopulation, createBorderState } from './simulation/border-incidents.ts';
 import { observedRail } from './simulation/rail.ts';
 import { observedGovernment } from './simulation/government.ts';
@@ -49,7 +51,7 @@ export { applyDirectorTick, catchUpClock } from './simulation/clock.ts';
 export { applyHistoryAdvance } from './simulation/evolution.ts';
 export { catchUpStrategy } from './simulation/turns.ts';
 
-export function createWorld(seed: number, clockEpoch?: string, registeredRulesId = CURRENT_RELEASE.id): WorldState {
+export function createWorld(seed: number, clockEpoch?: string, registeredRulesId = CURRENT_RELEASE.id, geography?: GeneratedGeography): WorldState {
   const errors = validateContent();
   if (errors.length) throw new Error(`Invalid content: ${errors.join('; ')}`);
   const normalized = normalizeSeed(seed);
@@ -59,10 +61,16 @@ export function createWorld(seed: number, clockEpoch?: string, registeredRulesId
     throw new RangeError('Clock epoch must be an explicit UTC timestamp');
   if (rules.featureIds.includes('independent-actions') && clockEpoch === undefined)
     throw new RangeError('Independent worlds require an explicit epoch');
+  const regionalIron = rules.featureIds.includes('regional-iron');
+  if (regionalIron && geography === undefined) return createGeneratedWorld(normalized, clockEpoch!, 'settlement-regional-iron-1');
+  if (geography !== undefined) {
+    const canonical = regionalIron && geography.width === WORLD_EXPANSION_RULES.width && geography.height === WORLD_EXPANSION_RULES.height ? reconstructGeneratedGeography(normalized, geography.width, geography.height, geography.attempt) : null;
+    if (!canonical || JSON.stringify(canonical) !== JSON.stringify(geography)) throw new RangeError('Fresh regional bootstrap requires the exact generated candidate for this seed');
+  }
   const expanded = rules.featureIds.includes(WORLD_EXPANSION_RULES.featureId);
   const width = expanded ? WORLD_EXPANSION_RULES.width : WORLD_EXPANSION_RULES.fromWidth;
   const height = expanded ? WORLD_EXPANSION_RULES.height : WORLD_EXPANSION_RULES.fromHeight;
-  const map = createMap(normalized, width, height);
+  const map = geography ? { tiles: structuredClone(geography.tiles), seed: geography.rng } : createMap(normalized, width, height);
   const state: WorldState = {
     schemaVersion: SCHEMA_VERSION,
     gameVersion: GAME_VERSION,
@@ -91,12 +99,16 @@ export function createWorld(seed: number, clockEpoch?: string, registeredRulesId
     climate: 0,
     directorCooldown: 0,
   };
+  if (geography) {
+    state.drainage = structuredClone(geography.drainage);
+    state.origin = { kind: 'generated', generatorVersion: geography.version, seed: normalized, clockEpoch: clockEpoch!, initialReleaseId: 'settlement-regional-iron-1', geographyAttempt: geography.attempt };
+  }
   if (usesIndependentTurns(state) && clockEpoch !== undefined) {
     state.independentTurns = createIndependentTurns(clockEpoch);
   }
   if (hasFeatures(state, ['bounded-plans']))
     state.actionPlans = Array.from({ length: DIRECTOR_SEAT + 1 }, () => null);
-  const anchors = [
+  const anchors = geography ? geography.capitalTileIds.map(id => ({ q: id % width, r: Math.floor(id / width) })) : [
     { q: 3, r: 3 },
     { q: 12, r: 2 },
     { q: 4, r: 8 },

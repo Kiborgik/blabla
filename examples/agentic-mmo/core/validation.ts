@@ -1,3 +1,4 @@
+import { regionalIronPlanForWorld, REGIONAL_IRON_PLACEMENT_ID } from './regional-iron.ts';
 import { isCivicWorksOperation, isCivicWorksState, validCivicWorksEvent } from './civic-works-validation.ts';
 import { validPolicyExclusivity, validInstitutionalScienceOperation } from './learning-patronage-validation.ts';
 import { isWoodlandState, isWoodlandOperationResult } from './woodland-validation.ts';
@@ -15,6 +16,7 @@ import {
   ECONOMY_RULES,
   LOCAL_GROWTH_RULES,
   COAL_RULES,
+  METAL_RULES,
   CONSTRUCTION_RULES,
   INDUSTRIAL_RULES,
   LAND_TRANSPORT_RULES,
@@ -406,9 +408,9 @@ function strategicShipment(value: unknown): value is StrategicShipmentResult {
     && strategicResources(value.proposerSent) && strategicResources(value.recipientSent);
 }
 
-function strategicLayer(value: unknown, seed: number, tiles: HexTile[]): value is StrategicDepositLayer {
+function strategicLayer(value: unknown, seed: number, tiles: HexTile[], regional: boolean): value is StrategicDepositLayer {
   if (!record(value) || !exactKeys(value, ['ruleVersion', 'placementId', 'seed', 'tileIds', 'deposits'])
-    || value.ruleVersion !== 1 || value.placementId !== 'iron-placement-1' || value.seed !== seed
+    || value.ruleVersion !== 1 || value.placementId !== (regional ? REGIONAL_IRON_PLACEMENT_ID : 'iron-placement-1') || value.seed !== seed
     || !Array.isArray(value.tileIds) || value.tileIds.length > Math.min(8, tiles.length) || !unique(value.tileIds)
     || !Array.from(value.tileIds).every((id: unknown) => integer(id) && tiles.some(site => site.id === id)) || !record(value.deposits)
     || !exactKeys(value.deposits, value.tileIds.map(String))) return false;
@@ -421,7 +423,7 @@ function metalRecords(hasLayer: boolean, layer: unknown, civilizations: Civiliza
   const enabled = features.includes('finite-metals');
   if (hasLayer !== enabled || civilizations.some(actor => Object.hasOwn(actor, 'strategicResources') !== enabled)) return false;
   if (!enabled) return !events.some(event => Object.hasOwn(event, 'strategicExtraction') || Object.hasOwn(event, 'strategicShipment'));
-  if (!strategicLayer(layer, seed, tiles) || !civilizations.every(actor => strategicResources(actor.strategicResources))) return false;
+  if (!strategicLayer(layer, seed, tiles, features.includes('regional-iron')) || !civilizations.every(actor => strategicResources(actor.strategicResources))) return false;
   const retainedExtraction = (value: StrategicExtractionResult): boolean => {
     const deposit = value.resource === 'coal' ? record(coal) && record(coal.deposits) ? coal.deposits[String(value.tileId)] : undefined : layer.deposits[String(value.tileId)];
     return record(deposit) && deposit.resource === value.resource && integer(deposit.initialReserve) && integer(deposit.remaining) && value.reserveBefore <= deposit.initialReserve && value.reserveAfter >= deposit.remaining
@@ -648,7 +650,7 @@ function pastoralLayer(value: unknown, seed: number, tiles: HexTile[], iron: Str
 
 function waterLandRecords(hasLayer: boolean, layer: unknown, cities: City[], tiles: HexTile[], events: GameEvent[], features: string[], seed: number, iron: unknown): boolean {
   const enabled = features.includes('water-land');
-  const deposits = strategicLayer(iron, seed, tiles) ? iron : undefined;
+  const deposits = strategicLayer(iron, seed, tiles, features.includes('regional-iron')) ? iron : undefined;
   const pastoral = enabled && pastoralLayer(layer, seed, tiles, deposits) ? layer : null;
   if (hasLayer !== enabled || enabled && !pastoral) return false;
   const sourceValid = (settlement: City, source: unknown): boolean => {
@@ -1800,6 +1802,14 @@ export function isWorldState(value: unknown): value is WorldState {
   const cities = value.cities;
   const round = value.round;
   const features = value.unlockedFeatures;
+  if (features.includes('regional-iron')) {
+    const plan = regionalIronPlanForWorld(value as unknown as WorldState);
+    const layer = value.strategicDeposits;
+    if (plan?.status !== 'placed' || !strategicLayer(layer, value.seed, tiles, true)
+      || JSON.stringify(layer.tileIds) !== JSON.stringify(plan.tileIds)
+      || layer.tileIds.some(id => !isHillSite(tiles[id]!) || tiles[id]!.resource !== null)
+      || Object.values(layer.deposits).some(deposit => deposit.initialReserve !== METAL_RULES.initialReserve)) return false;
+  }
   const counts = value.eventCounts;
   if (features.includes('world-expansion') && (width !== 18 || height !== 24)) return false;
   if (

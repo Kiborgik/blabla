@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advanceLocalSimulation, createLocalSimulation, parseLocalSimulation } from '../web/local-simulation.ts';
+import { ACTIVE_LOCAL_RELEASE_ID, advanceLocalSimulation, createLocalSimulation, parseLocalSimulation } from '../web/local-simulation.ts';
 import { isGameAction } from '../core/planning.ts';
 import { isGameEvent, isWorldState } from '../core/validation.ts';
 import { isCivicWorksReceipt } from '../core/civic-works-validation.ts';
@@ -15,7 +15,8 @@ import { syntheticTechnologies } from './fixtures/coastal-prefix.ts';
 
 test('current fresh genesis initializes the bounded civic works layer', () => {
   const run = createLocalSimulation(73);
-  assert.equal(run.state.releaseId, 'settlement-civic-works-1');
+  assert.equal(run.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
+  assert.ok(run.state.unlockedFeatures.includes('civic-works'));
   assert.deepEqual(run.state.civicWorks, { ruleVersion: 1, active: [], lastResults: [null, null, null, null, null] });
   assert.equal(isWorldState(run.state), true);
 });

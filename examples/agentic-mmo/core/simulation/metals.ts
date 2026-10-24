@@ -1,3 +1,4 @@
+import { regionalIronPlanForWorld, REGIONAL_IRON_PLACEMENT_ID } from '../regional-iron.ts';
 import { COAL_RULES, METAL_RULES, STRATEGIC_RESOURCE_RULES } from '../content.ts';
 import type { City, HexTile, Observation, StrategicDepositLayer, StrategicResource, WorldState } from '../types.ts';
 import { hexDistance } from './geography.ts';
@@ -35,7 +36,15 @@ function createDepositLayer(state: WorldState, rules: DepositRules): StrategicDe
   };
 }
 
-export function createStrategicDeposits(state: WorldState): StrategicDepositLayer { return createDepositLayer(state, METAL_RULES); }
+export function createStrategicDeposits(state: WorldState): StrategicDepositLayer {
+  if (!state.unlockedFeatures.includes('regional-iron')) return createDepositLayer(state, METAL_RULES);
+  const plan = regionalIronPlanForWorld(state);
+  if (plan?.status !== 'placed') throw new RangeError(`Regional Iron requires canonical generated placement: ${plan?.status ?? 'invalid-genesis'}`);
+  return {
+    ruleVersion: 1, placementId: REGIONAL_IRON_PLACEMENT_ID, seed: state.seed, tileIds: [...plan.tileIds],
+    deposits: Object.fromEntries(plan.tileIds.map(tileId => [String(tileId), { tileId, resource: 'iron', initialReserve: METAL_RULES.initialReserve, remaining: METAL_RULES.initialReserve }])),
+  };
+}
 export function createCoalDeposits(state: WorldState): StrategicDepositLayer { return createDepositLayer(state, COAL_RULES); }
 
 export function strategicCapacity(state: WorldState, civilizationId: number, resource: StrategicResource = 'iron'): number {

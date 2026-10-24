@@ -10,7 +10,7 @@ import { ACTIVE_LOCAL_POLICY_VERSION, ACTIVE_LOCAL_RELEASE_ID, createLocalSimula
 
 const EPOCH = '2000-01-01T00:00:00.000Z';
 const POLICY = 'weighted-civilizations-v5-funded-landwork';
-const RELEASE = 'settlement-civic-works-1';
+const RELEASE = 'settlement-regional-iron-1';
 const TERRAINS = ['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'];
 const DIRECTIONS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]] as const;
 const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined';
@@ -46,10 +46,11 @@ export interface GeneratedControllerContinuation {
 
 export function inspectGeneratedSample(seed: number, run: LocalSimulation, repeat: LocalSimulation): GeneratedControllerSample {
   const state = run.state;
-  const expectedOrigin = { kind: 'generated', generatorVersion: 'drainage-geography-v2', seed: seed >>> 0, clockEpoch: EPOCH, namingVersion: 'cultural-toponyms-v1', temperamentVersion: 'strategic-temperaments-v1', initialReleaseId: RELEASE };
+  const expectedAttempt = new Map([[73, 0], [1701, 0], [90210, 9]]).get(seed);
+  const expectedOrigin = { geographyAttempt: expectedAttempt, kind: 'generated', generatorVersion: 'drainage-geography-v2', seed: seed >>> 0, clockEpoch: EPOCH, namingVersion: 'cultural-toponyms-v1', temperamentVersion: 'strategic-temperaments-v1', initialReleaseId: RELEASE };
   let errors = 0;
   const check = (condition: boolean): void => { if (!condition) errors += 1; };
-  check(isDeepStrictEqual(state.origin, expectedOrigin));
+  check(expectedAttempt !== undefined && isDeepStrictEqual(state.origin, expectedOrigin));
   check(state.seed === (seed >>> 0));
   check(run.seed === state.seed);
   check(run.version === 2 && run.source === 'local-procedural');

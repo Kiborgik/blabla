@@ -21,7 +21,7 @@ function geographyHolds(s: GeneratedControllerSample): boolean {
 
 function genesisHolds(s: GeneratedControllerSample): boolean {
   return s.genesis_errors === 0 && s.policy_version === 'weighted-civilizations-v5-funded-landwork'
-    && s.release_id === 'settlement-civic-works-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
+    && s.release_id === 'settlement-regional-iron-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
 }
 
 function decisionHolds(d: GeneratedControllerDecision): boolean {
@@ -103,6 +103,9 @@ await test('raw geography and genesis inspection rejects malformed tiles, starts
     ['housing', run => { run.state.cities[0]!.housing!.baseCapacity += 1; }],
     ['building', run => { run.state.cities[0]!.buildings.push('granary'); }],
     ['foundation event', run => { run.state.events = []; }],
+    ['missing geography attempt', run => { delete run.state.origin!.geographyAttempt; }],
+    ['wrong bounded geography attempt', run => { run.state.origin!.geographyAttempt = 1; }],
+    ['unbounded geography attempt', run => { run.state.origin!.geographyAttempt = 96; }],
     ['temperament marker', run => { delete run.state.origin!.temperamentVersion; }],
     ['release marker', run => { delete run.state.origin!.initialReleaseId; }],
     ['policy rollback', run => { run.policyVersion = 'weighted-civilizations-v2'; }],

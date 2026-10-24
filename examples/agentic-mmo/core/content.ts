@@ -88,6 +88,7 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'regional-iron', name: 'Regional Iron districts', description: 'Eight finite Iron hill sites form separated connected districts of three, three and two. Two distinct genesis capitals have compatible structural purchase approaches; actual acquisition, Mines and extraction remain paid.' },
   { id: 'civic-works', name: 'Paid civic works', description: 'State workforce can assign one funded Kiln crew to an exact paid building order for two scheduled seasons. Complete Materials, Credits and resident allocation exchange current Kiln output for bounded actual construction work; no automatic continuation or free operation follows.' },
   { id: 'renewing-worked-woodlands', name: 'Renewing worked woodlands', description: 'Lumbermills and Charcoal clearings harvest one of eight exact local forest work-lots only with their complete existing paid and staffed operation. Non-harvest economy beats recover one lot, capped at eight; continuous depleted supply is not promised and the forest biome remains.' },
   { id: 'learning-patronage', name: 'Competing civic priorities', description: 'Choose one economic priority: Urban planning construction or Learning patronage for fully supported Library, House of learning and University Science.' },

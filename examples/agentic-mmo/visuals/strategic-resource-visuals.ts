@@ -1,3 +1,5 @@
+import { projectRegionalIron, regionalIronParts } from './regional-iron-visuals.ts';
+import type { RegionalIronVisualFacts } from './regional-iron-visuals.ts';
 import { observedStrategicResources } from '../core/simulation/metals.ts';
 import { STRATEGIC_RESOURCE_IDS } from '../core/content.ts';
 import type { StrategicDeposit, StrategicExtractionResult, StrategicResource, StrategicResources, WorldState } from '../core/types.ts';
@@ -18,6 +20,7 @@ export interface DepositView extends StrategicDeposit {
   r: number;
   height: number;
   revealedTo: Array<{ id: number; name: string }>;
+  regionalIron?: RegionalIronVisualFacts;
 }
 
 export const SITE_MARK_PATHS = {
@@ -40,7 +43,7 @@ export function projectRevealedDeposits(state: WorldState): DepositView[] {
       revealed.set(tile.id, view);
     }
   }
-  return [...revealed.values()].toSorted((a, b) => a.tileId - b.tileId);
+  return projectRegionalIron(state, [...revealed.values()].toSorted((a, b) => a.tileId - b.tileId));
 }
 
 export function depositLabel(deposit: StrategicDeposit): string {
@@ -59,6 +62,7 @@ export function extractionFacts(result: StrategicExtractionResult): string[] {
 }
 
 export function depositParts(deposit: DepositView, detail: DetailLevel): VisualPart[] {
+  if (deposit.resource === 'iron' && deposit.regionalIron) return regionalIronParts(deposit, detail);
   const count = detail === 'far' ? 2 : detail === 'mid' ? 3 : 4;
   return Array.from({ length: count }, (_, index) => ({ id: `${deposit.id}:rock-${index}`, shape: 'cone', material: deposit.remaining ? 'metal' : 'rock',
     position: [(index % 2 - .5) * .45, .24, (Math.floor(index / 2) - .5) * .4], scale: [.5, .48 + index * .06, .48], rotation: index * .7 }));

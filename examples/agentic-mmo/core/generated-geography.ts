@@ -16,6 +16,7 @@ export interface GeneratedGeography {
   tiles: HexTile[];
   drainage: DrainageLayerV1;
   capitalTileIds: number[];
+  attempt: number;
   rng: number;
 }
 
@@ -155,26 +156,42 @@ function riverOpportunities(tiles: HexTile[], drainage: DrainageLayerV1, capital
     .some(tile => tile.terrain !== 'ocean' && tile.terrain !== 'mountain' && facts[tile.id]!.contributingLandTiles >= RIVER_MINIMUM_CONTRIBUTING_LAND_TILES));
 }
 
-function generateFromCandidates(seed: number, width: number, height: number, candidate: (seed: number, width: number, height: number) => HexTile[]): GeneratedGeography {
+export type GeographyCandidateAssessment = (geography: GeneratedGeography) => 'accept' | 'reject' | 'search-budget-exhausted';
+
+function candidateGeography(seed: number, width: number, height: number, attempt: number, candidate: (seed: number, width: number, height: number) => HexTile[]): GeneratedGeography | null {
+  const candidateSeed = hash(normalizeSeed(seed) ^ 0x434f4e54, attempt, width * height);
+  const conditioned = conditionDrainage(candidate(candidateSeed, width, height), width, height);
+  if (!conditioned) return null;
+  const { tiles, drainage } = conditioned;
+  const capitalTileIds = startingSites(tiles, width, height, candidateSeed);
+  if (!capitalTileIds || !riverOpportunities(tiles, drainage, capitalTileIds, width, height)) return null;
+  return { version: GENERATED_GEOGRAPHY_VERSION, width, height, tiles, drainage, capitalTileIds, attempt, rng: randomStep(candidateSeed).seed };
+}
+
+export function reconstructGeneratedGeography(seed: number, width: number, height: number, attempt: number): GeneratedGeography | null {
+  if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff || !Number.isSafeInteger(attempt) || attempt < 0 || attempt >= MAXIMUM_ATTEMPTS
+    || !Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 18 || height < 24 || width * height > 4096) return null;
+  return candidateGeography(seed, width, height, attempt, landscape);
+}
+
+function generateFromCandidates(seed: number, width: number, height: number, candidate: (seed: number, width: number, height: number) => HexTile[], assess?: GeographyCandidateAssessment): GeneratedGeography {
   const normalized = normalizeSeed(seed);
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 18 || height < 24 || width * height > 4096)
     throw new RangeError('Drainage geography requires integer dimensions of at least 18 × 24 and at most 4096 tiles');
   for (let attempt = 0; attempt < MAXIMUM_ATTEMPTS; attempt++) {
-    const candidateSeed = hash(normalized ^ 0x434f4e54, attempt, width * height);
-    const conditioned = conditionDrainage(candidate(candidateSeed, width, height), width, height);
-    if (!conditioned) continue;
-    const { tiles, drainage } = conditioned;
-    const capitalTileIds = startingSites(tiles, width, height, candidateSeed);
-    if (!capitalTileIds || !riverOpportunities(tiles, drainage, capitalTileIds, width, height)) continue;
-    return { version: GENERATED_GEOGRAPHY_VERSION, width, height, tiles, drainage, capitalTileIds, rng: randomStep(candidateSeed).seed };
+    const geography = candidateGeography(normalized, width, height, attempt, candidate);
+    if (!geography) continue;
+    const assessment = assess?.(geography) ?? 'accept';
+    if (assessment === 'search-budget-exhausted') throw new RangeError(`Regional Iron search-budget-exhausted for seed ${normalized} at geography attempt ${attempt}; feasibility UNKNOWN`);
+    if (assessment === 'accept') return geography;
   }
   throw new RangeError(`No viable ${GENERATED_GEOGRAPHY_VERSION} geography for seed ${normalized} within ${MAXIMUM_ATTEMPTS} attempts`);
 }
 
-export function generateGeography(seed: number, width = 18, height = 24): GeneratedGeography {
-  return generateFromCandidates(seed, width, height, landscape);
+export function generateGeography(seed: number, width = 18, height = 24, assess?: GeographyCandidateAssessment): GeneratedGeography {
+  return generateFromCandidates(seed, width, height, landscape, assess);
 }
 
-export function generateGeographyWithCandidateForTest(seed: number, width: number, height: number, candidate: (seed: number, width: number, height: number) => HexTile[]): GeneratedGeography {
-  return generateFromCandidates(seed, width, height, candidate);
+export function generateGeographyWithCandidateForTest(seed: number, width: number, height: number, candidate: (seed: number, width: number, height: number) => HexTile[], assess?: GeographyCandidateAssessment): GeneratedGeography {
+  return generateFromCandidates(seed, width, height, candidate, assess);
 }

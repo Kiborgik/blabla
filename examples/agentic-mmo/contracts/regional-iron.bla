@@ -1,0 +1,14 @@
+type RegionalIronObservation {
+    cases: int, topology_errors: int, origin_errors: int,
+    approach_errors: int, resource_errors: int, refusal_errors: int,
+    payment_errors: int, extraction_errors: int, observer_errors: int
+}
+state regional_iron_observations: [RegionalIronObservation]
+action observe_regional_iron()
+when observe_regional_iron {
+    expect "fresh-iron-is-three-separated-connected-hill-districts": count(after.regional_iron_observations) > 0 and all(after.regional_iron_observations, s => s.cases > 0 and s.topology_errors == 0 and s.origin_errors == 0)
+    expect "two-capitals-have-structural-approaches-not-promised-income": all(after.regional_iron_observations, s => s.approach_errors == 0)
+    expect "eight-finite-reserves-preserve-coal-horses-and-bounded-refusal": all(after.regional_iron_observations, s => s.resource_errors == 0 and s.refusal_errors == 0)
+    expect "purchase-mine-and-later-foundry-pay-separately": all(after.regional_iron_observations, s => s.payment_errors == 0 and s.extraction_errors == 0)
+    expect "outcrops-follow-revealed-membership-and-remaining-reserves": all(after.regional_iron_observations, s => s.observer_errors == 0)
+}

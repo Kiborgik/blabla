@@ -1,3 +1,6 @@
+import { planRegionalIron } from './regional-iron.ts';
+import type { GeneratedGeography } from './generated-geography.ts';
+import { normalizeSeed } from './simulation/random.ts';
 import { createWoodlands } from './simulation/woodlands.ts';
 import { createWorld, legalActions } from './engine.ts';
 import { generateGeography, GENERATED_GEOGRAPHY_VERSION } from './generated-geography.ts';
@@ -13,19 +16,30 @@ import { generatePlaceName } from './place-names.ts';
 import { isCoastalSite } from './simulation/coastal.ts';
 import { civilizationBehaviorProfile, behaviorPolicyVersion } from './behavior-profiles.ts';
 
-export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' | 'settlement-hillside-commonworks-1' | 'settlement-supported-studies-1' | 'settlement-supplied-borders-1' | 'settlement-funded-landwork-1' | 'settlement-charcoal-clearing-1' | 'settlement-productive-frontiers-1' | 'settlement-river-intakes-1' | 'settlement-renewing-worked-woodlands-1' | 'settlement-learning-patronage-1' | 'settlement-civic-works-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion, temperamentVersion?: StrategicTemperamentVersion): WorldState {
+export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialReleaseId: 'settlement-interplanetary-1' | 'settlement-living-partnerships-1' | 'settlement-relief-charters-1' | 'settlement-regional-targets-1' | 'settlement-food-budget-1' | 'settlement-knowledge-compacts-1' | 'settlement-hillside-commonworks-1' | 'settlement-supported-studies-1' | 'settlement-supplied-borders-1' | 'settlement-funded-landwork-1' | 'settlement-charcoal-clearing-1' | 'settlement-productive-frontiers-1' | 'settlement-river-intakes-1' | 'settlement-renewing-worked-woodlands-1' | 'settlement-learning-patronage-1' | 'settlement-civic-works-1' | 'settlement-regional-iron-1' = 'settlement-living-partnerships-1', namingVersion?: PlaceNamingVersion, temperamentVersion?: StrategicTemperamentVersion): WorldState {
   if (namingVersion !== undefined && namingVersion !== 'cultural-toponyms-v1') throw new RangeError('Generated worlds require a supported naming version');
-  if (temperamentVersion !== undefined && (temperamentVersion !== 'strategic-temperaments-v1' || !['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1', 'settlement-funded-landwork-1', 'settlement-charcoal-clearing-1', 'settlement-productive-frontiers-1', 'settlement-river-intakes-1', 'settlement-renewing-worked-woodlands-1', 'settlement-learning-patronage-1', 'settlement-civic-works-1'].includes(initialReleaseId))) throw new RangeError('Strategic temperaments require their supported version and Food-budget genesis');
+  if (temperamentVersion !== undefined && (temperamentVersion !== 'strategic-temperaments-v1' || !['settlement-food-budget-1', 'settlement-knowledge-compacts-1', 'settlement-hillside-commonworks-1', 'settlement-supported-studies-1', 'settlement-supplied-borders-1', 'settlement-funded-landwork-1', 'settlement-charcoal-clearing-1', 'settlement-productive-frontiers-1', 'settlement-river-intakes-1', 'settlement-renewing-worked-woodlands-1', 'settlement-learning-patronage-1', 'settlement-civic-works-1', 'settlement-regional-iron-1'].includes(initialReleaseId))) throw new RangeError('Strategic temperaments require their supported version and Food-budget genesis');
   if (parseUtcTimestamp(clockEpoch) === null) throw new RangeError('Generated worlds require an explicit UTC clock epoch');
-  const geography = generateGeography(seed);
-  const state = createWorld(seed, clockEpoch, initialReleaseId);
+  let acceptedState: WorldState | undefined;
+  const regional = initialReleaseId === 'settlement-regional-iron-1';
+  const assess = (candidate: GeneratedGeography): 'accept' | 'reject' | 'search-budget-exhausted' => {
+    const plan = planRegionalIron({ seed: normalizeSeed(seed), width: candidate.width, height: candidate.height, terrainBasis: candidate.drainage.terrainBasis, genesisCapitalTileIds: candidate.capitalTileIds });
+    if (plan.status === 'search-budget-exhausted') return plan.status;
+    if (plan.status === 'no-solution') return 'reject';
+    const foundation = createWorld(seed, clockEpoch, initialReleaseId, candidate);
+    if (!resourceAndFoundingOpportunities(foundation, clockEpoch)) return 'reject';
+    acceptedState = foundation;
+    return 'accept';
+  };
+  const geography = generateGeography(seed, 18, 24, regional ? assess : undefined);
+  const state = acceptedState ?? createWorld(seed, clockEpoch, initialReleaseId);
   state.width = geography.width;
   state.height = geography.height;
-  state.tiles = geography.tiles;
+  if (!regional) state.tiles = geography.tiles;
   if (state.unlockedFeatures.includes('renewing-worked-woodlands')) state.woodlands = createWoodlands(state.tiles);
   state.drainage = geography.drainage;
   state.rng = geography.rng;
-  state.origin = { kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed: state.seed, clockEpoch, ...(namingVersion ? { namingVersion } : {}), ...(temperamentVersion ? { temperamentVersion } : {}), ...(initialReleaseId !== 'settlement-interplanetary-1' ? { initialReleaseId } : {}) };
+  state.origin = { ...(regional ? { geographyAttempt: geography.attempt } : {}), kind: 'generated', generatorVersion: GENERATED_GEOGRAPHY_VERSION, seed: state.seed, clockEpoch, ...(namingVersion ? { namingVersion } : {}), ...(temperamentVersion ? { temperamentVersion } : {}), ...(initialReleaseId !== 'settlement-interplanetary-1' ? { initialReleaseId } : {}) };
   for (const city of state.cities) {
     const tileId = geography.capitalTileIds[city.civId];
     const center = tileId === undefined ? undefined : state.tiles[tileId];
@@ -57,13 +71,16 @@ export function createGeneratedWorld(seed = 1701, clockEpoch: string, initialRel
   }];
   state.eventCounts = { 'world-founded': 1 };
   if (!isWorldState(state)) throw new Error('Generated foundation failed canonical world validation');
+  if (!resourceAndFoundingOpportunities(state, clockEpoch)) throw new Error('Generated foundation lacks canonical resource or paid founding opportunities');
+  return state;
+}
+
+function resourceAndFoundingOpportunities(state: WorldState, clockEpoch: string): boolean {
   const land = createLandTransportPlanner(state);
   const capital = state.cities[0];
-  if (!capital || state.strategicDeposits.tileIds.length !== METAL_RULES.placement.maximumDeposits
-    || state.coalDeposits.tileIds.length !== COAL_RULES.placement.maximumDeposits
-    || state.pastoralSites.tileIds.length !== PASTORAL_RULES.placement.maximumSites
-    || [state.strategicDeposits, state.coalDeposits].some(layer => layer.tileIds.filter(id => land.quote(capital.tileId, id)).length < 6)
-    || state.civilizations.some(civilization => !legalActions(state, civilization.id, clockEpoch).some(option => option.action.type === 'settle')))
-    throw new Error('Generated foundation lacks canonical resource or paid founding opportunities');
-  return state;
+  return !!capital && state.strategicDeposits?.tileIds.length === METAL_RULES.placement.maximumDeposits
+    && state.coalDeposits?.tileIds.length === COAL_RULES.placement.maximumDeposits
+    && state.pastoralSites?.tileIds.length === PASTORAL_RULES.placement.maximumSites
+    && [state.strategicDeposits, state.coalDeposits].every(layer => layer.tileIds.filter(id => land.quote(capital.tileId, id)).length >= 6)
+    && state.civilizations.every(civilization => legalActions(state, civilization.id, clockEpoch).some(option => option.action.type === 'settle'));
 }
