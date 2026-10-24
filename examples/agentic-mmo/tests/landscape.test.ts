@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { projectLandscape, LANDSCAPE_BUDGETS, TERRITORY_STYLE, territoryEdgeTriangles, landscapeSurface } from '../visuals/landscape.ts';
 import type { LandscapeTile } from '../visuals/landscape.ts';
-import { settlementVisual, DETAIL_BUDGETS } from '../visuals/world-visuals.ts';
+import { settlementVisual, DETAIL_BUDGETS, SETTLEMENT_RENDER_SCALE, VISUAL_PALETTE } from '../visuals/world-visuals.ts';
+import type { VisualPart } from '../visuals/world-visuals.ts';
+import { townPlanV1 } from '../visuals/town-plan.ts';
 import * as THREE from 'three';
 import { createLandscapeMeshes } from '../web/landscape-three.ts';
 import { projectWorld } from '../web/live-world.ts';
-import { flatSceneFaces, shapeTriangles, flatPartFaces } from '../web/settlement-parts.ts';
+import { flatSceneFaces, shapeTriangles, flatPartFaces, transformedVertices } from '../web/settlement-parts.ts';
+import { hexPosition } from '../web/atlas.ts';
 import { createWorld } from '../core/engine.ts';
 import { createTerritoryMeshes } from '../web/renderer.ts';
 import { createFlatTerritoryLayer } from '../web/flat-renderer.ts';
@@ -65,9 +68,16 @@ await test('population still changes a town silhouette after far-detail house co
   assert.ok(city);
   const small = settlementVisual({ ...city, population: 7 }, 'far');
   const large = settlementVisual({ ...city, population: 40 }, 'far');
+  assert.equal(city.civId, 0);
+  assert.equal(small.houses, DETAIL_BUDGETS.far.houses);
   assert.equal(small.houses, large.houses);
   assert.notDeepEqual(small.parts.filter(part => part.id.startsWith('home-')), large.parts.filter(part => part.id.startsWith('home-')));
-  assert.ok(large.parts.some(part => part.material === 'roof'));
+  for (const visual of [small, large]) {
+    assert.equal(visual.development.stage, 'primitive');
+    const roofs = visual.parts.filter(part => /^home-\d+-roof$/.test(part.id));
+    assert.equal(roofs.length, visual.houses);
+    assert.deepEqual(roofs.map(part => [part.shape, part.material]), [['cone', 'identity'], ['cone', 'grain'], ['cone', 'identity']]);
+  }
 });
 
 await test('SVG solids omit hidden back faces instead of painting them over the roof silhouette', () => {
@@ -113,32 +123,43 @@ await test('terrain solids remain outward-facing and SVG scene faces paint in sh
   assert.ok(faces.every((face, index) => index === 0 || face.depth >= (faces[index - 1]?.depth ?? 0)));
 });
 
-await test('larger population roofs leave all seven built families and current damage unoccluded at every LOD', () => {
-  const buildings = ['farm', 'workshop', 'irrigation', 'kiln', 'academy', 'monument', 'fuel-yard'];
+await test('larger population roofs leave selected built families and current damage unoccluded at every LOD', () => {
+  const labels = { farm: 'Farm', workshop: 'Workshop', irrigation: 'Irrigation works', kiln: 'Kiln', academy: 'House of learning', monument: 'Civic gathering place', 'fuel-yard': 'Fuel yard' };
+  const buildings = Object.keys(labels) as Array<keyof typeof labels>;
+  const selectedByDetail = { far: ['academy'], mid: ['academy', 'monument'], close: ['academy', 'monument', 'workshop'] };
   const city = createWorld(1701).cities[0];
   assert.ok(city);
+  assert.equal(city.civId, 0);
   for (const detail of ['far', 'mid', 'close'] as const) {
     for (const population of [4, 20, 40]) {
-      const visual = settlementVisual({ ...city, population, buildings, damage: 35 }, detail);
-      const faces = flatSceneFaces(visual.parts).map(face => ({
-        id: face.part.id,
-        polygon: face.points.split(' ').map(point => {
-          const coordinates = point.split(',').map(Number);
-          const x = coordinates[0];
-          const y = coordinates[1];
-          assert.ok(typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y));
-          return { x, y };
-        }),
-      }));
-      const exposed = new Set<string>();
-      for (let py = 0; py < 80; py++) {
-        for (let px = 0; px < 80; px++) {
-          const face = faces.findLast(candidate => containsPoint(-1.8 + px / 80 * 3.6, -2 + py / 80 * 4, candidate.polygon));
-          if (face) exposed.add(face.id);
+      for (const installed of [buildings, ...buildings.map(family => [family]), []]) {
+        const visual = settlementVisual({ ...city, population, buildings: installed, damage: 35 }, detail);
+        const selected = installed.length > 1 ? selectedByDetail[detail] : installed;
+        assert.deepEqual(visual.landmarks, selected);
+        assert.deepEqual(visual.buildings.map(badge => [badge.icon, badge.label, badge.value]).sort(), installed.map(family => [family, labels[family], 1]).sort());
+        assert.deepEqual(visual.summarizedBuildings.toSorted(), installed.filter(family => !selected.includes(family)).map(family => labels[family]).sort());
+        for (const family of buildings) assert.equal(visual.parts.some(part => part.id.startsWith(`${family}-`)), selected.includes(family), `${detail}, population ${population}, ${family}`);
+        assert.ok(visual.parts.length <= DETAIL_BUDGETS[detail].parts);
+        const faces = flatSceneFaces(visual.parts).map(face => ({
+          id: face.part.id,
+          polygon: face.points.split(' ').map(point => {
+            const coordinates = point.split(',').map(Number);
+            const x = coordinates[0];
+            const y = coordinates[1];
+            assert.ok(typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y));
+            return { x, y };
+          }),
+        }));
+        const exposed = new Set<string>();
+        for (let py = 0; py < 80; py++) {
+          for (let px = 0; px < 80; px++) {
+            const face = faces.findLast(candidate => containsPoint(-1.8 + px / 80 * 3.6, -2 + py / 80 * 4, candidate.polygon));
+            if (face) exposed.add(face.id);
+          }
         }
-      }
-      for (const family of [...buildings, 'damage', 'home']) {
-        assert.ok([...exposed].some(id => id.startsWith(family)), `${detail}, population ${population}, ${family}`);
+        for (const family of [...selected, 'damage', 'home']) {
+          assert.ok([...exposed].some(id => id.startsWith(family)), `${detail}, population ${population}, ${family}`);
+        }
       }
     }
   }
@@ -147,19 +168,37 @@ await test('larger population roofs leave all seven built families and current d
 await test('actual population tiers change residential massing without borrowing the field or workshop footprint', () => {
   const city = createWorld(1701).cities[0];
   assert.ok(city);
+  const plan = townPlanV1(city);
+  const bounds = (part: VisualPart) => {
+    const vertices = transformedVertices(part);
+    return { left: Math.min(...vertices.map(vertex => vertex[0])), right: Math.max(...vertices.map(vertex => vertex[0])),
+      back: Math.min(...vertices.map(vertex => vertex[2])), front: Math.max(...vertices.map(vertex => vertex[2])) };
+  };
   for (const detail of ['far', 'mid', 'close'] as const) {
     const samples: ReturnType<typeof settlementVisual>[] = [3, 18, 30].map(population => settlementVisual({ ...city, population, buildings: ['farm', 'workshop', 'aqueduct'] }, detail));
     const heights = samples.map(visual => Math.max(...visual.parts.filter(part => part.id.startsWith('home-')).map(part => part.position[1] + part.scale[1] / 2)));
     assert.ok(heights[0] !== undefined && heights[1] !== undefined && heights[2] !== undefined);
-    assert.ok(heights[1] > heights[0] + .25);
-    assert.ok(heights[2] > heights[1] + .1);
+    assert.ok(heights[1] > heights[0]);
+    assert.ok(heights[2] > heights[1]);
     const first = samples[0];
     assert.ok(first);
-    for (const visual of samples) {
+    for (const [index, visual] of samples.entries()) {
+      assert.equal(visual.development.stage, 'civic');
+      const wall = visual.parts.find(part => part.id === 'home-0-wall');
+      assert.ok(wall);
+      assert.ok(Math.abs(wall.scale[1] - [.25, .32, .355][index]!) < 1e-12);
+      assert.ok(Math.abs(wall.scale[0] - [.18, .20, .21][index]!) < 1e-12);
       assert.ok(visual.houses <= DETAIL_BUDGETS[detail].houses);
       assert.ok(visual.parts.length <= DETAIL_BUDGETS[detail].parts);
       assert.deepEqual(visual.parts.filter(part => !part.id.startsWith('home-')), first.parts.filter(part => !part.id.startsWith('home-')));
-      assert.ok(visual.parts.filter(part => part.id.startsWith('home-')).every(part => Math.abs(part.position[0]) + part.scale[0] / 2 < .65));
+      const installed = visual.parts.filter(part => !part.id.startsWith('home-')).map(bounds);
+      for (const [homeIndex, lot] of plan.homeLots.entries()) for (const part of visual.parts.filter(part => part.id.startsWith(`home-${homeIndex}-`))) {
+        assert.deepEqual([part.position[0], part.position[2]], [lot.x, lot.z]);
+        const home = bounds(part);
+        assert.ok(home.left >= lot.x - lot.width / 2 - 1e-10 && home.right <= lot.x + lot.width / 2 + 1e-10);
+        assert.ok(home.back >= lot.z - lot.depth / 2 - 1e-10 && home.front <= lot.z + lot.depth / 2 + 1e-10);
+        assert.ok(installed.every(building => home.right <= building.left + 1e-10 || home.left >= building.right - 1e-10 || home.front <= building.back + 1e-10 || home.back >= building.front - 1e-10));
+      }
     }
   }
 });
@@ -169,23 +208,48 @@ await test('fields and workshop yards reflect installed structures, not active o
   const city = state.cities[0];
   assert.ok(city);
   city.buildings = [];
-  city.construction = { active: { id: 'synthetic-order', ruleVersion: 1, cityId: city.id, buildingId: 'farm', startedRound: 1,
-    paid: { materials: 8, credits: 4 }, workRequired: 4, workDone: 3 }, lastCompleted: null };
+  const order = { id: 'synthetic-order', ruleVersion: 1 as const, cityId: city.id, buildingId: 'farm', startedRound: 1,
+    paid: { materials: 8, credits: 4 }, workRequired: 4, workDone: 3 };
+  city.construction = { active: order, lastCompleted: null };
   const before = structuredClone(state);
   const town = projectWorld(state).cities.find(candidate => candidate.cityId === city.id)?.settlement;
   assert.ok(town);
-  assert.ok(settlementVisual(town, 'mid').parts.every(part => part.id.startsWith('home-')));
+  const pending = settlementVisual(town, 'mid');
+  assert.deepEqual(pending.construction, { orderId: order.id, buildingId: 'farm', label: 'Terraced fields', workDone: 3, workRequired: 4, paid: { materials: 8, credits: 4 } });
+  assert.deepEqual(pending.buildings, []);
+  assert.deepEqual(pending.landmarks, []);
+  assert.ok(pending.parts.every(part => part.id.startsWith('home-') || part.id.startsWith('construction:synthetic-order:')));
+  const unfinished = pending.parts.filter(part => part.id.startsWith('construction:'));
+  assert.deepEqual(unfinished.map(part => part.id), ['foundation', 'foundation-step', 'stake-left', 'stake-right', 'unfinished-strip'].map(id => `construction:synthetic-order:${id}`));
+  assert.ok(unfinished.every(part => part.material !== 'crop' && part.material !== 'grain'));
+  for (const active of [null, { ...order, paid: {} }, { ...order, paid: { materials: 0 } }, { ...order, cityId: 'other-city' }, { ...order, tileId: city.tileId + 1 }]) {
+    const absent = settlementVisual({ ...town, construction: { active, lastCompleted: null } }, 'mid');
+    assert.equal(absent.construction, null);
+    assert.deepEqual(absent.buildings, []);
+    assert.deepEqual(absent.landmarks, []);
+    assert.ok(absent.parts.every(part => part.id.startsWith('home-')));
+  }
+  const fullyWorked = settlementVisual({ ...town, construction: { active: { ...order, workDone: 4 }, lastCompleted: null } }, 'mid');
+  assert.equal(fullyWorked.construction?.workDone, 4);
+  assert.ok(fullyWorked.parts.some(part => part.id.startsWith('construction:synthetic-order:')));
+  assert.ok(!fullyWorked.parts.some(part => part.id.startsWith('farm-')));
   assert.deepEqual(state, before);
   const installed = { ...city, buildings: ['farm', 'workshop'] };
   const visual = settlementVisual(installed, 'mid');
+  assert.equal(visual.construction, null);
+  assert.ok(!visual.parts.some(part => part.id.startsWith('construction:')));
+  assert.deepEqual(visual.landmarks, ['workshop', 'farm']);
   const rows = visual.parts.filter(part => part.id.startsWith('farm-row'));
   assert.equal(rows.length, 3);
   assert.equal(new Set(rows.map(part => part.material)).size, 2);
-  assert.ok(rows.every(part => part.scale[0] > .7));
+  assert.deepEqual(rows.map(part => part.id), ['farm-row-0', 'farm-row-1', 'farm-row-2']);
+  assert.deepEqual(rows.map(part => part.material), ['grain', 'crop', 'grain']);
+  assert.ok(rows.every((part, index) => Math.abs(part.scale[0] - [.37, .37, .23][index]!) < 1e-12));
   assert.ok(visual.parts.some(part => part.id === 'workshop-roof' && part.material === 'metal'));
   assert.ok(visual.parts.some(part => part.id === 'workshop-chimney'));
   assert.ok(visual.parts.some(part => part.id === 'workshop-yard'));
   assert.deepEqual(settlementVisual({ ...installed, buildingOperations: { workshop: { enabled: false, lastResult: null } } }, 'mid').parts, visual.parts);
+  assert.deepEqual(state, before);
 });
 
 await test('ownership surfaces cover only exact committed owned hexes and preserve terrain and coast', () => {
@@ -272,15 +336,52 @@ await test('shared inhabited parts remain the exact Three instances at every det
   city.buildings = ['farm', 'workshop', 'aqueduct'];
   const world = projectWorld(state);
   world.cities = world.cities.filter(town => town.cityId === city.id);
-  const appearance = new THREE.MeshBasicMaterial();
-  const meshes = createSettlementMeshes(world, () => appearance);
-  for (const [pixels, detail] of [[18, 'far'], [36, 'mid'], [60, 'close']] as const) {
+  const town = world.cities[0];
+  assert.ok(town?.settlement);
+  const origin = hexPosition(town.q, town.r);
+  const floor = world.tiles.find(tile => tile.q === town.q && tile.r === town.r)?.height;
+  assert.ok(floor !== undefined);
+  const appearances: THREE.MeshBasicMaterial[] = [];
+  const meshes = createSettlementMeshes(world, color => {
+    const material = new THREE.MeshBasicMaterial({ color });
+    appearances.push(material);
+    return material;
+  });
+  for (const [pixels, detail] of [[18, 'far'], [36, 'far'], [60, 'mid'], [110, 'close']] as const) {
     assert.equal(meshes.update(pixels), detail);
     const instances = meshes.group.children.filter((child): child is THREE.InstancedMesh => child instanceof THREE.InstancedMesh);
-    assert.equal(instances.reduce((sum, mesh) => sum + mesh.count, 0), settlementVisual(city, detail).parts.length);
+    const parts: VisualPart[] = settlementVisual(town.settlement, detail).parts;
+    assert.equal(instances.length, meshes.group.children.length);
+    assert.equal(instances.reduce((sum, mesh) => sum + mesh.count, 0), parts.length);
     assert.ok(instances.every(mesh => mesh.boundingSphere !== null));
+    const actual = new Map<string, string[]>();
+    for (const mesh of instances) {
+      assert.ok(mesh.material instanceof THREE.MeshBasicMaterial);
+      const key = JSON.stringify([Array.from(mesh.geometry.getAttribute('position').array), `#${mesh.material.color.getHexString()}`]);
+      const matrices = actual.get(key) ?? [];
+      for (let index = 0; index < mesh.count; index++) {
+        const matrix = new THREE.Matrix4();
+        mesh.getMatrixAt(index, matrix);
+        matrices.push(JSON.stringify(matrix.elements));
+      }
+      actual.set(key, matrices);
+    }
+    const expected = new Map<string, string[]>();
+    for (const part of parts) {
+      const color = part.material === 'identity' ? town.color : VISUAL_PALETTE[part.material];
+      const key = JSON.stringify([shapeTriangles(part.shape).map(Math.fround), color.toLowerCase()]);
+      const matrix = new THREE.Matrix4().compose(
+        new THREE.Vector3(origin.x + part.position[0] * SETTLEMENT_RENDER_SCALE, floor + part.position[1] * SETTLEMENT_RENDER_SCALE, origin.z + part.position[2] * SETTLEMENT_RENDER_SCALE),
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), part.rotation),
+        new THREE.Vector3(...part.scale.map(value => value * SETTLEMENT_RENDER_SCALE) as [number, number, number]),
+      );
+      const matrices = expected.get(key) ?? [];
+      matrices.push(JSON.stringify(matrix.elements.map(Math.fround)));
+      expected.set(key, matrices);
+    }
+    assert.deepEqual([...actual].map(([key, matrices]) => [key, matrices.sort()]).sort(), [...expected].map(([key, matrices]) => [key, matrices.sort()]).sort());
   }
   meshes.dispose();
   assert.equal(meshes.group.children.length, 0);
-  appearance.dispose();
+  for (const appearance of appearances) appearance.dispose();
 });
