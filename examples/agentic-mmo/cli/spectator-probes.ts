@@ -2,7 +2,7 @@ import type { GameEvent } from '../core/types.ts';
 import { createEventCueTracker, type VisualEvent } from '../visuals/event-visuals.ts';
 import { parseRelease, shouldReload, type Release } from '../web/viewer-state.ts';
 
-const CURRENT: Release = { schemaVersion: 1, version: 'synthetic-current', buildId: 'current', publishedAt: '2026-10-16T00:00:00.000Z' };
+const CURRENT: Release = { schemaVersion: 2, version: 'synthetic-current', buildId: 'current', preparedAt: '2026-10-16T00:00:00.000Z' };
 
 function syntheticEvent(sequence: number, known: boolean, importance = 1): GameEvent {
   return { id: `synthetic:${sequence}`, round: 0, type: known ? 'population-growth' : 'synthetic-unknown-event', title: 'Synthetic policy input', detail: 'Synthetic event fixture', actor: 0, target: 0, tileId: 0, cause: 'Policy fixture', effects: ['Population +1'], importance };
@@ -51,7 +51,7 @@ export class SpectatorPolicyProbes {
     return {
       reload_remote_valid: this.remote !== null,
       reload_distinct: this.remote !== null && this.remote.buildId !== CURRENT.buildId,
-      reload_newer: this.remote !== null && Date.parse(this.remote.publishedAt) > Date.parse(CURRENT.publishedAt),
+      reload_newer: this.remote !== null && Date.parse(this.remote.preparedAt) > Date.parse(CURRENT.preparedAt),
       reload_attempted: this.remote !== null && this.attempts.includes(this.remote.buildId),
       reload_requested: this.requested,
       reload_requests: this.requests,
@@ -64,13 +64,13 @@ export class SpectatorPolicyProbes {
   }
 
   deploymentOffer(kind: number): void {
-    let input: unknown = { ...CURRENT, publishedAt: 'invalid' };
-    if (kind === 1) input = { ...CURRENT, publishedAt: '2026-10-16T00:00:01.000Z' };
-    if (kind === 2) input = { ...CURRENT, buildId: 'older', publishedAt: '2026-10-15T23:59:59.000Z' };
+    let input: unknown = { ...CURRENT, preparedAt: 'invalid' };
+    if (kind === 1) input = { ...CURRENT, preparedAt: '2026-10-16T00:00:01.000Z' };
+    if (kind === 2) input = { ...CURRENT, buildId: 'older', preparedAt: '2026-10-15T23:59:59.000Z' };
     if (kind === 3) input = { ...CURRENT, buildId: 'equal-time' };
     if (kind === 4 || kind === 5) {
       const sequence = kind === 4 ? ++this.offerSequence : 1;
-      input = { ...CURRENT, buildId: `newer:${sequence}`, publishedAt: new Date(Date.parse(CURRENT.publishedAt) + sequence * 1000).toISOString() };
+      input = { ...CURRENT, buildId: `newer:${sequence}`, preparedAt: new Date(Date.parse(CURRENT.preparedAt) + sequence * 1000).toISOString() };
     }
     this.remote = parseRelease(input);
   }

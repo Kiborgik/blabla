@@ -169,6 +169,7 @@ export function createWorld(seed: number, clockEpoch?: string, registeredRulesId
   if (hasFeatures(state, ['consented-relief'])) state.relief = createReliefState(state);
   if (hasFeatures(state, ['knowledge-compacts'])) state.knowledge = createKnowledgeState(state);
   if (hasFeatures(state, ['supplied-borders'])) state.border = createBorderState(state);
+  if (hasFeatures(state, ['river-intakes'])) state.riverFlow = { ruleVersion: 1, ruleId: 'uniform-runoff-1', lastBeat: null };
   const event: GameEvent = {
     id: '0:foundation',
     round: 0,

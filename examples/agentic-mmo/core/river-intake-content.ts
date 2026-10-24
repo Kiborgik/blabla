@@ -1,0 +1,18 @@
+export const RIVER_INTAKE_RULES = {
+  featureId: 'river-intakes',
+  releaseId: 'settlement-river-intakes-1',
+  ruleVersion: 1,
+  ruleId: 'uniform-runoff-1',
+  improvementId: 'river-intake',
+  supportBuildingId: 'irrigation',
+  constructionCost: { materials: 8, credits: 4 },
+  constructionWork: 4,
+  siteRange: 3,
+  minimumContributingLand: 8,
+  materialsPerOperation: 1,
+  residentsPerOperation: 1,
+  flowPerOperation: 8,
+  baseFoodPerOperation: 3,
+  runoffPerLandTile: 1,
+  returnFlowPerOperation: 0,
+} as const;

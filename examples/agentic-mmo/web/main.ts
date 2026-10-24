@@ -393,7 +393,7 @@ function renderInspection(): void {
   if (settlement) renderSettlementInspection(settlement, cities, preferences.selectedCity, selectCity, residentSupport, selectedWork, development, territory, retainedTerritory, () => {
     chooseSection('work');
     panel.scrollTop = 0;
-  }, capabilities?.rail, capabilities?.localPower);
+  }, capabilities?.rail, capabilities?.localPower, displayed.improvements);
   const overview = settlement?.querySelector<HTMLElement>('.town-overview');
   if (overview) panel.insertBefore(overview, panel.querySelector('.city-details'));
   const aim = panel.querySelector('.ambition'); if (aim) panel.append(aim);

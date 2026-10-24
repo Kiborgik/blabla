@@ -4,6 +4,8 @@ import { workedLandCompositionV1 } from './worked-land-composition.ts';
 import { shoreFisheryParts } from './shore-fishery-visuals.ts';
 import { charcoalClearingParts } from './charcoal-clearing-visuals.ts';
 import { hillsideCommonworksParts } from './hillside-commonworks-visuals.ts';
+import { riverIntakeParts } from './river-intake-visuals.ts';
+import type { RiverIntakeVisualFacts } from './river-intake-visuals.ts';
 import type { CityImprovement, ImprovementConstructionOrder, ImprovementConstructionCompletion, Resources } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
@@ -26,6 +28,7 @@ export interface ImprovementView {
   operation: CityImprovement['operation'] | null;
   baseProduction: Partial<Resources>;
   residentsRequired: number;
+  riverIntake?: RiverIntakeVisualFacts | null;
 }
 
 export const IMPROVEMENT_PART_BUDGETS = { far: 10, mid: 15, close: 20 } as const;
@@ -36,8 +39,8 @@ export function improvementLabel(view: ImprovementView): string {
 
 export const CHARCOAL_MARK_PATH = 'M3 20H21M5 18C5 10 9 7 12 7C16 7 19 12 19 18ZM8 16H16M3 22H9M15 22H21';
 
-export function improvementMark(view: Pick<ImprovementView, 'improvementId'>): 'charcoal' | 'commons' | 'fishery' | 'pasture' | 'lumber' | 'mine' {
-  return view.improvementId === 'charcoal-clearing' ? 'charcoal' : view.improvementId === 'hill-commons' ? 'commons' : view.improvementId === 'shore-fishery' ? 'fishery' : view.improvementId === 'pasture' ? 'pasture' : view.improvementId === 'lumber-mill' ? 'lumber' : 'mine';
+export function improvementMark(view: Pick<ImprovementView, 'improvementId'>): 'intake' | 'charcoal' | 'commons' | 'fishery' | 'pasture' | 'lumber' | 'mine' {
+  return view.improvementId === 'river-intake' ? 'intake' : view.improvementId === 'charcoal-clearing' ? 'charcoal' : view.improvementId === 'hill-commons' ? 'commons' : view.improvementId === 'shore-fishery' ? 'fishery' : view.improvementId === 'pasture' ? 'pasture' : view.improvementId === 'lumber-mill' ? 'lumber' : 'mine';
 }
 
 export function improvementLastLabel(result: CityImprovement['operation']['lastResult']): string {
@@ -56,6 +59,7 @@ export function improvementLastLabel(result: CityImprovement['operation']['lastR
 }
 
 export function improvementParts(view: ImprovementView, detail: DetailLevel): VisualPart[] {
+  if (view.improvementId === 'river-intake') return riverIntakeParts(view, detail);
   return workedLandCompositionV1(view, improvementRecipeParts(view, detail));
 }
 

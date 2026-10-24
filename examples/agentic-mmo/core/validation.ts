@@ -1,4 +1,5 @@
 import { validateDrainage } from './drainage.ts';
+import { isRiverFlowState, isRiverIntakeOperationResult } from './river-intake-validation.ts';
 import { isBorderState, validBorderEvent } from './border-validation.ts';
 import { isKnowledgeState, validKnowledgeEvent } from './knowledge-validation.ts';
 import { FOOD_BUDGET_RULES, type FoodSupplyReceipt } from './food-security-content.ts';
@@ -1180,6 +1181,7 @@ function sameImprovementCompletion(left: ImprovementConstructionCompletion, righ
 }
 
 function paidImprovementResult(value: unknown, definition: ImprovementDefinition, completedRound: number, round: number, features: string[]): boolean {
+  if (definition.id === 'river-intake') return definition.requiredFeatures.every(feature => features.includes(feature)) && isRiverIntakeOperationResult(value, completedRound, round);
   if (!definition.requiredFeatures.every(feature => features.includes(feature)) || !record(value)
     || !exactKeys(value, ['round', 'status', 'paid', 'produced', 'residents', 'blockedReason', 'inputs', 'shortages'])
     || !integer(value.round, completedRound + 1, round) || !resourceAmounts(value.paid) || !resourceAmounts(value.produced)
@@ -1846,6 +1848,9 @@ export function isWorldState(value: unknown): value is WorldState {
   const knowledgeEnabled = features.includes('knowledge-compacts');
   if (knowledgeEnabled !== Object.hasOwn(value, 'knowledge') || knowledgeEnabled && !isKnowledgeState(value.knowledge, value as unknown as WorldState)
     || !knowledgeEnabled && value.events.some(event => Object.hasOwn(event, 'knowledgeCompact') || Object.hasOwn(event, 'knowledgeStudy') || Object.hasOwn(event, 'knowledgeResult') || event.type.startsWith('knowledge-'))) return false;
+  const intakeEnabled = features.includes('river-intakes');
+  if (intakeEnabled !== Object.hasOwn(value, 'riverFlow') || intakeEnabled && !isRiverFlowState(value.riverFlow, value as unknown as WorldState)
+    || !intakeEnabled && value.events.some(event => event.type === 'river-flow')) return false;
   const reliefEnabled = features.includes('consented-relief');
   if (reliefEnabled !== Object.hasOwn(value, 'relief') || (reliefEnabled && !isReliefState(value.relief, value as unknown as WorldState))
     || (!reliefEnabled && value.events.some(event => Object.hasOwn(event, 'reliefResult') || event.type.startsWith('relief-')))) return false;

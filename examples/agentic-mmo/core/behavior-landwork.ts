@@ -41,11 +41,12 @@ export interface FundedLandworkQuote {
   readonly retainedOperations: readonly string[];
   readonly allocations: readonly { key: string; required: number; available: number; allocated: number }[];
 }
-export interface FundedCharcoalOperationQuote extends Omit<FundedLandworkQuote, 'action'> {
+export interface FundedImprovementOperationQuote extends Omit<FundedLandworkQuote, 'action'> {
   readonly targetOperationBeats: number;
   readonly requiredByBorder: boolean;
   readonly action: Extract<GameAction, { type: 'set-improvement-operation' }>;
 }
+export type FundedCharcoalOperationQuote = FundedImprovementOperationQuote;
 export interface LandworkAssessment { readonly quotes: readonly FundedLandworkQuote[]; readonly reason: string | null }
 interface Footprint { key: string; cityId: string; ordinary: Partial<Resources>; strategic: StrategicResources }
 interface PendingUse { cityId: string; order: ConstructionOrder; definition: BuildingDefinition | ImprovementDefinition; footprint: Footprint | null }
@@ -78,7 +79,7 @@ function installFootprint(state: WorldState, cityId: string, definition: Buildin
   const city = state.cities.find(city => city.id === cityId)!;
   if ('residentsRequired' in definition) {
     city.improvements ??= {};
-    city.improvements[String(tileId)] = { improvementId: definition.id, tileId: tileId!, completion: { kind: 'improvement', orderId: 'conditional-landwork', cityId, improvementId: definition.id, tileId: tileId!, startedRound: state.round, completedRound: state.round, paid: {}, workRequired: definition.requiredWork, eventId: 'conditional-landwork' }, operation: { enabled: true, lastResult: null } };
+    city.improvements[String(tileId)] = { improvementId: definition.id, tileId: tileId!, completion: { kind: 'improvement', orderId: 'conditional-landwork', cityId, improvementId: definition.id, tileId: tileId!, startedRound: definition.id === 'river-intake' ? state.round - 1 : state.round, completedRound: definition.id === 'river-intake' ? state.round - 1 : state.round, paid: {}, workRequired: definition.requiredWork, eventId: 'conditional-landwork' }, operation: { enabled: true, lastResult: null } };
   } else {
     city.buildings = [...city.buildings, definition.id];
     if (definition.district) city.districtSites = { ...city.districtSites, [definition.id]: tileId! };
@@ -145,11 +146,12 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
       for (const obligation of party.departure.operationForecast) {
         const key = obligation.kind === 'building' ? buildingKey(obligation.cityId, obligation.id) : siteKey(obligation.cityId, obligation.tileId!);
         const target = installed && obligation.kind === 'improvement' && key === siteKey(installed.cityId, installed.tileId);
-        const targetDefinition = target ? IMPROVEMENTS.find(definition => definition.id === 'charcoal-clearing') : undefined;
+        const targetSite = target ? state.cities.find(town => town.id === installed!.cityId)?.improvements?.[String(installed!.tileId)] : undefined;
+        const targetDefinition = targetSite ? IMPROVEMENTS.find(definition => definition.id === targetSite.improvementId) : undefined;
         const current: Footprint | undefined = targetDefinition ? { key, cityId: installed!.cityId, ordinary: targetDefinition.operatingInputs ?? {}, strategic: {} } : retained.get(key);
         if (targetDefinition) {
           prepared.requiredByBorder = true; prepared.targetOperationBeats = Math.max(prepared.targetOperationBeats, party.departure.returnByRound - state.round);
-          if (obligation.id !== targetDefinition.id || obligation.residents !== targetDefinition.residentsRequired) reject('border-operation-unfunded: retained clearing recipe does not match its exact forecast');
+          if (obligation.id !== targetDefinition.id || obligation.residents !== targetDefinition.residentsRequired) reject('border-operation-unfunded: retained site recipe does not match its exact forecast');
         }
         if (!current || RESOURCE_IDS.some(id => (current.ordinary[id] ?? 0) !== (obligation.inputs[id] ?? 0)) || STRATEGIC_RESOURCE_IDS.some(id => (current.strategic[id] ?? 0) !== (obligation.strategicInputs[id] ?? 0))) reject('border-operation-unfunded: retained exact operation footprint is unavailable');
       }
@@ -186,7 +188,7 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
     const city = state.cities.find(city => city.id === cityId && city.civId === civId); const tile = state.tiles.find(tile => tile.id === tileId);
     if (!actor || !city || !tile) return refuse('missing-exact-site: existing civilization, town and tile are required');
     const installed = operationOnly ? city.improvements?.[String(tileId)] : undefined;
-    if (operationOnly && installed?.improvementId !== 'charcoal-clearing') return refuse('missing-installed-charcoal: operation requires its exact completed clearing');
+    if (operationOnly && (!installed || !['charcoal-clearing', 'river-intake'].includes(installed.improvementId))) return refuse('missing-installed-paid-site: operation requires its exact completed site');
     const shared = prepare(operationOnly ? { cityId, tileId } : undefined); if (shared.failure) return refuse(shared.failure);
     let acquisitionCost: Partial<Resources> = {}; let ownedState = state;
     if (tile.owner !== civId) {
@@ -203,7 +205,7 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
     const startDelayBeats = Math.max(waitBeats, acquisitionDelayBeats);
     const candidates: Candidate[] = [];
     for (const original of IMPROVEMENTS.toSorted((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
-      if (original.id === 'charcoal-clearing' && tile.owner !== civId || operationOnly && original.id !== installed!.improvementId) continue;
+      if (['charcoal-clearing', 'river-intake'].includes(original.id) && tile.owner !== civId || operationOnly && original.id !== installed!.improvementId) continue;
       const definition = operationOnly ? { ...original, cost: {}, requiredWork: 0 } : original;
       const eligibility = improvementEligibility(ownedState, civId, definition, cityId);
       if ((operationOnly ? !hasFeatures(state, definition.requiredFeatures) : eligibility.blockers.some(blocker => blocker.kind !== 'active-commitment')) || improvementSiteBlock(ownedState, city, definition, tileId, operationOnly)) continue;
@@ -229,7 +231,7 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
       if (candidate.footprint) { add(ordinary, candidate.footprint.ordinary, operationOnly ? shared.targetOperationBeats : 2); addStrategic(strategic, candidate.footprint.strategic, operationOnly ? shared.targetOperationBeats : 2); add(allocationOrdinary, candidate.footprint.ordinary); addStrategic(allocationStrategic, candidate.footprint.strategic); }
       if (!safe(ordinary, strategic)) { reason = 'unsafe-accounting: protected costs exceed safe resource units'; continue; }
       if (RESOURCE_IDS.some(id => Math.round(actor.resources[id] * 100) < Math.round(ordinary[id] * 100)) || STRATEGIC_RESOURCE_IDS.some(id => (actor.strategicResources?.[id] ?? 0) < (strategic[id] ?? 0))) { reason = 'opening-budget: purchase, setup, households and protected operations or promises are not funded'; continue; }
-      const projected = projectOperationAllocation(ownedState, opening => {
+      const prepareOpening = (opening: WorldState, includeCandidate: boolean): void => {
         const payer = opening.civilizations.find(item => item.id === civId)!;
         for (const id of RESOURCE_IDS) payer.resources[id] = quantize(payer.resources[id] - ordinary[id] + allocationOrdinary[id]);
         payer.strategicResources ??= {};
@@ -238,8 +240,12 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
           const town = opening.cities.find(town => town.id === use.cityId)!; town.construction = { ...town.construction!, active: null };
           installFootprint(opening, use.cityId, use.definition, use.order.tileId);
         }
-        installFootprint(opening, cityId, candidate.definition, tileId);
-      });
+        if (includeCandidate) installFootprint(opening, cityId, candidate.definition, tileId);
+        else if (operationOnly) opening.cities.find(town => town.id === cityId)!.improvements![String(tileId)]!.operation.enabled = false;
+      };
+      const projected = projectOperationAllocation(ownedState, opening => prepareOpening(opening, true));
+      const intake = candidate.action.type === 'improve' && candidate.action.improvementId === 'river-intake';
+      if (intake && shared.baseline.cities.some(town => town.civId !== civId && Object.values(town.improvements ?? {}).some(site => site.improvementId === 'river-intake' && site.operation.lastResult?.status === 'operated' && projected.cities.find(next => next.id === town.id)?.improvements?.[String(site.tileId)]?.operation.lastResult?.status !== 'operated'))) { reason = 'voluntary-downstream-protection: this quote would displace a currently funded foreign intake'; continue; }
       const allocations = operated(projected, civId);
       if ([...shared.retained.keys()].some(key => !allocations.has(key)) || candidate.footprint && !allocations.has(candidate.footprint.key) || !selectedInstitutionsFunded(projected, civId)) { reason = 'operation-displacement: exact current or paid-order inputs, residents or Power would be unavailable'; continue; }
       const actualOutput = withoutPendingOutput(projected, shared.pending); const protectedFood = foodAllocation(shared.baseline, civId); const proposedFood = foodAllocation(actualOutput, civId);
@@ -249,7 +255,7 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
         ...Object.entries(town.buildingOperations ?? {}).flatMap(([id, operation]) => operation.lastResult?.status === 'operated' ? [{ key: buildingKey(town.id, id), required: operation.lastResult.residents?.required ?? 0, available: operation.lastResult.residents?.available ?? 0, allocated: operation.lastResult.residents?.allocated ?? 0 }] : []),
         ...Object.values(town.improvements ?? {}).flatMap(site => site.operation.lastResult?.status === 'operated' ? [{ key: siteKey(town.id, site.tileId), required: site.operation.lastResult.residents.required, available: site.operation.lastResult.residents.available, allocated: site.operation.lastResult.residents.allocated }] : []),
       ]).sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
-      const withoutCandidate: WorldState = { ...actualOutput, cities: actualOutput.cities.map(town => {
+      const withoutCandidate: WorldState = intake ? withoutPendingOutput(projectOperationAllocation(ownedState, opening => prepareOpening(opening, false)), shared.pending) : { ...actualOutput, cities: actualOutput.cities.map(town => {
         if (town.id !== cityId) return town;
         if (candidateAction.type === 'build') return { ...town, buildings: town.buildings.filter(id => id !== candidateAction.project) };
         const improvements = { ...town.improvements }; delete improvements[String(tileId)]; return { ...town, improvements };
@@ -266,6 +272,12 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
     charcoalOperation(cityId: string, tileId: number): FundedCharcoalOperationQuote | null {
       const quote = assess(cityId, tileId, true).quotes[0];
       return quote ? freeze({ ...quote, targetOperationBeats: prepare({ cityId, tileId }).targetOperationBeats, requiredByBorder: prepare({ cityId, tileId }).requiredByBorder, action: { type: 'set-improvement-operation', cityId, tileId, improvementId: 'charcoal-clearing', enabled: true } }) : null;
+    },
+    riverIntakeOperation(cityId: string, tileId: number): FundedImprovementOperationQuote | null {
+      const installed = state.cities.find(city => city.id === cityId)?.improvements?.[String(tileId)];
+      if (installed?.improvementId !== 'river-intake') return null;
+      const quote = assess(cityId, tileId, true).quotes[0];
+      return quote ? freeze({ ...quote, targetOperationBeats: prepare({ cityId, tileId }).targetOperationBeats, requiredByBorder: prepare({ cityId, tileId }).requiredByBorder, action: { type: 'set-improvement-operation', cityId, tileId, improvementId: 'river-intake', enabled: true } }) : null;
     },
     owned(cityId: string): readonly FundedLandworkQuote[] {
       const existing = ownedQuotes.get(cityId); if (existing) return existing;

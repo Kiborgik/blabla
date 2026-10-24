@@ -1,3 +1,4 @@
+import type { RiverFlowBeat } from '../core/river-intake-types.ts';
 import type { DrainageView } from '../visuals/drainage-visuals.ts';
 import type { BorderIncidentView } from '../visuals/border-visuals.ts';
 import type { AcquiredLandView } from '../visuals/territory-visuals.ts';
@@ -45,6 +46,7 @@ export interface AtlasTile {
 
 export interface AtlasWorld {
   drainage?: DrainageView | null;
+  riverFlow?: RiverFlowBeat | null;
   borderIncidents?: BorderIncidentView[];
   acquiredLand?: AcquiredLandView[];
   tiles: AtlasTile[];

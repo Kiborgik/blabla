@@ -50,8 +50,8 @@ export function planDeploymentUpdate(input: UpdateRequest): UpdatePlan {
     || !current || !remote || !buildId(current.buildId) || !buildId(remote.buildId)) return base;
   const fromUrl = marker(url, input.now);
   const fromStore = parseAttempt(input.stored, input.now);
-  const targetTime = Date.parse(remote.publishedAt);
-  if (remote.buildId === current.buildId || targetTime <= Date.parse(current.publishedAt)) {
+  const targetTime = Date.parse(remote.preparedAt);
+  if (remote.buildId === current.buildId || targetTime <= Date.parse(current.preparedAt)) {
     if (fromUrl?.to === current.buildId) { url.searchParams.delete(UPDATE_RETRY_PARAM); return { ...base, status: 'current', href: url.href }; }
     return { ...base, status: 'current' };
   }

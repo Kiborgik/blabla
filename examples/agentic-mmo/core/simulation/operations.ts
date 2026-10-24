@@ -5,6 +5,8 @@ import type { BuildingDefinition, City, GameEvent, Observation, WorldState } fro
 import { emitEvent } from './events.ts';
 import { hasFeatures } from './history.ts';
 import { civilizationById } from './world.ts';
+import type { RiverFlowPlan } from '../river-intake-types.ts';
+import { allocateRiverIntakes } from './river-intakes.ts';
 
 export function paidRecipe(building: BuildingDefinition): boolean {
   return RESOURCE_IDS.some((resource) => (building.operatingInputs?.[resource] ?? 0) > 0) || STRATEGIC_RESOURCE_IDS.some(resource => (building.strategicInputs?.[resource] ?? 0) > 0) || participatesInLocalPower(building);
@@ -17,12 +19,13 @@ export function orderedBuildings(city: City): BuildingDefinition[] {
   });
 }
 
-export function allocateOperations(state: WorldState): void {
-  if (!hasFeatures(state, ['building-operations'])) return;
+export function allocateOperations(state: WorldState): RiverFlowPlan | null {
+  if (!hasFeatures(state, ['building-operations'])) return null;
   const residentEnabled = hasFeatures(state, ['resident-capacity']);
   const powerEnabled = hasFeatures(state, [LOCAL_POWER_RULES.featureId]);
   const budgets = new Map(state.civilizations.map((civilization) => [civilization.id, { ...civilization.resources }]));
   const strategicBudgets = new Map(state.civilizations.map(civilization => [civilization.id, { ...civilization.strategicResources }]));
+  const residentBudgets = new Map<string, number>();
   for (const city of state.cities.toSorted((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)) {
     const budget = budgets.get(city.civId);
     const strategicBudget = strategicBudgets.get(city.civId);
@@ -82,14 +85,16 @@ export function allocateOperations(state: WorldState): void {
       }
       operation.lastResult = { ...result, status: 'operated', paid };
     }
-    allocateImprovements(state, city, available, budget);
+    residentBudgets.set(city.id, allocateImprovements(state, city, available, budget));
   }
+  return allocateRiverIntakes(state, budgets, residentBudgets);
 }
 
 export function projectOperationAllocation(state: WorldState, prepare?: (projected: WorldState) => void): WorldState {
   const projected: WorldState = {
     ...state,
     round: state.round + 1,
+    ...(state.riverFlow ? { riverFlow: structuredClone(state.riverFlow) } : {}),
     civilizations: state.civilizations.map(civilization => ({ ...civilization, resources: { ...civilization.resources }, ...(civilization.strategicResources ? { strategicResources: { ...civilization.strategicResources } } : {}) })),
     cities: state.cities.map(city => ({ ...city, ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}), ...(city.improvements ? { improvements: structuredClone(city.improvements) } : {}) })),
   };

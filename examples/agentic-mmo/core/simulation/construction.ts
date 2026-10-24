@@ -2,9 +2,10 @@ import { initializeLocalPower } from './local-power.ts';
 import { installRail, isRailOrder, railSiteBlock } from './rail.ts';
 import { governmentModifiers, originalCapitalCityId } from './government.ts';
 import { isWonderOrder, resolveWonderConstruction } from './wonders.ts';
-import { installImprovement, isImprovementOrder } from './improvements.ts';
+import { improvementSiteBlock, installImprovement, isImprovementOrder } from './improvements.ts';
 import { buildingBaseProduction, describeDistrictProduction } from './districts.ts';
-import { BUILDINGS, CONSTRUCTION_RULES, RESOURCE_IDS } from '../content.ts';
+import { BUILDINGS, CONSTRUCTION_RULES, IMPROVEMENTS, RESOURCE_IDS } from '../content.ts';
+import { RIVER_INTAKE_RULES } from '../river-intake-content.ts';
 import type { CampusHighGroundSite, BuildingDefinition, City, GameEvent, WorldState } from '../types.ts';
 import { applyEffects } from './effects.ts';
 import { emitEvent } from './events.ts';
@@ -85,6 +86,10 @@ export function resolveConstruction(state: WorldState, opening: ReadonlyMap<stri
     const work = opening.get(city.id);
     if (!construction || !order || isWonderOrder(order) || work === undefined || state.round <= order.startedRound) continue;
     if (isRailOrder(order) && railSiteBlock(state, city, order.tileId, order.toTileId, order.id)) continue;
+    if (isImprovementOrder(order) && order.improvementId === RIVER_INTAKE_RULES.improvementId) {
+      const definition = IMPROVEMENTS.find(candidate => candidate.id === order.improvementId);
+      if (!definition || improvementSiteBlock(state, city, definition, order.tileId, false, order.id)) continue;
+    }
     order.workDone = Math.min(order.workRequired, Math.round((order.workDone + work) * 100) / 100);
     if (order.workDone < order.workRequired) continue;
     if (isRailOrder(order)) { installRail(state, city, order, events); construction.active = null; continue; }

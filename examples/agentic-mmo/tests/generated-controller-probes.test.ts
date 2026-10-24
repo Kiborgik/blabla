@@ -21,7 +21,7 @@ function geographyHolds(s: GeneratedControllerSample): boolean {
 
 function genesisHolds(s: GeneratedControllerSample): boolean {
   return s.genesis_errors === 0 && s.policy_version === 'weighted-civilizations-v5-funded-landwork'
-    && s.release_id === 'settlement-productive-frontiers-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
+    && s.release_id === 'settlement-river-intakes-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
 }
 
 function decisionHolds(d: GeneratedControllerDecision): boolean {
@@ -81,6 +81,10 @@ await test('raw geography and genesis inspection rejects malformed tiles, starts
     ['tile coordinate', run => { run.state.tiles[0]!.q = 18; }],
     ['tile elevation', run => { run.state.tiles[0]!.elevation = 101; }],
     ['unquantized elevation', run => { run.state.tiles[0]!.elevation = .1; }],
+    ['missing river flow', run => { delete run.state.riverFlow; }],
+    ['null river flow', run => { Reflect.set(run.state, 'riverFlow', null); }],
+    ['river flow rule', run => { Reflect.set(run.state.riverFlow!, 'ruleId', 'unearned-flow'); }],
+    ['pre-earned river flow', run => { Reflect.set(run.state.riverFlow!, 'lastBeat', { round: 0, withdrawals: [] }); }],
     ['missing drainage', run => { delete run.state.drainage; }],
     ['null drainage', run => { Reflect.set(run.state, 'drainage', null); }],
     ['null drainage basis', run => { Reflect.set(run.state.drainage!, 'terrainBasis', null); }],

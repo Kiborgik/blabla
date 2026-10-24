@@ -10,7 +10,7 @@ import { ACTIVE_LOCAL_POLICY_VERSION, ACTIVE_LOCAL_RELEASE_ID, createLocalSimula
 
 const EPOCH = '2000-01-01T00:00:00.000Z';
 const POLICY = 'weighted-civilizations-v5-funded-landwork';
-const RELEASE = 'settlement-productive-frontiers-1';
+const RELEASE = 'settlement-river-intakes-1';
 const TERRAINS = ['grassland', 'forest', 'desert', 'tundra', 'mountain', 'ocean'];
 const DIRECTIONS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]] as const;
 const json = (value: unknown): string => JSON.stringify(value) ?? 'undefined';
@@ -105,6 +105,7 @@ export function inspectGeneratedSample(seed: number, run: LocalSimulation, repea
     const tile = state.tiles.find(candidate => candidate.id === city.tileId);
     check(tile !== undefined && tile.terrain === 'grassland' && tile.owner === city.civId && tile.resource === 'food');
   }
+  check(isDeepStrictEqual(state.riverFlow, { ruleVersion: 1, ruleId: 'uniform-runoff-1', lastBeat: null }));
   check(state.routes.length === 0 && state.treaties.length === 0 && state.calendarMilestones.length === 0 && state.outcome === null);
   check(state.events.length === 1);
   const foundation = state.events[0];

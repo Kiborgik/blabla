@@ -51,9 +51,9 @@ void test('deployment carry retains both body views and selected body without tr
   const mars = { ...earth, body: 'mars' };
   let preferences = saveWorldView(DEFAULT_PREFERENCES, earth, { ...DEFAULT_WORLD_CAMERA, x: 8, selectedCity: 'town-3' });
   preferences = saveWorldView(preferences, mars, { ...DEFAULT_WORLD_CAMERA, z: -7, selectedCity: 'mars:2', selected: 2 });
-  const current = { schemaVersion: 1 as const, version: '36', buildId: 'old', publishedAt: '2026-10-22T07:00:00Z' };
-  const remote = { ...current, version: '37', buildId: 'new', publishedAt: '2026-10-22T09:00:00Z' };
-  const plan = planDeploymentUpdate({ current, remote, url: 'https://viewer.example/?body=mars', now: Date.parse(remote.publishedAt), preferences: { ...preferences, state: { revision: 10 } }, stored: null });
+  const current = { schemaVersion: 2 as const, version: '36', buildId: 'old', preparedAt: '2026-10-22T07:00:00Z' };
+  const remote = { ...current, version: '37', buildId: 'new', preparedAt: '2026-10-22T09:00:00Z' };
+  const plan = planDeploymentUpdate({ current, remote, url: 'https://viewer.example/?body=mars', now: Date.parse(remote.preparedAt), preferences: { ...preferences, state: { revision: 10 } }, stored: null });
   assert.ok(plan.carry); const restored = restoreDeploymentPreferences(remote.buildId, DEFAULT_PREFERENCES, plan.carry);
   assert.equal(restored.worldBody, 'mars'); assert.deepEqual(restored.worldViews, preferences.worldViews);
   assert.equal('state' in plan.carry.preferences, false); assert.doesNotMatch(plan.href ?? '', /immutable-private-genesis|town-3|mars%3A2/);

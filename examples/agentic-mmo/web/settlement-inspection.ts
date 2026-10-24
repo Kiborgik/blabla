@@ -1,3 +1,4 @@
+import { riverIntakeFacts, riverIntakeReadiness } from './river-intake-inspection.ts';
 import { territoryPage, type TownTerritoryView, type TerritorySiteView } from '../visuals/territory-visuals.ts';
 import type { observedPastoralSites } from '../core/simulation/pastoral.ts';
 import { pastoralSiteLabel } from '../visuals/pastoral-visuals.ts';
@@ -5,7 +6,7 @@ import { wonderWorkRows, type TownDevelopmentFacts, type WonderWorkRow } from '.
 import { exactNumber, numberElement } from './number-format.ts';
 import { strategicResourceAmounts, strategicResourceLabel, SITE_MARK_PATHS, type StrategicAmount, extractionFacts, depositLabel } from '../visuals/strategic-resource-visuals.ts';
 import type { observedStrategicResources } from '../core/simulation/metals.ts';
-import { improvementLastLabel } from '../visuals/improvement-visuals.ts';
+import { improvementLastLabel, type ImprovementView } from '../visuals/improvement-visuals.ts';
 import { damageCondition } from '../visuals/damage-visuals.ts';
 import { BUILDINGS, IMPROVEMENTS, RESOURCE_IDS, TECHNOLOGIES, WONDERS } from '../core/content.ts';
 import { hasFeatures } from '../core/simulation/history.ts';
@@ -243,7 +244,7 @@ export function createLocalPowerInspection(city: Pick<City, 'id' | 'buildings' |
   return section;
 }
 
-export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }, onInspectWork?: () => void, rail?: RailObservation, power?: CityLocalPower): void {
+export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }, onInspectWork?: () => void, rail?: RailObservation, power?: CityLocalPower, improvements: readonly ImprovementView[] = []): void {
   host.replaceChildren();
   const city = cities.find((entry) => entry.id === selectedId) ?? cities[0];
   if (!city) return;
@@ -345,7 +346,8 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     card.dataset['improvementTile'] = String(site.tileId);
     const siteHeading = text('h4', `${definition?.name ?? site.improvementId} · Tile ${site.tileId}`);
     siteHeading.prepend(visualIcon(definition?.production.food ? 'food' : 'materials'));
-    card.append(siteHeading, text('p', `Built · ${site.operation.enabled ? 'On' : 'Paused'} now`, 'building-current'));
+    card.append(siteHeading, text('p', `Built · ${site.operation.enabled ? site.improvementId === 'river-intake' ? 'Enabled' : 'On' : 'Paused'} now`, 'building-current'));
+    if (site.improvementId === 'river-intake') for (const fact of riverIntakeReadiness(site, improvements.find(view => view.cityId === city.id && view.tileId === site.tileId)?.riverIntake)) card.append(text('p', fact, 'river-intake-readiness'));
     if (definition) card.append(text('p', `Needs ${definition.residentsRequired} local resident each operating season. People stay in this town.`, 'building-summary'),
       amountLine('Base before town productivity', RESOURCE_IDS.flatMap(resource => { const amount = definition.production[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
     if (definition?.operatingInputs) card.append(vectorLine('Opening supplies needed each operating season', definition.operatingInputs), text('p', 'All opening supplies and local support must be available. Base output is not a delivery or a recorded result.', 'building-summary'));
@@ -365,6 +367,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
         amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
       for (const input of last.inputs ?? []) receipt.append(text('p', `${METRIC_LABELS[input.resource]} needed ${exactNumber(input.required)} · Available before that attempt ${exactNumber(input.available)}`, 'operation-input'));
       for (const shortage of last.shortages ?? []) receipt.append(text('p', `${METRIC_LABELS[shortage.resource]} needed ${exactNumber(shortage.required)} · Available then ${exactNumber(shortage.available)}`, 'operation-shortage'));
+      if (site.improvementId === 'river-intake') for (const fact of riverIntakeFacts(last)) receipt.append(text('p', fact, 'river-intake-fact'));
       if (last.extraction) for (const fact of extractionFacts(last.extraction)) receipt.append(text('p', fact, 'extraction-fact'));
       card.append(receipt);
     } else card.append(text('p', 'No operating result has been recorded yet. Output requires a later season with local support.', 'building-summary'));

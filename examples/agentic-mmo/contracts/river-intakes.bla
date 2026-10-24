@@ -1,0 +1,12 @@
+type RiverBeatSample {
+    round: int, source_units: int, withdrawals: int, outlet_residuals: int,
+    identity_errors: int, topology_errors: int, partial_payments: int,
+    baseline_changes: int, restart_errors: int, projection_changes: int
+}
+state river_beats: [RiverBeatSample]
+action observe_funded_river_intakes()
+when observe_funded_river_intakes {
+    expect "renewable-flow-is-conserved-through-actual-downhill-links": count(after.river_beats) > 0 and all(after.river_beats, s => s.source_units > 0 and s.withdrawals >= 0 and s.outlet_residuals >= 0 and s.source_units == s.withdrawals + s.outlet_residuals and s.topology_errors == 0)
+    expect "intake-recipes-are-exact-atomic-and-baseline-preserving": all(after.river_beats, s => s.identity_errors == 0 and s.partial_payments == 0 and s.baseline_changes == 0)
+    expect "current-restart-and-observation-preserve-earned-flow": all(after.river_beats, s => s.restart_errors == 0 and s.projection_changes == 0)
+}

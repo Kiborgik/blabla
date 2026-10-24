@@ -9,6 +9,7 @@ import { applyCommand, legalActions } from '../core/engine.ts';
 import { createGeneratedWorld } from '../core/generated-world.ts';
 import { decisionObligations } from '../core/simulation/decisions.ts';
 import { hexDistance } from '../core/simulation/geography.ts';
+import { isHillSite } from '../core/simulation/improvements.ts';
 import { STRATEGIC_TEMPERAMENT_VERSION } from '../core/strategic-temperaments.ts';
 import type { ActionOption, GameAction, Resources, WorldState } from '../core/types.ts';
 import { isWorldState } from '../core/validation.ts';
@@ -26,14 +27,11 @@ function fixture(busy = true) {
   actor.resources = { food: 500, materials: 200, energy: 200, credits: 200, science: 0, culture: 0 };
   actor.technologies = ['agriculture', 'kiln-firing', 'mining']; city.population = 5; city.focus = 'industry';
   const reserved = new Set([...state.strategicDeposits!.tileIds, ...state.coalDeposits!.tileIds, ...state.pastoralSites!.tileIds, ...state.cities.map(item => item.tileId)]);
-  const neighbors = state.tiles.filter(tile => tile.owner === 0 && !reserved.has(tile.id) && tile.terrain !== 'ocean' && tile.terrain !== 'mountain' && hexDistance(center, tile) === 1).toSorted((a, b) => a.id - b.id);
-  const work = neighbors[0]; const purchase = neighbors[1]; assert.ok(work && purchase);
-  for (const tile of state.tiles) if (hexDistance(center, tile) <= 3 && tile.id !== center.id) {
-    if (!reserved.has(tile.id)) tile.elevation = 40;
-    else if (tile.owner === 0 && tile.elevation >= 70 && tile.elevation <= 88) tile.owner = 1;
-  }
-  work.terrain = 'grassland'; work.elevation = busy ? 75 : 40;
-  purchase.terrain = 'grassland'; purchase.elevation = 75; purchase.owner = null;
+  const hills = state.tiles.filter(tile => !reserved.has(tile.id) && isHillSite(tile) && hexDistance(center, tile) <= 3).toSorted((a, b) => a.id - b.id);
+  const work = hills.find(tile => tile.owner === null); const purchase = hills.find(tile => tile.owner === 0 && hexDistance(center, tile) === 1); assert.ok(work && purchase);
+  for (const tile of state.tiles) if (hexDistance(center, tile) <= 3 && tile.id !== center.id && isHillSite(tile)) tile.owner = 1;
+  work.owner = busy ? 0 : 1;
+  purchase.owner = null;
   assert.ok(isWorldState(state));
   if (busy) state = act(state, { type: 'improve', cityId: city.id, tileId: work.id, improvementId: 'mine' }, 0);
   state = act(state, { type: 'research', technology: 'writing' }, 10);
@@ -130,19 +128,21 @@ void test('required research and emergency damage still preempt funded optional 
 
 void test('unsupported land or unaffordable exact work scores zero instead of crediting a bought tile town-center yield', () => {
   const { state, cityId, tileId } = fixture();
-  for (const mutate of [
-    (value: WorldState) => { value.tiles[tileId]!.elevation = 40; },
-    (value: WorldState) => { value.civilizations[0]!.resources.materials = 5; },
-    (value: WorldState) => { value.cities.find(item => item.id === cityId)!.population = 4; },
-    (value: WorldState) => { value.civilizations[0]!.technologies = ['agriculture']; },
-  ]) {
+  const center = state.tiles[state.cities.find(item => item.id === cityId)!.tileId]!;
+  const unsupported = state.tiles.find(tile => tile.owner === 0 && tile.id !== center.id && !isHillSite(tile) && hexDistance(center, tile) === 1); assert.ok(unsupported);
+  for (const [targetId, mutate] of [
+    [unsupported.id, (value: WorldState) => { value.tiles[unsupported.id]!.owner = null; }],
+    [tileId, (value: WorldState) => { value.civilizations[0]!.resources.materials = 5; }],
+    [tileId, (value: WorldState) => { value.cities.find(item => item.id === cityId)!.population = 4; }],
+    [tileId, (value: WorldState) => { value.civilizations[0]!.technologies = ['agriculture']; }],
+  ] as const) {
     const refused = structuredClone(state); mutate(refused);
-    assert.equal(createLandworkPlanner(refused, 0).quote(cityId, tileId).quotes.length, 0);
-    assert.equal(purchaseCandidate(refused, tileId).weight, 0);
+    assert.equal(createLandworkPlanner(refused, 0).quote(cityId, targetId).quotes.length, 0);
+    assert.equal(purchaseCandidate(refused, targetId).weight, 0);
   }
-  const legacy = structuredClone(state); legacy.unlockedFeatures = legacy.unlockedFeatures.filter(feature => feature !== 'funded-landwork-planning'); legacy.tiles[tileId]!.elevation = 40;
+  const legacy = structuredClone(state); legacy.unlockedFeatures = legacy.unlockedFeatures.filter(feature => feature !== 'funded-landwork-planning'); legacy.tiles[unsupported.id]!.owner = null;
   assert.equal(createBehaviorMemory(legacy, 0).policyVersion, TEMPERAMENT_BEHAVIOR_POLICY_VERSION);
-  assert.ok(purchaseCandidate(legacy, tileId).weight > 0);
+  assert.ok(purchaseCandidate(legacy, unsupported.id).weight > 0);
 });
 
 void test('an equally useful funded owned site defeats another purchase even while the same paid lane remains busy', () => {
@@ -150,10 +150,10 @@ void test('an equally useful funded owned site defeats another purchase even whi
   const options = optionsAt(state); const purchase = options.find(option => option.action.type === 'acquire-tile' && option.action.tileId === tileId); assert.ok(purchase);
   const owned = act(state, purchase.action, 30); const ownedQuote = createLandworkPlanner(owned, 0).owned(cityId).find(item => item.tileId === tileId); assert.ok(ownedQuote);
   assert.deepEqual(ownedQuote.acquisitionCost, {}); assert.equal(ownedQuote.orderId, state.cities.find(item => item.id === cityId)!.construction!.active!.id);
-  const extra = owned.tiles.find(tile => tile.owner === null && tile.terrain !== 'ocean' && tile.terrain !== 'mountain' && hexDistance(tile, owned.tiles[tileId]!) === 1
+  const extra = owned.tiles.find(tile => tile.owner === 1 && isHillSite(tile) && hexDistance(tile, owned.tiles[tileId]!) === 1
     && hexDistance(tile, owned.tiles[owned.cities.find(item => item.id === cityId)!.tileId]!) <= 3
     && ![...owned.strategicDeposits!.tileIds, ...owned.coalDeposits!.tileIds, ...owned.pastoralSites!.tileIds].includes(tile.id)); assert.ok(extra);
-  extra.elevation = 75;
+  extra.owner = null;
   assert.ok(createLandworkPlanner(owned, 0).quote(cityId, extra.id).quotes.length > 0);
   assert.equal(purchaseCandidate(owned, extra.id, optionsAt(owned, 40)).weight, 0);
   assert.deepEqual(owned.cities.find(item => item.id === cityId)!.construction, state.cities.find(item => item.id === cityId)!.construction);

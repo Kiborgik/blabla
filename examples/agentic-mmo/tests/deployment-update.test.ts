@@ -5,8 +5,8 @@ import type { UpdatePlan, UpdateRequest, UpdateStorage } from '../web/deployment
 import { DEFAULT_PREFERENCES, shouldReload } from '../web/viewer-state.ts';
 import { createWorldViewSession, saveWorldView } from '../web/world-view.ts';
 
-const current = { schemaVersion: 1 as const, version: '0.1.0-live.9', buildId: 'build-nine', publishedAt: '2026-10-16T12:00:00Z' };
-const remote = { ...current, version: '0.1.0-live.10', buildId: 'build-ten', publishedAt: '2026-10-16T14:00:00Z' };
+const current = { schemaVersion: 2 as const, version: '0.1.0-live.9', buildId: 'build-nine', preparedAt: '2026-10-16T12:00:00Z' };
+const remote = { ...current, version: '0.1.0-live.10', buildId: 'build-ten', preparedAt: '2026-10-16T14:00:00Z' };
 const now = Date.parse('2026-10-16T15:00:00Z');
 const preferences = { ...DEFAULT_PREFERENCES, zoom: 1.6, x: 3, z: -8, selected: 1, selectedCity: 'frontier', theme: 'dark' as const, effects: 'calm' as const };
 
@@ -28,21 +28,38 @@ function storage(initial: string | null = null): { port: UpdateStorage; writes: 
   return { port: { read: () => initial, write: (value) => { writes.push(value); } }, writes };
 }
 
-void test('newer validated deployment plans an observational same-origin first attempt', () => {
+void test('newer validated prepared build plans an observational same-origin first attempt', () => {
   const input = request(); const before = structuredClone(input); const plan = planDeploymentUpdate(input);
   assert.equal(plan.status, 'reload'); assert.equal(plan.attempt?.count, 1); assert.ok(plan.href);
   const href = new URL(plan.href);
   assert.equal(href.origin, 'https://viewer.example'); assert.equal(href.pathname, '/atlas'); assert.equal(href.searchParams.get('other'), 'keep'); assert.equal(href.hash, '#events');
+  assert.equal(plan.attempt?.schemaVersion, 1); assert.equal(plan.attempt?.targetTime, Date.parse(remote.preparedAt));
+  assert.equal(plan.carry?.schemaVersion, 1); assert.equal(plan.carry?.preferences.schemaVersion, 1);
   assert.ok(href.searchParams.get(UPDATE_RETRY_PARAM)); assert.deepEqual(input, before);
   assert.doesNotMatch(plan.href, /frontier|zoom|theme|world|dark/);
 });
 
 void test('same older invalid or ambiguous-time releases never cause navigation', () => {
-  for (const value of [current, { ...remote, publishedAt: current.publishedAt }, { ...remote, publishedAt: '2020-01-01' }, null, { ...remote, schemaVersion: 2 }, { ...remote, buildId: 'x'.repeat(300) }]) {
+  for (const value of [current, { ...remote, preparedAt: current.preparedAt }, { ...remote, preparedAt: '2020-01-01' }, null, { ...remote, schemaVersion: 1 }, { ...remote, buildId: 'x'.repeat(300) }]) {
     assert.notEqual(planDeploymentUpdate(request({ remote: value })).status, 'reload');
   }
   assert.equal(planDeploymentUpdate(request({ url: 'javascript:alert(1)' })).status, 'invalid');
   assert.equal(planDeploymentUpdate(request({ now: Number.NaN })).status, 'invalid');
+});
+
+void test('publication-only metadata cannot trigger an update or override preparation ordering', () => {
+  const publication = { schemaVersion: 2, version: remote.version, buildId: remote.buildId, publishedAt: remote.preparedAt };
+  for (const value of [publication, { ...publication, schemaVersion: 1 }, { ...publication, preparedAt: null }, { ...publication, preparedAt: 'invalid' }]) {
+    assert.equal(planDeploymentUpdate(request({ remote: value })).status, 'invalid');
+  }
+  assert.equal(planDeploymentUpdate(request({ remote: { ...remote, preparedAt: current.preparedAt, publishedAt: '2099-01-01T00:00:00Z' } })).status, 'current');
+  const first = planDeploymentUpdate(request({ remote: { ...remote, publishedAt: '2000-01-01T00:00:00Z' } }));
+  assert.equal(first.status, 'reload'); assert.equal(first.attempt?.targetTime, Date.parse(remote.preparedAt));
+  assert.ok(first.href);
+  assert.equal(planDeploymentUpdate(request({ url: first.href, now: now + UPDATE_COOLDOWN_MS - 1 })).status, 'cooldown');
+  const retry = planDeploymentUpdate(request({ url: first.href, now: now + UPDATE_COOLDOWN_MS }));
+  assert.equal(retry.attempt?.count, 2); assert.ok(retry.href);
+  assert.equal(planDeploymentUpdate(request({ url: retry.href, now: now + UPDATE_COOLDOWN_MS * 2 })).status, 'exhausted');
 });
 
 void test('actual throwing storage read and write cannot suppress the first update plan', () => {
@@ -87,19 +104,19 @@ void test('loaded target clears only its URL marker and newer deployments receiv
   const loaded = planDeploymentUpdate(request({ current: remote, url: first.href }));
   assert.equal(loaded.status, 'current'); assert.ok(loaded.href); assert.equal(new URL(loaded.href).searchParams.has(UPDATE_RETRY_PARAM), false);
   assert.equal(new URL(loaded.href).searchParams.get('other'), 'keep'); assert.equal(new URL(loaded.href).hash, '#events');
-  const newer = { ...remote, buildId: 'build-eleven', publishedAt: '2026-10-16T14:30:00Z' };
+  const newer = { ...remote, buildId: 'build-eleven', preparedAt: '2026-10-16T14:30:00Z' };
   assert.equal(planDeploymentUpdate(request({ remote: newer, stored: { ...first.attempt, count: 2 } })).attempt?.count, 1);
 });
 
 void test('a stale manifest cannot oscillate the target and restart a consumed allowance', () => {
   const first = planDeploymentUpdate(request()); assert.ok(first.href);
-  const olderTarget = { ...remote, buildId: 'older-target', publishedAt: '2026-10-16T13:00:00Z' };
+  const olderTarget = { ...remote, buildId: 'older-target', preparedAt: '2026-10-16T13:00:00Z' };
   assert.equal(planDeploymentUpdate(request({ remote: olderTarget, url: first.href })).status, 'stale-manifest');
   assert.equal(planDeploymentUpdate(request({ remote: { ...remote, buildId: 'same-time-other' }, url: first.href })).status, 'stale-manifest');
 });
 
 void test('malformed markers cannot force a redirect or borrow a different source budget', () => {
-  for (const marker of ['{bad', JSON.stringify({ schemaVersion: 9 }), JSON.stringify({ schemaVersion: 1, from: current.buildId, to: remote.buildId, count: 99, at: now, targetTime: Date.parse(remote.publishedAt) }), 'x'.repeat(3000)]) {
+  for (const marker of ['{bad', JSON.stringify({ schemaVersion: 9 }), JSON.stringify({ schemaVersion: 1, from: current.buildId, to: remote.buildId, count: 99, at: now, targetTime: Date.parse(remote.preparedAt) }), 'x'.repeat(3000)]) {
     const url = new URL(request().url); url.searchParams.set(UPDATE_RETRY_PARAM, marker);
     const plan = planDeploymentUpdate(request({ url: url.href }));
     assert.equal(plan.status, 'reload'); assert.equal(plan.attempt?.count, 1); assert.ok(plan.href); assert.equal(new URL(plan.href).origin, url.origin);

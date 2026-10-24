@@ -1,3 +1,7 @@
+import { isRiverFlowState } from '../core/river-intake-validation.ts';
+import { projectTerrainSurface, type TerrainSurface } from '../visuals/landscape.ts';
+import { improvementSiteBlock } from '../core/simulation/improvements.ts';
+import { hasFeatures } from '../core/simulation/history.ts';
 import { projectDrainage } from '../visuals/drainage-visuals.ts';
 import { projectBorderIncidents } from '../visuals/border-visuals.ts';
 import { projectAcquiredLand } from '../visuals/territory-visuals.ts';
@@ -12,7 +16,7 @@ import type { DistrictView } from '../visuals/district-visuals.ts';
 import type { GameEvent, WorldState } from '../core/types.ts';
 import { eventVisual } from '../visuals/world-visuals.ts';
 import { isWorldState } from '../core/validation.ts';
-import type { AtlasCivilization, AtlasWorld } from './atlas.ts';
+import type { AtlasCivilization, AtlasWorld, AtlasTile } from './atlas.ts';
 
 export interface LiveSnapshot {
   identity: string;
@@ -54,10 +58,13 @@ export function presentationColor(value: string): string {
 
 export function projectWorld(state: WorldState): AtlasWorld {
   const drainage = projectDrainage(state);
+  const intakeReceiptValid = state.riverFlow !== undefined && isRiverFlowState(state.riverFlow, state);
   const centerQ = (state.width - 1) / 2;
   const centerR = (state.height - 1) / 2;
   const civilizations = new Map(state.civilizations.map((civ) => [civ.id, civ]));
   const tiles = new Map(state.tiles.map((tile) => [tile.id, tile]));
+  const atlasTiles: AtlasTile[] = state.tiles.flatMap(tile => tile.terrain === 'ocean' ? [] : [{ id: tile.id, q: tile.q - centerQ, r: tile.r - centerR, owner: tile.owner, terrain: tile.terrain, height: mapTileHeight(tile.elevation) }]);
+  let intakeSurfaces: Map<string, TerrainSurface> | undefined;
   const cities: AtlasCivilization[] = state.cities.map((city) => {
     const civ = civilizations.get(city.civId);
     const tile = tiles.get(city.tileId);
@@ -117,11 +124,24 @@ export function projectWorld(state: WorldState): AtlasWorld {
       const tile = tiles.get(record.tileId);
       const definition = IMPROVEMENTS.find(item => item.id === record.improvementId);
       if (!tile || !definition || tile.terrain === 'ocean') return [];
+      let riverIntake: ImprovementView['riverIntake'] = null;
+      if (definition.id === 'river-intake') {
+        intakeSurfaces ??= new Map(projectTerrainSurface(atlasTiles, drainage).map(surface => [surface.key, surface]));
+        const surface = intakeSurfaces.get(`${tile.q - centerQ},${tile.r - centerR}`);
+        const edge = drainage?.edges.find(edge => edge.fromTileId === tile.id);
+        const last = record.operation?.lastResult;
+        const beat = state.riverFlow?.lastBeat;
+        const support = city.buildingOperations?.irrigation;
+        const eligible = hasFeatures(state, definition.requiredFeatures) && improvementSiteBlock(state, city, definition, tile.id, !!record.completion, record.construction?.id) === null && support?.enabled === true;
+        const receiptCurrent = intakeReceiptValid && !!last && last.round === state.round && beat?.round === state.round && support?.lastResult?.round === state.round && support.lastResult.status === 'operated'
+          && last.river?.supportAllocationRound === state.round && beat.withdrawals.some(withdrawal => withdrawal.cityId === city.id && withdrawal.civId === city.civId && withdrawal.tileId === tile.id && withdrawal.orderId === record.completion?.orderId && withdrawal.quantity === last.river?.withdrawn);
+        riverIntake = surface && edge ? { surface, edge, round: state.round, terminal: state.outcome !== null, eligible, receiptCurrent } : null;
+      }
       return [{ id: `improvement:${city.id}:${record.tileId}:${record.instance}`, cityId: city.id, townName: city.name, civId: city.civId,
         improvementId: record.improvementId, name: definition.name, tileId: tile.id, worldSeed: state.seed, q: tile.q - centerQ, r: tile.r - centerR,
         height: mapTileHeight(tile.elevation), color: town.color, status: record.construction ? 'building' : 'built',
         construction: structuredClone(record.construction), completion: structuredClone(record.completion), operation: structuredClone(record.operation),
-        baseProduction: structuredClone(definition.production), residentsRequired: definition.residentsRequired }];
+        baseProduction: structuredClone(definition.production), residentsRequired: definition.residentsRequired, ...(definition.id === 'river-intake' ? { riverIntake } : {}) }];
     });
   }).toSorted((a, b) => a.tileId - b.tileId || a.id.localeCompare(b.id));
   const town = (id: string) => {
@@ -134,6 +154,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
   return {
     illustrative: false,
     drainage,
+    ...(state.riverFlow ? { riverFlow: structuredClone(state.riverFlow.lastBeat) } : {}),
     acquiredLand: projectAcquiredLand(state),
     borderIncidents: projectBorderIncidents(state),
     cities,
@@ -143,10 +164,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
     wonders: projectWonderSites(state),
     improvements,
     deposits: projectRevealedDeposits(state),
-    tiles: state.tiles.flatMap((tile) => tile.terrain === 'ocean' ? [] : [{
-      id: tile.id, q: tile.q - centerQ, r: tile.r - centerR, owner: tile.owner,
-      terrain: tile.terrain, height: mapTileHeight(tile.elevation),
-    }]),
+    tiles: atlasTiles,
     routes,
   };
 }

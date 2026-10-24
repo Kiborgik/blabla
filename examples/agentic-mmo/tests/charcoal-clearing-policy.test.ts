@@ -12,7 +12,7 @@ import { decisionObligations } from '../core/simulation/decisions.ts';
 import { availableActions } from '../core/simulation/choices.ts';
 import { householdFoodUpkeep } from '../core/simulation/food-security.ts';
 import { hexDistance } from '../core/simulation/geography.ts';
-import { installImprovement } from '../core/simulation/improvements.ts';
+import { installImprovement, isHillSite } from '../core/simulation/improvements.ts';
 import { createCoalDeposits, createStrategicDeposits } from '../core/simulation/metals.ts';
 import { createPastoralSites } from '../core/simulation/pastoral.ts';
 import { projectOperationAllocation } from '../core/simulation/operations.ts';
@@ -45,8 +45,13 @@ function fixture() {
   city.buildings = ['kiln']; city.buildingOperations = { kiln: { enabled: true, lastResult: null } }; city.improvements = {}; city.districtSites = {}; city.construction = { active: null, lastCompleted: null };
   actor.technologies = ['agriculture', 'kiln-firing', 'mining']; actor.era = 0;
   actor.resources = { food: 1000, materials: 20, energy: 100, credits: 4, science: 0, culture: 100 };
-  const sites = forests(state, city);
-  return { state, city, actor, ...sites, action: actionFor(city, sites.first.id) };
+  const center = state.tiles[city.tileId]!;
+  const reserved = new Set([...state.strategicDeposits!.tileIds, ...state.coalDeposits!.tileIds, ...state.pastoralSites!.tileIds, ...state.cities.map(town => town.tileId)]);
+  const eligible = state.tiles.filter(tile => tile.owner === 0 && tile.terrain === 'forest' && !isHillSite(tile) && !reserved.has(tile.id) && hexDistance(center, tile) <= 3).toSorted((a, b) => a.id - b.id);
+  const first = eligible[0]; const other = eligible[1]; assert.ok(first && other);
+  for (const tile of state.tiles) if (tile.owner === 0 && tile.terrain === 'forest' && tile.id !== first.id && tile.id !== other.id) tile.owner = 1;
+  const grassland = state.tiles.filter(tile => tile.owner === null && tile.terrain === 'grassland' && !isHillSite(tile) && !reserved.has(tile.id) && hexDistance(center, tile) <= 3).toSorted((a, b) => hexDistance(center, a) - hexDistance(center, b) || a.id - b.id)[0]; assert.ok(grassland); grassland.owner = 0;
+  return { state, city, actor, first, other, action: actionFor(city, first.id) };
 }
 function policy(state: WorldState, civId = 0, locks: Array<{ cityId: string; untilRound: number }> = []) {
   const actor = state.civilizations.find(actor => actor.id === civId)!;
@@ -306,12 +311,8 @@ void test('hypothetical Border targets and peaceful alternatives exclude charcoa
 void test('actual required construction selection cannot revive refused charcoal and still chooses paid ordinary work', () => {
   for (const refusal of ['sole-forest', 'passive-energy', 'opening-inputs'] as const) {
     const { state, city, actor, first, other } = fixture(); city.buildings.push('farm');
-    const protectedTiles = new Set([...state.strategicDeposits!.tileIds, ...state.coalDeposits!.tileIds, ...state.pastoralSites!.tileIds]);
-    for (const tile of state.tiles) if (tile.owner === 0 && tile.id !== city.tileId) {
-      if (protectedTiles.has(tile.id)) tile.owner = 1;
-      else { tile.elevation = 40; if (tile.id !== first.id && tile.id !== other.id && tile.terrain === 'forest') tile.terrain = 'grassland'; }
-    }
-    if (refusal === 'sole-forest') other.terrain = 'grassland';
+    for (const tile of state.tiles) if (tile.owner === 0 && tile.id !== city.tileId && tile.id !== first.id && tile.id !== other.id) tile.owner = 1;
+    if (refusal === 'sole-forest') other.owner = 1;
     if (refusal === 'passive-energy') { city.buildings.push('workshop'); city.focus = 'industry'; }
     if (refusal === 'opening-inputs') actor.resources.materials = 9.99;
     assert.ok(isWorldState(state)); borderEngineAction(state, 0, { type: 'research', technology: 'writing' });
@@ -325,7 +326,8 @@ void test('actual required construction selection cannot revive refused charcoal
     assert.ok(refused.length > 0); assert.ok(refused.every(candidate => candidate.weight === 0));
     const before = structuredClone(state); const decision = chooseCivilizationBehavior(state, 0, memory, borderTimestamp(state, 0));
     assert.ok(decision.action?.type !== 'improve' || decision.action.improvementId !== 'charcoal-clearing', refusal); assert.deepEqual(state, before);
-    const work = state.tiles.find(tile => tile.id === other.id)!; work.terrain = 'grassland'; work.elevation = 75;
+    const protectedTiles = new Set([...state.strategicDeposits!.tileIds, ...state.coalDeposits!.tileIds, ...state.pastoralSites!.tileIds]);
+    const work = state.tiles.find(tile => tile.owner === 1 && !protectedTiles.has(tile.id) && isHillSite(tile) && hexDistance(tile, state.tiles[current.tileId]!) === 1); assert.ok(work); work.owner = 0;
     const chosen = chooseCivilizationBehavior(state, 0, memory, borderTimestamp(state, 0)); assert.deepEqual(chosen.action, { type: 'improve', cityId: current.id, tileId: work.id, improvementId: 'mine' }); assert.equal(chosen.explanation.required, true);
     const opening = state.civilizations[0]!.resources.materials; borderEngineAction(state, 0, chosen.action!);
     assert.equal(state.civilizations[0]!.resources.materials, opening - 6); assert.equal(state.cities.find(town => town.id === current.id)!.construction!.active!.paid.materials, 6);

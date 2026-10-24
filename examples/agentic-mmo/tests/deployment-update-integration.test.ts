@@ -6,8 +6,8 @@ import { DEFAULT_PREFERENCES } from '../web/viewer-state.ts';
 import { createWorldViewSession, saveWorldView } from '../web/world-view.ts';
 import { UPDATE_COOLDOWN_MS, UPDATE_RETRY_PARAM } from '../web/deployment-update.ts';
 
-const old = { schemaVersion: 1 as const, version: 'local-old', buildId: 'local-old', publishedAt: '2026-10-16T12:00:00Z' };
-const next = { ...old, version: 'local-new', buildId: 'local-new', publishedAt: '2026-10-16T14:00:00Z' };
+const old = { schemaVersion: 2 as const, version: 'local-old', buildId: 'local-old', preparedAt: '2026-10-16T12:00:00Z' };
+const next = { ...old, version: 'local-new', buildId: 'local-new', preparedAt: '2026-10-16T14:00:00Z' };
 const prefs = { ...DEFAULT_PREFERENCES, selectedCity: 'frontier-town', theme: 'dark' as const, effects: 'calm' as const, x: 7, zoom: 1.7 };
 
 void test('an actual automatic deployment restores qualified archive selection through history even when preference storage fails', async () => {
@@ -100,7 +100,7 @@ void test('a failed manifest read releases single-flight state for a later check
 });
 
 void test('unchanged or invalid manifests never write preferences or navigate', async () => {
-  for (const remote of [old, null, { ...next, schemaVersion: 2 }]) {
+  for (const remote of [old, null, { ...next, schemaVersion: 1 }, { schemaVersion: 2, version: next.version, buildId: next.buildId, publishedAt: next.preparedAt }, { ...next, preparedAt: 'invalid' }]) {
     const f = fixture({ fetchRelease: async () => remote }); await createViewerUpdates(f.ports).check();
     assert.equal(f.navigations.length, 0); assert.equal(f.saved.length, 0);
   }

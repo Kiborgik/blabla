@@ -3,10 +3,10 @@ import type { WorldViewPreferences } from './world-view.ts';
 export { MAP_ZOOM } from './world-view.ts';
 
 export interface Release {
-  schemaVersion: 1;
+  schemaVersion: 2;
   version: string;
   buildId: string;
-  publishedAt: string;
+  preparedAt: string;
 }
 
 export interface ViewerPreferences extends WorldViewPreferences {
@@ -75,23 +75,23 @@ export function parsePreferences(value: unknown): ViewerPreferences {
 export function parseRelease(value: unknown): Release | null {
   const data = object(value);
   if (
-    data?.['schemaVersion'] !== 1 ||
+    data?.['schemaVersion'] !== 2 ||
     typeof data['version'] !== 'string' ||
     typeof data['buildId'] !== 'string' ||
-    typeof data['publishedAt'] !== 'string'
+    typeof data['preparedAt'] !== 'string'
   )
     return null;
   if (
     !data['version'].trim() ||
     !data['buildId'].trim() ||
-    !Number.isFinite(Date.parse(data['publishedAt']))
+    !Number.isFinite(Date.parse(data['preparedAt']))
   )
     return null;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     version: data['version'],
     buildId: data['buildId'],
-    publishedAt: data['publishedAt'],
+    preparedAt: data['preparedAt'],
   };
 }
 
@@ -103,7 +103,7 @@ export function shouldReload(
   return (
     remote !== null &&
     remote.buildId !== current.buildId &&
-    Date.parse(remote.publishedAt) > Date.parse(current.publishedAt) &&
+    Date.parse(remote.preparedAt) > Date.parse(current.preparedAt) &&
     !attempted.includes(remote.buildId)
   );
 }

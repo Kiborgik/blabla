@@ -64,18 +64,18 @@ await test('viewer preferences reject incompatible and malformed persisted value
   assert.ok(!('world' in parsePreferences({ schemaVersion: 1, world: { round: 900 } })));
 });
 
-await test('release polling reloads only for a valid newer unattempted deployment', () => {
+await test('release polling reloads only for a valid newer unattempted prepared build', () => {
   const current = parseRelease({
-    schemaVersion: 1,
+    schemaVersion: 2,
     version: '0.1.0',
     buildId: 'one',
-    publishedAt: '2026-10-16T07:14:00Z',
+    preparedAt: '2026-10-16T07:14:00Z',
   });
   const newer = parseRelease({
-    schemaVersion: 1,
+    schemaVersion: 2,
     version: '0.1.1',
     buildId: 'two',
-    publishedAt: '2026-10-16T07:15:00Z',
+    preparedAt: '2026-10-16T07:15:00Z',
   });
   assert.ok(current && newer);
   assert.equal(shouldReload(current, newer, []), true);
@@ -84,17 +84,33 @@ await test('release polling reloads only for a valid newer unattempted deploymen
   assert.equal(shouldReload(newer, current, []), false);
   assert.equal(shouldReload(current, null, []), false);
   assert.equal(
-    parseRelease({ schemaVersion: 1, version: 'x', buildId: 'x', publishedAt: 'invalid' }),
+    parseRelease({ schemaVersion: 2, version: 'x', buildId: 'x', preparedAt: 'invalid' }),
     null,
   );
 });
 
-await test('published manifests match meaningful current history and sample mode stays explicit', () => {
+await test('release parsing requires schema two preparation metadata, never a publication-only claim', () => {
+  const identity = { schemaVersion: 2, version: 'candidate', buildId: 'candidate-build' };
+  const preparedAt = '2026-10-16T07:15:00Z';
+  const prepared = { ...identity, preparedAt };
+  assert.deepEqual(parseRelease(prepared), prepared);
+  for (const input of [identity, { ...identity, publishedAt: preparedAt }, { ...prepared, schemaVersion: 1 },
+    ...[undefined, null, '', 'invalid', 123, {}].map(value => ({ ...identity, preparedAt: value, publishedAt: preparedAt }))]) {
+    assert.equal(parseRelease(input), null);
+  }
+  assert.deepEqual(parseRelease({ ...prepared, publishedAt: '2099-01-01T00:00:00Z' }), prepared);
+});
+
+await test('prepared manifests match meaningful current history without claiming publication and sample mode stays explicit', () => {
   const release: unknown = JSON.parse(
     readFileSync(new URL('../public/version.json', import.meta.url), 'utf8'),
   );
   const parsed = parseRelease(release);
   assert.ok(parsed);
+  assert.equal(parsed.schemaVersion, 2);
+  assert.ok(Number.isFinite(Date.parse(parsed.preparedAt)));
+  assert.deepEqual(Object.keys(release as object).sort(), ['buildId', 'preparedAt', 'schemaVersion', 'version']);
+  assert.equal('publishedAt' in parsed, false);
   const history: unknown = JSON.parse(
     readFileSync(new URL('../public/changelog.json', import.meta.url), 'utf8'),
   );
