@@ -1,3 +1,4 @@
+import { civicWorksActionHold, createCivicWorksPolicy } from './behavior-civic-works.ts';
 import { createPatronagePolicy } from './behavior-patronage.ts';
 import { woodlandOperationAllowed } from './behavior-woodlands.ts';
 import { isWoodlandImprovement } from './simulation/woodlands.ts';
@@ -158,6 +159,7 @@ interface Situation {
   riverIntake: ReturnType<typeof createRiverIntakePolicy>;
   frontier: ReturnType<typeof createProductiveFrontierAssessment> | null;
   patronage: ReturnType<typeof createPatronagePolicy> | null;
+  civicWorks: ReturnType<typeof createCivicWorksPolicy>;
 }
 
 function situation(state: WorldState, actor: Civilization, profile: BehaviorProfile, memory: BehaviorMemory, options: readonly ActionOption[]): Situation {
@@ -180,7 +182,7 @@ function situation(state: WorldState, actor: Civilization, profile: BehaviorProf
   if (actor.resources.materials < 12) weights.materials *= 2;
   if (actor.resources.energy < 4) weights.energy *= 2;
   if (actor.resources.credits < 12) weights.credits *= 2;
-  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, phase: memory.phase, patronage: hasFeatures(state, ['learning-patronage']) ? createPatronagePolicy(state, actor.id, weights, profile.priorities) : null, fundedLandwork: null, frontier: hasFeatures(state, ['productive-frontier-founding']) ? createProductiveFrontierAssessment(state, actor.id) : null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), riverIntake: createRiverIntakePolicy(state, actor.id, weights, profile.priorities.construction), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
+  const context: Situation = { state, actor, cities, profile, memory, upkeep, foodRisk, severeFoodRisk, maxDamage, weights, civicWorks: createCivicWorksPolicy(state, actor.id, weights), phase: memory.phase, patronage: hasFeatures(state, ['learning-patronage']) ? createPatronagePolicy(state, actor.id, weights, profile.priorities) : null, fundedLandwork: null, frontier: hasFeatures(state, ['productive-frontier-founding']) ? createProductiveFrontierAssessment(state, actor.id) : null, charcoal: createCharcoalClearingPolicy(state, actor.id, weights, profile.priorities.construction, memory.focusLocks), riverIntake: createRiverIntakePolicy(state, actor.id, weights, profile.priorities.construction), paidFoodSiteAffordable: createPaidFoodSiteAffordability(state, actor.id), progression: deriveProgressionPlan(state, actor, profile, options), diplomacy: hasFeatures(state, ['partnership-stewardship']) ? deriveDiplomacyPlan(state, actor, profile, options) : null, relief: hasFeatures(state, ['consented-relief']) ? deriveReliefPlan(state, actor, profile, options) : null, knowledge: hasFeatures(state, ['knowledge-compacts']) ? deriveKnowledgePlan(state, actor, profile, options) : null, border: hasFeatures(state, ['supplied-borders']) ? deriveBorderPlan(state, actor, profile, options) : null };
   if (memory.policyVersion === FUNDED_LANDWORK_BEHAVIOR_POLICY_VERSION) context.fundedLandwork = deriveFundedLandworkPlan(context, options);
   return context;
 }
@@ -353,6 +355,7 @@ function actionWeight(option: ActionOption, context: Situation): number {
   const { action } = option;
   const { state, actor, cities, profile, memory, weights } = context;
   switch (action.type) {
+    case 'commission-civic-works': return context.civicWorks(action).weight;
     case 'research': {
       if (actor.researchTarget) return 0;
       const definition = TECHNOLOGIES.find(candidate => candidate.id === action.technology);
@@ -569,7 +572,7 @@ function committedDecision(state: WorldState, memory: BehaviorMemory, candidate:
 
 
 function protectedCandidate(option: ActionOption, context: Situation): boolean {
-  return !!context.diplomacy && diplomacyProtects(option, context.diplomacy) || !!context.relief && reliefProtects(option, context.relief) || !!context.knowledge && knowledgeProtects(option, context.knowledge) || !!context.border && borderProtects(option, context.border);
+  return civicWorksActionHold(context.state, context.actor.id, option.action) !== null || !!context.diplomacy && diplomacyProtects(option, context.diplomacy) || !!context.relief && reliefProtects(option, context.relief) || !!context.knowledge && knowledgeProtects(option, context.knowledge) || !!context.border && borderProtects(option, context.border);
 }
 
 function scoreCandidates(context: Situation, options: readonly ActionOption[], lanes: Map<string, Set<string>>): Candidate[] {
@@ -592,7 +595,7 @@ function scoreCandidates(context: Situation, options: readonly ActionOption[], l
     const woodlandDesired = woodlandToggle && action.type === 'set-improvement-operation' ? action.improvementId === 'charcoal-clearing' ? !!context.charcoal({ ...action, enabled: true }) : context.progression.shortages.materials >= 3 || context.state.woodlands?.stands[String(action.tileId)]?.stock === WOODLAND_RULES.capacity : true;
     const refusedWoodland = woodlandToggle && action.type === 'set-improvement-operation' && (!woodlandOperationAllowed(context.state, context.actor.id, action, woodlandDesired) || action.improvementId === 'lumber-mill' && action.enabled && !woodlandPlanner!.lumberOperation(action.cityId, action.tileId)) || !!woodlandPlanner && action.type === 'improve' && isWoodlandImprovement(action.improvementId) && !woodlandPlanner.quote(action.cityId, action.tileId).quotes.some(quote => quote.action.type === 'improve' && quote.action.improvementId === action.improvementId);
     const restWeight = woodlandToggle && action.type === 'set-improvement-operation' && !action.enabled && !refusedWoodland ? Math.max(4, assessed) : assessed;
-    const weight = coastalHold || refusedWoodland || refusedCharcoal || refusedIntake || usesStrategicTemperaments(context.memory.policyVersion) && protectedCandidate(option, context) ? 0 : restWeight;
+    const weight = civicWorksActionHold(context.state, context.actor.id, action) || coastalHold || refusedWoodland || refusedCharcoal || refusedIntake || usesStrategicTemperaments(context.memory.policyVersion) && protectedCandidate(option, context) ? 0 : restWeight;
     return { option, weight, ...classify(option.action), lane: laneOf(option.action, lanes), coastalHold };
   });
 }
@@ -618,6 +621,8 @@ export function assessCivilizationBehavior(state: WorldState, seat: number, prev
     commitmentUntilRound: (context.phase === memory.phase ? memory.phaseSinceRound : state.round) + profile.commitmentRounds,
     candidates: candidates.map(candidate => ({ ...candidate, protected: candidate.coastalHold !== null || protectedCandidate(candidate.option, context), urgent: urgent(candidate, context),
       ...(candidate.option.action.type === 'adopt-government' && context.patronage ? { economicPriority: context.patronage(candidate.option.action) } : {}),
+      ...(candidate.option.action.type === 'commission-civic-works' ? { civicWorksAssessment: context.civicWorks(candidate.option.action) } : {}),
+      ...(civicWorksActionHold(state, seat, candidate.option.action) ? { civicWorksHold: { kind: 'civic-works' as const, reason: civicWorksActionHold(state, seat, candidate.option.action)! } } : {}),
       ordinaryWeight: usesStrategicTemperaments(memory.policyVersion) ? ordinaryPhaseWeight(candidate.option.action, candidate.weight, context.phase) : candidate.weight })) };
 }
 
@@ -700,6 +705,7 @@ export function chooseCivilizationBehavior(state: WorldState, seat: number, prev
     const assessment = context.riverIntake(choice.option.action);
     if (assessment) reason = riverIntakeReason(assessment);
   }
+  if (choice.option.action.type === 'commission-civic-works') reason = context.civicWorks(choice.option.action).reason;
   if (choice.option.action.type === 'adopt-government' && context.patronage) reason = context.patronage(choice.option.action).reason;
   return committedDecision(state, memory, choice, context.phase, reason, profile, isUrgent);
 }

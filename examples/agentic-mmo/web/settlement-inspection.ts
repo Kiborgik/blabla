@@ -1,3 +1,6 @@
+import type { CivicWorksState } from '../core/civic-works-types.ts';
+import { civicWorksForCity } from '../visuals/civic-works-visuals.ts';
+import { createCivicWorksInspection, civicWorksInspectionKey, civicWorksPreview, civicWorksResultSummary } from './civic-works-inspection.ts';
 import { riverIntakeFacts, riverIntakeReadiness } from './river-intake-inspection.ts';
 import { territoryPage, type TownTerritoryView, type TerritorySiteView } from '../visuals/territory-visuals.ts';
 import type { observedPastoralSites } from '../core/simulation/pastoral.ts';
@@ -250,10 +253,11 @@ export function createLocalPowerInspection(city: Pick<City, 'id' | 'buildings' |
   return section;
 }
 
-export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }, onInspectWork?: () => void, rail?: RailObservation, power?: CityLocalPower, improvements: readonly ImprovementView[] = []): void {
+export function renderSettlementInspection(host: HTMLElement, cities: readonly City[], selectedId: string | null, onSelect: (id: string) => void, support?: ResidentCapacityObservation, retainedWork = '', development?: TownDevelopmentFacts, territory?: TownTerritoryView, retainedTerritory?: { view: string; page: number }, onInspectWork?: () => void, rail?: RailObservation, power?: CityLocalPower, improvements: readonly ImprovementView[] = [], civicWorks?: CivicWorksState): void {
   host.replaceChildren();
   const city = cities.find((entry) => entry.id === selectedId) ?? cities[0];
   if (!city) return;
+  const crew = civicWorksForCity(civicWorks, city);
   let townPicker: HTMLElement | null = null;
   if (cities.length > 1) {
     const label = text('label', 'Town', 'town-picker-label');
@@ -316,6 +320,8 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
   const overview = text('div', '', 'town-overview');
   overview.dataset['inspectionSection'] = 'overview';
   overview.append(...Array.from(host.children)); host.append(overview);
+  const crewCard = createCivicWorksInspection(crew);
+  if (crewCard) host.append(crewCard);
   const activeDistrict = city.construction?.active;
   if (activeDistrict && 'buildingId' in activeDistrict) {
     const definition = BUILDINGS.find(item => item.id === activeDistrict.buildingId);
@@ -332,6 +338,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     }
     site.append(text('p', `${exactNumber(activeDistrict.workDone)} / ${exactNumber(activeDistrict.workRequired)} work · Not built yet`, 'building-summary'),
       amountLine('Paid once for this order', RESOURCE_IDS.flatMap(resource => { const amount = activeDistrict.paid[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })));
+    if (crew?.last?.orderId === activeDistrict.id) site.append(text('p', `Latest Kiln crew result · ${civicWorksResultSummary(crew.last)}`));
     host.append(site);
   }
   if (activeDistrict && 'kind' in activeDistrict && activeDistrict.kind === 'improvement') {
@@ -489,7 +496,8 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     const operation = key ? city.buildingOperations?.[key] : undefined;
     const wonder = wonderRows.find(row => row.key === key);
     const railway = rails.find(row => row.key === key);
-    if (operation?.lastResult?.localPower) {
+    if (crew && key === civicWorksInspectionKey(crew)) preview.append(civicWorksPreview(crew));
+    else if (operation?.lastResult?.localPower) {
       preview.append(text('strong', `Built · ${operation.enabled ? 'On' : 'Paused'} now`));
       for (const line of localPowerResultLines(operation.lastResult).slice(0, 2)) preview.append(text('p', line));
       preview.append(vectorLine('Actual ordinary output', operation.lastResult.produced));
@@ -503,7 +511,9 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     } else {
       preview.append(text('strong', operation || worked ? `Built · ${(operation ?? worked?.operation)?.enabled ? 'On' : 'Paused'} now` : 'Built'));
       const last = operation?.lastResult ?? worked?.operation.lastResult;
-      if (last) {
+      if (last?.status === 'civic-works') {
+        preview.append(text('strong', 'Kiln crew assigned to construction'), text('p', 'No ordinary Kiln payment or Materials output in this season. The commission record holds the separate fee and exact work.'), text('span', `Last recorded season · ${last.round}`, 'work-record-round'));
+      } else if (last) {
         preview.append(text('span', `Last recorded season · ${last.round}`, 'work-record-round'));
         const results = text('div', '', 'work-key-results');
         results.append(amountLine('Made', RESOURCE_IDS.flatMap(resource => { const amount = last.produced[resource]; return amount === undefined ? [] : [{ resource, label: METRIC_LABELS[resource], amount }]; })),
@@ -534,7 +544,7 @@ export function renderSettlementInspection(host: HTMLElement, cities: readonly C
     choose();
     onInspectWork?.();
     picker.focus({ preventScroll: true });
-  });
+  }, crew);
   const localPower = createLocalPowerInspection(city, power ?? city.localPower);
   if (localPower) overview.prepend(localPower);
   if (production) overview.prepend(production);

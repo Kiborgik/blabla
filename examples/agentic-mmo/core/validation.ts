@@ -1,3 +1,4 @@
+import { isCivicWorksOperation, isCivicWorksState, validCivicWorksEvent } from './civic-works-validation.ts';
 import { validPolicyExclusivity, validInstitutionalScienceOperation } from './learning-patronage-validation.ts';
 import { isWoodlandState, isWoodlandOperationResult } from './woodland-validation.ts';
 import { validateDrainage } from './drainage.ts';
@@ -919,9 +920,11 @@ function buildingOperations(value: City, round: number, features: string[]): boo
   if (!features.includes('building-operations') || !record(operations) || !exactKeys(operations, paid)) return false;
   return Object.entries(operations).every(([id, operation]) => record(operation)
     && exactKeys(operation, ['enabled', 'lastResult']) && typeof operation.enabled === 'boolean'
-    && (operation.lastResult === null || validInstitutionalScienceOperation(operation.lastResult, id, features) && (powerParticipant(definitions.find(building => building.id === id))
-      ? features.includes(LOCAL_POWER_RULES.featureId) && powerOperation(operation.lastResult, definitions.find(building => building.id === id), round)
-      : operationResult(operation.lastResult, round, features, (definitions.find(building => building.id === id)?.strategicInputs?.iron ?? 0) > 0))));
+    && (operation.lastResult === null || (record(operation.lastResult) && operation.lastResult.status === 'civic-works'
+      ? isCivicWorksOperation(operation.lastResult, id, features, round)
+      : validInstitutionalScienceOperation(operation.lastResult, id, features) && (powerParticipant(definitions.find(building => building.id === id))
+        ? features.includes(LOCAL_POWER_RULES.featureId) && powerOperation(operation.lastResult, definitions.find(building => building.id === id), round)
+        : operationResult(operation.lastResult, round, features, (definitions.find(building => building.id === id)?.strategicInputs?.iron ?? 0) > 0)))));
 }
 
 function orderRevision(value: unknown, revision: number): number | null {
@@ -1647,7 +1650,7 @@ function territoryRecords(present: boolean, value: unknown, cities: City[], tile
 
 export function isGameEvent(value: unknown): value is GameEvent {
   return (
-    record(value) && validMarsEvent(value) && validReliefEvent(value) && validKnowledgeEvent(value) && validBorderEvent(value) &&
+    record(value) && validMarsEvent(value) && validReliefEvent(value) && validKnowledgeEvent(value) && validBorderEvent(value) && validCivicWorksEvent(value) &&
     (!Object.hasOwn(value, 'regionalEvent') || isHistoricalEventReceipt(value.regionalEvent) && value.regionalEvent.eventId === value.id && value.regionalEvent.round === value.round && value.regionalEvent.eventKind === value.type && value.actor === DIRECTOR_SEAT && value.target === value.regionalEvent.civId && value.tileId === value.regionalEvent.selection.local.tileId) &&
     ['id', 'type', 'title', 'cause'].every((field) => text(value[field])) &&
     typeof value.detail === 'string' &&
@@ -1845,6 +1848,9 @@ export function isWorldState(value: unknown): value is WorldState {
     (value.outcome !== null && value.outcome.round > round)
   )
     return false;
+  const civicWorksEnabled = features.includes('civic-works');
+  if (civicWorksEnabled !== Object.hasOwn(value, 'civicWorks') || civicWorksEnabled && !isCivicWorksState(value.civicWorks, value as unknown as WorldState)
+    || !civicWorksEnabled && value.events.some(event => Object.hasOwn(event, 'civicWorks') || event.type.startsWith('civic-works-'))) return false;
   const borderEnabled = features.includes('supplied-borders');
   if (borderEnabled !== Object.hasOwn(value, 'border') || borderEnabled && !isBorderState(value.border, value as unknown as WorldState)
     || !borderEnabled && value.events.some(event => Object.hasOwn(event, 'border') || event.type.startsWith('border-'))) return false;

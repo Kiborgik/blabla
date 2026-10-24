@@ -1,3 +1,4 @@
+import { civicWorksCrewParts, currentCivicWorksReceipt, type CivicWorksView } from './civic-works-visuals.ts';
 import type { DistrictAdjacencyFacts } from '../core/simulation/districts.ts';
 import { BUILDINGS, RESOURCE_IDS } from '../core/content.ts';
 import { METRIC_LABELS, civilizationIdentity } from './visual-language.ts';
@@ -7,6 +8,7 @@ import type { ConstructionOrder, Resources } from '../core/types.ts';
 import type { DetailLevel, VisualPart } from './world-visuals.ts';
 
 export interface DistrictView extends OperationContext {
+  civicWorks?: CivicWorksView;
   id: string;
   cityId: string;
   townName: string;
@@ -234,16 +236,26 @@ export function districtParts(district: DistrictView, detail: DetailLevel): Visu
     }
     if (detail === 'close') for (const x of [-.68, .68]) add(`garden-${x}`, 'box', 'canopy', [x, .15, .3], [.11, .12, .4]);
   }
+  const order = district.construction;
+  const target = order && 'buildingId' in order ? order.buildingId : null;
+  const aliases: Record<string, string> = { 'guild-workshop': 'guild', 'printing-house': 'printing' };
+  const foundation = target ? parts.find(part => part.id === `${district.id}:${aliases[target] ?? target}-foundation`) : undefined;
+  const worksite = district.status === 'building' ? { x: 0, z: -.12, width: 1.2, depth: .9, heightScale: .7, front: true }
+    : foundation ? { x: foundation.position[0], z: foundation.position[2], width: foundation.scale[0], depth: foundation.scale[2], heightScale: .7, front: true } : null;
+  const crew = worksite ? civicWorksCrewParts(currentCivicWorksReceipt({ cityId: district.cityId, civId: district.civId, tileId: district.tileId,
+    ...(district.round === undefined ? {} : { round: district.round }), ...(district.terminal === undefined ? {} : { terminal: district.terminal }),
+    order, donor: district.buildingOperations?.kiln, works: district.civicWorks }), detail, worksite) : [];
+  const crewBudget = worksite && order ? detail === 'close' ? 9 : detail === 'mid' ? 6 : 0 : 0;
   const priority = (part: VisualPart): number => {
     const id = part.id.slice(district.id.length + 1);
     if (id.endsWith('-foundation') || id.endsWith('-frame') || /^(coal-plant-stack|factory-roof|research-lab-block)$/.test(id)) return 0;
     if (/^(hall-roof-|industrial-roof-|awning-)/.test(id) || /^(guild-roof|foundry-body|foundry-cap|library-roof|university-tower|university-roof|observatory-body|observatory-crown|coal-plant-boiler|factory-hall|factory-roof-east|research-lab-roof|theater-stage|theater-backdrop)$/.test(id) || id.startsWith('operation:')) return 1;
     return id === 'site' || id === 'identity' ? 2 : 3;
   };
-  const selected = new Set(parts.toSorted((left, right) => priority(left) - priority(right)).slice(0, DISTRICT_PART_BUDGETS[detail]).map(part => part.id));
+  const selected = new Set(parts.toSorted((left, right) => priority(left) - priority(right)).slice(0, DISTRICT_PART_BUDGETS[detail] - crewBudget).map(part => part.id));
   const installed = parts.filter(part => selected.has(part.id));
-  const activity = districtActivityParts(district, detail).slice(0, DISTRICT_PART_BUDGETS[detail] - installed.length);
-  return [...installed, ...activity].map(part => ({ ...part,
+  const activity = districtActivityParts(district, detail).slice(0, DISTRICT_PART_BUDGETS[detail] - installed.length - crewBudget);
+  return [...installed, ...activity, ...crew].map(part => ({ ...part,
     position: [part.position[0] * .72, part.position[1], part.position[2] * .72],
     scale: [part.scale[0] * .72, part.scale[1], part.scale[2] * .72],
   }));

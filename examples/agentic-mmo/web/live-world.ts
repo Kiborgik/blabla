@@ -1,3 +1,4 @@
+import { civicWorksForCity } from '../visuals/civic-works-visuals.ts';
 import { isWoodlandState } from '../core/woodland-validation.ts';
 import { projectOperationAllocation } from '../core/simulation/operations.ts';
 import type { WoodlandVisualFacts } from '../visuals/woodland-visuals.ts';
@@ -90,6 +91,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
       settlement: { id: city.id, civId: city.civId, tileId: city.tileId, name: city.name,
         population: city.population, wellbeing: city.wellbeing, damage: city.damage, buildings: [...city.buildings],
         worldSeed: state.seed, round: state.round, terminal: state.outcome !== null,
+        ...(civicWorksForCity(state.civicWorks, city) ? { civicWorks: civicWorksForCity(state.civicWorks, city)! } : {}),
         ...(city.construction ? { construction: structuredClone(city.construction) } : {}),
         ...(city.localPower ? { localPower: structuredClone(city.localPower) } : {}),
         ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}) },
@@ -117,6 +119,7 @@ export function projectWorld(state: WorldState): AtlasWorld {
         construction: active && (active.buildingId === definition.id || attachments.some(item => item.buildingId === active.buildingId)) ? structuredClone(active) : null,
         baseProduction: buildingBaseProduction(state, city, definition, tile.id),
         round: state.round, terminal: state.outcome !== null,
+        ...(civicWorksForCity(state.civicWorks, city) ? { civicWorks: civicWorksForCity(state.civicWorks, city)! } : {}),
         ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}),
         ...(city.localPower ? { localPower: structuredClone(city.localPower) } : {}),
         ...((definition.district?.adjacency?.improvement || definition.district?.adjacency?.wonder) ? { adjacency: districtAdjacencyFacts(state, definition, tile.id) } : {}) }];

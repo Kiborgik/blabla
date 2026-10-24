@@ -13,10 +13,14 @@ import { hasFeatures } from './history.ts';
 import { paidRecipe } from './operations.ts';
 import { cityProductivity } from './world.ts';
 
+export function constructionWorkMultiplier(state: WorldState, city: City): number {
+  const government = governmentModifiers(state, city.civId);
+  return cityProductivity(city) * (city.id === originalCapitalCityId(state, city.civId) ? 1 + government.capitalConstructionWorkPercent / 100 : 1);
+}
+
 export function constructionWork(state: WorldState, city: City): number {
   const government = governmentModifiers(state, city.civId);
-  const multiplier = city.id === originalCapitalCityId(state, city.civId) ? 1 + government.capitalConstructionWorkPercent / 100 : 1;
-  return Math.round(((city.focus === 'industry' ? CONSTRUCTION_RULES.industryWork : CONSTRUCTION_RULES.baseWork) + government.constructionWork) * cityProductivity(city) * multiplier * 100) / 100;
+  return Math.round(((city.focus === 'industry' ? CONSTRUCTION_RULES.industryWork : CONSTRUCTION_RULES.baseWork) + government.constructionWork) * constructionWorkMultiplier(state, city) * 100) / 100;
 }
 
 export function requiredConstructionWork(buildingId: string): number {

@@ -1,3 +1,4 @@
+import { civicWorksCrewParts, civicWorksForCity, currentCivicWorksReceipt, type CivicWorksView } from './civic-works-visuals.ts';
 import { damageCondition, damageParts } from './damage-visuals.ts';
 import { townPlanV1 } from './town-plan.ts';
 import { settlementHomeParts } from './settlement-homes.ts';
@@ -42,7 +43,7 @@ export interface SettlementVisual {
 export const SETTLEMENT_RENDER_SCALE = .7;
 
 const POPULATION_STEPS = [1, 4, 7, 10, 14, 20, 28, 40] as const;
-export type SettlementFacts = Pick<City, 'id' | 'civId' | 'tileId' | 'name' | 'population' | 'wellbeing' | 'damage' | 'buildings' | 'buildingOperations' | 'construction' | 'localPower'> & { worldSeed?: number; round?: number; terminal?: boolean };
+export type SettlementFacts = Pick<City, 'id' | 'civId' | 'tileId' | 'name' | 'population' | 'wellbeing' | 'damage' | 'buildings' | 'buildingOperations' | 'construction' | 'localPower'> & { worldSeed?: number; round?: number; terminal?: boolean; civicWorks?: CivicWorksView };
 
 export function populationFootprint(population: number): number {
   return .58 + Math.min(1, Math.log2(Math.max(1, population) + 1) / 6) * .26;
@@ -74,10 +75,15 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
   });
   const reference = construction.facts ? buildingAppearance(construction.facts.buildingId, 'close')?.parts ?? [] : [];
   const constructionParts = construction.facts?.buildingId === 'farm' ? construction.parts : placeBuildingParts(construction.parts, reference, plan.constructionLot);
+  const crew = construction.facts ? civicWorksCrewParts(currentCivicWorksReceipt({ cityId: city.id, civId: city.civId, tileId: city.tileId,
+    ...(city.round === undefined ? {} : { round: city.round }), ...(city.terminal === undefined ? {} : { terminal: city.terminal }),
+    order: city.construction?.active, donor: city.buildingOperations?.kiln, works: city.civicWorks }), detail, construction.facts?.buildingId === 'farm' ? plan.farmLots[0] ?? plan.constructionLot : plan.constructionLot) : [];
+  const operationBudget = detail !== 'far' && appearances.some(appearance => appearance.id === 'kiln') ? 1 : 0;
+  const crewBudget = construction.facts ? detail === 'close' ? 9 : detail === 'mid' ? 6 : 0 : 0;
   const primitive = development.stage === 'primitive';
   const hearth = primitive && appearances.length === 0;
   const maximumHouses = detail === 'far' ? 3 : detail === 'mid' ? 4 : appearances.length > 2 || construction.facts ? 5 : 6;
-  const reserved = 3 + Number(hearth) + constructionParts.length + operationParts.length;
+  const reserved = 3 + Number(hearth) + constructionParts.length + operationBudget + crewBudget;
   const houseBudget = Math.floor((budget.parts - reserved - placed.reduce((sum, appearance) => sum + appearance.corePartIds.length, 0)) / 2);
   const houses = Math.max(1, Math.min(maximumHouses, houseBudget, POPULATION_STEPS.filter(threshold => city.population >= threshold).length));
   const parts: VisualPart[] = [];
@@ -87,8 +93,8 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
   parts.push(...settlementHomeParts(city, development.stage, plan.homeLots.slice(0, houses)));
   if (hearth) add('home-hearth', 'cylinder', 'stone', [plan.landmarkLot.x, .045, plan.landmarkLot.z], [.23, .09, .23]);
   const buildings = installedBuildingBadges(city.buildings);
-  parts.push(...allocateBuildingParts(placed, budget.parts - parts.length - 3 - constructionParts.length - operationParts.length));
-  parts.push(...constructionParts, ...operationParts);
+  parts.push(...allocateBuildingParts(placed, budget.parts - parts.length - 3 - constructionParts.length - operationBudget - crewBudget));
+  parts.push(...constructionParts, ...operationParts, ...crew);
   const conditions: VisualBadge[] = [];
   if (city.wellbeing < 40) conditions.push({ icon: 'wellbeing', label: 'Wellbeing', value: city.wellbeing });
   const damaged = damageCondition(city.damage);
@@ -104,5 +110,5 @@ export function settlementVisual(city: SettlementFacts, detail: DetailLevel): Se
 }
 
 export function projectWorldVisuals(state: WorldState, detail: DetailLevel): SettlementVisual[] {
-  return state.cities.map((city) => settlementVisual({ ...city, worldSeed: state.seed, round: state.round, terminal: state.outcome !== null }, detail));
+  return state.cities.map((city) => settlementVisual({ ...city, worldSeed: state.seed, round: state.round, terminal: state.outcome !== null, ...(civicWorksForCity(state.civicWorks, city) ? { civicWorks: civicWorksForCity(state.civicWorks, city)! } : {}) }, detail));
 }

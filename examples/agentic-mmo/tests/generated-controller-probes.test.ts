@@ -21,7 +21,7 @@ function geographyHolds(s: GeneratedControllerSample): boolean {
 
 function genesisHolds(s: GeneratedControllerSample): boolean {
   return s.genesis_errors === 0 && s.policy_version === 'weighted-civilizations-v5-funded-landwork'
-    && s.release_id === 'settlement-learning-patronage-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
+    && s.release_id === 'settlement-civic-works-1' && s.origin_json === s.expected_origin_json && s.world_digest === s.repeat_world_digest;
 }
 
 function decisionHolds(d: GeneratedControllerDecision): boolean {

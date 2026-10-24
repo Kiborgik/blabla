@@ -1,3 +1,4 @@
+import { availableCivicWorksActions } from './civic-works.ts';
 import { availableBorderActions } from './border-incidents.ts';
 import { availableKnowledgeActions } from './knowledge-compacts.ts';
 import { availableReliefActions } from './relief-charters.ts';
@@ -92,6 +93,7 @@ export function availableActions(
   if (!civilization) return [];
   const cities = citiesOf(state, seat);
   choices.push(...availableCivicActions(state, seat));
+  choices.push(...availableCivicWorksActions(state, seat));
   choices.push(...availableGovernmentActions(state, seat));
   choices.push(...availableWonderActions(state, seat));
   choices.push(...availableTerritoryActions(state, seat));
@@ -282,6 +284,8 @@ export function sameAction(left: GameAction, right: unknown): boolean {
   )
     return false;
   switch (left.type) {
+    case 'commission-civic-works':
+      return 'cityId' in right && 'orderId' in right && 'donorBuildingId' in right && left.cityId === right.cityId && left.orderId === right.orderId && left.donorBuildingId === right.donorBuildingId;
     case 'adopt-government':
       return 'governmentId' in right && left.governmentId === right.governmentId && 'assignments' in right && Array.isArray(right.assignments) && right.assignments.length === left.assignments.length && right.assignments.every((assignment: unknown) => typeof assignment === 'object' && assignment !== null && Object.keys(assignment).length === 3 && 'slotType' in assignment && 'slotIndex' in assignment && 'policyId' in assignment && left.assignments.some(expected => assignment.slotType === expected.slotType && assignment.slotIndex === expected.slotIndex && assignment.policyId === expected.policyId)) && new Set(right.assignments.map((assignment: { slotType: string; slotIndex: number }) => `${assignment.slotType}:${assignment.slotIndex}`)).size === right.assignments.length;
     case 'choose-civic':

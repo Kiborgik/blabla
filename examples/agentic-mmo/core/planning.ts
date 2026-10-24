@@ -1,3 +1,5 @@
+import { civicWorksBlock } from './simulation/civic-works.ts';
+import { isCivicWorksAction } from './civic-works-validation.ts';
 import { isBorderAction } from './border-validation.ts';
 import { borderActionFailure } from './simulation/border-incidents.ts';
 import { isKnowledgeAction } from './knowledge-validation.ts';
@@ -74,6 +76,7 @@ function integer(value: unknown, maximum = Number.MAX_SAFE_INTEGER): value is nu
 export function isGameAction(value: unknown): value is GameAction {
   if (!record(value)) return false;
   switch (value.type) {
+    case 'commission-civic-works': return isCivicWorksAction(value);
     case 'dispatch-border': case 'respond-border': case 'withdraw-border': return isBorderAction(value);
     case 'propose-knowledge':
     case 'respond-knowledge':
@@ -205,6 +208,10 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
   if (specialized && (action.type === 'focus' || action.type === 'build') && !cities.some((city) => city.id === action.cityId))
     return invalidated('This release requires an explicit existing owned city target; review and choose the exact city');
   switch (action.type) {
+    case 'commission-civic-works': {
+      const failure = civicWorksBlock(state, seat, action);
+      return failure ? blocked(failure) : null;
+    }
     case 'dispatch-border': case 'respond-border': case 'withdraw-border': {
       const failure = borderActionFailure(state, seat, action);
       return failure ? blocked(failure) : null;
@@ -376,6 +383,7 @@ function targetInvalidation(state: WorldState, seat: number, action: GameAction)
 }
 
 function unavailableReason(state: WorldState, seat: number, action: GameAction): string {
+  if (action.type === 'commission-civic-works') return civicWorksBlock(state, seat, action) ?? 'Review the exact paid order and two scheduled crew seasons';
   if (action.type === 'expedition') return spaceflightActionBlock(state, seat, action) ?? 'Review the exact paid mission and powered source town';
   if (action.type === 'build-rail') return railTownBlock(state, seat, action.cityId) ?? 'Review the exact local Rail edge';
   if (action.type === 'adopt-government') return governmentActionBlock(state, seat, action.governmentId, action.assignments) ?? 'Review current arrangement admission';

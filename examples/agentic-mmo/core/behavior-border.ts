@@ -123,6 +123,10 @@ export function deriveBorderPlan(state: WorldState, actor: Civilization, profile
   for (const option of options) {
     const action = option.action;
     const assessment: Assessment = { weight: null, priority: 0, reason: '', protected: false };
+    if (state.civicWorks?.active.some(commission => commission.civId === actor.id) && (action.type === 'dispatch-border' || action.type === 'respond-border' && action.response === 'defend')) {
+      assessments.set(option, { weight: 0, priority: 0, protected: true, reason: 'Active civic-works fees and returning Kiln production are outside this border departure forecast; withdrawal and yielding remain available.' });
+      continue;
+    }
     const partner = newDealPartner(state, actor.id, action);
     const blockedDeal = partner === null ? null : borderDealFailure(state, actor.id, partner);
     if (blockedDeal) {

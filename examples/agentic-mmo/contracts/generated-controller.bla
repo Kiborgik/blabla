@@ -57,7 +57,7 @@ when observe_generated_world {
     expect "current-factory-exercises-three-distinct-seeds": count(after.gc_samples) == 3 and unique(after.gc_samples, s => s.seed) and any(after.gc_samples, s => s.seed == 73) and any(after.gc_samples, s => s.seed == 1701) and any(after.gc_samples, s => s.seed == 90210)
     expect "raw-geography-has-connected-viable-starts": all(after.gc_samples, s => s.width == 18 and s.height == 24 and s.tile_count == 432 and s.land_count > 0 and s.passable_count > 0 and s.passable_count <= s.land_count and s.connected_count > 0 and s.connected_count <= s.passable_count and s.land_fraction >= 0.55 and s.land_fraction <= 0.8 and s.connected_fraction >= 0.7 and s.connected_fraction <= 1.0 and s.connected_capitals == 5 and s.capital_count == 5 and s.minimum_spacing >= 6 and s.viable_capitals == 5 and s.coastal_capitals > 0 and s.coastal_capitals < 5 and s.neighborhood_kinds >= 3)
     expect "seeds-produce-distinct-terrain-and-starts": unique(after.gc_samples, s => s.terrain_signature) and unique(after.gc_samples, s => s.start_signature)
-    expect "current-world-keeps-immutable-fresh-genesis": all(after.gc_samples, s => s.genesis_errors == 0 and s.policy_version == "weighted-civilizations-v5-funded-landwork" and s.release_id == "settlement-learning-patronage-1" and s.origin_json == s.expected_origin_json and s.world_digest == s.repeat_world_digest)
+    expect "current-world-keeps-immutable-fresh-genesis": all(after.gc_samples, s => s.genesis_errors == 0 and s.policy_version == "weighted-civilizations-v5-funded-landwork" and s.release_id == "settlement-civic-works-1" and s.origin_json == s.expected_origin_json and s.world_digest == s.repeat_world_digest)
 }
 
 when decide {

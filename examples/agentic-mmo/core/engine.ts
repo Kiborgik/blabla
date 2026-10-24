@@ -168,6 +168,7 @@ export function createWorld(seed: number, clockEpoch?: string, registeredRulesId
   if (hasFeatures(state, ['earned-history'])) state.milestoneProofs = {};
   if (hasFeatures(state, ['public-projects'])) state.publicProjects = [];
   if (hasFeatures(state, ['consented-relief'])) state.relief = createReliefState(state);
+  if (hasFeatures(state, ['civic-works'])) state.civicWorks = { ruleVersion: 1, active: [], lastResults: Array.from({ length: CIV_COUNT }, () => null) };
   if (hasFeatures(state, ['knowledge-compacts'])) state.knowledge = createKnowledgeState(state);
   if (hasFeatures(state, ['supplied-borders'])) state.border = createBorderState(state);
   if (hasFeatures(state, ['renewing-worked-woodlands'])) state.woodlands = createWoodlands(state.tiles);
@@ -244,6 +245,7 @@ export function observe(state: WorldState, seat: number, timestamp?: string, tra
     ),
     ...(hasFeatures(state, ['consented-relief']) ? { relief: state.relief } : {}),
     ...(hasFeatures(state, ['supplied-borders']) ? { border: structuredClone(state.border) } : {}),
+    ...(hasFeatures(state, ['civic-works']) ? { civicWorks: structuredClone(state.civicWorks) } : {}),
     ...(hasFeatures(state, ['knowledge-compacts']) ? { knowledge: structuredClone(state.knowledge) } : {}),
     ...(hasFeatures(state, ['public-projects']) ? { publicProjects: (state.publicProjects ?? []).filter((project) => director || project.proposer === seat || project.recipient === seat) } : {}),
     recentEvents: state.events.slice(-12),

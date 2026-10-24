@@ -189,6 +189,7 @@ export function createLandworkPlanner(state: WorldState, civId: number) {
     const key = `${cityId}/${tileId}/${operationOnly}`; const cached = quotes.get(key); if (cached) return cached;
     const save = (result: LandworkAssessment) => { const observation = freeze(result); quotes.set(key, observation); return observation; };
     const refuse = (reason: string) => save({ quotes: [], reason });
+    if (state.civicWorks?.active.some(commission => commission.civId === civId)) return refuse('active-civic-works: scheduled crew fees and earlier paid recipes are outside this landwork forecast');
     const city = state.cities.find(city => city.id === cityId && city.civId === civId); const tile = state.tiles.find(tile => tile.id === tileId);
     if (!actor || !city || !tile) return refuse('missing-exact-site: existing civilization, town and tile are required');
     const installed = operationOnly ? city.improvements?.[String(tileId)] : undefined;

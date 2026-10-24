@@ -46,6 +46,7 @@ export function createPaidFoodSiteAffordability(state: WorldState, civId: number
   const actor = state.civilizations.find(candidate => candidate.id === civId);
   const upkeep = civilizationFoodUpkeep(state, civId);
   return action => {
+    if (state.civicWorks?.active.some(commission => commission.civId === civId)) return false;
     const definition = IMPROVEMENTS.find(candidate => candidate.id === action.improvementId);
     const city = state.cities.find(candidate => candidate.id === action.cityId && candidate.civId === civId);
     if (!actor || !definition || !paidFoodSite(definition) || !city || city.construction?.active
@@ -80,6 +81,10 @@ export function createPaidFoodSiteAffordability(state: WorldState, civId: number
 
 export function fundedPaidFoodSites(state: WorldState, civId: number, desiredBuildings: ReadonlySet<string>, desiredImprovements: ReadonlySet<string>): ReadonlySet<string> {
   if (!hasFeatures(state, [IMPROVEMENT_RULES.featureId])) return new Set();
+  if (state.civicWorks?.active.some(commission => commission.civId === civId)) return new Set(state.cities.filter(city => city.civId === civId).flatMap(city => Object.values(city.improvements ?? {}).flatMap(improvement => {
+    const definition = IMPROVEMENTS.find(candidate => candidate.id === improvement.improvementId);
+    return definition && paidFoodSite(definition) && improvement.operation.enabled ? [`${city.id}/${improvement.tileId}`] : [];
+  })));
   const promised = exchangeReserve(state, civId);
   const projected = projectOperationAllocation(state, opening => {
     const actor = opening.civilizations.find(candidate => candidate.id === civId)!;

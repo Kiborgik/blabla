@@ -1,3 +1,4 @@
+import { civicWorksStory } from './civic-works-inspection.ts';
 import { exactNumber } from './number-format.ts';
 import { extractionFacts } from '../visuals/strategic-resource-visuals.ts';
 import type { GameEvent, PublicProjectResult, Resources } from '../core/types.ts';
@@ -21,6 +22,7 @@ export interface EventLogEntry {
   exchanges: Array<{ from: string; to: string; cargo: string; upkeep: string; commerce: string }>;
 }
 const GROUPS: ReadonlyArray<{ prefix: string; category: string; family: string; icon: VisualIcon }> = [
+  { prefix: 'civic-works', category: 'Kiln crew', family: 'building', icon: 'population' },
   { prefix: 'wonder', category: 'World wonder', family: 'building', icon: 'discovery' },
   { prefix: 'research', category: 'Research', family: 'research', icon: 'science' },
   { prefix: 'cultivated-harvest', category: 'Extra harvest', family: 'production', icon: 'food' },
@@ -102,6 +104,8 @@ function namedStory(event: GameEvent, options: EventLogOptions): { title: string
   const actor = participant(event.actor, options).name;
   const target = participant(event.target, options).name;
   const technology = TECHNOLOGIES.find(candidate => candidate.id === event.detail);
+  const crew = civicWorksStory(event);
+  if (crew) return { title: crew.title, category: crew.category, summary: crew.summary };
   const project = publicProjectStory(event, options);
   if (project) return project;
   if (['cultivated-harvest', 'forest-fire', 'coastal-storm', 'trade-fair', 'industrial-accident', 'internal-migration'].includes(event.type)) {
@@ -174,6 +178,7 @@ export function eventLogEntries(events: readonly GameEvent[], options: EventLogO
         if (row && (cargo.iron ?? 0) > 0) row.cargo = [row.cargo === 'None' ? '' : row.cargo, `${cargo.iron} Iron`].filter(Boolean).join(', ');
       }
     }
+    const crew = civicWorksStory(event);
     const projectResult = recordedPublicProjectResult(event);
     const projectDeltas: VisualDelta[] | null = projectResult ? projectResult.damageBefore === null || projectResult.damageAfter === null ? [] : [{ icon: 'damage', label: 'Damage', value: projectResult.damageAfter - projectResult.damageBefore, kind: 'delta', tone: projectResult.damageAfter < projectResult.damageBefore ? 'positive' : projectResult.damageAfter > projectResult.damageBefore ? 'negative' : 'neutral', qualifier: 'points changed in this recorded result', subject: null }] : null;
     const deltas = (projectDeltas ?? receipt?.deltas ?? visual?.deltas ?? []).map(delta => ({ ...delta, subject: delta.subject?.startsWith('Route route-') ? 'Trade route' : delta.subject }));
@@ -195,7 +200,7 @@ export function eventLogEntries(events: readonly GameEvent[], options: EventLogO
       icon: receipt?.icon ?? visual?.icon ?? group?.icon ?? 'discovery',
       participants: [participant(event.actor, options), ...(event.target !== null && event.target !== event.actor ? [participant(event.target, options)] : [])],
       cause: projectResult?.reason ?? event.cause, detail: event.detail, effects: [...event.effects], deltas: structuredClone(deltas), qualifiers,
-      receiptDetails: [...(projectResult ? [story.summary, projectResult.reason] : receipt?.details ?? []), ...extraction],
+      receiptDetails: [...(crew?.details ?? []), ...(projectResult ? [story.summary, projectResult.reason] : receipt?.details ?? []), ...extraction],
       summary: [story.summary, ...transfers, ...extraction.slice(0, 2)].filter(Boolean).join(' '), routine: routineEvent(event),
       exchanges,
     };

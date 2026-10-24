@@ -26,6 +26,7 @@ export function createCharcoalClearingPolicy(state: WorldState, civId: number, w
   return (action: Extract<GameAction, { type: 'improve' | 'set-improvement-operation' }>): CharcoalAssessment | null => {
     const key = `${action.type}/${action.cityId}/${action.tileId}/${action.improvementId}/${action.type === 'improve' || action.enabled}`; if (cached.has(key)) return cached.get(key)!;
     const save = (assessment: CharcoalAssessment | null) => { cached.set(key, assessment); return assessment; };
+    if (state.civicWorks?.active.some(commission => commission.civId === civId)) return save(null);
     if (!actor || !definition || !hasFeatures(state, definition.requiredFeatures) || action.improvementId !== definition.id || action.type === 'set-improvement-operation' && !action.enabled) return save(null);
     const city = state.cities.find(city => city.id === action.cityId && city.civId === civId);
     if (!city || state.tiles.find(tile => tile.id === action.tileId)?.owner !== civId) return save(null);

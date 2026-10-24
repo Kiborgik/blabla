@@ -10,8 +10,8 @@ import { ACTIVE_LOCAL_RELEASE_ID, LOCAL_SIMULATION_STORAGE_KEY, createLocalSimul
 
 void test('current patronage genesis starts empty and preserves exact same-version continuation', () => {
   const fresh = createLocalSimulation(1701);
-  assert.equal(ACTIVE_LOCAL_RELEASE_ID, 'settlement-learning-patronage-1');
-  assert.equal(LOCAL_SIMULATION_STORAGE_KEY, 'civitas:procedural-observatory:learning-patronage-v1');
+  assert.match(ACTIVE_LOCAL_RELEASE_ID, /^settlement-/);
+  assert.match(LOCAL_SIMULATION_STORAGE_KEY, /^civitas:procedural-observatory:/);
   assert.equal(fresh.state.releaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.equal(fresh.state.origin?.initialReleaseId, ACTIVE_LOCAL_RELEASE_ID);
   assert.ok(fresh.state.unlockedFeatures.includes('learning-patronage'));

@@ -1,3 +1,4 @@
+import { civicWorksStory } from './civic-works-inspection.ts';
 import { knowledgeStory } from './knowledge-inspection.ts';
 import { BUILDINGS, CIVICS, ERAS, FEATURES, GOVERNMENTS, POLICIES, RESOURCE_IDS, TECHNOLOGIES, HISTORICAL_MILESTONES } from '../core/content.ts';
 import type { GameEvent, Resources, WorldState } from '../core/types.ts';
@@ -249,6 +250,8 @@ function regionalStory(state: StoryNames, event: GameEvent, fallback: EventLogEn
 }
 
 export function storyLanguage(state: StoryNames, event: GameEvent, fallback: EventLogEntry): StoryLanguage {
+  const crew = civicWorksStory(event, id => town(state, id));
+  if (crew) return { title: crew.title, cause: crew.cause, consequence: crew.summary };
   const knowledge = knowledgeStory(event);
   if (knowledge) return knowledge;
   const historical = historicalStory(state, event);

@@ -10,6 +10,7 @@ export interface OperationVisual {
   tone: 'positive' | 'negative' | 'neutral';
   last: {
     round: number;
+    civicWorksCommissionId?: string;
     status: BuildingOperationResult['status'];
     label: string;
     paid: ResourceAmount[];
@@ -38,7 +39,8 @@ export function operationVisual(operation: BuildingOperation | undefined): Opera
   const blockedLabel = supportBlocked ? result.shortages.length || result.strategicShortages?.length ? 'Not enough support or supplies' : 'Not enough local support' : 'Short of inputs';
   const last = result ? {
     round: result.round, status: result.status,
-    label: result.status === 'blocked' ? blockedLabel : result.status === 'paused' ? 'Paused' : positiveOutput ? 'Supplies made' : 'No output',
+    label: result.status === 'civic-works' ? 'Crew assigned to construction' : result.status === 'blocked' ? blockedLabel : result.status === 'paused' ? 'Paused' : positiveOutput ? 'Supplies made' : 'No output',
+    ...(result.civicWorksCommissionId ? { civicWorksCommissionId: result.civicWorksCommissionId } : {}),
     paid: resourceAmounts(result.paid), produced, shortages: result.shortages.map((shortage) => ({ ...shortage })),
     ...(result.strategicPaid !== undefined ? { strategicPaid: strategicResourceAmounts(result.strategicPaid) } : {}),
     ...(result.strategicShortages !== undefined ? { strategicShortages: result.strategicShortages.map(shortage => ({ ...shortage })) } : {}),
@@ -48,7 +50,7 @@ export function operationVisual(operation: BuildingOperation | undefined): Opera
   return {
     current: operation.enabled ? 'On' : 'Paused',
     summary: !operation.enabled ? 'Paused now' : !last || last.status === 'paused' ? 'Ready for next season' : `Last season: ${last.label.toLowerCase()}`,
-    tone: !operation.enabled || !last || last.status === 'paused' ? 'neutral' : last.status === 'blocked' ? 'negative' : positiveOutput ? 'positive' : 'neutral',
+    tone: !operation.enabled || !last || last.status === 'paused' ? 'neutral' : last.status === 'blocked' ? 'negative' : positiveOutput || last.status === 'civic-works' ? 'positive' : 'neutral',
     last,
   };
 }

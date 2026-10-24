@@ -51,6 +51,7 @@ export function borderPromisedResources(state: WorldState, actorId: number, roun
   const accepted = (state.knowledge?.active ?? []).filter(compact => compact.status === 'accepted' && (compact.terms.teacherId === actorId || compact.terms.learnerId === actorId));
   const horizon = Math.max(rounds, ...accepted.map(compact => compact.status === 'accepted' ? compact.deadlineRound - state.round : 0));
   const result: BorderPromises = { ordinary: {}, strategic: {}, operationForecast: [], horizon, failure: null };
+  if (state.civicWorks?.active.some(commission => commission.civId === actorId)) return { ...result, failure: 'An active civic-works commission is outside the border departure operation forecast' };
   if (!Number.isSafeInteger(horizon) || horizon < 1 || !Number.isSafeInteger(state.round + horizon)) return { ...result, failure: 'The protected commitment horizon exceeds safe round accounting' };
   addOrdinary(result.ordinary, knowledgePromisedResources(state, actorId));
   addOrdinary(result.ordinary, reliefPromisedResources(state, actorId));

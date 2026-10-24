@@ -20,7 +20,7 @@ import type { City, GameAction, GameEvent, PolicyAssignment, Resources, WorldSta
 export type ArrangementAction = Extract<GameAction, { type: 'adopt-government' }>;
 export interface GovernmentOperationCheckpoint {
   readonly key: string;
-  readonly status: 'operated' | 'blocked' | 'paused';
+  readonly status: 'operated' | 'blocked' | 'paused' | 'civic-works';
   readonly paid: Readonly<Partial<Resources>>;
   readonly residents: number;
   readonly power: number;
@@ -104,6 +104,7 @@ function horizon(state: WorldState, civId: number, valueBeats: number): number {
 }
 
 function dependencyFailure(state: WorldState, civId: number): string | null {
+  if (state.civicWorks?.active.some(commission => commission.civId === civId)) return 'active civic-works fees, donor substitution and earlier construction are outside this government forecast.';
   const actor = state.civilizations.find(candidate => candidate.id === civId)!;
   if (state.border?.active.some(incident => incident.initiatorId === civId || incident.defenderId === civId)) return 'active border clashes and returning residents are outside this bounded dependency closure.';
   if (state.spaceflight?.civilizations[civId]?.activeMission || state.spaceflight?.civilizations[civId]?.colony) return 'active off-world commitments are outside this bounded dependency closure.';

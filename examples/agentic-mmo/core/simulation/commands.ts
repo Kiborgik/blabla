@@ -1,3 +1,4 @@
+import { executeCivicWorksAction } from './civic-works.ts';
 import { executeBorderAction } from './border-incidents.ts';
 import { executeKnowledgeAction } from './knowledge-compacts.ts';
 import { executeReliefAction } from './relief-charters.ts';
@@ -61,6 +62,10 @@ export function executeAction(
   action: GameAction,
   events: GameEvent[],
 ): void {
+  if (action.type === 'commission-civic-works') {
+    executeCivicWorksAction(state, seat, action, events);
+    return;
+  }
   if (action.type === 'dispatch-border' || action.type === 'respond-border' || action.type === 'withdraw-border') {
     executeBorderAction(state, seat, action, events);
     return;

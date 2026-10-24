@@ -1,3 +1,5 @@
+import { allocateCivicWorks, openingCivicWorksBasis, prepareCivicWorksProtection } from './civic-works.ts';
+import { openingConstructionWork } from './construction.ts';
 import { localPowerBuildingOrder, participatesInLocalPower } from './local-power.ts';
 import { prepareWoodlandBeat } from './woodlands.ts';
 import type { WoodlandPlan } from '../woodland-types.ts';
@@ -98,11 +100,16 @@ export function projectOperationAllocation(state: WorldState, prepare?: (project
     round: state.round + 1,
     ...(state.woodlands ? { woodlands: structuredClone(state.woodlands) } : {}),
     ...(state.riverFlow ? { riverFlow: structuredClone(state.riverFlow) } : {}),
+    ...(state.civicWorks ? { civicWorks: structuredClone(state.civicWorks) } : {}),
     civilizations: state.civilizations.map(civilization => ({ ...civilization, resources: { ...civilization.resources }, ...(civilization.strategicResources ? { strategicResources: { ...civilization.strategicResources } } : {}) })),
     cities: state.cities.map(city => ({ ...city, ...(city.buildingOperations ? { buildingOperations: structuredClone(city.buildingOperations) } : {}), ...(city.improvements ? { improvements: structuredClone(city.improvements) } : {}) })),
   };
   prepare?.(projected);
+  const civicProtection = prepareCivicWorksProtection(projected);
+  const openingWork = openingConstructionWork(projected);
+  const workBasis = openingCivicWorksBasis(projected);
   allocateOperations(projected);
+  allocateCivicWorks(projected, openingWork, [], civicProtection, workBasis);
   return projected;
 }
 
@@ -125,8 +132,8 @@ export function emitOperations(state: WorldState, city: City, events: GameEvent[
       actor: city.civId,
       target: city.civId,
       tileId: city.tileId,
-      cause: result.status !== 'paused' && hasFeatures(state, [LOCAL_POWER_RULES.featureId]) ? 'Generators reserve opening resources and local residents before stable-ID ordinary and powered consumers; each complete recipe is atomic' : result.status === 'paused' ? 'The civilization paused this recipe' : result.residents ? 'Complete resources and local residents are reserved jointly from opening stocks and population in city and building ID order; allocations reset each strategic beat' : 'The complete recipe was checked against remaining opening stocks in city and building ID order',
-      effects: [...(result.status === 'operated'
+      cause: result.status === 'civic-works' ? 'The paid civic-works commission reassigned this funded Kiln crew; ordinary payment and Materials output are suppressed' : result.status !== 'paused' && hasFeatures(state, [LOCAL_POWER_RULES.featureId]) ? 'Generators reserve opening resources and local residents before stable-ID ordinary and powered consumers; each complete recipe is atomic' : result.status === 'paused' ? 'The civilization paused this recipe' : result.residents ? 'Complete resources and local residents are reserved jointly from opening stocks and population in city and building ID order; allocations reset each strategic beat' : 'The complete recipe was checked against remaining opening stocks in city and building ID order',
+      effects: [...(result.status === 'civic-works' ? [`Reassigned to ${result.civicWorksCommissionId}; payment and earned work are recorded by the exact commission`, 'No ordinary Kiln inputs consumed or Materials produced'] : result.status === 'operated'
         ? [...RESOURCE_IDS.filter((resource) => (result.paid[resource] ?? 0) > 0).map((resource) => `Paid ${result.paid[resource]} ${resource}`), ...RESOURCE_IDS.filter((resource) => (result.produced[resource] ?? 0) > 0).map((resource) => `Produced ${result.produced[resource]} ${resource}`)]
         : result.status === 'paused' ? ['No inputs consumed or outputs produced']
           : result.residents && result.shortages.length === 0 ? ['No inputs consumed or outputs produced']

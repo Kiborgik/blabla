@@ -152,6 +152,7 @@ function value(actor: Civilization, profile: BehaviorProfile, vector: Partial<Re
 function opportunity(state: WorldState, actor: Civilization, profile: BehaviorProfile, terms: KnowledgeTerms, compact?: KnowledgeCompact): Opportunity {
   const projected = estimate(state, terms, compact);
   const bad = (reason: string): Opportunity => ({ estimate: projected, useful: false, gain: 0, reason });
+  if (compact?.status !== 'accepted' && state.civicWorks?.active.some(commission => commission.civId === terms.teacherId || commission.civId === terms.learnerId)) return bad('active civic-works fees and earlier paid recipes are outside a new teaching forecast');
   const identity = knowledgeCompactFailure(state, { terms }); if (identity) return bad(identity.detail);
   if (projected.expectedWork <= 0) return bad(projected.projectedRemainingWork <= 0 ? 'ordinary research is estimated to finish before the second lesson; retain self-reliant learning' : 'the remaining route window cannot fit the required fresh lessons');
   if (projected.savedRounds <= 0) return bad('paid teaching is not estimated to complete the discovery earlier than ordinary research');

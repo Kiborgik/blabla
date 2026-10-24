@@ -118,6 +118,7 @@ export function createFoundingProtection(state: WorldState, civId: number) {
     if (preparation) return preparation;
     const shared: Prepared = { horizon: 1, baseline: new Map(), footprints: new Map(), pending: [], failure: null }; preparation = shared;
     const reject = (reason: string): void => { shared.failure ??= reason; };
+    if (state.civicWorks?.active.some(commission => commission.civId === civId)) { reject('active-civic-works: scheduled crew fees and earlier paid recipes are outside this founding forecast'); return shared; }
     if (!actor || !safe(actor.resources, actor.strategicResources) || !Number.isSafeInteger(state.round) || !Number.isSafeInteger(state.round + 1)) { reject('unsafe-accounting: opening resources or round cannot be bounded'); return shared; }
     if (actor.government?.pending) reject('government-transition: pending modifiers are not projected');
     const projected = projectOperationAllocation(state); shared.baseline = operated(projected, civId);

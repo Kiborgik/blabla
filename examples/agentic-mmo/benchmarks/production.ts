@@ -142,6 +142,7 @@ function workload(cities: number, beats: number) {
         const result = operation.lastResult;
         assert.ok(result);
         assert.equal(result.round, state.round);
+        assert.ok(result.status !== 'civic-works', 'The selected settlement-production-1 fixture has no civic-works feature');
         recipeReceipts += 1;
         counts[result.status] += 1;
         if (result.status !== 'operated') {

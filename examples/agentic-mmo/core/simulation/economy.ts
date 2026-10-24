@@ -1,3 +1,6 @@
+import type { CivicWorksAction, CivicWorksCommission } from '../civic-works-types.ts';
+import { cityGrowthFacts } from './growth.ts';
+import { allocateCivicWorks, civicWorksProjectionAdverse, civicWorksTargetBlock, openingCivicWorksBasis, prepareCivicWorksProtection, resolveCivicWorks, type CivicWorksProtection } from './civic-works.ts';
 import { borderFieldPopulation, resolveBorderIncidents } from './border-incidents.ts';
 import { resolveKnowledgeCompacts } from './knowledge-compacts.ts';
 import { resolveReliefCharters } from './relief-charters.ts';
@@ -42,11 +45,17 @@ function resolveResearch(state: WorldState, civilizationId: number, producedScie
 }
 
 export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
+  resolveEconomyBeat(state, events, prepareCivicWorksProtection(state));
+}
+
+function resolveEconomyBeat(state: WorldState, events: GameEvent[], civicProtection: ReadonlyMap<string, string>): void {
+  const workBasis = openingCivicWorksBasis(state);
   const woodlandPlan = prepareWoodlandBeat(state);
   const openingWork = openingConstructionWork(state);
   const researchBudgets = new Map<number, number>();
   const civicBudgets = new Map<number, number>();
   const riverFlowPlan = allocateOperations(state, woodlandPlan);
+  allocateCivicWorks(state, openingWork, events, civicProtection, workBasis);
   for (const city of state.cities.toSorted((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0)) extractCityMetals(state, city);
   for (const civilization of state.civilizations) {
     let culture = 0;
@@ -101,10 +110,49 @@ export function resolveEconomy(state: WorldState, events: GameEvent[]): void {
   resolveKnowledgeCompacts(state, events);
   for (const civilization of state.civilizations) resolveCivics(state, civilization.id, civicBudgets.get(civilization.id) ?? 0, events);
   resolveConstruction(state, openingWork, events);
+  resolveCivicWorks(state, events);
   resolveGovernmentTransitions(state, events);
   resolveBorderIncidents(state, events);
   if (state.border) for (const civilization of state.civilizations) civilization.score = Math.floor(civilization.influence
     + state.cities.filter(city => city.civId === civilization.id).reduce((total, city) => total + city.population * 5 + city.infrastructure * 2, 0)
     + borderFieldPopulation(state, civilization.id) * 5 + civilization.technologies.length * 10);
   resolveSpaceflight(state, events);
+}
+
+const protectionBeatLimit = 12;
+
+export function projectCivicWorksProtection(state: WorldState, commission: CivicWorksCommission, currentOpening = false): CivicWorksProtection {
+  const result: CivicWorksProtection = { supported: false, reason: '', retained: [], proposed: [] };
+  const refuse = (reason: string): CivicWorksProtection => ({ ...result, reason });
+  const action: CivicWorksAction = { type: 'commission-civic-works', cityId: commission.cityId, orderId: commission.orderId, donorBuildingId: commission.donorBuildingId };
+  const blocked = civicWorksTargetBlock(state, commission.civId, action); if (blocked) return refuse(blocked);
+  const retained = structuredClone(state); const proposed = structuredClone(state);
+  retained.civicWorks!.active = retained.civicWorks!.active.filter(active => active.id !== commission.id);
+  proposed.civicWorks!.active = proposed.civicWorks!.active.filter(active => active.civId !== commission.civId);
+  proposed.civicWorks!.active.push(structuredClone(commission));
+  let completedRound: number | null = null;
+  let worked = false;
+  for (let beat = 0; beat < protectionBeatLimit; beat++) {
+    if (!currentOpening || beat > 0) { retained.round++; proposed.round++; }
+    retained.revision++; proposed.revision++;
+    resolveEconomyBeat(retained, [], new Map());
+    resolveEconomyBeat(proposed, [], new Map());
+    result.retained.push(structuredClone(retained)); result.proposed.push(structuredClone(proposed));
+    const failure = civicWorksProjectionAdverse(retained, proposed, commission); if (failure) return refuse(failure);
+    const receipt = proposed.civicWorks!.lastResults[commission.civId];
+    if (receipt?.commissionId === commission.id && receipt.round === proposed.round) {
+      worked ||= receipt.status === 'worked';
+      if (receipt.status === 'blocked') return refuse(`Scheduled civic works cannot be funded: ${receipt.reason}`);
+    }
+    const completion = retained.cities.find(city => city.id === commission.cityId)?.construction?.lastCompleted;
+    if (completion?.orderId === commission.orderId) completedRound ??= completion.completedRound;
+    if (completedRound !== null && retained.round > completedRound && retained.round >= commission.expiresRound) {
+      for (const city of proposed.cities.filter(city => city.civId === commission.civId)) {
+        const baseline = retained.cities.find(candidate => candidate.id === city.id)!;
+        if (city.population < cityGrowthFacts(proposed, city).capacity && (city.wellbeing > baseline.wellbeing || proposed.civilizations.find(actor => actor.id === commission.civId)!.resources.food > retained.civilizations.find(actor => actor.id === commission.civId)!.resources.food)) return refuse(`${city.id} retains additional growth exposure beyond the bounded protection horizon`);
+      }
+      return worked ? { ...result, supported: true, reason: `Exact ordinary allocation, scheduled fees, households and first completed-target operation protected through round ${retained.round}` } : refuse('Ordinary construction finishes without useful commissioned work');
+    }
+  }
+  return refuse(`Ordinary completion and its first later operation exceed the ${protectionBeatLimit}-beat protection bound`);
 }

@@ -92,6 +92,10 @@ export function deriveReliefPlan(state: WorldState, actor: Civilization, profile
   };
   for (const option of options) {
     const action = option.action; const assessment: Assessment = { weight: null, priority: 0, reason: '', protected: false };
+    if (action.type === 'propose-relief' && state.civicWorks?.active.some(commission => commission.civId === actor.id)) {
+      assessments.set(option, { weight: 0, priority: 0, protected: true, reason: 'Active civic-works fees and earlier paid recipes are outside a new relief donor forecast.' });
+      continue;
+    }
     if (spendsPromiseOrReserve(option)) { assessment.weight = 0; assessment.protected = true; }
     if ((action.type === 'respond-trade' || action.type === 'respond-public-project') && !action.accept
       && spendsPromiseOrReserve({ ...option, action: { ...action, accept: true } })) {
@@ -117,12 +121,13 @@ export function deriveReliefPlan(state: WorldState, actor: Civilization, profile
         if (action.type === 'respond-relief') {
           const useful = actor.resources.food < upkeep(state, actor.id) * 2;
           const funded = !reliefActionFailure(state, actor.id, { ...action, accept: true });
-          const accept = useful && funded;
+          const unsupportedCrew = state.civicWorks?.active.some(commission => commission.civId === charter.terms.donorId) ?? false;
+          const accept = useful && funded && !unsupportedCrew;
           if (action.accept === accept) {
             assessment.weight = (accept ? 80 : 40) * profile.priorities.recovery;
             assessment.priority = accept ? 4 : 3;
             assessment.reason = accept ? `Accept the exact ${charter.terms.food} Food relief for current town reserves; no stock arrives until the funded due transfer.`
-              : `Decline ${charter.id}; ${useful ? 'the exact offer is no longer currently deliverable' : 'current Food already covers two upkeep beats'}. No penalty or resized cargo.`;
+              : `Decline ${charter.id}; ${unsupportedCrew ? 'active civic-works donor funding is outside this forecast' : useful ? 'the exact offer is no longer currently deliverable' : 'current Food already covers two upkeep beats'}. No penalty or resized cargo.`;
           }
         } else {
           const donor = actor.id === charter.terms.donorId;

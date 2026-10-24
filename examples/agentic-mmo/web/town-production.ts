@@ -1,3 +1,5 @@
+import { paidCivicWorksReceipt, type CivicWorksView } from '../visuals/civic-works-visuals.ts';
+import { civicWorksInspectionKey } from './civic-works-inspection.ts';
 import { BUILDINGS } from '../core/content.ts';
 import type { FoodSupplyReceipt } from '../core/food-security-content.ts';
 import type { City } from '../core/types.ts';
@@ -11,20 +13,25 @@ export interface TownProductionRow extends OperationVisual {
   name: string;
   result: string;
   recordedAt: string | null;
+  inspectKey: string;
 }
 
-export function townProductionRows(city: Pick<City, 'buildings' | 'buildingOperations'>): TownProductionRow[] {
+export function townProductionRows(city: Pick<City, 'buildings' | 'buildingOperations'>, works?: CivicWorksView): TownProductionRow[] {
   return [...city.buildings].reverse().flatMap(buildingId => {
     const definition = BUILDINGS.find(building => building.id === buildingId);
     if (!definition?.operatingInputs) return [];
     const view = operationVisual(city.buildingOperations?.[buildingId]);
     const last = view.last;
+    const crew = last?.status === 'civic-works';
+    const receipt = works?.last;
+    const exactCrew = crew && paidCivicWorksReceipt(receipt) && receipt.commissionId === last.civicWorksCommissionId && receipt.round === last.round;
     const produced = last?.produced.filter(amount => amount.amount > 0) ?? [];
     const result = !last ? 'No operating record yet'
+      : crew ? `${exactCrew ? `Crew added ${exactNumber(receipt.extraWork)} work` : 'Crew assigned to construction'} · No Kiln Materials`
       : last.status === 'paused' ? 'Paused in that season'
       : last.status === 'operated' && produced.length ? `Made ${produced.map(amount => `${exactNumber(amount.amount)} ${amount.label}`).join(' · ')}`
       : last.label;
-    return [{ ...view, buildingId, name: definition.name, result, recordedAt: last ? `Last recorded season · ${last.round}` : null }];
+    return [{ ...view, buildingId, inspectKey: crew && works ? civicWorksInspectionKey(works) : buildingId, name: definition.name, result, recordedAt: last ? `Last recorded season · ${last.round}` : null }];
   });
 }
 
@@ -56,8 +63,8 @@ function createFoodSupplyReceipt(receipt: FoodSupplyReceipt): HTMLDetailsElement
   return details;
 }
 
-export function createTownProduction(city: Pick<City, 'buildings' | 'buildingOperations' | 'lastFoodSupply'>, onInspect: (buildingId: string) => void): HTMLElement | null {
-  const rows = townProductionRows(city);
+export function createTownProduction(city: Pick<City, 'buildings' | 'buildingOperations' | 'lastFoodSupply'>, onInspect: (buildingId: string) => void, works?: CivicWorksView): HTMLElement | null {
+  const rows = townProductionRows(city, works);
   if (!rows.length && !city.lastFoodSupply) return null;
   const section = document.createElement('section');
   section.className = 'town-production';
@@ -99,7 +106,7 @@ export function createTownProduction(city: Pick<City, 'buildings' | 'buildingOpe
       inputs.className = 'town-production-inputs';
       const paid = [...row.last.paid, ...row.last.strategicPaid ?? []].map(amount => `${exactNumber(amount.amount)} ${amount.label}`).join(' · ') || 'None';
       const residents = row.last.residents;
-      inputs.textContent = `Used ${paid}${residents ? ` · Assigned ${exactNumber(residents.allocated)} resident${residents.allocated === 1 ? '' : 's'}` : ''}`;
+      inputs.textContent = row.last.status === 'civic-works' ? `Crew assigned ${exactNumber(residents?.allocated ?? 0)} local staff · Fee is in the commission record` : `Used ${paid}${residents ? ` · Assigned ${exactNumber(residents.allocated)} resident${residents.allocated === 1 ? '' : 's'}` : ''}`;
       button.append(inputs);
     }
     if (row.recordedAt) {
@@ -112,7 +119,7 @@ export function createTownProduction(city: Pick<City, 'buildings' | 'buildingOpe
     link.className = 'town-production-link';
     link.textContent = 'Inspect record →';
     button.append(link);
-    button.addEventListener('click', () => onInspect(row.buildingId));
+    button.addEventListener('click', () => onInspect(row.inspectKey));
     (index < 3 ? section : more).append(button);
   }
   if (rows.length > 3) section.append(more);

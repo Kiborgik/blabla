@@ -88,6 +88,7 @@ export const STRATEGIC_RESOURCE_RULES = { iron: METAL_RULES, coal: COAL_RULES } 
 export const COASTAL_FOUNDING_RULES = { ruleVersion: 1, requiredTechnology: 'navigation', requiredBuildingCapability: 'coastal-departure' } as const;
 
 export const FEATURES: FeatureDefinition[] = [
+  { id: 'civic-works', name: 'Paid civic works', description: 'State workforce can assign one funded Kiln crew to an exact paid building order for two scheduled seasons. Complete Materials, Credits and resident allocation exchange current Kiln output for bounded actual construction work; no automatic continuation or free operation follows.' },
   { id: 'renewing-worked-woodlands', name: 'Renewing worked woodlands', description: 'Lumbermills and Charcoal clearings harvest one of eight exact local forest work-lots only with their complete existing paid and staffed operation. Non-harvest economy beats recover one lot, capped at eight; continuous depleted supply is not promised and the forest biome remains.' },
   { id: 'learning-patronage', name: 'Competing civic priorities', description: 'Choose one economic priority: Urban planning construction or Learning patronage for fully supported Library, House of learning and University Science.' },
   { id: 'river-intakes', name: 'Funded river intakes', description: 'Optional exact-site intakes use one opening Material, one local resident and eight renewable uniform-runoff units for three base Food after funded same-town Irrigation. Physical upstream withdrawals reduce downstream residual flow; no Water stock, treaty right or baseline Irrigation loss is implied.' },
@@ -164,6 +165,7 @@ export const FEATURES: FeatureDefinition[] = [
 ];
 
 export const ACTION_FEATURES: Record<GameAction['type'], readonly string[]> = {
+  'commission-civic-works': ['civic-works', 'civic-bootstrap', 'resident-capacity', 'building-operations', 'recurring-decisions'],
   'dispatch-border': ['supplied-borders'], 'respond-border': ['supplied-borders'], 'withdraw-border': ['supplied-borders'],
   'propose-knowledge': ['knowledge-compacts'], 'respond-knowledge': ['knowledge-compacts'], 'withdraw-knowledge': ['knowledge-compacts'],
   'propose-relief': ['consented-relief'], 'respond-relief': ['consented-relief'], 'withdraw-relief': ['consented-relief'],
