@@ -621,7 +621,8 @@ export function assessCivilizationBehavior(state: WorldState, seat: number, prev
 
 function ordinaryReason(context: Situation): string {
   const cause = context.phase === 'expansion' ? 'funded founding fits town or coastal needs' : context.phase === 'trade' ? 'a useful funded exchange is available'
-    : context.phase === 'development' ? 'useful funded domestic or research work is available' : context.phase === 'survival' ? 'Food risk overrides ordinary preferences'
+    : context.phase === 'development' ? 'useful funded domestic or research work is available' : context.phase === 'survival'
+      ? context.foodRisk ? 'current Food risk overrides ordinary preferences' : `no current Food risk; retained Survival buffer ${context.actor.resources.food}/${Math.max(12, context.upkeep * 4)} Food`
       : context.phase === 'recovery' ? 'serious damage overrides ordinary preferences' : 'consolidate useful operations and existing places';
   const until = (context.phase === context.memory.phase ? context.memory.phaseSinceRound : context.state.round) + context.profile.commitmentRounds;
   return `${context.profile.name} prefer ${context.phase}: ${cause}. Weighted alternatives remain possible; viable phase commitment to round ${until}.`;
