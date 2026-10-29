@@ -2,12 +2,15 @@ import copy
 import importlib.util
 import json
 import pathlib
+import select
+import socket
 import threading
 import subprocess
 import sys
 import time
 import unittest
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('systemone_provider', ROOT / 'adapters/systemone/provider.py')
@@ -185,52 +188,160 @@ class SystemOneProviderTests(unittest.TestCase):
             self.assertEqual(endpoint.calls, [])
 
 
-def slow_response_handler(mode, ended):
+def slow_response_handler(mode, endpoint):
     class Handler(BaseHTTPRequestHandler):
+        timeout = 0.15
+
+        def setup(self):
+            super().setup()
+            endpoint.transport = self.connection
+
         def do_GET(self):
             raw_body = json.dumps({'models': [{'name': 'kev-latest', 'run': 'kev@fixture'}]}).encode()
+            if mode == 'headers':
+                first = b'HTTP/1.0 200 OK\r\nX-Slow: '
+                chunks = [bytes([value]) for value in b'12345678'] + [b'\r\n\r\n' + raw_body]
+            else:
+                first = b'HTTP/1.0 200 OK\r\n\r\n'
+                chunks = [bytes([value]) for value in raw_body]
+            chunks = iter([first] + chunks)
+            self.connection.settimeout(0.02)
             try:
-                if mode == 'headers':
-                    self.wfile.write(b'HTTP/1.0 200 OK\r\nX-Slow: ')
-                    self.wfile.flush()
-                    for value in b'12345678':
-                        self.wfile.write(bytes([value]))
-                        self.wfile.flush()
-                        time.sleep(0.02)
-                    self.wfile.write(b'\r\n\r\n' + raw_body)
-                else:
-                    self.send_response(200)
-                    self.end_headers()
-                    for value in raw_body:
-                        self.wfile.write(bytes([value]))
-                        self.wfile.flush()
-                        time.sleep(0.02)
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                ended.set()
+                endpoint.observing.set()
+                while not endpoint.stopped.is_set():
+                    chunk = next(chunks, None)
+                    if chunk is not None:
+                        try:
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                            chunks = iter(())
+                    readable, _, _ = select.select([self.connection], [], [], 0.02)
+                    if not readable:
+                        continue
+                    try:
+                        received = self.connection.recv(1)
+                    except (ConnectionResetError, ConnectionAbortedError):
+                        observation = 'reset'
+                    else:
+                        if received:
+                            raise AssertionError('unexpected bytes after the GET request')
+                        observation = 'eof'
+                    if not endpoint.stopped.is_set():
+                        endpoint.observation = observation
+                        endpoint.peer_closed.set()
+                    return
+            except (OSError, ValueError, AssertionError) as error:
+                endpoint.error = repr(error)
+
         def log_message(self, *args):
             pass
     return Handler
 
 
-class SystemOneDeadlineTests(unittest.TestCase):
-    def test_slow_headers_and_body_obey_absolute_deadline_without_orphan_thread(self):
-        for mode in ['headers', 'body']:
-            ended = threading.Event()
-            server = ThreadingHTTPServer(('127.0.0.1', 0), slow_response_handler(mode, ended))
-            thread = threading.Thread(target=server.serve_forever, args=(0.01,), daemon=True)
-            thread.start()
+class SlowResponseEndpoint:
+    def __init__(self, mode):
+        self.observing = threading.Event()
+        self.peer_closed = threading.Event()
+        self.stopped = threading.Event()
+        self.observation = None
+        self.error = None
+        self.transport = None
+        self.server = HTTPServer(('127.0.0.1', 0), slow_response_handler(mode, self))
+        self.server.timeout = 0.02
+        self.thread = threading.Thread(target=self.serve, name='blabla-systemone-peer', daemon=True)
+        self.thread.start()
+        self.url = 'http://127.0.0.1:' + str(self.server.server_port)
+
+    def serve(self):
+        while not self.stopped.is_set():
+            self.server.handle_request()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.stopped.set()
+        if self.transport is not None:
             try:
-                started = time.monotonic()
-                result = provider.evaluate(request(), 'http://127.0.0.1:' + str(server.server_port), 0.05)
-                elapsed = time.monotonic() - started
-                self.assertEqual(result['outcome'], {'Err': 'timeout'})
-                self.assertLess(elapsed, 0.12, mode + ' exceeded original deadline')
-                self.assertTrue(ended.wait(0.15), mode + ' left the client socket open')
-                self.assertFalse(any(t.name == 'blabla-systemone-deadline' and t.is_alive() for t in threading.enumerate()))
+                self.transport.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        self.thread.join(0.15)
+        self.server.server_close()
+        if self.thread.is_alive():
+            raise AssertionError('slow-response peer thread did not stop')
+
+
+class SystemOneDeadlineTests(unittest.TestCase):
+    def assert_transport_closed(self, transports):
+        self.assertTrue(transports, 'no real client transport was observed')
+        for transport in transports:
+            self.assertEqual(transport.fileno(), -1, 'client transport still open')
+
+    def assert_peer_closed(self, endpoint):
+        observed = endpoint.peer_closed.wait(0.15)
+        self.assertTrue(endpoint.observing.is_set(), 'peer observer never started')
+        self.assertIsNone(endpoint.error, endpoint.error)
+        self.assertTrue(observed, 'peer did not observe EOF/reset')
+        self.assertIn(endpoint.observation, ('eof', 'reset'))
+
+    def assert_slow_deadline(self, mode):
+        transports = []
+        connected_fds = []
+
+        class ObservedConnection(provider.http.client.HTTPConnection):
+            def connect(self):
+                super().connect()
+                transports.append(self.sock)
+                connected_fds.append(self.sock.fileno())
+
+        with SlowResponseEndpoint(mode) as endpoint:
+            try:
+                with patch.object(provider.http.client, 'HTTPConnection', ObservedConnection):
+                    started = time.monotonic()
+                    result = provider.evaluate(request(), endpoint.url, 0.05)
+                    elapsed = time.monotonic() - started
+                with self.subTest(observation='local transport at return'):
+                    self.assertEqual(len(connected_fds), 1)
+                    self.assertGreaterEqual(connected_fds[0], 0)
+                    self.assert_transport_closed(transports)
+                with self.subTest(observation='deadline monitor at return'):
+                    self.assertFalse(any(t.name == 'blabla-systemone-deadline' and t.is_alive()
+                                         for t in threading.enumerate()))
+                with self.subTest(observation='timeout result and return budget'):
+                    self.assertEqual(result['outcome'], {'Err': 'timeout'})
+                    self.assertLess(elapsed, 0.12, mode + ' exceeded original deadline')
+                with self.subTest(observation='peer EOF/reset'):
+                    self.assert_peer_closed(endpoint)
             finally:
-                server.shutdown()
-                server.server_close()
-                thread.join()
+                for transport in transports:
+                    try:
+                        transport.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    transport.close()
+
+    def test_slow_headers_obey_absolute_deadline_without_orphan_thread(self):
+        self.assert_slow_deadline('headers')
+
+    def test_slow_body_obeys_absolute_deadline_without_orphan_thread(self):
+        self.assert_slow_deadline('body')
+
+    def test_peer_eof_does_not_hide_an_open_or_half_closed_client_transport(self):
+        with SlowResponseEndpoint('body') as endpoint:
+            with socket.create_connection(endpoint.server.server_address, timeout=0.15) as transport:
+                transport.sendall(b'GET /v1/models HTTP/1.0\r\nHost: localhost\r\n\r\n')
+                self.assertTrue(endpoint.observing.wait(0.15), 'peer observer never started')
+                with self.assertRaisesRegex(AssertionError, 'peer did not observe EOF/reset'):
+                    self.assert_peer_closed(endpoint)
+                with self.assertRaisesRegex(AssertionError, 'client transport still open'):
+                    self.assert_transport_closed([transport])
+                transport.shutdown(socket.SHUT_WR)
+                self.assert_peer_closed(endpoint)
+                with self.assertRaisesRegex(AssertionError, 'client transport still open'):
+                    self.assert_transport_closed([transport])
+            self.assert_transport_closed([transport])
 
 
 if __name__ == '__main__':

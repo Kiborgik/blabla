@@ -3,6 +3,29 @@ use crate::ir::{BinaryOp, Expr, ExprKind, MAX_INT, Predicate, QueryOp, Type, Una
 use crate::report::VerifyError;
 use serde_json::Value;
 
+#[cfg(test)]
+mod tests;
+
+fn copy_value(value: &Value) -> Value {
+    #[cfg(test)]
+    tests::observe_copy(value);
+    value.clone()
+}
+
+fn load_slot<'a>(
+    slot: usize,
+    slots: &'a [Option<Value>],
+    predicate: &Predicate,
+) -> Result<&'a Value, VerifyError> {
+    slots.get(slot).and_then(Option::as_ref).ok_or_else(|| {
+        run_diagnostic(
+            predicate,
+            "BLA-EVAL-SLOT",
+            format!("binding slot {slot} is unavailable"),
+        )
+    })
+}
+
 pub(super) struct PredicateFailure {
     pub expected: Option<Value>,
     pub actual: Option<Value>,
@@ -65,19 +88,19 @@ pub(super) fn evaluate(
             }
             Ok(value.clone())
         }
-        ExprKind::Load(slot) => slots.get(*slot).and_then(Clone::clone).ok_or_else(|| {
-            run_diagnostic(
-                predicate,
-                "BLA-EVAL-SLOT",
-                format!("binding slot {slot} is unavailable"),
-            )
-        }),
+        ExprKind::Load(slot) => load_slot(*slot, slots, predicate).map(copy_value),
         ExprKind::Field { base, name } => {
-            let value = evaluate(base, slots, predicate)?;
+            let evaluated;
+            let value = if let ExprKind::Load(slot) = &base.kind {
+                load_slot(*slot, slots, predicate)?
+            } else {
+                evaluated = evaluate(base, slots, predicate)?;
+                &evaluated
+            };
             value
                 .as_object()
                 .and_then(|object| object.get(name))
-                .cloned()
+                .map(copy_value)
                 .ok_or_else(|| {
                     run_diagnostic(
                         predicate,

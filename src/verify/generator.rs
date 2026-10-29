@@ -17,7 +17,7 @@ impl SplitMix64 {
         Self { state: seed }
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub(super) fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9e3779b97f4a7c15);
         let mut value = self.state;
         value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);

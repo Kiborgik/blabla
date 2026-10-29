@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
     contract: &Contract,
     options: &RunOptions,
+    budget: Budget,
     mut make_app: F,
     observer: &mut dyn FnMut(&Progress),
 ) -> Result<RunReport, VerifyError> {
@@ -28,7 +29,11 @@ pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
         .actions
         .iter()
         .any(|a| !a.postconditions.is_empty());
-    for case_index in 0..options.cases {
+    let mut cases_executed = 0;
+    let mut detected = None;
+    let mut stopped = false;
+    'cases: for case_index in 0..options.cases {
+        cases_executed = case_index + 1;
         let mut app = make_app().map_err(VerifyError::Application)?;
         app.reset().map_err(VerifyError::Application)?;
         metrics.resets += 1;
@@ -48,33 +53,8 @@ pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
         });
         let mut sequence = Vec::new();
         if let Some(failure) = failure {
-            metrics.detection_ms = Some(elapsed(&started));
-            app.finish().map_err(VerifyError::Application)?;
-            sequences.push(sequence);
-            let index = sequences.len() - 1;
-            observer(&progress_of(
-                &coverage,
-                options,
-                case_index,
-                steps_executed,
-                true,
-            ));
-            let shrinking = Instant::now();
-            let result = finish_failure(
-                contract,
-                options,
-                &mut make_app,
-                sequences,
-                index,
-                steps_executed,
-                failure,
-            )
-            .map(|mut report| {
-                report.cases_executed = case_index + 1;
-                report
-            });
-            metrics.shrink_ms = elapsed(&shrinking);
-            return with_coverage(result, &coverage, metrics, &started);
+            detected = Some((app, sequence, case_index, failure));
+            break;
         }
         corpus.retain(guidance.signature(&state), state, &sequence, false);
         let mut replay = VecDeque::new();
@@ -133,33 +113,8 @@ pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
                             elapsed_ms: elapsed(&started),
                             failed: Some(&failure.predicate.label),
                         });
-                        metrics.detection_ms = Some(elapsed(&started));
-                        app.finish().map_err(VerifyError::Application)?;
-                        sequences.push(sequence);
-                        let index = sequences.len() - 1;
-                        observer(&progress_of(
-                            &coverage,
-                            options,
-                            case_index,
-                            steps_executed,
-                            true,
-                        ));
-                        let shrinking = Instant::now();
-                        let result = finish_failure(
-                            contract,
-                            options,
-                            &mut make_app,
-                            sequences,
-                            index,
-                            steps_executed,
-                            failure,
-                        )
-                        .map(|mut report| {
-                            report.cases_executed = case_index + 1;
-                            report
-                        });
-                        metrics.shrink_ms = elapsed(&shrinking);
-                        return with_coverage(result, &coverage, metrics, &started);
+                        detected = Some((app, sequence, case_index, failure));
+                        break 'cases;
                     }
                     coverage.record(CoverageEvent {
                         action: None,
@@ -309,37 +264,52 @@ pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
                 metrics.time_to_full_coverage_ms = Some(elapsed(&started));
             }
             if let Some(failure) = failure {
-                metrics.detection_ms = Some(elapsed(&started));
-                app.finish().map_err(VerifyError::Application)?;
-                sequences.push(sequence);
-                let index = sequences.len() - 1;
-                observer(&progress_of(
-                    &coverage,
-                    options,
-                    case_index,
-                    steps_executed,
-                    true,
-                ));
-                let shrinking = Instant::now();
-                let result = finish_failure(
-                    contract,
-                    options,
-                    &mut make_app,
-                    sequences,
-                    index,
-                    steps_executed,
-                    failure,
-                )
-                .map(|mut r| {
-                    r.cases_executed = case_index + 1;
-                    r
-                });
-                metrics.shrink_ms = elapsed(&shrinking);
-                return with_coverage(result, &coverage, metrics, &started);
+                detected = Some((app, sequence, case_index, failure));
+                break 'cases;
+            }
+            stopped = budget.spent(
+                steps_executed,
+                options.steps,
+                metrics.actions_to_full_coverage,
+            );
+            if stopped {
+                break;
             }
         }
         app.finish().map_err(VerifyError::Application)?;
         sequences.push(sequence);
+        if stopped {
+            break;
+        }
+    }
+    if let Some((mut app, sequence, case_index, failure)) = detected {
+        metrics.detection_ms = Some(elapsed(&started));
+        app.finish().map_err(VerifyError::Application)?;
+        sequences.push(sequence);
+        let index = sequences.len() - 1;
+        observer(&progress_of(
+            &coverage,
+            options,
+            case_index,
+            steps_executed,
+            true,
+        ));
+        let shrinking = Instant::now();
+        let result = finish_failure(
+            contract,
+            options,
+            &mut make_app,
+            sequences,
+            index,
+            steps_executed,
+            failure,
+        )
+        .map(|mut report| {
+            report.cases_executed = case_index + 1;
+            report
+        });
+        metrics.shrink_ms = elapsed(&shrinking);
+        return with_coverage(result, &coverage, metrics, &started);
     }
     metrics.elapsed_ms = elapsed(&started);
     Ok(RunReport {
@@ -353,12 +323,13 @@ pub(super) fn campaign<A: Application, F: FnMut() -> Result<A, AppError>>(
         cases: options.cases,
         steps: options.steps,
         shrink_budget: options.shrink_budget,
-        cases_executed: options.cases,
+        cases_executed,
         steps_executed,
         sequences,
         coverage_summary: coverage.summary(),
         metrics,
         failure: None,
+        campaigns: Vec::new(),
     })
 }
 

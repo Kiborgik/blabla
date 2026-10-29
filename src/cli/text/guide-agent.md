@@ -6,7 +6,7 @@ Start with:
 
 Layers: BEHAVIOR (runtime behavior, verified by a campaign) and STRUCTURE (codebase and architecture constraints, checked statically); status shows each, OVERALL and every identity.
 
-Every object BlaBla explains has one canonical identity, printed by the command before it; copy it rather than inventing a separator of your own:
+Every object has one canonical identity, printed by the command before it; copy it, never invent a separator:
   blabla explain contract::<group>   a contract: its path, its state, the id of every rule
   blabla explain <group>::<label>    one rule, its evidence and its counterexample
   blabla explain mission::<name>     why this project exists; priority::<name> opens one priority
@@ -18,11 +18,10 @@ Every object BlaBla explains has one canonical identity, printed by the command 
 Process roles, policies and flows bind the role you carry; a ruling is expertise, never permission to widen a task.
 Delegating one bounded change, and asking BlaBla to contradict your account of it: blabla guide loop
 
-Before declaring work complete: blabla finish. It checks structure, runs the canonical
-behavior verification (project.bla defines it) and decides:
+Before declaring work complete: blabla finish checks structure, runs the canonical behavior verification and decides:
 RED:    a rule is violated; use the minimized counterexample or the observed structural fact. NOT COMPLETE.
 YELLOW: no known violation, but required behavior remains unverified; supply the listed witness. NOT COMPLETE.
 GREEN:  every active layer passed. Only OVERALL GREEN means completion.
+A verification record written by another BlaBla version shows STALE: run blabla finish.
 
-Do not modify .bla contracts or the verification profile merely to make the implementation pass.
-Changing intended behavior is a separate contract-author task: blabla guide change
+Never weaken a contract or the verification profile to pass; changing intended behavior is a contract-author task: blabla guide change

@@ -1,7 +1,7 @@
 module task    "src/project/task.rs"
-module clitask "src/cli/task.rs"
+module clitask "src/cli/task/falsification.rs"
 module skeptic "src/skeptic.rs"
 
 require "a-task-can-name-the-paths-its-check-must-falsify": symbol task::Task.falsify
 require "the-check-is-run-against-the-opened-contents":     symbol clitask::falsify
-require "an-unfalsified-check-is-challenged":               value skeptic::CLASSES contains "check-not-falsified"
+require "an-unfalsified-check-is-challenged":               symbol skeptic::Class.CheckNotFalsified

@@ -1,6 +1,7 @@
 use crate::memory::Memory;
 use crate::memory::goal::{Outcome, Verdict};
 use crate::project::status::CompletionState;
+use crate::project::task::machine::TaskState;
 use crate::project::task::{self, Resolution, Task};
 use crate::structure::falsify::FalsifyReport;
 use serde::Serialize;
@@ -15,38 +16,6 @@ pub const LIMITS: [&str; 3] = [
     include_str!("cli/text/skeptic-limit-silence.md"),
     include_str!("cli/text/skeptic-limit-source.md"),
 ];
-
-pub const CLASSES: [&str; 20] = [
-    "unresolved-finding",
-    "deliverable-unchanged",
-    "scope-breach",
-    "vacuous-rule",
-    "verification-not-current",
-    "work-without-acceptance",
-    "model-outside-role-policy",
-    "exception-unresolved",
-    "lens-unassessed",
-    "readiness-without-evidence",
-    "evidence-superseded",
-    "attribution-unknown",
-    "declared-check-failed",
-    "decision-unanswered",
-    "orchestrator-record-during-carry",
-    "question-unpicked",
-    "withdrawal-residue",
-    "review-target-stale",
-    "unobservable-task-input",
-    "check-not-falsified",
-];
-
-pub const OUTSIDE_THE_ASSIGNMENT: [&str; 4] = [
-    "verification-not-current",
-    "vacuous-rule",
-    "orchestrator-record-during-carry",
-    "withdrawal-residue",
-];
-
-pub const GOAL_CLASSES: [&str; 1] = ["goal-outcome-unmet"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -75,32 +44,255 @@ pub enum Class {
 }
 
 impl Class {
-    pub fn word(self) -> &'static str {
+    pub const fn word(self) -> &'static str {
         match self {
-            Class::UnresolvedFinding => CLASSES[0],
-            Class::DeliverableUnchanged => CLASSES[1],
-            Class::ScopeBreach => CLASSES[2],
-            Class::VacuousRule => CLASSES[3],
-            Class::VerificationNotCurrent => CLASSES[4],
-            Class::WorkWithoutAcceptance => CLASSES[5],
-            Class::ModelOutsideRolePolicy => CLASSES[6],
-            Class::ExceptionUnresolved => CLASSES[7],
-            Class::LensUnassessed => CLASSES[8],
-            Class::ReadinessWithoutEvidence => CLASSES[9],
-            Class::EvidenceSuperseded => CLASSES[10],
-            Class::AttributionUnknown => CLASSES[11],
-            Class::DeclaredCheckFailed => CLASSES[12],
-            Class::DecisionUnanswered => CLASSES[13],
-            Class::OrchestratorRecordDuringCarry => CLASSES[14],
-            Class::QuestionUnpicked => CLASSES[15],
-            Class::GoalOutcomeUnmet => GOAL_CLASSES[0],
-            Class::WithdrawalResidue => CLASSES[16],
-            Class::ReviewTargetStale => CLASSES[17],
-            Class::UnobservableTaskInput => CLASSES[18],
-            Class::CheckNotFalsified => CLASSES[19],
+            Class::UnresolvedFinding => "unresolved-finding",
+            Class::DeliverableUnchanged => "deliverable-unchanged",
+            Class::ScopeBreach => "scope-breach",
+            Class::VacuousRule => "vacuous-rule",
+            Class::VerificationNotCurrent => "verification-not-current",
+            Class::WorkWithoutAcceptance => "work-without-acceptance",
+            Class::ModelOutsideRolePolicy => "model-outside-role-policy",
+            Class::ExceptionUnresolved => "exception-unresolved",
+            Class::LensUnassessed => "lens-unassessed",
+            Class::ReadinessWithoutEvidence => "readiness-without-evidence",
+            Class::EvidenceSuperseded => "evidence-superseded",
+            Class::AttributionUnknown => "attribution-unknown",
+            Class::DeclaredCheckFailed => "declared-check-failed",
+            Class::DecisionUnanswered => "decision-unanswered",
+            Class::OrchestratorRecordDuringCarry => "orchestrator-record-during-carry",
+            Class::QuestionUnpicked => "question-unpicked",
+            Class::GoalOutcomeUnmet => "goal-outcome-unmet",
+            Class::WithdrawalResidue => "withdrawal-residue",
+            Class::ReviewTargetStale => "review-target-stale",
+            Class::UnobservableTaskInput => "unobservable-task-input",
+            Class::CheckNotFalsified => "check-not-falsified",
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ground {
+    Project,
+    Task,
+    Role,
+    Goal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reach {
+    Assignment,
+    Project,
+}
+
+type Found = Result<Challenge, &'static str>;
+
+struct Scene<'a> {
+    evidence: &'a Evidence<'a>,
+    goals: Result<&'a [Outcome], &'static str>,
+    tracking: Option<(&'a std::path::Path, &'a Ignore)>,
+    ignore: &'a Ignore,
+}
+
+#[derive(Clone, Copy)]
+enum Detect {
+    Scene(fn(&Scene<'_>) -> Found),
+    Task(fn(&Task, &Scene<'_>) -> Found),
+}
+
+#[derive(Clone, Copy)]
+pub struct Detector {
+    pub class: Class,
+    pub ground: Ground,
+    pub reach: Reach,
+    pub waits_for_clear_work: bool,
+    detect: Detect,
+}
+
+impl Detector {
+    const fn new(class: Class, ground: Ground, reach: Reach, detect: Detect) -> Detector {
+        Detector {
+            class,
+            ground,
+            reach,
+            waits_for_clear_work: false,
+            detect,
+        }
+    }
+
+    const fn after_clear_work(self) -> Detector {
+        Detector {
+            waits_for_clear_work: true,
+            ..self
+        }
+    }
+
+    pub fn outside_the_assignment(&self) -> bool {
+        self.reach == Reach::Project
+    }
+
+    fn found(&self, scene: &Scene<'_>) -> Found {
+        match self.detect {
+            Detect::Scene(detect) => detect(scene),
+            Detect::Task(detect) => match scene.evidence.task {
+                Some(task) => detect(task, scene),
+                None if self.outside_the_assignment() => scene
+                    .evidence
+                    .other_tasks
+                    .iter()
+                    .map(|task| detect(task, scene))
+                    .reduce(|first, next| first.or(next))
+                    .unwrap_or(Err(NO_TASK)),
+                None => Err(NO_TASK),
+            },
+        }
+    }
+}
+
+pub const DETECTORS: &[Detector] = &[
+    Detector::new(
+        Class::UnobservableTaskInput,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(unobservable_task_input),
+    ),
+    Detector::new(
+        Class::WithdrawalResidue,
+        Ground::Project,
+        Reach::Project,
+        Detect::Scene(|scene| withdrawal_residue(scene.evidence, scene.tracking)),
+    ),
+    Detector::new(
+        Class::DeclaredCheckFailed,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, scene| declared_check_failed(task, scene.evidence.tree)),
+    ),
+    Detector::new(
+        Class::DecisionUnanswered,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, _| decision_unanswered(task)),
+    ),
+    Detector::new(
+        Class::QuestionUnpicked,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, _| question_unpicked(task)),
+    ),
+    Detector::new(
+        Class::UnresolvedFinding,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, _| unresolved_finding(task)),
+    ),
+    Detector::new(
+        Class::DeliverableUnchanged,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, scene| deliverable_unchanged(task, scene.evidence.tree)),
+    ),
+    Detector::new(
+        Class::ScopeBreach,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, scene| scope_breach(task, scene.evidence.tree, scene.ignore)),
+    ),
+    Detector::new(
+        Class::WorkWithoutAcceptance,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, scene| {
+            work_without_acceptance(task, scene.evidence.tree, scene.ignore)
+        }),
+    ),
+    Detector::new(
+        Class::ExceptionUnresolved,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, _| exception_unresolved(task)),
+    ),
+    Detector::new(
+        Class::ReadinessWithoutEvidence,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, _| readiness_without_evidence(task)),
+    ),
+    Detector::new(
+        Class::EvidenceSuperseded,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, scene| evidence_superseded(task, scene.evidence.tree)),
+    ),
+    Detector::new(
+        Class::AttributionUnknown,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, scene| {
+            attribution_unknown(
+                task,
+                scene.evidence.tree,
+                scene.evidence.other_tasks,
+                scene.ignore,
+            )
+        }),
+    ),
+    Detector::new(
+        Class::CheckNotFalsified,
+        Ground::Task,
+        Reach::Assignment,
+        Detect::Task(|task, scene| check_not_falsified(task, scene.evidence.tree)),
+    ),
+    Detector::new(
+        Class::ModelOutsideRolePolicy,
+        Ground::Role,
+        Reach::Assignment,
+        Detect::Task(|task, scene| model_outside_role_policy(task, scene.evidence.role)),
+    ),
+    Detector::new(
+        Class::LensUnassessed,
+        Ground::Role,
+        Reach::Assignment,
+        Detect::Task(|task, scene| lens_unassessed(task, scene.evidence.role)),
+    ),
+    Detector::new(
+        Class::ReviewTargetStale,
+        Ground::Role,
+        Reach::Assignment,
+        Detect::Task(|task, scene| review_target_stale(task, scene.evidence.role)),
+    ),
+    Detector::new(
+        Class::OrchestratorRecordDuringCarry,
+        Ground::Task,
+        Reach::Project,
+        Detect::Task(|task, _| orchestrator_record_during_carry(task)),
+    ),
+    Detector::new(
+        Class::GoalOutcomeUnmet,
+        Ground::Goal,
+        Reach::Project,
+        Detect::Scene(|scene| goal_outcome_unmet(scene.goals, scene.evidence.task)),
+    ),
+    Detector::new(
+        Class::VacuousRule,
+        Ground::Project,
+        Reach::Project,
+        Detect::Scene(|scene| vacuous_rule(&(scene.evidence.falsify)())),
+    )
+    .after_clear_work(),
+    Detector::new(
+        Class::VerificationNotCurrent,
+        Ground::Project,
+        Reach::Project,
+        Detect::Scene(|scene| {
+            verification_not_current(
+                scene.evidence.completion,
+                scene.evidence.completion_reason,
+                scene.evidence.task,
+            )
+        }),
+    ),
+];
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Challenge {
@@ -108,6 +300,8 @@ pub struct Challenge {
     pub statement: String,
     pub evidence: Vec<String>,
     pub reconcile: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unattributed: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -116,12 +310,22 @@ pub struct ChallengeReport {
     pub task: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub challenge: Option<Challenge>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenges: Option<Vec<Challenge>>,
     pub grounded: Vec<&'static str>,
     pub assignment_blockers: Vec<&'static str>,
     pub project_challenges: Vec<&'static str>,
     pub ungrounded: Vec<(&'static str, &'static str)>,
     pub authority: &'static str,
     pub limits: [&'static str; 3],
+}
+
+pub fn standing(classes: &[&'static str], excused: &[Class]) -> Vec<&'static str> {
+    classes
+        .iter()
+        .copied()
+        .filter(|class| !excused.iter().any(|excuse| excuse.word() == *class))
+        .collect()
 }
 
 impl ChallengeReport {
@@ -144,7 +348,7 @@ pub struct Evidence<'a> {
     pub other_tasks: &'a [Task],
 }
 
-const NO_TASK: &str = "no bounded task is open; blabla task open records one";
+const NO_TASK: &str = "no bounded task is selected; blabla challenge <task> holds one assignment and blabla task open records one";
 const NOT_REACHED: &str = "a stronger challenge already stands, so this was not evaluated";
 pub const GOALS_NOT_JUDGED: &str = "finish does not judge goals, because a goal never decides completion; blabla challenge with no bounded task selected judges each goal marked done";
 
@@ -161,44 +365,6 @@ pub fn unjudged_goals<T>(memory: &Memory<T>) -> Option<&'static str> {
         ),
         Memory::Unregistered | Memory::Ignored(_) | Memory::Present(_) => None,
     }
-}
-
-fn path_in_other_task_scope(
-    path: &str,
-    current_task: &Task,
-    other_tasks: &[Task],
-    tree: &BTreeMap<String, String>,
-) -> bool {
-    other_tasks.iter().any(|other| {
-        if other.name == current_task.name {
-            return false;
-        }
-        if other.open()
-            && (other.in_scope(path)
-                || other
-                    .deliverables
-                    .iter()
-                    .any(|deliverable| task::covers(&deliverable.path, path)))
-        {
-            return true;
-        }
-        if !other.open()
-            && other
-                .closed_unix
-                .is_some_and(|closed| closed > current_task.opened_unix)
-            && (other.in_scope(path)
-                || other
-                    .deliverables
-                    .iter()
-                    .any(|deliverable| task::covers(&deliverable.path, path)))
-            && let Some(closed_digest) = other.closed_paths.get(path)
-            && let Some(current_digest) = task::observed_digest(tree, path)
-            && &current_digest == closed_digest
-        {
-            return true;
-        }
-        false
-    })
 }
 
 pub fn challenge(evidence: &Evidence<'_>) -> ChallengeReport {
@@ -230,146 +396,78 @@ fn challenge_against_tracking(
     goals: Result<&[Outcome], &'static str>,
     tracking: Option<(&std::path::Path, &Ignore)>,
 ) -> ChallengeReport {
-    let tracking_error = evidence.task.and_then(|task| {
-        tracking.and_then(|(root, ignore)| task::tracking_error(task, root, ignore))
-    });
     let default_rules = Ignore::default();
-    let ignore = tracking.map_or(&default_rules, |(_, rules)| rules);
-    let mut outcomes: Vec<(&'static str, Result<Challenge, &'static str>)> = Vec::new();
-    outcomes.push((
-        CLASSES[18],
-        match (evidence.task, tracking_error) {
-            (Some(task), Some(problem)) => Ok(Challenge {
-                class: Class::UnobservableTaskInput,
-                statement: format!("I don't believe this result has observable inputs. {problem}"),
-                evidence: vec![format!("task: {}", task.name), problem.clone()],
-                reconcile: task::tracking_recovery(task, &problem),
-            }),
-            (Some(_), None) if tracking.is_some() => {
-                Err("every declared evidence path is observable in change tracking")
-            }
-            (Some(_), None) => Err("path observability was not evaluated against project tracking"),
-            (None, _) => Err(NO_TASK),
-        },
-    ));
-    outcomes.push((CLASSES[16], withdrawal_residue(evidence, tracking)));
-    type Grounding = fn(&Task, &Evidence<'_>, &Ignore) -> Result<Challenge, &'static str>;
-    let against_the_task: [(&'static str, Grounding); 12] = [
-        (CLASSES[12], |task, evidence, _| {
-            declared_check_failed(task, evidence.tree)
-        }),
-        (CLASSES[13], |task, _, _| decision_unanswered(task)),
-        (CLASSES[15], |task, _, _| question_unpicked(task)),
-        (CLASSES[0], |task, _, _| unresolved_finding(task)),
-        (CLASSES[1], |task, evidence, _| {
-            deliverable_unchanged(task, evidence.tree)
-        }),
-        (CLASSES[2], |task, evidence, ignore| {
-            scope_breach(task, evidence.tree, ignore)
-        }),
-        (CLASSES[5], |task, evidence, ignore| {
-            work_without_acceptance(task, evidence.tree, ignore)
-        }),
-        (CLASSES[7], |task, _, _| exception_unresolved(task)),
-        (CLASSES[9], |task, _, _| readiness_without_evidence(task)),
-        (CLASSES[10], |task, evidence, _| {
-            evidence_superseded(task, evidence.tree)
-        }),
-        (CLASSES[11], |task, evidence, ignore| {
-            attribution_unknown(task, evidence.tree, evidence.other_tasks, ignore)
-        }),
-        (CLASSES[19], |task, evidence, _| {
-            check_not_falsified(task, evidence.tree)
-        }),
-    ];
-    for (class, grounding) in against_the_task {
-        outcomes.push((
-            class,
-            match evidence.task {
-                Some(task) => grounding(task, evidence, ignore),
-                None => Err(NO_TASK),
-            },
-        ));
-    }
-    type RoleGrounding = fn(&Task, Option<&Resolution>) -> Result<Challenge, &'static str>;
-    let against_the_role: [(&'static str, RoleGrounding); 3] = [
-        (CLASSES[6], model_outside_role_policy),
-        (CLASSES[8], lens_unassessed),
-        (CLASSES[17], review_target_stale),
-    ];
-    for (class, grounding) in against_the_role {
-        outcomes.push((
-            class,
-            match evidence.task {
-                Some(task) => grounding(task, evidence.role),
-                None => Err(NO_TASK),
-            },
-        ));
-    }
-    outcomes.push((
-        CLASSES[14],
-        match evidence.task {
-            Some(task) => orchestrator_record_during_carry(task),
-            None => Err(NO_TASK),
-        },
-    ));
-    outcomes.push((GOAL_CLASSES[0], goal_outcome_unmet(goals, evidence.task)));
-    let standing = outcomes
-        .iter()
-        .any(|(class, outcome)| *class != CLASSES[16] && outcome.is_ok());
-    outcomes.push((
-        CLASSES[3],
-        if standing {
-            Err(NOT_REACHED)
-        } else {
-            vacuous_rule(&(evidence.falsify)())
-        },
-    ));
-    outcomes.push((
-        CLASSES[4],
-        verification_not_current(
-            evidence.completion,
-            evidence.completion_reason,
-            evidence.task,
-        ),
-    ));
-
+    let scene = Scene {
+        evidence,
+        goals,
+        tracking,
+        ignore: tracking.map_or(&default_rules, |(_, rules)| rules),
+    };
+    let mut work_challenged = false;
     let mut grounded = Vec::new();
     let mut ungrounded = Vec::new();
-    let mut challenges: Vec<(&'static str, Challenge)> = Vec::new();
-    for (class, outcome) in outcomes {
-        match outcome {
+    let mut assignment_blockers = Vec::new();
+    let mut project_challenges = Vec::new();
+    let mut challenges: Vec<(Reach, Challenge)> = Vec::new();
+    for detector in DETECTORS {
+        let class = detector.class.word();
+        let found = if detector.waits_for_clear_work && work_challenged {
+            Err(NOT_REACHED)
+        } else {
+            detector.found(&scene)
+        };
+        match found {
             Ok(challenge) => {
+                work_challenged |= detector.ground != Ground::Project;
                 grounded.push(class);
-                challenges.push((class, challenge));
+                match detector.reach {
+                    Reach::Assignment => assignment_blockers.push(class),
+                    Reach::Project => project_challenges.push(class),
+                }
+                challenges.push((detector.reach, challenge));
             }
             Err(reason) => ungrounded.push((class, reason)),
         }
     }
     let headline = challenges
         .iter()
-        .position(|(class, _)| !OUTSIDE_THE_ASSIGNMENT.contains(class))
+        .position(|(reach, _)| *reach == Reach::Assignment)
         .or_else(|| (!challenges.is_empty()).then_some(0));
+    let project_wide = evidence.task.is_none().then(|| {
+        challenges
+            .iter()
+            .map(|(_, challenge)| challenge.clone())
+            .collect()
+    });
     let found = headline.map(|index| challenges.swap_remove(index).1);
 
     ChallengeReport {
         task: evidence.task.map(|task| task.name.clone()),
         challenge: found,
-        assignment_blockers: grounded
-            .iter()
-            .copied()
-            .filter(|class| !OUTSIDE_THE_ASSIGNMENT.contains(class))
-            .collect(),
-        project_challenges: grounded
-            .iter()
-            .copied()
-            .filter(|class| OUTSIDE_THE_ASSIGNMENT.contains(class))
-            .collect(),
+        challenges: project_wide,
+        assignment_blockers,
+        project_challenges,
         grounded,
         ungrounded,
         authority: AUTHORITY,
         limits: LIMITS,
     }
+}
+
+fn unobservable_task_input(task: &Task, scene: &Scene<'_>) -> Found {
+    let Some((root, ignore)) = scene.tracking else {
+        return Err("path observability was not evaluated against project tracking");
+    };
+    let Some(problem) = task::tracking_error(task, root, ignore) else {
+        return Err("every declared evidence path is observable in change tracking");
+    };
+    Ok(Challenge {
+        unattributed: Vec::new(),
+        class: Class::UnobservableTaskInput,
+        statement: format!("I don't believe this result has observable inputs. {problem}"),
+        evidence: vec![format!("task: {}", task.name), problem.clone()],
+        reconcile: task::tracking_recovery(task, &problem),
+    })
 }
 
 fn withdrawal_residue(
@@ -389,6 +487,7 @@ fn withdrawal_residue(
         };
         if !paths.is_empty() {
             return Ok(Challenge {
+                unattributed: Vec::new(),
                 class: Class::WithdrawalResidue,
                 statement: format!(
                     "Withdrawn task {} still has unresolved changed paths",
@@ -433,6 +532,7 @@ fn unresolved_finding(task: &Task) -> Result<Challenge, &'static str> {
             .to_owned(),
     );
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::UnresolvedFinding,
         statement: format!(
             "I don't believe this task is ready. Finding {} was recorded during it and still carries no resolution.",
@@ -481,6 +581,7 @@ fn decision_unanswered(task: &Task) -> Result<Challenge, &'static str> {
         ));
     }
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::DecisionUnanswered,
         statement: format!(
             "I don't believe this task can be handed back. Decision {} was recorded below its floor, so it blocks the task, and nobody has answered it.",
@@ -523,6 +624,7 @@ fn question_unpicked(task: &Task) -> Result<Challenge, &'static str> {
         ));
     }
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::QuestionUnpicked,
         statement: format!(
             "I don't believe this task can be handed back. The orchestrator asked question {} and nobody has picked an answer to it.",
@@ -569,6 +671,7 @@ fn orchestrator_record_during_carry(task: &Task) -> Result<Challenge, &'static s
         ));
     }
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::OrchestratorRecordDuringCarry,
         statement: format!(
             "I don't believe the orchestrator made this record. {} was recorded {} while {} carried the task, and --model is an attestation, not proof.",
@@ -637,6 +740,7 @@ fn deliverable_unchanged(
         ));
     }
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::DeliverableUnchanged,
         statement: format!("I don't believe this task is complete. {subject}."),
         evidence,
@@ -656,7 +760,7 @@ fn scope_breach(
     let outside: Vec<&str> = moved
         .into_iter()
         .filter(|path| {
-            !task.in_scope(path) && task::attribute(task, tree, path) == task::ATTRIBUTIONS[0]
+            !task.in_scope(path) && task::attribute(task, tree, path) == task::AttributionKind::Task
         })
         .collect();
     let Some(first) = outside.first() else {
@@ -674,6 +778,7 @@ fn scope_breach(
         ));
     }
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::ScopeBreach,
         statement: format!(
             "I don't believe this task stayed inside its write scope. {first} changed since it opened and no declared scope covers it."
@@ -695,6 +800,7 @@ fn vacuous_rule(report: &FalsifyReport) -> Result<Challenge, &'static str> {
         .as_deref()
         .unwrap_or("the inverted fact could not be built from what the providers reported");
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::VacuousRule,
         statement: format!(
             "I don't believe {} can fail. Inverting the fact it names leaves its verdict where it was.",
@@ -735,9 +841,14 @@ fn verification_not_current(
         CompletionState::StructureRed => "a structure rule is violated",
         CompletionState::StructureError => "structure could not be evaluated",
     };
-    let in_the_workers_hands =
-        task.is_some_and(|task| matches!(task.state.as_str(), "open" | "accepted" | "blocked"));
+    let in_the_workers_hands = task.is_some_and(|task| {
+        matches!(
+            task.state,
+            TaskState::Open | TaskState::Accepted | TaskState::Blocked
+        )
+    });
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::VerificationNotCurrent,
         statement: format!("I don't believe any completion claim about this tree yet: {subject}."),
         evidence: vec![
@@ -768,12 +879,13 @@ fn work_without_acceptance(
         return Err("nothing has changed since the task opened");
     };
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::WorkWithoutAcceptance,
         statement: format!(
             "I don't believe this work was taken up through BlaBla. {first} changed, and no role ever accepted this assignment."
         ),
         evidence: vec![
-            format!("state: {}", task.state),
+            format!("state: {}", task.state.word()),
             format!("changed since the task opened: {first}"),
             "no acceptance is recorded on this task".to_owned(),
         ],
@@ -790,6 +902,7 @@ fn exception_unresolved(task: &Task) -> Result<Challenge, &'static str> {
         return Err("no model exception is waiting on the owner");
     };
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::ExceptionUnresolved,
         statement: format!(
             "I don't believe this assignment is settled. A model exception for {} was proposed and no owner ruling answers it.",
@@ -808,7 +921,7 @@ fn declared_check_failed(
     task: &Task,
     tree: &BTreeMap<String, String>,
 ) -> Result<Challenge, &'static str> {
-    if !matches!(task.state.as_str(), "accepted" | "ready") {
+    if !matches!(task.state, TaskState::Accepted | TaskState::Ready) {
         return Err("the task is not accepted or handed back for review");
     }
     let Some(latest) = task::latest_evidence(task) else {
@@ -820,13 +933,14 @@ fn declared_check_failed(
         return Err("the most recent result for the declared check reports success");
     }
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::DeclaredCheckFailed,
         statement: format!(
             "I don't believe this hand-back is supported. {} is the check this task declared, and the most recent result for it exited {}.",
             latest.check, latest.exit
         ),
         evidence: vec![
-            format!("state: {}", task.state),
+            format!("state: {}", task.state.word()),
             format!("check: {}", latest.check),
             format!("exit: {}", latest.exit),
             format!("tool: {}", latest.tool),
@@ -866,6 +980,7 @@ fn check_not_falsified(
         }
     };
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::CheckNotFalsified,
         statement: format!("I don't believe this hand-back proves its change. {reason}."),
         evidence: vec![
@@ -878,13 +993,16 @@ fn check_not_falsified(
 }
 
 fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
-    if !matches!(task.state.as_str(), "accepted" | "ready") {
+    if !matches!(task.state, TaskState::Accepted | TaskState::Ready) {
         return Err("the task is not accepted or handed back for review");
     }
     if task::latest_evidence(task).is_some() {
         return Err("a result for the declared check is recorded against this hand-back");
     }
-    let declared = task.check.as_deref().unwrap_or("the task's declared check");
+    let declared = task.check.as_ref().map_or_else(
+        || "the task's declared check".to_owned(),
+        |argv| crate::project::command_line(argv),
+    );
     let seen: Vec<String> = task
         .evidence
         .iter()
@@ -905,10 +1023,11 @@ fn readiness_without_evidence(task: &Task) -> Result<Challenge, &'static str> {
         )
     };
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::ReadinessWithoutEvidence,
         statement,
         evidence: vec![
-            format!("state: {}", task.state),
+            format!("state: {}", task.state.word()),
             format!("declared check: {declared}"),
             format!("acceptance epoch: {}", task.acceptance_epoch),
             observed,
@@ -929,6 +1048,7 @@ fn evidence_superseded(
         );
     };
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::EvidenceSuperseded,
         statement: format!(
             "I don't believe this result still holds. {} ran against inputs that have since changed.",
@@ -939,7 +1059,11 @@ fn evidence_superseded(
             format!("exit: {}", evidence.exit),
             format!("inputs it saw: {}", evidence.inputs.len()),
         ],
-        reconcile: include_str!("cli/text/skeptic-evidence-superseded.md").to_owned(),
+        reconcile: format!(
+            "Inspect blabla task freshness {} for receipt-relative changes. {}",
+            task.name,
+            include_str!("cli/text/skeptic-evidence-superseded.md")
+        ),
     })
 }
 
@@ -949,16 +1073,12 @@ fn attribution_unknown(
     other_tasks: &[Task],
     ignore: &Ignore,
 ) -> Result<Challenge, &'static str> {
-    let moved = task::changed(task, tree, ignore);
-    let undeclared: Vec<&str> = moved
-        .iter()
-        .copied()
-        .filter(|path| {
-            task::attribute(task, tree, path) == task::ATTRIBUTIONS[2]
-                && !path_in_other_task_scope(path, task, other_tasks, tree)
-        })
+    let undeclared: Vec<String> = task::attributions(task, tree, other_tasks, ignore)
+        .into_iter()
+        .filter(|entry| !entry.attributed)
+        .map(|entry| entry.path)
         .collect();
-    let Some(first) = undeclared.first().copied() else {
+    let Some(first) = undeclared.first() else {
         return Err("every change since the task opened is attributable");
     };
     let mut evidence = vec![
@@ -983,6 +1103,7 @@ fn attribution_unknown(
         ),
         evidence,
         reconcile: include_str!("cli/text/skeptic-attribution-unknown.md").to_owned(),
+        unattributed: undeclared,
     })
 }
 
@@ -999,7 +1120,7 @@ fn model_outside_role_policy(
     if role.models.is_empty() {
         return Err("the role declares no model policy");
     }
-    if role.models.iter().any(|model| model == &accepted.model) {
+    if crate::memory::process::admits(&role.models, &accepted.model) {
         return Err("the accepted model is one the role permits");
     }
     if task.exceptions.iter().any(|exception| {
@@ -1008,6 +1129,7 @@ fn model_outside_role_policy(
         return Err("an owner ruling approved this model for this assignment");
     }
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::ModelOutsideRolePolicy,
         statement: format!(
             "I don't believe this assignment is running under a permitted model. It was accepted on {}, which {} does not list.",
@@ -1023,7 +1145,7 @@ fn model_outside_role_policy(
 }
 
 fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, &'static str> {
-    if !matches!(task.state.as_str(), "accepted" | "ready") {
+    if !matches!(task.state, TaskState::Accepted | TaskState::Ready) {
         return Err("the task is not accepted or handed back for review");
     }
     let Some(role) = role else {
@@ -1047,12 +1169,13 @@ fn lens_unassessed(task: &Task, role: Option<&Resolution>) -> Result<Challenge, 
         return Err("every lens the task requires carries an assessment");
     };
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::LensUnassessed,
         statement: format!(
             "I don't believe this hand-back was held against everything the role consults. {missing} has no assessment on it."
         ),
         evidence: vec![
-            format!("state: {}", task.state),
+            format!("state: {}", task.state.word()),
             if task.lenses.is_empty() {
                 format!("role::{} consults: {}", task.role, role.lenses.join(", "))
             } else {
@@ -1072,6 +1195,7 @@ fn review_target_stale(task: &Task, role: Option<&Resolution>) -> Result<Challen
         return Err("the review inspects the current target revision");
     }
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::ReviewTargetStale,
         statement: format!(
             "Review {} no longer establishes approval of task {} at its current revision",
@@ -1082,7 +1206,7 @@ fn review_target_stale(task: &Task, role: Option<&Resolution>) -> Result<Challen
             target.revision.fingerprint()
         )],
         reconcile: format!(
-            "Reaccept {} to inspect the target again, record current evidence and assessments, challenge and hand back. A CLOSED review stays historical; open a new review task",
+            "Inspect task freshness {0}, then reaccept {0} to inspect the target again, record current evidence and assessments, challenge and hand back. A CLOSED review stays historical; open a new review task",
             task.name
         ),
     })
@@ -1124,6 +1248,7 @@ fn goal_outcome_unmet(
         ));
     }
     Ok(Challenge {
+        unattributed: Vec::new(),
         class: Class::GoalOutcomeUnmet,
         statement: format!(
             "I don't believe {} is done. It is marked done, and {} of its {} expectations hold in the current project view.",
@@ -1135,4 +1260,62 @@ fn goal_outcome_unmet(
             first.goal
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_class_has_one_detector_in_evaluation_order() {
+        let expected = [
+            (Class::UnobservableTaskInput, Ground::Task),
+            (Class::WithdrawalResidue, Ground::Project),
+            (Class::DeclaredCheckFailed, Ground::Task),
+            (Class::DecisionUnanswered, Ground::Task),
+            (Class::QuestionUnpicked, Ground::Task),
+            (Class::UnresolvedFinding, Ground::Task),
+            (Class::DeliverableUnchanged, Ground::Task),
+            (Class::ScopeBreach, Ground::Task),
+            (Class::WorkWithoutAcceptance, Ground::Task),
+            (Class::ExceptionUnresolved, Ground::Task),
+            (Class::ReadinessWithoutEvidence, Ground::Task),
+            (Class::EvidenceSuperseded, Ground::Task),
+            (Class::AttributionUnknown, Ground::Task),
+            (Class::CheckNotFalsified, Ground::Task),
+            (Class::ModelOutsideRolePolicy, Ground::Role),
+            (Class::LensUnassessed, Ground::Role),
+            (Class::ReviewTargetStale, Ground::Role),
+            (Class::OrchestratorRecordDuringCarry, Ground::Task),
+            (Class::GoalOutcomeUnmet, Ground::Goal),
+            (Class::VacuousRule, Ground::Project),
+            (Class::VerificationNotCurrent, Ground::Project),
+        ];
+        let table: Vec<(Class, Ground)> = DETECTORS
+            .iter()
+            .map(|detector| (detector.class, detector.ground))
+            .collect();
+        assert_eq!(table, expected.to_vec());
+        let outside: Vec<Class> = DETECTORS
+            .iter()
+            .filter(|detector| detector.outside_the_assignment())
+            .map(|detector| detector.class)
+            .collect();
+        assert_eq!(
+            outside,
+            vec![
+                Class::WithdrawalResidue,
+                Class::OrchestratorRecordDuringCarry,
+                Class::GoalOutcomeUnmet,
+                Class::VacuousRule,
+                Class::VerificationNotCurrent,
+            ]
+        );
+        for detector in DETECTORS {
+            assert_eq!(
+                serde_json::to_value(detector.class).expect("a class serializes"),
+                detector.class.word()
+            );
+        }
+    }
 }

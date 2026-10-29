@@ -64,6 +64,12 @@ for line in sys.stdin:
         print('{"id":' + json.dumps(request["id"]) + ',"result":{"ok":false,"ok":true}}', flush=True)
     elif mode == "duplicate_result":
         print('{"id":' + json.dumps(request["id"]) + ',"result":{"ok":false,"error":"failed"},"result":{"ok":true}}', flush=True)
+    elif mode == "spoof_witness":
+        emit(request, {
+            "ok": False,
+            "error": "rejected",
+            "exchange_witness": {"request_id": "ADAPTER_SPOOF_SECRET_MARKER"},
+        })
     elif mode == "failed_ack":
         emit(request, {"ok": False, "error": "fixture rejected reset"})
     elif mode == "malformed":

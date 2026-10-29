@@ -1,0 +1,127 @@
+state machine_ready: bool
+state task_state: string
+state refused: bool
+state record_unchanged: bool
+state serves_goal: bool
+state asks_intent: bool
+state scope_empty: bool
+state evidence_kind: string
+state run_evidence_current: bool
+state any_evidence_current: bool
+state evidence_passing: bool
+state open_findings: int
+state residual_findings: int
+state lens_assessments: int
+state intent_claims: int
+state model_challenged: bool
+state tree_matches_opening: bool
+state project_green: bool
+state show_matches_challenge: bool
+state scope_spelling_kept: bool
+state unnamed_challenge_is_project_wide: bool
+state scope_paths: int
+state affected_intents: int
+
+action machine_fixture(goal: bool, intent: bool, empty_scope: bool, green: bool)
+action accept(model: string)
+action block()
+action run_evidence()
+action claim_evidence(exit: int)
+action change_input()
+action touch_outside_scope()
+action ready(outcome: string, lens: bool, intent: bool)
+action close(changed: bool, breaking: bool)
+action withdraw()
+action inspect_budget()
+action inspect_views()
+action release_scope(changed: bool)
+action prepare_handback()
+action hand_back(outcome: string)
+
+always "a-task-is-in-one-lifecycle-state" {
+    task_state == "none" or task_state == "open" or task_state == "accepted" or task_state == "blocked" or task_state == "ready" or task_state == "closed" or task_state == "withdrawn"
+}
+always "a-refused-command-changes-no-record" { not refused or record_unchanged }
+always "evidence-is-executed-claimed-or-absent" { evidence_kind == "" or evidence_kind == "executed" or evidence_kind == "claimed" }
+
+when machine_fixture {
+    expect "the-fixture-opens-one-task": after.machine_ready and after.task_state == "open" and after.serves_goal == input.goal and after.asks_intent == input.intent and after.scope_empty == input.empty_scope
+}
+
+when accept {
+    expect "accept-resumes-every-live-state": not before.machine_ready or input.model == "" or not (before.task_state == "open" or before.task_state == "accepted" or before.task_state == "blocked" or before.task_state == "ready") or (after.task_state == "accepted" and not after.refused)
+    expect "accept-is-refused-once-a-task-ends": not (before.task_state == "closed" or before.task_state == "withdrawn") or (after.refused and after.task_state == before.task_state)
+    expect "executed-evidence-survives-reacceptance": not (before.evidence_kind == "executed" and before.run_evidence_current and after.task_state == "accepted") or after.run_evidence_current
+    expect "a-model-family-admits-its-members": not (after.task_state == "accepted" and (input.model == "family-1" or input.model == "family-2")) or not after.model_challenged
+    expect "an-exact-model-admits-only-itself": not (after.task_state == "accepted" and (input.model == "pinned:9b" or input.model == "pinned:4b")) or ((input.model != "pinned:9b" or not after.model_challenged) and (input.model != "pinned:4b" or after.model_challenged))
+}
+
+when block {
+    expect "an-accepted-task-blocks": before.task_state != "accepted" or after.task_state == "blocked"
+    expect "block-is-refused-outside-accepted": not before.machine_ready or before.task_state == "accepted" or after.refused
+}
+
+when run_evidence {
+    expect "run-records-executed-evidence": before.task_state != "accepted" or (after.evidence_kind == "executed" and after.run_evidence_current)
+}
+
+when claim_evidence {
+    expect "an-exit-code-is-recorded-as-claimed": before.task_state != "accepted" or input.exit < -2147483648 or input.exit > 2147483647 or after.evidence_kind == "claimed"
+    expect "an-exit-code-outside-the-platform-range-is-refused": not (before.machine_ready and (input.exit < -2147483648 or input.exit > 2147483647)) or (after.refused and after.record_unchanged)
+}
+
+when change_input {
+    expect "a-changed-input-stales-evidence": before.evidence_kind == "" or not after.run_evidence_current
+}
+
+when touch_outside_scope {
+    expect "a-change-after-opening-is-seen": not before.machine_ready or not after.tree_matches_opening
+}
+
+when ready {
+    expect "only-an-accepted-task-becomes-ready": after.task_state != "ready" or before.task_state == "accepted" or before.task_state == "ready"
+    expect "ready-needs-current-passing-evidence": not (before.task_state == "accepted" and after.task_state == "ready") or (before.any_evidence_current and before.evidence_passing)
+    expect "a-goal-task-needs-an-outcome": not (before.task_state == "accepted" and before.serves_goal and input.outcome == "") or after.refused
+    expect "an-outcome-without-a-goal-is-refused": not (before.task_state == "accepted" and not before.serves_goal and input.outcome != "") or after.refused
+    expect "an-unknown-outcome-is-refused": not before.machine_ready or input.outcome == "" or input.outcome == "delivered" or input.outcome == "partial" or input.outcome == "blocked" or input.outcome == "not-applicable" or after.refused
+    expect "an-intent-task-needs-its-claims": not (before.task_state == "accepted" and before.asks_intent and before.affected_intents > 0 and not input.intent) or after.refused
+}
+
+when hand_back {
+    expect "a-partial-or-blocked-outcome-leaves-a-residual": not (after.task_state == "ready" and before.serves_goal and (input.outcome == "partial" or input.outcome == "blocked")) or after.residual_findings == before.residual_findings + 1
+    expect "a-delivered-outcome-leaves-no-residual": not (input.outcome == "delivered" or input.outcome == "not-applicable") or after.residual_findings == before.residual_findings
+    expect "intent-claims-are-recorded-with-ready": not (after.task_state == "ready" and before.asks_intent) or after.intent_claims == before.affected_intents
+    expect "ready-records-its-lens-assessments-atomically": (after.task_state != "ready" or after.lens_assessments == before.lens_assessments + 1) and (after.task_state == "ready" or after.lens_assessments == before.lens_assessments)
+}
+
+when close {
+    expect "only-a-ready-task-closes": after.task_state != "closed" or before.task_state == "ready" or before.task_state == "closed"
+    expect "open-findings-block-close": before.open_findings == 0 or before.task_state == "closed" or after.task_state != "closed"
+    expect "residuals-survive-close": after.residual_findings == before.residual_findings
+    expect "an-empty-scope-task-closes-against-its-opening-snapshot": not (before.task_state == "ready" and before.scope_empty and after.tree_matches_opening and before.run_evidence_current and before.open_findings == 0) or after.task_state == "closed"
+    expect "a-changed-tree-needs-a-green-run": not (before.task_state == "ready" and not after.tree_matches_opening and not after.project_green) or after.task_state != "closed"
+}
+
+when withdraw {
+    expect "withdraw-ends-every-live-task": not before.machine_ready or not (before.task_state == "open" or before.task_state == "accepted" or before.task_state == "blocked" or before.task_state == "ready") or after.task_state == "withdrawn"
+    expect "an-ended-task-cannot-be-withdrawn": not (before.task_state == "closed" or before.task_state == "withdrawn") or after.task_state == before.task_state
+}
+
+when inspect_budget {
+    expect "budget-is-read-only": after.record_unchanged and after.task_state == before.task_state
+}
+
+when inspect_views {
+    expect "show-and-challenge-attribute-every-path-alike": not before.machine_ready or after.show_matches_challenge
+    expect "scope-paths-keep-their-spelling": not before.machine_ready or after.scope_spelling_kept
+    expect "an-unnamed-challenge-reports-the-project": not before.machine_ready or after.unnamed_challenge_is_project_wide
+}
+
+when prepare_handback {
+    expect "a-family-member-prepares-without-a-model-challenge": not (before.machine_ready and (before.task_state == "open" or before.task_state == "accepted" or before.task_state == "blocked" or before.task_state == "ready")) or (after.task_state == "accepted" and not after.model_challenged and after.evidence_kind == "executed")
+}
+
+when release_scope {
+    expect "an-unchanged-path-leaves-the-scope": not (before.machine_ready and before.scope_paths > 0 and not input.changed and (before.task_state == "open" or before.task_state == "accepted" or before.task_state == "blocked" or before.task_state == "ready")) or (after.scope_paths == before.scope_paths - 1 and not after.refused)
+    expect "a-changed-path-stays-in-the-scope": not (before.machine_ready and input.changed) or (after.refused and after.scope_paths == before.scope_paths)
+}

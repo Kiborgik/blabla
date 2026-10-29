@@ -2,7 +2,7 @@ use super::mission::MissionMemory;
 use super::syntax::Block;
 use super::{Memory, expect_fields, expect_keywords, list, text};
 use crate::diagnostic::Diagnostic;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 pub const FILE_NAME: &str = "goals.bla";
@@ -11,7 +11,7 @@ pub const AUTHORITY: &str = include_str!("../cli/text/authority-goal.md");
 
 pub const STATES: [&str; 3] = ["active", "done", "dropped"];
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Goal {
     pub name: String,
     pub serves: Vec<String>,

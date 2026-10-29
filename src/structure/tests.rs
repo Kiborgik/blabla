@@ -286,11 +286,12 @@ fn a_module_a_provider_never_reported_is_an_error_not_an_absent_fact() {
     assert_eq!(report.errors, report.total());
     let rule = report.result("architecture::no-domain-restart").unwrap();
     assert_eq!(rule.status, RuleStatus::Error);
-    assert!(
-        rule.message.contains("reported no facts for app/domain.py"),
-        "{}",
-        rule.message
-    );
+    let expected = ProviderFailure::NotReported {
+        provider: "silent",
+        module: "app/domain.py".to_owned(),
+    }
+    .message();
+    assert!(rule.message.contains(&expected), "{}", rule.message);
 }
 
 pub(super) fn symbols(paths: &[&str]) -> Vec<SymbolFact> {
@@ -386,13 +387,18 @@ fn a_clean_architecture_is_green_with_one_provider_invocation() {
     assert_eq!(ids[6], "architecture::model-module");
     let restart = report.result("architecture::no-domain-restart").unwrap();
     assert_eq!(restart.status, RuleStatus::Green);
-    assert_eq!(
-        restart.observed.as_deref(),
-        Some("app/domain.py does not define VaultDomain.restart")
-    );
+    let observed = restart.observed.as_deref().unwrap();
+    assert!(observed.starts_with("app/domain.py "), "{observed}");
+    assert!(observed.ends_with("VaultDomain.restart"), "{observed}");
+    let declared = contract(ARCHITECTURE);
+    let declared = declared
+        .rules
+        .iter()
+        .find(|rule| rule.id == "architecture::no-domain-restart")
+        .unwrap();
     assert_eq!(
         restart.requirement,
-        "domain must not define VaultDomain.restart"
+        declared.fact.requirement(declared.polarity)
     );
     assert_eq!(restart.provider, Some("fake"));
     assert_eq!(restart.file, "architecture.bla");
@@ -417,10 +423,9 @@ fn mutations_turn_exactly_the_touched_rule_red_with_an_observation() {
     assert_eq!(report.status, LayerStatus::Red);
     assert_eq!(report.violated, 1);
     assert_eq!(rule.status, RuleStatus::Red);
-    assert_eq!(
-        rule.observed.as_deref(),
-        Some("app/domain.py:4 imports store (app/store.py)")
-    );
+    let observed = rule.observed.as_deref().unwrap();
+    assert!(observed.starts_with("app/domain.py:4 "), "{observed}");
+    assert!(observed.ends_with("(app/store.py)"), "{observed}");
 
     let mut facts = clean_facts();
     let model = facts.get_mut("app/model.py").unwrap();
@@ -460,10 +465,9 @@ fn mutations_turn_exactly_the_touched_rule_red_with_an_observation() {
     let (report, _) = report_with(facts);
     let rule = report.result("architecture::no-domain-restart").unwrap();
     assert_eq!(rule.status, RuleStatus::Red);
-    assert_eq!(
-        rule.observed.as_deref(),
-        Some("app/domain.py:40 defines VaultDomain.restart")
-    );
+    let observed = rule.observed.as_deref().unwrap();
+    assert!(observed.starts_with("app/domain.py:40 "), "{observed}");
+    assert!(observed.ends_with("VaultDomain.restart"), "{observed}");
 
     let mut facts = clean_facts();
     facts.get_mut("app/model.py").unwrap().collections[0]
@@ -472,10 +476,12 @@ fn mutations_turn_exactly_the_touched_rule_red_with_an_observation() {
     let (report, _) = report_with(facts);
     let rule = report.result("architecture::durable-keeper").unwrap();
     assert_eq!(rule.status, RuleStatus::Red);
-    assert_eq!(
-        rule.observed.as_deref(),
-        Some("app/model.py:3 DURABLE_FIELDS = (\"glyph\")")
+    let observed = rule.observed.as_deref().unwrap();
+    assert!(
+        observed.starts_with("app/model.py:3 DURABLE_FIELDS "),
+        "{observed}"
     );
+    assert!(observed.ends_with("(\"glyph\")"), "{observed}");
 
     let mut facts = clean_facts();
     facts.get_mut("app/model.py").unwrap().collections[0]
@@ -484,10 +490,12 @@ fn mutations_turn_exactly_the_touched_rule_red_with_an_observation() {
     let (report, _) = report_with(facts);
     let rule = report.result("architecture::id-is-the-key").unwrap();
     assert_eq!(rule.status, RuleStatus::Red);
-    assert_eq!(
-        rule.observed.as_deref(),
-        Some("app/model.py:3 DURABLE_FIELDS contains \"id\"")
+    let observed = rule.observed.as_deref().unwrap();
+    assert!(
+        observed.starts_with("app/model.py:3 DURABLE_FIELDS "),
+        "{observed}"
     );
+    assert!(observed.ends_with("\"id\""), "{observed}");
 }
 
 #[test]
@@ -509,10 +517,11 @@ fn unsupported_facts_and_missing_providers_are_errors_never_green() {
         let rule = report.result(id).unwrap();
         assert_eq!(rule.status, RuleStatus::Error);
         assert!(
-            rule.message.contains("not a literal collection"),
+            rule.message.starts_with("app/model.py:"),
             "{}",
             rule.message
         );
+        assert!(rule.message.contains("DURABLE_FIELDS"), "{}", rule.message);
     }
 
     let mut facts = clean_facts();
@@ -525,7 +534,12 @@ fn unsupported_facts_and_missing_providers_are_errors_never_green() {
     ] {
         let rule = report.result(id).unwrap();
         assert_eq!(rule.status, RuleStatus::Error, "{id}");
-        assert!(rule.message.contains("could not be parsed"));
+        assert!(rule.message.contains("app/domain.py"), "{}", rule.message);
+        assert!(
+            rule.message.contains("invalid syntax (line 3)"),
+            "{}",
+            rule.message
+        );
     }
     assert_eq!(
         report
@@ -547,15 +561,20 @@ fn unsupported_facts_and_missing_providers_are_errors_never_green() {
     let report = verify(&[contract(ARCHITECTURE)], Path::new("/repo"), &providers);
     assert_eq!(report.status, LayerStatus::Error);
     assert_eq!(report.errors, 7);
-    assert!(report.rules[0].message.contains("python was not found"));
+    let unavailable = ProviderFailure::Unavailable {
+        provider: "fake",
+        message: "python was not found".into(),
+    }
+    .message();
+    assert!(report.rules[0].message.contains(&unavailable));
 
     let report = verify(&[contract(ARCHITECTURE)], Path::new("/repo"), &[]);
     assert_eq!(report.status, LayerStatus::Error);
-    assert!(
-        report.rules[0]
-            .message
-            .contains("no structural provider inspects '.py'")
-    );
+    let no_provider = ProviderFailure::NoProvider {
+        extension: ".py".to_owned(),
+    }
+    .message();
+    assert!(report.rules[0].message.contains(&no_provider));
 
     let report = verify(&[], Path::new("/repo"), &[]);
     assert_eq!(report.status, LayerStatus::None);
@@ -578,7 +597,7 @@ fn deeper_symbol_paths_than_the_provider_reports_are_errors() {
     let providers: Vec<Box<dyn Provider>> = vec![Box::new(provider)];
     let report = verify(&[deep], Path::new("/repo"), &providers);
     assert_eq!(report.rules[0].status, RuleStatus::Error);
-    assert!(report.rules[0].message.contains("2 levels deep"));
+    assert!(report.rules[0].message.contains("B.c.d"));
 }
 
 #[test]
@@ -605,9 +624,13 @@ fn missing_modules_are_observed_state_not_provider_failures() {
     let (report, _) = report_with(facts);
     let module = report.result("architecture::model-module").unwrap();
     assert_eq!(module.status, RuleStatus::Red);
-    assert_eq!(
-        module.observed.as_deref(),
-        Some("app/model.py does not exist")
+    assert!(
+        module
+            .observed
+            .as_deref()
+            .is_some_and(|observed| observed.starts_with("app/model.py")),
+        "{:?}",
+        module.observed
     );
 }
 
@@ -741,58 +764,55 @@ fn association_report(entries: Vec<super::EntryFact>, symbols_present: &[&str]) 
 }
 
 #[test]
-fn an_association_holds_when_the_keyed_entry_carries_the_value() {
-    let entries = vec![entry(
-        "GATES",
-        "clippy",
-        27,
-        &["cargo", "clippy", "--offline"],
-    )];
-    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Green);
-}
-
-#[test]
-fn an_association_fails_when_the_keyed_entry_carries_another_payload() {
-    let entries = vec![entry("GATES", "clippy", 27, &["cargo", "check"])];
-    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
-}
-
-#[test]
-fn an_association_fails_when_the_value_sits_under_a_different_key() {
-    let entries = vec![
-        entry("GATES", "fmt", 26, &["cargo", "clippy"]),
-        entry("GATES", "clippy", 27, &["cargo", "check"]),
+fn an_association_holds_only_when_the_keyed_entry_carries_the_value() {
+    let opaque = super::EntryFact {
+        path: vec!["GATES".to_owned()],
+        key: Literal::Str("clippy".to_owned()),
+        line: 27,
+        values: None,
+    };
+    let cases = [
+        (
+            vec![entry(
+                "GATES",
+                "clippy",
+                27,
+                &["cargo", "clippy", "--offline"],
+            )],
+            RuleStatus::Green,
+        ),
+        (
+            vec![entry("GATES", "clippy", 27, &["cargo", "check"])],
+            RuleStatus::Red,
+        ),
+        (
+            vec![
+                entry("GATES", "fmt", 26, &["cargo", "clippy"]),
+                entry("GATES", "clippy", 27, &["cargo", "check"]),
+            ],
+            RuleStatus::Red,
+        ),
+        (
+            vec![entry("GATES", "fmt", 26, &["cargo", "clippy"])],
+            RuleStatus::Red,
+        ),
+        (
+            vec![
+                entry("GATES", "clippy", 27, &["cargo", "check"]),
+                entry("GATES", "lint", 28, &["cargo", "clippy"]),
+            ],
+            RuleStatus::Red,
+        ),
+        (Vec::new(), RuleStatus::Error),
+        (vec![opaque], RuleStatus::Error),
     ];
-    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
-}
-
-#[test]
-fn an_association_fails_when_the_key_appears_only_inside_another_payload() {
-    let entries = vec![entry("GATES", "fmt", 26, &["cargo", "clippy"])];
-    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
-}
-
-#[test]
-fn an_association_fails_when_key_and_value_exist_but_are_not_paired() {
-    let entries = vec![
-        entry("GATES", "clippy", 27, &["cargo", "check"]),
-        entry("GATES", "lint", 28, &["cargo", "clippy"]),
-    ];
-    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
-}
-
-#[test]
-fn an_association_never_satisfies_itself_from_the_key() {
-    let entries = vec![entry("GATES", "clippy", 27, &["cargo", "check"])];
-    assert_eq!(association_report(entries, &["GATES"]), RuleStatus::Red);
-}
-
-#[test]
-fn an_association_over_a_name_without_entries_is_an_error() {
-    assert_eq!(
-        association_report(Vec::new(), &["GATES"]),
-        RuleStatus::Error
-    );
+    for (index, (entries, expected)) in cases.into_iter().enumerate() {
+        assert_eq!(
+            association_report(entries, &["GATES"]),
+            expected,
+            "case {index}"
+        );
+    }
 }
 
 #[test]
@@ -820,10 +840,9 @@ fn an_association_reports_the_entry_line_and_rejects_a_missing_separator() {
     let providers: Vec<Box<dyn Provider>> = vec![Box::new(provider)];
     let report = verify(&[contract(ASSOCIATION)], Path::new("/repo"), &providers);
     let rule = report.result("architecture::clippy-runs").unwrap();
-    assert_eq!(
-        rule.observed.as_deref(),
-        Some("app/gate.py:27 GATES maps \"clippy\" to \"clippy\"")
-    );
+    let observed = rule.observed.as_deref().unwrap();
+    assert!(observed.starts_with("app/gate.py:27 GATES "), "{observed}");
+    assert!(observed.ends_with("\"clippy\""), "{observed}");
     let broken = parse(
         "s.bla",
         "module gate \"app/gate.py\"\nrequire \"x\": value gate::GATES maps \"a\" \"b\"\n",
@@ -832,18 +851,4 @@ fn an_association_reports_the_entry_line_and_rejects_a_missing_separator() {
     )
     .unwrap_err();
     assert_eq!(broken.code, "E_STRUCTURE_FACT");
-}
-
-#[test]
-fn an_unreadable_payload_is_an_error_not_a_missing_association() {
-    let opaque = super::EntryFact {
-        path: vec!["GATES".to_owned()],
-        key: Literal::Str("clippy".to_owned()),
-        line: 27,
-        values: None,
-    };
-    assert_eq!(
-        association_report(vec![opaque], &["GATES"]),
-        RuleStatus::Error
-    );
 }

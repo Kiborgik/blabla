@@ -1,1 +1,0 @@
-  Run that command from the project root; --tool is an evidence label, not the command to execute, and --exit is its real exit code

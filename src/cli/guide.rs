@@ -22,7 +22,7 @@ const LOOP_TAIL: &str = include_str!("text/guide-loop-tail.md");
 pub fn loop_text() -> String {
     format!(
         "{LOOP_HEAD}{}{LOOP_TAIL}",
-        task::routes_text("<name>", Some("<the check the assignment declares>"))
+        task::routes_text("<name>", "<the check the assignment declares>")
     )
 }
 

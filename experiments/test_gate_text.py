@@ -188,6 +188,16 @@ class ExitCodes(TempTree):
         subprocess.run(["git", "-C", str(self.root), "add", "README.md"], check=True)
         self.assertEqual(quiet_main(["links"], self.root), 1)
 
+    def test_links_mode_skips_a_tracked_file_deleted_from_the_working_tree(self):
+        tracked_tree(self.root, {"README.md": "[guide](docs/guide.md)\n", "docs/guide.md": "# Guide\n", "docs/old.md": "# Old\n"})
+        (self.root / "docs/old.md").unlink()
+        self.assertEqual(quiet_main(["links"], self.root), 0)
+
+    def test_links_mode_exits_one_on_a_link_to_a_tracked_file_deleted_from_the_working_tree(self):
+        tracked_tree(self.root, {"README.md": "[old](docs/old.md)\n", "docs/old.md": "# Old\n"})
+        (self.root / "docs/old.md").unlink()
+        self.assertEqual(quiet_main(["links"], self.root), 1)
+
 
 class GateWiring(unittest.TestCase):
     def test_the_gate_runs_each_text_mode_as_its_own_step(self):

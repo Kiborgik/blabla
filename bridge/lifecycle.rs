@@ -1,3 +1,4 @@
+use super::component::Component;
 use blabla::application::{AppConfig, Application};
 use blabla::ir::Field;
 use blabla::ir::Type;
@@ -66,24 +67,6 @@ impl Lifecycle {
             previous_descendant_alive: false,
             last_termination: "none".to_owned(),
             previous_descendant_pid: None,
-        }
-    }
-
-    pub fn call(&mut self, action: &str) -> bool {
-        match action {
-            "start_an_application_with_a_descendant" => {
-                self.start_an_application_with_a_descendant();
-                true
-            }
-            "restart_the_application" => {
-                self.restart_the_application();
-                true
-            }
-            "finish_the_application" => {
-                self.finish_the_application();
-                true
-            }
-            _ => false,
         }
     }
 
@@ -216,19 +199,30 @@ impl Lifecycle {
             }
         }
     }
+}
 
-    pub fn reset(&mut self) {
+impl Drop for Lifecycle {
+    fn drop(&mut self) {
         if let Some(session) = &mut self.session {
             let _ = session.finish();
         }
-        self.session = None;
-        self.running = false;
-        self.previous_descendant_alive = false;
-        self.last_termination = "none".to_owned();
-        self.previous_descendant_pid = None;
+    }
+}
+
+impl Component for Lifecycle {
+    fn call(&mut self, action: &str, _args: &Value) -> Option<Result<(), String>> {
+        match action {
+            "start_an_application_with_a_descendant" => {
+                self.start_an_application_with_a_descendant()
+            }
+            "restart_the_application" => self.restart_the_application(),
+            "finish_the_application" => self.finish_the_application(),
+            _ => return None,
+        }
+        Some(Ok(()))
     }
 
-    pub fn observe(&self) -> Value {
+    fn observe(&self, _observed: &Value) -> Value {
         json!({
             "running": self.running,
             "previous_descendant_alive": self.previous_descendant_alive,

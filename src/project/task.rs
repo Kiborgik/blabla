@@ -1,13 +1,18 @@
 use super::ignore::Ignore;
 use super::snapshot;
 use super::status::RECORD_DIRECTORY;
+use crate::memory::process::admits;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+pub mod claims;
+pub mod machine;
+pub mod models;
 pub mod revision;
 pub mod store;
 
+use machine::{Command, Facts, Refusal, TaskState};
 pub use revision::{RelevantRevision, relevant_revision};
 
 pub const TASK_DIRECTORY: &str = "tasks";
@@ -15,6 +20,7 @@ pub const TASK_DIRECTORY: &str = "tasks";
 pub const AUTHORITY: &str = include_str!("../cli/text/authority-task.md");
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Deliverable {
     pub path: String,
     pub opened_digest: Option<String>,
@@ -29,7 +35,7 @@ pub struct FindingResolution {
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 enum ResolutionRecord {
     Evidence(String),
     Fields {
@@ -52,6 +58,7 @@ impl From<ResolutionRecord> for FindingResolution {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Addressed {
     pub model: String,
     pub statement: String,
@@ -59,6 +66,7 @@ pub struct Addressed {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Finding {
     pub id: usize,
     pub statement: String,
@@ -66,6 +74,8 @@ pub struct Finding {
     pub addressed: Option<Addressed>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<FindingResolution>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub residual: bool,
 }
 
 pub const DECISION_KINDS: [&str; 2] = ["yes-no", "choice"];
@@ -73,6 +83,7 @@ pub const DECISION_KINDS: [&str; 2] = ["yes-no", "choice"];
 pub const YES_NO: [&str; 2] = ["yes", "no"];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Answer {
     pub pick: String,
     pub model: String,
@@ -80,6 +91,7 @@ pub struct Answer {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Decision {
     pub id: usize,
     pub question: String,
@@ -135,6 +147,7 @@ pub struct Question {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AskedQuestion {
     pub id: String,
     pub question: String,
@@ -218,7 +231,7 @@ pub fn ask<'a>(
             task.name
         ));
     }
-    if !orchestrator.is_empty() && !orchestrator.contains(&asked.model) {
+    if !orchestrator.is_empty() && !admits(orchestrator, &asked.model) {
         return Err(format!(
             "model {:?} is not in role::orchestrator's permitted list: {}; only the orchestrator asks, and the carrying role picks with task decide --on",
             asked.model,
@@ -303,11 +316,11 @@ fn record_decision(
             task.name, blocking.id, blocking.question
         ));
     }
-    if task.state != "accepted" || task.accepted.is_none() {
+    if task.state != TaskState::Accepted || task.accepted.is_none() {
         return Err(format!(
             "task {:?} is {}; a decision is recorded once the task is accepted",
             task.name,
-            task.state.to_ascii_uppercase()
+            task.state.label()
         ));
     }
     if asked.question.trim().is_empty() {
@@ -348,7 +361,7 @@ fn record_decision(
         on,
     });
     if confidence < floor {
-        apply(task, "blocked");
+        let _ = machine::fire(task, Command::Block, &Facts::record_only());
     }
     Ok(task.decisions.last().expect("a decision was just recorded"))
 }
@@ -375,12 +388,14 @@ pub fn answer(task: &mut Task, id: usize, given: Answer) -> Result<&Decision, St
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Confirmation {
     pub model: String,
     pub unix: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OrchestratorRecord {
     pub verb: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -403,7 +418,7 @@ impl OrchestratorRecord {
 }
 
 pub fn carrier(task: &Task) -> Option<&str> {
-    if task.state != "accepted" {
+    if task.state != TaskState::Accepted {
         return None;
     }
     task.accepted
@@ -486,18 +501,10 @@ pub fn calibration(tasks: &[Task], model_named_by: impl Fn(&str) -> String) -> V
         .collect()
 }
 
-pub const STATES: [&str; 6] = [
-    "open",
-    "accepted",
-    "blocked",
-    "ready",
-    "closed",
-    "withdrawn",
-];
-
 pub const SCRATCH_DIRECTORY: &str = "scratch";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Acceptance {
     pub model: String,
     pub unix: u64,
@@ -506,6 +513,7 @@ pub struct Acceptance {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Assessment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -590,7 +598,7 @@ pub fn review_current(
     identities: BTreeMap<String, String>,
 ) -> bool {
     review.accepted.is_some()
-        && reviewed.state != "withdrawn"
+        && reviewed.state != TaskState::Withdrawn
         && review.name != reviewed.name
         && review.review_of.as_ref().is_some_and(|target| {
             target.task == reviewed.name
@@ -599,6 +607,7 @@ pub fn review_current(
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Exception {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_epoch: Option<u64>,
@@ -613,39 +622,90 @@ pub struct Exception {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CheckIdentity {
-    Text { command: String },
     Argv { argv: Vec<String> },
 }
 
 pub fn declared_check(task: &Task) -> Option<CheckIdentity> {
-    match (&task.check_argv, &task.check) {
-        (Some(argv), _) => Some(CheckIdentity::Argv { argv: argv.clone() }),
-        (None, Some(command)) => Some(CheckIdentity::Text {
-            command: command.clone(),
-        }),
-        (None, None) => None,
-    }
+    task.check
+        .as_ref()
+        .map(|argv| CheckIdentity::Argv { argv: argv.clone() })
 }
 
 pub fn evidence_matches(task: &Task, evidence: &Evidence) -> bool {
-    if evidence.acceptance_epoch != Some(task.acceptance_epoch) {
-        return false;
+    let bound = if executed(evidence) && task.review_of.is_none() {
+        evidence
+            .acceptance_epoch
+            .is_some_and(|epoch| epoch <= task.acceptance_epoch)
+    } else {
+        evidence.acceptance_epoch == Some(task.acceptance_epoch)
+    };
+    bound && answers_declared_check(task, evidence)
+}
+
+pub fn executed(evidence: &Evidence) -> bool {
+    evidence.command.is_some() && evidence.log.is_some()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EvidenceKind {
+    Executed,
+    Claimed,
+}
+
+impl EvidenceKind {
+    pub fn of(evidence: &Evidence) -> EvidenceKind {
+        if executed(evidence) {
+            EvidenceKind::Executed
+        } else {
+            EvidenceKind::Claimed
+        }
     }
+
+    pub const fn word(self) -> &'static str {
+        match self {
+            EvidenceKind::Executed => "executed",
+            EvidenceKind::Claimed => "claimed",
+        }
+    }
+}
+
+pub fn evidence_kind(evidence: &Evidence) -> &'static str {
+    EvidenceKind::of(evidence).word()
+}
+
+fn answers_declared_check(task: &Task, evidence: &Evidence) -> bool {
     match (declared_check(task), evidence.identity.as_ref()) {
         (
             Some(CheckIdentity::Argv { argv: declared }),
             Some(CheckIdentity::Argv { argv: observed }),
-        ) => declared == *observed && evidence.command.as_ref() == Some(observed),
-        (
-            Some(CheckIdentity::Text { command: declared }),
-            Some(CheckIdentity::Text { command: observed }),
-        ) => declared == *observed && evidence.check == *observed && evidence.command.is_none(),
+        ) => {
+            declared == *observed
+                && evidence
+                    .command
+                    .as_ref()
+                    .is_none_or(|command| command == observed)
+        }
         _ => false,
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvidenceReuse {
+    pub original_index: usize,
+    pub original_digest: String,
+    pub original_epoch: u64,
+    pub original_log_digest: String,
+    pub model: String,
+    pub reason: String,
+    pub unix: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Evidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reuse: Option<EvidenceReuse>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<CheckIdentity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -661,9 +721,187 @@ pub struct Evidence {
     pub command: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub log: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_member_manifest"
+    )]
+    pub member_manifest: Option<serde_json::Value>,
+}
+
+fn deserialize_member_manifest<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error> {
+    serde_json::Value::deserialize(deserializer).map(Some)
+}
+
+const DERIVED_EVIDENCE_FIELD: &str = "executed";
+
+fn deserialize_evidence<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<Evidence>, D::Error> {
+    Vec::<serde_json::Value>::deserialize(deserializer)?
+        .into_iter()
+        .map(|mut entry| {
+            if let Some(fields) = entry.as_object_mut() {
+                fields.remove(DERIVED_EVIDENCE_FIELD);
+            }
+            serde_json::from_value(entry).map_err(serde::de::Error::custom)
+        })
+        .collect()
+}
+
+const EVIDENCE_MEMBER_BASIS: &str = "tracked-input-snapshot-v1";
+const EVIDENCE_MEMBER_LIMIT: usize = 8192;
+const EVIDENCE_MEMBER_PATH_BYTES: usize = 4096;
+const EVIDENCE_MEMBER_PAYLOAD_BYTES: usize = 1_048_576;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EvidenceMemberEnvelope {
+    basis: String,
+    capture: String,
+    availability: String,
+    member_count: usize,
+    #[serde(default)]
+    members: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct EvidenceMemberBaseline {
+    pub members: BTreeMap<String, String>,
+    pub capture: &'static str,
+}
+
+fn member_payload_fits(value: &serde_json::Value) -> bool {
+    struct Budget(usize);
+    impl std::io::Write for Budget {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self
+                .0
+                .checked_sub(bytes.len())
+                .ok_or_else(|| std::io::Error::other("member payload limit"))?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    serde_json::to_writer(Budget(EVIDENCE_MEMBER_PAYLOAD_BYTES), value).is_ok()
+}
+
+fn valid_member(path: &str, digest: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\0')
+        && !Path::new(path).is_absolute()
+        && Path::new(path)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+        && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
+        && digest.len() == 16
+        && digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+pub fn capture_evidence_members(
+    inputs: &BTreeMap<String, Option<String>>,
+    tree: &BTreeMap<String, String>,
+    capture: &str,
+) -> serde_json::Value {
+    let selected = || {
+        tree.iter()
+            .filter(|(path, _)| inputs.keys().any(|root| covers(root, path)))
+    };
+    let member_count = selected().count();
+    let unavailable = |reason: &str| {
+        serde_json::json!({
+            "basis": EVIDENCE_MEMBER_BASIS, "capture": capture,
+            "availability": "unavailable", "reason": reason, "member_count": member_count
+        })
+    };
+    if member_count > EVIDENCE_MEMBER_LIMIT {
+        return unavailable("member-limit");
+    }
+    if selected().any(|(path, _)| path.len() > EVIDENCE_MEMBER_PATH_BYTES) {
+        return unavailable("path-limit");
+    }
+    if selected().any(|(path, digest)| !valid_member(path, digest)) {
+        return unavailable("invalid-member");
+    }
+    let members: BTreeMap<_, _> = selected().collect();
+    let complete = serde_json::json!({
+        "basis": EVIDENCE_MEMBER_BASIS, "capture": capture,
+        "availability": "complete", "member_count": member_count, "members": members
+    });
+    if member_payload_fits(&complete) {
+        complete
+    } else {
+        unavailable("byte-limit")
+    }
+}
+
+pub fn evidence_member_baseline(
+    evidence: &Evidence,
+) -> Result<EvidenceMemberBaseline, &'static str> {
+    let raw = evidence.member_manifest.as_ref().ok_or("absent")?;
+    if !member_payload_fits(raw) {
+        return Err("byte-limit");
+    }
+    let envelope: EvidenceMemberEnvelope =
+        serde_json::from_value(raw.clone()).map_err(|_| "malformed-manifest")?;
+    if envelope.basis != EVIDENCE_MEMBER_BASIS {
+        return Err("unsupported-basis");
+    }
+    let capture = match envelope.capture.as_str() {
+        "execution-start" => "execution-start",
+        "manual-record" => "manual-record",
+        _ => return Err("unsupported-capture"),
+    };
+    if envelope.availability == "unavailable" && envelope.members.is_none() {
+        return Err(match envelope.reason.as_deref() {
+            Some("member-limit") => "member-limit",
+            Some("path-limit") => "path-limit",
+            Some("byte-limit") => "byte-limit",
+            Some("invalid-member") => "invalid-member",
+            _ => "malformed-manifest",
+        });
+    }
+    if envelope.availability != "complete" || envelope.reason.is_some() {
+        return Err("malformed-manifest");
+    }
+    let members = envelope.members.ok_or("malformed-manifest")?;
+    if members.len() > EVIDENCE_MEMBER_LIMIT {
+        return Err("member-limit");
+    }
+    if members.len() != envelope.member_count {
+        return Err("member-count-mismatch");
+    }
+    for (path, digest) in &members {
+        if path.len() > EVIDENCE_MEMBER_PATH_BYTES {
+            return Err("path-limit");
+        }
+        if !valid_member(path, digest) {
+            return Err("invalid-member");
+        }
+        if !evidence.inputs.keys().any(|root| covers(root, path)) {
+            return Err("member-outside-inputs");
+        }
+    }
+    if evidence
+        .inputs
+        .iter()
+        .any(|(root, digest)| observed_digest(&members, root) != *digest)
+    {
+        return Err("input-digest-mismatch");
+    }
+    Ok(EvidenceMemberBaseline { members, capture })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Falsification {
     pub acceptance_epoch: u64,
     pub check: String,
@@ -676,22 +914,52 @@ pub struct Falsification {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ChallengeReceipt {
     pub fingerprint: String,
     pub unix: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Note {
     pub statement: String,
     pub unix: u64,
 }
 
-pub const ATTRIBUTIONS: [&str; 3] = ["task", "concurrent", "unknown"];
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttributionKind {
+    Task,
+    Concurrent,
+    Unknown,
+}
+
+impl AttributionKind {
+    pub const ALL: [AttributionKind; 3] = [
+        AttributionKind::Task,
+        AttributionKind::Concurrent,
+        AttributionKind::Unknown,
+    ];
+
+    pub const fn word(self) -> &'static str {
+        match self {
+            AttributionKind::Task => "task",
+            AttributionKind::Concurrent => "concurrent",
+            AttributionKind::Unknown => "unknown",
+        }
+    }
+
+    pub fn from_word(word: &str) -> Option<AttributionKind> {
+        AttributionKind::ALL
+            .into_iter()
+            .find(|kind| kind.word() == word)
+    }
+}
 
 pub const ORCHESTRATOR_ROLE: &str = "orchestrator";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Attribution {
     pub path: String,
     pub kind: String,
@@ -741,26 +1009,85 @@ fn honoured(entry: &Attribution, tree: &BTreeMap<String, String>, path: &str) ->
     entry.path != path || entry.digest.as_deref() == tree.get(path).map(String::as_str)
 }
 
-pub fn attribute(task: &Task, tree: &BTreeMap<String, String>, path: &str) -> String {
+pub fn attribute(task: &Task, tree: &BTreeMap<String, String>, path: &str) -> AttributionKind {
     if let Some(declared) = task
         .attributions
         .iter()
         .rev()
-        .find(|entry| covers(&entry.path, path) && honoured(entry, tree, path))
+        .filter(|entry| covers(&entry.path, path) && honoured(entry, tree, path))
+        .find_map(|entry| AttributionKind::from_word(&entry.kind))
     {
-        return declared.kind.clone();
+        return declared;
     }
     if task.in_scope(path) {
-        return ATTRIBUTIONS[0].to_owned();
+        return AttributionKind::Task;
     }
-    ATTRIBUTIONS[2].to_owned()
+    AttributionKind::Unknown
 }
 
-pub fn stale(evidence: &Evidence, tree: &BTreeMap<String, String>) -> bool {
-    evidence
-        .inputs
-        .iter()
-        .any(|(path, digest)| observed_digest(tree, path) != *digest)
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PathOwner {
+    pub path: String,
+    pub owner: String,
+    #[serde(skip)]
+    pub attributed: bool,
+}
+
+pub fn attributions(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    other_tasks: &[Task],
+    ignore: &Ignore,
+) -> Vec<PathOwner> {
+    changed(task, tree, ignore)
+        .into_iter()
+        .map(|path| {
+            let declared = attribute(task, tree, path);
+            let holder = if declared == AttributionKind::Unknown {
+                other_tasks
+                    .iter()
+                    .find(|other| holds_path(other, task, tree, path))
+            } else {
+                None
+            };
+            PathOwner {
+                path: path.to_owned(),
+                attributed: declared != AttributionKind::Unknown || holder.is_some(),
+                owner: holder
+                    .map_or_else(|| declared.word().to_owned(), |other| other.name.clone()),
+            }
+        })
+        .collect()
+}
+
+fn holds_path(other: &Task, task: &Task, tree: &BTreeMap<String, String>, path: &str) -> bool {
+    if other.name == task.name {
+        return false;
+    }
+    let claimed = other.in_scope(path)
+        || other
+            .deliverables
+            .iter()
+            .any(|deliverable| covers(&deliverable.path, path));
+    if other.open() {
+        return claimed;
+    }
+    claimed
+        && other
+            .closed_unix
+            .is_some_and(|closed| closed > task.opened_unix)
+        && other
+            .closed_paths
+            .get(path)
+            .is_some_and(|digest| *digest == observed_digest(tree, path))
+}
+
+pub fn closes_against_opening(
+    task: &Task,
+    tree: &BTreeMap<String, String>,
+    ignore: &Ignore,
+) -> bool {
+    task.scope.is_empty() && changed(task, tree, ignore).is_empty()
 }
 
 pub fn declared_inputs(task: &Task) -> &[String] {
@@ -814,7 +1141,8 @@ pub fn latest_evidence(task: &Task) -> Option<&Evidence> {
     task.evidence
         .iter()
         .rev()
-        .find(|entry| evidence_matches(task, entry))
+        .find(|entry| entry.acceptance_epoch.is_some() && answers_declared_check(task, entry))
+        .filter(|entry| evidence_matches(task, entry))
 }
 
 pub fn readiness(task: &Task, tree: &BTreeMap<String, String>) -> Readiness {
@@ -830,40 +1158,13 @@ pub fn readiness(task: &Task, tree: &BTreeMap<String, String>) -> Readiness {
     }
 }
 
-pub fn transition(from: &str, to: &str) -> bool {
-    matches!(
-        (from, to),
-        ("open", "accepted")
-            | ("accepted", "accepted")
-            | ("accepted", "blocked")
-            | ("accepted", "ready")
-            | ("blocked", "accepted")
-            | ("ready", "accepted")
-            | ("ready", "closed")
-    )
-}
-
-pub fn apply(task: &mut Task, to: &str) -> bool {
-    if to == "ready"
-        || !transition(&task.state, to)
-        || (to == "accepted" && unanswered_decision(task).is_some())
-    {
-        return false;
-    }
-    task.state = to.to_owned();
-    if matches!(to, "accepted" | "blocked") {
-        task.challenged = None;
-    }
-    true
-}
-
 fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String {
     let mut record = task.clone();
     record.challenged = None;
-    record.state.clear();
     record.closed_unix = None;
     record.closed_paths.clear();
     record.result = None;
+    record.result_basis = None;
     record.build = None;
     record
         .findings
@@ -878,9 +1179,13 @@ fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String
     record.orchestrator_records.clear();
     record
         .attributions
-        .retain(|attr| attr.kind != ATTRIBUTIONS[1]);
+        .retain(|attr| attr.kind != AttributionKind::Concurrent.word());
+    let mut fingerprinted = serde_json::to_value(&record).expect("task serializes");
+    if let Some(fields) = fingerprinted.as_object_mut() {
+        fields.remove("state");
+    }
     let mut fingerprint = super::Fnv::new();
-    fingerprint.write_str(&serde_json::to_string(&record).expect("task serializes"));
+    fingerprint.write_str(&fingerprinted.to_string());
     for (path, digest) in tree {
         if receipt_covers(task, tree, path) {
             fingerprint.write_str(path);
@@ -891,7 +1196,7 @@ fn challenge_fingerprint(task: &Task, tree: &BTreeMap<String, String>) -> String
 }
 
 pub fn receipt_covers(task: &Task, tree: &BTreeMap<String, String>, path: &str) -> bool {
-    if attribute(task, tree, path) == ATTRIBUTIONS[1] {
+    if attribute(task, tree, path) == AttributionKind::Concurrent {
         return false;
     }
     task.in_scope(path)
@@ -907,32 +1212,30 @@ pub fn receipt_covers(task: &Task, tree: &BTreeMap<String, String>, path: &str) 
 }
 
 pub fn handback(task: &Task, tree: &BTreeMap<String, String>) -> Result<(), &'static str> {
-    if task.open() && unanswered_decision(task).is_some() {
-        return Err("await-answer");
+    let facts = Facts {
+        tree,
+        standing: 0,
+        intents: None,
+    };
+    match machine::refusal(task, Command::Ready, &facts) {
+        Some(refused) => Err(handback_code(task, refused)),
+        None => Ok(()),
     }
-    match task.state.as_str() {
-        "open" | "blocked" => return Err("accept"),
-        "ready" => return Err("review"),
-        "closed" | "withdrawn" => return Err("closed"),
-        "accepted" => {}
-        _ => return Err("invalid-state"),
+}
+
+pub fn handback_code(task: &Task, refused: Refusal) -> &'static str {
+    let state = match refused {
+        Refusal::Guard(guard) => return guard.code(),
+        Refusal::State(state) => state,
+    };
+    if !state.live() {
+        return "closed";
     }
-    if task.accepted.is_none() {
-        return Err("accept");
+    match machine::refusal(task, Command::Accept, &Facts::record_only()) {
+        Some(Refusal::Guard(guard)) => guard.code(),
+        _ if state == TaskState::Ready => "review",
+        _ => "accept",
     }
-    if task.unpicked().next().is_some() {
-        return Err("pick-question");
-    }
-    if !task.declares_check() {
-        return Err("declare-check");
-    }
-    if !readiness(task, tree).supported {
-        return Err("record-evidence");
-    }
-    if !challenge_current(task, tree) {
-        return Err("challenge");
-    }
-    Ok(())
 }
 
 pub fn challenge_current(task: &Task, tree: &BTreeMap<String, String>) -> bool {
@@ -947,7 +1250,7 @@ pub fn record_challenge(
     blockers: usize,
     unix: u64,
 ) -> bool {
-    if task.state != "accepted" {
+    if !matches!(task.state, TaskState::Accepted | TaskState::Ready) {
         return false;
     }
     task.challenged = None;
@@ -965,17 +1268,42 @@ pub fn record_challenge(
     true
 }
 
-pub fn mark_ready(
+pub fn hand_back(
     task: &mut Task,
     tree: &BTreeMap<String, String>,
-    blockers: usize,
-) -> Result<(), &'static str> {
-    handback(task, tree)?;
-    if blockers != 0 {
-        return Err("resolve-challenge");
+    request: HandbackRequest,
+) -> Result<(), Refusal> {
+    let facts = Facts {
+        tree,
+        standing: request.standing,
+        intents: request.intents,
+    };
+    if let Some(unix) = request.challenged_at {
+        let mut skipped = machine::CLAIM_GUARDS.to_vec();
+        skipped.push(machine::Guard::ChallengeCurrent);
+        if let Some(cause) = machine::refusal_without(task, Command::Ready, &facts, &skipped) {
+            return Err(cause);
+        }
+        record_challenge(task, tree, request.standing, unix);
     }
-    task.state = "ready".to_owned();
-    Ok(())
+    machine::fire(task, Command::Ready, &facts)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct HandbackRequest {
+    pub standing: usize,
+    pub intents: Option<usize>,
+    pub challenged_at: Option<u64>,
+}
+
+impl HandbackRequest {
+    pub fn standing(standing: usize) -> HandbackRequest {
+        HandbackRequest {
+            standing,
+            intents: None,
+            challenged_at: None,
+        }
+    }
 }
 
 pub fn record_acceptance(
@@ -1008,6 +1336,8 @@ pub fn record_acceptance(
     } else {
         Some(changed_paths.iter().map(|s| s.to_string()).collect())
     };
+    task.outcome = None;
+    task.intent_claims.clear();
     task.accepted = Some(Acceptance {
         model: model.to_owned(),
         unix,
@@ -1023,11 +1353,12 @@ pub fn accept_result(
     model: &str,
     now_unix: u64,
 ) -> bool {
-    if standing != 0
-        || !readiness(task, tree).supported
-        || !challenge_current(task, tree)
-        || !apply(task, "closed")
-    {
+    let facts = Facts {
+        tree,
+        standing,
+        intents: None,
+    };
+    if machine::fire(task, Command::Close, &facts).is_err() {
         return false;
     }
     task.result = Some(Acceptance {
@@ -1036,19 +1367,16 @@ pub fn accept_result(
         changed_at_acceptance: None,
     });
     task.closed_unix = Some(now_unix);
-    let paths_changed: Vec<String> = changed(task, tree, ignore)
+    let closed_paths: Vec<(String, Option<String>)> = changed(task, tree, ignore)
         .into_iter()
-        .map(|s| s.to_owned())
+        .map(|path| (path.to_owned(), observed_digest(tree, path)))
         .collect();
-    for path in paths_changed {
-        if let Some(digest) = observed_digest(tree, &path) {
-            task.closed_paths.insert(path, digest);
-        }
-    }
+    task.closed_paths.extend(closed_paths);
     true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RemovedDeliverable {
     pub path: String,
     pub reason: String,
@@ -1074,8 +1402,7 @@ pub struct WithdrawalReconciliation {
     pub revision: revision::RelevantRevision,
     pub model: String,
     pub unix: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub successor_closed_unix: Option<u64>,
+    pub successor_closed_unix: u64,
 }
 
 pub fn withdraw(
@@ -1086,14 +1413,16 @@ pub fn withdraw(
     model: &str,
     unix: u64,
 ) -> Result<(), String> {
-    if !task.open() || reason.trim().is_empty() {
-        return Err("withdrawal requires a nonterminal task and a nonempty reason".to_owned());
+    let refused = || "withdrawal requires a nonterminal task and a nonempty reason".to_owned();
+    if reason.trim().is_empty() {
+        return Err(refused());
     }
     let unresolved_paths = changed(task, tree, ignore)
         .into_iter()
-        .filter(|path| task.in_scope(path) || attribute(task, tree, path) == ATTRIBUTIONS[0])
+        .filter(|path| task.in_scope(path) || attribute(task, tree, path) == AttributionKind::Task)
         .map(|path| (path.to_owned(), observed_digest(tree, path)))
         .collect();
+    machine::fire(task, Command::Withdraw, &Facts::record_only()).map_err(|_| refused())?;
     task.withdrawal = Some(Withdrawal {
         reason: reason.to_owned(),
         model: model.to_owned(),
@@ -1101,11 +1430,10 @@ pub fn withdraw(
         unresolved_paths,
         reconciliations: Vec::new(),
     });
-    task.state = "withdrawn".to_owned();
     task.result = None;
+    task.result_basis = None;
     task.closed_unix = None;
     task.closed_paths.clear();
-    task.challenged = None;
     Ok(())
 }
 
@@ -1154,8 +1482,7 @@ pub fn covered(task: &Task, path: &str) -> bool {
 }
 
 pub fn successful_successor(task: &Task, tree: &BTreeMap<String, String>, path: &str) -> bool {
-    task.state == "closed"
-        && task.result.is_some()
+    task.accepted_product_result()
         && readiness(task, tree).supported
         && challenge_current(task, tree)
         && successor_covers(task, path)
@@ -1202,7 +1529,7 @@ fn withdrawal_residue_by(
                     && tasks.iter().any(|successor| {
                         successor.name == record.successor
                             && observable(successor)
-                            && reconciliation_stands(record, successor, tree, path)
+                            && reconciliation_stands(record, successor)
                     })
             })
         })
@@ -1210,22 +1537,9 @@ fn withdrawal_residue_by(
         .collect()
 }
 
-fn reconciliation_stands(
-    record: &WithdrawalReconciliation,
-    successor: &Task,
-    tree: &BTreeMap<String, String>,
-    path: &str,
-) -> bool {
-    match record.successor_closed_unix {
-        Some(closed_unix) => {
-            successor.state == "closed" && successor.closed_unix == Some(closed_unix)
-        }
-        None => {
-            successful_successor(successor, tree, path)
-                && successor_revision(successor, tree, path) == record.revision
-                && record.revision.paths.get(path) == Some(&observed_digest(tree, path))
-        }
-    }
+fn reconciliation_stands(record: &WithdrawalReconciliation, successor: &Task) -> bool {
+    successor.state == TaskState::Closed
+        && successor.closed_unix == Some(record.successor_closed_unix)
 }
 
 pub fn normalize_scope(root: &Path, path: &str) -> Result<String, String> {
@@ -1474,7 +1788,20 @@ pub fn validate_scope(
     Ok(scopes)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ResultBasis {
+    Bounded {
+        reason: String,
+        project_state: String,
+        prior_run_id: String,
+        implementation_fingerprint: String,
+        revision: RelevantRevision,
+    },
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_of: Option<ReviewTarget>,
@@ -1492,12 +1819,10 @@ pub struct Task {
     pub closed_unix: Option<u64>,
     #[serde(default)]
     pub opened_tree: BTreeMap<String, String>,
-    #[serde(default = "open_state")]
-    pub state: String,
+    #[serde(default)]
+    pub state: TaskState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check_argv: Option<Vec<String>>,
+    pub check: Option<Vec<String>>,
     #[serde(default)]
     pub check_inputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1506,11 +1831,13 @@ pub struct Task {
     pub acceptance_epoch: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Acceptance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_basis: Option<ResultBasis>,
     #[serde(default)]
     pub assessments: Vec<Assessment>,
     #[serde(default)]
     pub exceptions: Vec<Exception>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_evidence")]
     pub evidence: Vec<Evidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub challenged: Option<ChallengeReceipt>,
@@ -1523,7 +1850,7 @@ pub struct Task {
     #[serde(default)]
     pub removed_deliverables: Vec<RemovedDeliverable>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub closed_paths: BTreeMap<String, String>,
+    pub closed_paths: BTreeMap<String, Option<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub questions: Vec<AskedQuestion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1532,16 +1859,18 @@ pub struct Task {
     pub orchestrator_records: Vec<OrchestratorRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<claims::Outcome>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub asks_intent: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intent_claims: Vec<claims::IntentClaim>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lenses: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub falsify: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub falsifications: Vec<Falsification>,
-}
-
-fn open_state() -> String {
-    STATES[0].to_owned()
 }
 
 impl Default for Task {
@@ -1558,13 +1887,13 @@ impl Default for Task {
             opened_unix: 0,
             closed_unix: None,
             opened_tree: BTreeMap::new(),
-            state: open_state(),
+            state: TaskState::Open,
             check: None,
-            check_argv: None,
             check_inputs: Vec::new(),
             accepted: None,
             acceptance_epoch: 0,
             result: None,
+            result_basis: None,
             assessments: Vec::new(),
             exceptions: Vec::new(),
             evidence: Vec::new(),
@@ -1578,6 +1907,9 @@ impl Default for Task {
             decisions: Vec::new(),
             orchestrator_records: Vec::new(),
             goal: None,
+            outcome: None,
+            asks_intent: false,
+            intent_claims: Vec::new(),
             lenses: Vec::new(),
             falsify: Vec::new(),
             falsifications: Vec::new(),
@@ -1586,12 +1918,16 @@ impl Default for Task {
 }
 
 impl Task {
+    pub fn accepted_product_result(&self) -> bool {
+        self.state == TaskState::Closed && self.result.is_some()
+    }
+
     pub fn open(&self) -> bool {
-        !matches!(self.state.as_str(), "closed" | "withdrawn")
+        self.state.live()
     }
 
     pub fn declares_check(&self) -> bool {
-        self.check.is_some() || self.check_argv.is_some()
+        self.check.is_some()
     }
 
     pub fn unresolved(&self) -> impl Iterator<Item = &Finding> {
@@ -1602,7 +1938,7 @@ impl Task {
 
     pub fn blocking(&self) -> impl Iterator<Item = &Finding> {
         self.unresolved()
-            .filter(|finding| finding.addressed.is_none())
+            .filter(|finding| finding.addressed.is_none() && !finding.residual)
     }
 
     pub fn next_finding_id(&self) -> usize {
@@ -1674,8 +2010,7 @@ pub struct Opening {
     pub statement: String,
     pub scope: Vec<String>,
     pub deliverables: Vec<String>,
-    pub check: Option<String>,
-    pub check_argv: Option<Vec<String>>,
+    pub check: Option<Vec<String>>,
     pub inputs: Vec<String>,
     pub goal: Option<String>,
     pub lenses: Vec<String>,
@@ -1723,7 +2058,6 @@ pub fn record_from(
         opened_unix: now_unix,
         opened_tree: tree,
         check: opening.check,
-        check_argv: opening.check_argv,
         check_inputs: opening.inputs,
         goal: opening.goal,
         lenses: opening.lenses,
@@ -1742,15 +2076,13 @@ pub fn read(root: &Path, name: &str) -> Result<Option<Task>, String> {
     }
     let text = std::fs::read_to_string(&path)
         .map_err(|failure| format!("cannot read {}: {failure}", path.display()))?;
-    let unparsable =
-        |failure: serde_json::Error| format!("cannot parse {}: {failure}", path.display());
-    let record: serde_json::Value = serde_json::from_str(&text).map_err(unparsable)?;
-    let stateless = record.get("state").is_none();
-    let mut task: Task = serde_json::from_value(record).map_err(unparsable)?;
-    if stateless && task.closed_unix.is_some() {
-        task.state = "closed".to_owned();
-    }
-    Ok(Some(task))
+    let unparsable = |failure: serde_json::Error| {
+        format!(
+            "cannot parse {}: {failure}; it was written by an older BlaBla: finish or withdraw it with that version, or move closed history out of {RECORD_DIRECTORY}/{TASK_DIRECTORY}",
+            path.display()
+        )
+    };
+    serde_json::from_str(&text).map(Some).map_err(unparsable)
 }
 
 fn recorded_names(root: &Path) -> Vec<String> {
@@ -1795,9 +2127,17 @@ pub fn unreadable(root: &Path) -> Vec<String> {
 pub struct TaskSummary {
     pub id: String,
     pub role: String,
-    pub state: String,
+    #[serde(serialize_with = "serialize_label")]
+    pub state: TaskState,
     pub unresolved: usize,
     pub deliverables: usize,
+}
+
+fn serialize_label<S: serde::Serializer>(
+    state: &TaskState,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&state.label())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1811,7 +2151,7 @@ pub struct TaskStatus {
 }
 
 pub fn can_address_finding(task: &Task, model: &str, permitted: &[String]) -> bool {
-    if permitted.is_empty() || permitted.iter().any(|entry| entry == model) {
+    if permitted.is_empty() || admits(permitted, model) {
         return true;
     }
     task.accepted
@@ -1841,7 +2181,7 @@ pub fn status(root: &Path) -> Option<TaskStatus> {
             .map(|task| TaskSummary {
                 id: format!("task::{}", task.name),
                 role: format!("role::{}", task.role),
-                state: task.state.to_ascii_uppercase(),
+                state: task.state,
                 unresolved: task.unresolved().count(),
                 deliverables: task.deliverables.len(),
             })
@@ -1933,6 +2273,264 @@ pub fn owe_path(task: &mut Task, path: String) {
 mod tests {
     use super::*;
 
+    fn member_evidence(tree: &BTreeMap<String, String>, roots: &[&str]) -> Evidence {
+        let inputs: BTreeMap<_, _> = roots
+            .iter()
+            .map(|root| (root.to_string(), observed_digest(tree, root)))
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "check": "check", "exit": 0, "tree": "tree", "tool": "run", "unix": 1,
+            "inputs": inputs, "member_manifest": capture_evidence_members(&inputs, tree, "execution-start")
+        })).unwrap()
+    }
+
+    #[test]
+    fn evidence_member_manifest_complete_selection_deduplicates_and_reconstructs_roots() {
+        let tree = BTreeMap::from([
+            ("core/a.rs".into(), "0000000000000001".into()),
+            ("core/b.rs".into(), "0000000000000002".into()),
+            ("core2/c.rs".into(), "0000000000000003".into()),
+            ("report.md".into(), "0000000000000004".into()),
+        ]);
+        let mut work = Task {
+            scope: vec!["core".into()],
+            check_inputs: vec!["core".into(), "core/a.rs".into(), "missing".into()],
+            ..Default::default()
+        };
+        work.deliverables.push(Deliverable {
+            path: "report.md".into(),
+            opened_digest: None,
+        });
+        let inputs = evidence_inputs(&work, &tree);
+        let raw = capture_evidence_members(&inputs, &tree, "execution-start");
+        assert_eq!(raw["member_count"], 3);
+        let evidence = member_evidence(&tree, &["core", "core/a.rs", "report.md", "missing"]);
+        assert_eq!(evidence.member_manifest.as_ref().unwrap(), &raw);
+        let baseline = evidence_member_baseline(&evidence).unwrap();
+        assert_eq!(
+            baseline
+                .members
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["core/a.rs", "core/b.rs", "report.md"]
+        );
+        for (root, digest) in &inputs {
+            assert_eq!(observed_digest(&baseline.members, root), *digest);
+        }
+        assert_eq!(inputs["missing"], None);
+    }
+
+    #[test]
+    fn evidence_member_manifest_empty_null_and_removed_root_are_not_missing_selection() {
+        let mut evidence = member_evidence(&BTreeMap::new(), &["missing"]);
+        assert!(
+            evidence_member_baseline(&evidence)
+                .unwrap()
+                .members
+                .is_empty()
+        );
+        assert_eq!(
+            evidence.member_manifest.as_ref().unwrap()["member_count"],
+            0
+        );
+        evidence
+            .inputs
+            .insert("missing".into(), Some("0000000000000001".into()));
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "input-digest-mismatch"
+        );
+        let tree = BTreeMap::from([("core/a.rs".into(), "0000000000000001".into())]);
+        let mut evidence = member_evidence(&tree, &["core"]);
+        evidence.inputs.clear();
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "member-outside-inputs"
+        );
+    }
+
+    #[test]
+    fn evidence_member_manifest_absent_and_malformed_wire_roundtrip_without_gates() {
+        let old = r#"{"check":"check","exit":0,"tree":"old","tool":"check","unix":1,"inputs":{}}"#;
+        let evidence: Evidence = serde_json::from_str(old).unwrap();
+        assert_eq!(serde_json::to_string(&evidence).unwrap(), old);
+        assert_eq!(evidence_member_baseline(&evidence).unwrap_err(), "absent");
+        for raw in [
+            serde_json::Value::Null,
+            serde_json::json!([1]),
+            serde_json::json!({"basis":"future","unknown":true}),
+        ] {
+            let mut wire = serde_json::to_value(&evidence).unwrap();
+            wire["member_manifest"] = raw;
+            let decoded: Evidence = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&decoded).unwrap(), wire);
+            assert_eq!(
+                evidence_member_baseline(&decoded).unwrap_err(),
+                "malformed-manifest"
+            );
+            let work = Task::default();
+            assert_eq!(
+                evidence_matches(&work, &decoded),
+                evidence_matches(&work, &evidence)
+            );
+        }
+        let mut current = evidence.clone();
+        current.acceptance_epoch = Some(1);
+        current.identity = Some(CheckIdentity::Argv {
+            argv: vec!["check".into()],
+        });
+        let mut work = Task {
+            acceptance_epoch: 1,
+            check: Some(vec!["check".into()]),
+            evidence: vec![current],
+            ..Default::default()
+        };
+        assert!(readiness(&work, &BTreeMap::new()).supported);
+        work.evidence[0].member_manifest = Some(serde_json::json!({"bad":"diagnostics"}));
+        assert!(readiness(&work, &BTreeMap::new()).supported);
+    }
+
+    #[test]
+    fn evidence_member_manifest_count_and_utf8_path_limits_are_all_or_unavailable() {
+        let mut tree: BTreeMap<_, _> = (0..8192)
+            .map(|n| (format!("core/{n:04}"), "0000000000000001".to_owned()))
+            .collect();
+        let evidence = member_evidence(&tree, &["core"]);
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap().members.len(),
+            8192
+        );
+        tree.insert("core/overflow".into(), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        let raw = evidence.member_manifest.as_ref().unwrap();
+        assert_eq!(raw["member_count"], 8193);
+        assert_eq!(raw["reason"], "member-limit");
+        assert!(raw.get("members").is_none());
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "member-limit"
+        );
+        for extra in [0, 1] {
+            let path = format!("core/{}{}", "é".repeat(2045), "x".repeat(1 + extra));
+            assert_eq!(path.len(), 4096 + extra);
+            let tree = BTreeMap::from([(path, "0000000000000001".into())]);
+            let evidence = member_evidence(&tree, &["core"]);
+            if extra == 0 {
+                assert!(evidence_member_baseline(&evidence).is_ok());
+            } else {
+                assert_eq!(
+                    evidence_member_baseline(&evidence).unwrap_err(),
+                    "path-limit"
+                );
+                assert!(
+                    evidence
+                        .member_manifest
+                        .as_ref()
+                        .unwrap()
+                        .get("members")
+                        .is_none()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn evidence_member_manifest_compact_byte_limit_counts_escaping_exactly() {
+        let mut tree: BTreeMap<_, _> = (0..260)
+            .map(|n| {
+                (
+                    format!("core/{n:03}/{}", "x".repeat(4000)),
+                    "0000000000000001".to_owned(),
+                )
+            })
+            .collect();
+        tree.insert("core/last".into(), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        let size = serde_json::to_vec(evidence.member_manifest.as_ref().unwrap())
+            .unwrap()
+            .len();
+        let remaining = 1_048_576 - size;
+        let base = format!(
+            "core/last{}{}",
+            "\"".repeat(remaining / 2),
+            "x".repeat(remaining % 2)
+        );
+        assert!(base.len() <= 4096);
+        tree.remove("core/last");
+        tree.insert(base.clone(), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        assert_eq!(
+            serde_json::to_vec(evidence.member_manifest.as_ref().unwrap())
+                .unwrap()
+                .len(),
+            1_048_576
+        );
+        assert!(evidence_member_baseline(&evidence).is_ok());
+        tree.remove(&base);
+        tree.insert(format!("{base}x"), "0000000000000001".into());
+        let evidence = member_evidence(&tree, &["core"]);
+        assert_eq!(
+            evidence_member_baseline(&evidence).unwrap_err(),
+            "byte-limit"
+        );
+        assert_eq!(
+            evidence.member_manifest.as_ref().unwrap()["member_count"],
+            261
+        );
+        assert!(
+            evidence
+                .member_manifest
+                .as_ref()
+                .unwrap()
+                .get("members")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn evidence_member_manifest_rejects_invalid_shape_count_path_digest_and_selection() {
+        let tree = BTreeMap::from([("core/a.rs".into(), "0000000000000001".into())]);
+        let original = member_evidence(&tree, &["core"]);
+        for (field, value, reason) in [
+            ("basis", serde_json::json!("future-v2"), "unsupported-basis"),
+            (
+                "capture",
+                serde_json::json!("completion-time"),
+                "unsupported-capture",
+            ),
+            (
+                "member_count",
+                serde_json::json!(2),
+                "member-count-mismatch",
+            ),
+            (
+                "members",
+                serde_json::json!({"../escape":"0000000000000001"}),
+                "invalid-member",
+            ),
+            (
+                "members",
+                serde_json::json!({"core/a.rs":"secret content"}),
+                "invalid-member",
+            ),
+            (
+                "members",
+                serde_json::json!({"elsewhere/a.rs":"0000000000000001"}),
+                "member-outside-inputs",
+            ),
+            (
+                "members",
+                serde_json::json!({"core/a.rs":"0000000000000002"}),
+                "input-digest-mismatch",
+            ),
+        ] {
+            let mut evidence = original.clone();
+            evidence.member_manifest.as_mut().unwrap()[field] = value;
+            assert_eq!(evidence_member_baseline(&evidence).unwrap_err(), reason);
+        }
+    }
+
     #[test]
     #[cfg(unix)]
     fn case_identity_guard_rejects_colliding_regular_and_symlink_aliases() {
@@ -2009,25 +2607,6 @@ mod tests {
     }
 
     #[test]
-    fn task_without_closed_paths_serializes_without_field() {
-        let task = Task {
-            name: "test-task".to_owned(),
-            role: "worker".to_owned(),
-            statement: "test statement".to_owned(),
-            scope: vec!["src/".to_owned()],
-            opened_unix: 1234567890,
-            ..Default::default()
-        };
-
-        let serialized = serde_json::to_string(&task).expect("task serializes");
-        assert!(!serialized.contains("closed_paths"));
-
-        let deserialized: Task = serde_json::from_str(&serialized).expect("task deserializes");
-        assert_eq!(deserialized.name, task.name);
-        assert!(deserialized.closed_paths.is_empty());
-    }
-
-    #[test]
     fn a_record_written_before_attestation_reads_with_nothing_to_confirm() {
         let mut task: Task = serde_json::from_value(serde_json::json!({
             "name": "legacy",
@@ -2043,9 +2622,10 @@ mod tests {
         assert!(task.orchestrator_records.is_empty());
         assert_eq!(confirm(&mut task, "opus", 3), Ok(0));
         assert!(
-            !serde_json::to_string(&task)
+            serde_json::to_value(&task)
                 .expect("task serializes")
-                .contains("orchestrator_records")
+                .get("orchestrator_records")
+                .is_none()
         );
         let bare: OrchestratorRecord =
             serde_json::from_value(serde_json::json!({ "verb": "scope", "unix": 4 }))
@@ -2108,6 +2688,38 @@ mod tests {
     }
 
     #[test]
+    fn a_challenge_fingerprint_ignores_the_state_and_follows_a_fingerprinted_field() {
+        let tree = BTreeMap::from([("src/a.rs".to_owned(), "new".to_owned())]);
+        let task = Task {
+            name: "work".to_owned(),
+            role: "worker".to_owned(),
+            statement: "repair".to_owned(),
+            scope: vec!["src".to_owned()],
+            opened_unix: 7,
+            opened_tree: BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),
+            ..Task::default()
+        };
+        let recorded = challenge_fingerprint(&task, &tree);
+        for state in TaskState::ALL {
+            let moved = Task {
+                state,
+                ..task.clone()
+            };
+            assert_eq!(challenge_fingerprint(&moved, &tree), recorded);
+        }
+        let restated = Task {
+            statement: "repair differently".to_owned(),
+            ..task.clone()
+        };
+        assert_ne!(challenge_fingerprint(&restated, &tree), recorded);
+        let rechecked = Task {
+            check: Some(vec!["cargo".to_owned(), "test".to_owned()]),
+            ..task
+        };
+        assert_ne!(challenge_fingerprint(&rechecked, &tree), recorded);
+    }
+
+    #[test]
     fn every_opening_field_reaches_the_recorded_task() {
         let task = record_from(
             Opening {
@@ -2116,8 +2728,7 @@ mod tests {
                 statement: "repair".to_owned(),
                 scope: vec!["src".to_owned()],
                 deliverables: vec!["src/a.rs".to_owned()],
-                check: Some("check".to_owned()),
-                check_argv: Some(vec!["cargo".to_owned(), "test".to_owned()]),
+                check: Some(vec!["cargo".to_owned(), "test".to_owned()]),
                 inputs: vec!["shared".to_owned()],
                 goal: Some("ship".to_owned()),
                 review_of: None,
@@ -2140,8 +2751,7 @@ mod tests {
                 "opened_tree": { "src/a.rs": "old" },
                 "state": "open",
                 "acceptance_epoch": 0,
-                "check": "check",
-                "check_argv": ["cargo", "test"],
+                "check": ["cargo", "test"],
                 "check_inputs": ["shared"],
                 "assessments": [],
                 "exceptions": [],

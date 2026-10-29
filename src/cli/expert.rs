@@ -12,6 +12,7 @@ use blabla::expert::trace::{
     TraceStore,
 };
 use blabla::expert::{ContextSlot, DeliveryState, ExpertMode, ObservedEvent};
+use blabla::project::task::machine::TaskState;
 use blabla::project::{Project, task};
 use clap::Subcommand;
 mod native;
@@ -310,7 +311,8 @@ fn validate_fit_project<'a>(
             return Err(TraceError::InvalidInput);
         }
         if let Some(limits) = current_limits {
-            if task.state != "accepted" || packet.revision.acceptance_epoch != task.acceptance_epoch
+            if task.state != TaskState::Accepted
+                || packet.revision.acceptance_epoch != task.acceptance_epoch
             {
                 return Err(TraceError::InvalidInput);
             }
@@ -869,7 +871,7 @@ fn checkpoint(
         Ok(None) => return fail(TraceError::Missing, json),
         Err(_) => return fail(TraceError::Io, json),
     };
-    if task.state != "accepted" {
+    if task.state != TaskState::Accepted {
         return emit(
             &CheckpointOutput {
                 execution: execution.clone(),

@@ -10,7 +10,7 @@
     {"run": ["blabla", "task", "open", "fix-red-counterexample", "--role", "worker",
              "--statement", "The last canonical verification is RED and its counterexample is recorded. Use it to repair the persistence path inside the widget package, then rerun the declared check until it holds. The application, the adapter and the contracts stay as they are.",
              "--scope", "widget", "--scope", "widget.json", "--input", "widget",
-             "--check", "python3 checks/restart.py"]}
+             "--check", "python3", "checks/restart.py"]}
   ],
   "observations": ["syntax", "finish", "persistence", "challenge:fix-red-counterexample"]
 }

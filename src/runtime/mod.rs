@@ -1,13 +1,19 @@
+pub mod command;
+pub mod evidence_capture;
+mod exchange_witness;
 pub mod primitives;
 pub(crate) mod process_tree;
 pub(crate) mod strict_json;
 
 use crate::application::{AppConfig, Application};
-use crate::diagnostic::AppError;
+use crate::diagnostic::{
+    AppError, ExchangeAllowance, ExchangeOperation, ReaderEventKind, ReaderProgress,
+};
 use crate::ir::{Field, MAX_INT, Type};
 use crate::report::Call;
 use serde_json::{Map, Value, json};
 use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
@@ -15,16 +21,19 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
+use exchange_witness::{Exchange, ExchangeStart, ReaderRecorder, Slot, WriterMetadata};
 use process_tree::ProcessTree;
 
-pub const MAX_TIMEOUT: Duration = Duration::from_secs(5);
+pub const MAX_TIMEOUT: Duration = Duration::from_secs(42);
 pub const MAX_STARTUP: Duration = Duration::from_secs(60);
 const RESPONSE_LINE_LIMIT: usize = 1024 * 1024;
 const CLEANUP_LIMIT: Duration = Duration::from_millis(250);
+const TEMPORARY_VARIABLES: [&str; 3] = ["TMP", "TEMP", "TMPDIR"];
 
 struct WriteJob {
     bytes: Vec<u8>,
     completion: SyncSender<Result<(), String>>,
+    witness: Arc<Slot<WriterMetadata>>,
 }
 
 enum ResponseEvent {
@@ -35,14 +44,52 @@ enum ResponseEvent {
     Io(String),
 }
 
+struct ResponseFrame {
+    ordinal: Option<u64>,
+    event: ResponseEvent,
+}
+
+struct ResponseSender {
+    channel: SyncSender<ResponseFrame>,
+    witness: Arc<ReaderRecorder>,
+    ordinal: Option<u64>,
+    session_started: Instant,
+}
+
+impl ResponseSender {
+    fn send(
+        &mut self,
+        event: ResponseEvent,
+        bytes: usize,
+    ) -> Result<(), mpsc::SendError<ResponseFrame>> {
+        self.ordinal = self.ordinal.and_then(|ordinal| ordinal.checked_add(1));
+        let kind = match &event {
+            ResponseEvent::Line(_) => ReaderEventKind::Line,
+            ResponseEvent::Eof => ReaderEventKind::Eof,
+            ResponseEvent::Unterminated => ReaderEventKind::Unterminated,
+            ResponseEvent::TooLong => ReaderEventKind::TooLong,
+            ResponseEvent::Io(_) => ReaderEventKind::Io,
+        };
+        self.witness
+            .produced(self.ordinal, kind, bytes, self.session_started);
+        self.channel.send(ResponseFrame {
+            ordinal: self.ordinal,
+            event,
+        })
+    }
+}
+
 pub struct AppSession {
     child: Option<Child>,
     writer: Option<Sender<WriteJob>>,
-    responses: Receiver<ResponseEvent>,
+    responses: Receiver<ResponseFrame>,
+    reader_witness: Arc<ReaderRecorder>,
+    session_started: Instant,
     writer_thread: Option<JoinHandle<()>>,
     reader_thread: Option<JoinHandle<()>>,
     process_tree: Option<ProcessTree>,
     temp_dir: Option<Arc<TempDir>>,
+    run_directory: Option<PathBuf>,
     config: AppConfig,
     initialized: bool,
     timeout: Duration,
@@ -53,10 +100,18 @@ pub struct AppSession {
 
 impl AppSession {
     pub fn spawn(config: &AppConfig) -> Result<Self, AppError> {
+        Self::spawn_within(config, None)
+    }
+
+    pub fn spawn_under(config: &AppConfig, parent: &Path) -> Result<Self, AppError> {
+        Self::spawn_within(config, Some(parent.to_path_buf()))
+    }
+
+    fn spawn_within(config: &AppConfig, run_directory: Option<PathBuf>) -> Result<Self, AppError> {
         if config.timeout.is_zero() || config.timeout > MAX_TIMEOUT {
             return Err(AppError::new(
                 "APP_CONFIG",
-                "exchange timeout must be greater than zero and at most five seconds",
+                "exchange timeout must be greater than zero and at most forty-two seconds",
             ));
         }
         if config.startup.is_zero() || config.startup > MAX_STARTUP {
@@ -66,16 +121,25 @@ impl AppSession {
             ));
         }
 
-        let temp_dir = Arc::new(TempDir::new().map_err(|error| {
+        let temp_dir = match &run_directory {
+            Some(parent) => std::fs::create_dir_all(parent).and_then(|()| TempDir::new_in(parent)),
+            None => TempDir::new(),
+        }
+        .map_err(|error| {
             AppError::new(
                 "APP_SPAWN",
                 format!("could not create working directory: {error}"),
             )
-        })?);
-        Self::spawn_in(config, temp_dir)
+        })?;
+        Self::spawn_in(config, Arc::new(temp_dir), run_directory)
     }
 
-    fn spawn_in(config: &AppConfig, temp_dir: Arc<TempDir>) -> Result<Self, AppError> {
+    fn spawn_in(
+        config: &AppConfig,
+        temp_dir: Arc<TempDir>,
+        run_directory: Option<PathBuf>,
+    ) -> Result<Self, AppError> {
+        let session_started = Instant::now();
         let mut command = Command::new(&config.executable);
         command
             .args(&config.args)
@@ -83,6 +147,18 @@ impl AppSession {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        if run_directory.is_some() {
+            let temporary = temp_dir.path().join("tmp");
+            std::fs::create_dir_all(&temporary).map_err(|error| {
+                AppError::new(
+                    "APP_SPAWN",
+                    format!("could not create temporary directory: {error}"),
+                )
+            })?;
+            for variable in TEMPORARY_VARIABLES {
+                command.env(variable, &temporary);
+            }
+        }
         process_tree::configure(&mut command);
         let mut child = command.spawn().map_err(|error| {
             AppError::new(
@@ -110,9 +186,18 @@ impl AppSession {
         };
         let (writer, write_jobs) = mpsc::channel();
         let (response_sender, responses) = mpsc::sync_channel(1);
+        let reader_witness = Arc::new(ReaderRecorder::new(ReaderProgress::Available {
+            last_event: None,
+        }));
+        let response_sender = ResponseSender {
+            channel: response_sender,
+            witness: Arc::clone(&reader_witness),
+            ordinal: Some(0),
+            session_started,
+        };
         let writer_thread = match thread::Builder::new()
             .name("blabla-app-writer".into())
-            .spawn(move || write_requests(stdin, write_jobs))
+            .spawn(move || write_requests(stdin, write_jobs, session_started))
         {
             Ok(handle) => handle,
             Err(error) => {
@@ -152,10 +237,13 @@ impl AppSession {
             child: Some(child),
             writer: Some(writer),
             responses,
+            reader_witness,
+            session_started,
             writer_thread: Some(writer_thread),
             reader_thread: Some(reader_thread),
             process_tree: Some(process_tree),
             temp_dir: Some(temp_dir),
+            run_directory,
             config: config.clone(),
             initialized: false,
             timeout: config.timeout,
@@ -165,24 +253,32 @@ impl AppSession {
         })
     }
 
-    fn exchange(&mut self, request: Value) -> Result<Value, AppError> {
-        let result = self.exchange_open(request);
+    fn exchange(
+        &mut self,
+        operation: ExchangeOperation,
+        request: Value,
+    ) -> Result<Value, AppError> {
+        let result = self.exchange_open(operation, request);
         if result.is_err() {
             self.shutdown();
         }
         result
     }
 
-    fn exchange_open(&mut self, mut request: Value) -> Result<Value, AppError> {
+    fn exchange_open(
+        &mut self,
+        operation: ExchangeOperation,
+        mut request: Value,
+    ) -> Result<Value, AppError> {
         if self.closed {
             return Err(AppError::new("APP_IO", "application session is closed"));
         }
-        let deadline = Instant::now()
-            + if self.booted {
-                self.timeout
-            } else {
-                self.startup
-            };
+        let started = Instant::now();
+        let (allowance, budget) = if self.booted {
+            (ExchangeAllowance::Response, self.timeout)
+        } else {
+            (ExchangeAllowance::Startup, self.startup)
+        };
         let request_id = request_id()?;
         request
             .as_object_mut()
@@ -195,15 +291,46 @@ impl AppSession {
             )
         })?;
         bytes.push(b'\n');
+        let mut exchange = Exchange::new(ExchangeStart {
+            request_id,
+            operation,
+            request_bytes: bytes.len(),
+            child_pid: self.child.as_ref().map(Child::id),
+            allowance,
+            budget,
+            started,
+            session_started: self.session_started,
+        });
+        let result = self.exchange_pending(bytes, &mut exchange);
+        result.map_err(|mut error| {
+            if error.code == "APP_TIMEOUT" {
+                error.exchange_witness = Some(Box::new(
+                    exchange.snapshot(&self.reader_witness, self.child.as_mut()),
+                ));
+            }
+            error
+        })
+    }
+
+    fn exchange_pending(
+        &mut self,
+        bytes: Vec<u8>,
+        exchange: &mut Exchange,
+    ) -> Result<Value, AppError> {
+        let deadline = exchange.deadline;
         let (completion, written) = mpsc::sync_channel(1);
         self.writer
             .as_ref()
             .ok_or_else(|| AppError::new("APP_IO", "application input is closed"))?
-            .send(WriteJob { bytes, completion })
+            .send(WriteJob {
+                bytes,
+                completion,
+                witness: Arc::clone(&exchange.writer),
+            })
             .map_err(|_| AppError::new("APP_IO", "application input is closed"))?;
 
         match written.recv_timeout(remaining(deadline)?) {
-            Ok(Ok(())) => {}
+            Ok(Ok(())) => exchange.received_write(),
             Ok(Err(message)) => return Err(AppError::new("APP_IO", message)),
             Err(RecvTimeoutError::Timeout) => {
                 return Err(AppError::new(
@@ -219,8 +346,8 @@ impl AppSession {
             }
         }
 
-        let event = match self.responses.recv_timeout(remaining(deadline)?) {
-            Ok(event) => event,
+        let frame = match self.responses.recv_timeout(remaining(deadline)?) {
+            Ok(frame) => frame,
             Err(RecvTimeoutError::Timeout) => {
                 return Err(AppError::new(
                     "APP_TIMEOUT",
@@ -234,7 +361,8 @@ impl AppSession {
                 ));
             }
         };
-        let line = match event {
+        exchange.received_response(frame.ordinal);
+        let line = match frame.event {
             ResponseEvent::Line(line) => line,
             ResponseEvent::Eof => return Err(self.eof_error(deadline)),
             ResponseEvent::Unterminated => {
@@ -259,11 +387,12 @@ impl AppSession {
                     format!("application emitted malformed JSON: {error}"),
                 )
             })?;
-        unwrap_response(response.0, &request_id)
+        let result = unwrap_response(response.0, &exchange.request_id)?;
+        exchange.correlated_response();
+        Ok(result)
     }
 
     fn eof_error(&mut self, exchange_deadline: Instant) -> AppError {
-        let status_deadline = exchange_deadline.min(Instant::now() + Duration::from_millis(50));
         loop {
             match self.child.as_mut().map(Child::try_wait) {
                 Some(Ok(Some(status))) if !status.success() => {
@@ -278,7 +407,7 @@ impl AppSession {
                         format!("application exited before responding with {status}"),
                     );
                 }
-                Some(Ok(None)) if Instant::now() < status_deadline => {
+                Some(Ok(None)) if Instant::now() < exchange_deadline => {
                     thread::sleep(Duration::from_millis(1));
                 }
                 Some(Ok(None)) | None => {
@@ -294,8 +423,14 @@ impl AppSession {
         }
     }
 
-    fn acknowledgement(&mut self, request: Value) -> Result<(), AppError> {
-        let result = self.exchange(request).and_then(validate_acknowledgement);
+    fn acknowledgement(
+        &mut self,
+        operation: ExchangeOperation,
+        request: Value,
+    ) -> Result<(), AppError> {
+        let result = self
+            .exchange(operation, request)
+            .and_then(validate_acknowledgement);
         if result.is_err() {
             self.shutdown();
         }
@@ -372,7 +507,7 @@ impl AppSession {
 
             if !saw_eof {
                 let wait = remaining(deadline)?.min(Duration::from_millis(5));
-                match self.responses.recv_timeout(wait) {
+                match self.responses.recv_timeout(wait).map(|frame| frame.event) {
                     Ok(ResponseEvent::Line(_)) => {
                         return Err(AppError::new(
                             "APP_PROTOCOL",
@@ -483,7 +618,7 @@ impl AppSession {
                 tree.reap_descendants();
             }
             while let Ok(event) = self.responses.try_recv() {
-                if !matches!(event, ResponseEvent::Eof) {
+                if !matches!(event.event, ResponseEvent::Eof) {
                     return Err(AppError::new(
                         "APP_PROTOCOL",
                         "unexpected protocol output during trusted termination",
@@ -518,7 +653,7 @@ impl AppSession {
         join_finished(&mut self.writer_thread);
         join_finished(&mut self.reader_thread);
         while let Ok(event) = self.responses.try_recv() {
-            if !matches!(event, ResponseEvent::Eof) {
+            if !matches!(event.event, ResponseEvent::Eof) {
                 return Err(AppError::new(
                     "APP_PROTOCOL",
                     "unexpected trailing protocol output during trusted termination",
@@ -538,68 +673,70 @@ impl AppSession {
         }
         self.closed = true;
         self.writer.take();
-
-        if let Some(process_tree) = self.process_tree.as_mut() {
-            process_tree.terminate();
+        if let Some(tree) = self.process_tree.as_mut() {
+            tree.terminate();
         }
-
-        let mut child = self.child.take();
-        if let Some(process) = child.as_mut() {
-            let _ = process.kill();
+        let killed = self.child.as_mut().is_none_or(|child| child.kill().is_ok());
+        if killed && let Some(child) = self.child.as_mut() {
+            let _ = child.wait();
         }
-        let cleanup_deadline = Instant::now() + CLEANUP_LIMIT;
-        let mut reaped = false;
-        while Instant::now() < cleanup_deadline {
-            match child.as_mut().map(Child::try_wait) {
-                Some(Ok(Some(_))) | None => {
-                    reaped = true;
-                    break;
-                }
-                Some(Ok(None)) => thread::sleep(Duration::from_millis(1)),
-                Some(Err(_)) => break,
+        let deadline = Instant::now() + CLEANUP_LIMIT;
+        loop {
+            let exited = self
+                .child
+                .as_mut()
+                .map(Child::try_wait)
+                .transpose()
+                .is_ok_and(|status| status.is_none_or(|status| status.is_some()));
+            if exited && let Some(tree) = &self.process_tree {
+                tree.reap_descendants();
             }
-        }
-
-        if reaped {
-            child.take();
-            while Instant::now() < cleanup_deadline {
-                if let Some(tree) = self.process_tree.as_ref() {
-                    tree.reap_descendants();
-                    if tree.is_empty().unwrap_or(true) {
-                        break;
-                    }
-                } else {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(1));
-            }
-            self.temp_dir.take();
-        } else if let Some(mut process) = child.take() {
-            let temp_dir = self.temp_dir.take();
-            thread::spawn(move || {
-                let _ = process.wait();
-                drop(temp_dir);
-            });
-        } else {
-            self.temp_dir.take();
-        }
-
-        while Instant::now() < cleanup_deadline
-            && (self
-                .writer_thread
-                .as_ref()
-                .is_some_and(|handle| !handle.is_finished())
-                || self
-                    .reader_thread
-                    .as_ref()
-                    .is_some_and(|handle| !handle.is_finished()))
-        {
             while self.responses.try_recv().is_ok() {}
+            join_finished(&mut self.writer_thread);
+            join_finished(&mut self.reader_thread);
+            let empty = self
+                .process_tree
+                .as_ref()
+                .is_none_or(|tree| tree.is_empty().unwrap_or(false));
+            if exited && empty && self.writer_thread.is_none() && self.reader_thread.is_none() {
+                self.child.take();
+                self.process_tree.take();
+                close_directory(self.temp_dir.take());
+                return;
+            }
+            if Instant::now() >= deadline {
+                break;
+            }
             thread::sleep(Duration::from_millis(1));
         }
-        join_finished(&mut self.writer_thread);
-        join_finished(&mut self.reader_thread);
-        self.process_tree.take();
+        let child = self.child.take();
+        let tree = self.process_tree.take();
+        let writer = self.writer_thread.take();
+        let reader = self.reader_thread.take();
+        let directory = self.temp_dir.take();
+        let (_, closed) = mpsc::sync_channel(1);
+        drop(std::mem::replace(&mut self.responses, closed));
+        thread::spawn(move || {
+            if let Some(mut child) = child {
+                let _ = child.wait();
+            }
+            if let Some(writer) = writer {
+                let _ = writer.join();
+            }
+            if let Some(reader) = reader {
+                let _ = reader.join();
+            }
+            if let Some(tree) = tree {
+                loop {
+                    tree.reap_descendants();
+                    if tree.is_empty().unwrap_or(false) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+            close_directory(directory);
+        });
     }
 }
 
@@ -611,9 +748,10 @@ impl Application for AppSession {
                 self.shutdown();
                 return Err(error);
             }
-            *self = Self::spawn(&config)?;
+            let run_directory = self.run_directory.clone();
+            *self = Self::spawn_within(&config, run_directory)?;
         }
-        self.acknowledgement(json!({"op": "reset"}))?;
+        self.acknowledgement(ExchangeOperation::Reset, json!({"op": "reset"}))?;
         self.initialized = true;
         Ok(())
     }
@@ -625,15 +763,18 @@ impl Application for AppSession {
                 "restart must use the trusted lifecycle operation",
             ));
         }
-        self.acknowledgement(json!({
-            "op": "call",
-            "name": call.action,
-            "args": call.args,
-        }))
+        self.acknowledgement(
+            ExchangeOperation::Call,
+            json!({
+                "op": "call",
+                "name": call.action,
+                "args": call.args,
+            }),
+        )
     }
 
     fn observe(&mut self, schema: &[Field]) -> Result<Value, AppError> {
-        let response = self.exchange(json!({"op": "observe"}))?;
+        let response = self.exchange(ExchangeOperation::Observe, json!({"op": "observe"}))?;
         let result = project_observation(&response, schema);
         if result.is_err() {
             self.shutdown();
@@ -659,7 +800,7 @@ impl Application for AppSession {
             self.shutdown();
             return Err(error);
         }
-        *self = Self::spawn_in(&config, directory)?;
+        *self = Self::spawn_in(&config, directory, self.run_directory.clone())?;
         self.initialized = true;
         Ok(())
     }
@@ -858,13 +999,15 @@ fn remaining(deadline: Instant) -> Result<Duration, AppError> {
         .ok_or_else(|| AppError::new("APP_TIMEOUT", "application exchange deadline elapsed"))
 }
 
-fn write_requests(mut stdin: ChildStdin, jobs: Receiver<WriteJob>) {
+fn write_requests(mut stdin: ChildStdin, jobs: Receiver<WriteJob>, session_started: Instant) {
     for job in jobs {
+        job.witness.writing();
         let result = stdin
             .write_all(&job.bytes)
             .and_then(|()| stdin.flush())
             .map_err(|error| format!("could not write application request: {error}"));
         let failed = result.is_err();
+        job.witness.completed(!failed, session_started);
         let _ = job.completion.send(result);
         if failed {
             break;
@@ -872,16 +1015,17 @@ fn write_requests(mut stdin: ChildStdin, jobs: Receiver<WriteJob>) {
     }
 }
 
-fn read_responses(stdout: ChildStdout, responses: SyncSender<ResponseEvent>) {
+fn read_responses(stdout: ChildStdout, mut responses: ResponseSender) {
     let mut reader = BufReader::new(stdout);
     let mut line = Vec::new();
     loop {
         let available = match reader.fill_buf() {
             Ok(available) => available,
             Err(error) => {
-                let _ = responses.send(ResponseEvent::Io(format!(
-                    "could not read application response: {error}"
-                )));
+                let _ = responses.send(
+                    ResponseEvent::Io(format!("could not read application response: {error}")),
+                    line.len(),
+                );
                 return;
             }
         };
@@ -891,18 +1035,19 @@ fn read_responses(stdout: ChildStdout, responses: SyncSender<ResponseEvent>) {
             } else {
                 ResponseEvent::Unterminated
             };
-            let _ = responses.send(event);
+            let _ = responses.send(event, line.len());
             return;
         }
         if let Some(newline) = available.iter().position(|byte| *byte == b'\n') {
             if line.len() + newline > RESPONSE_LINE_LIMIT {
-                let _ = responses.send(ResponseEvent::TooLong);
+                let _ = responses.send(ResponseEvent::TooLong, line.len() + newline + 1);
                 return;
             }
             line.extend_from_slice(&available[..newline]);
             reader.consume(newline + 1);
+            let bytes = line.len() + 1;
             if responses
-                .send(ResponseEvent::Line(std::mem::take(&mut line)))
+                .send(ResponseEvent::Line(std::mem::take(&mut line)), bytes)
                 .is_err()
             {
                 return;
@@ -910,12 +1055,21 @@ fn read_responses(stdout: ChildStdout, responses: SyncSender<ResponseEvent>) {
         } else {
             let available_len = available.len();
             if line.len() + available_len > RESPONSE_LINE_LIMIT {
-                let _ = responses.send(ResponseEvent::TooLong);
+                let _ = responses.send(ResponseEvent::TooLong, line.len() + available_len);
                 return;
             }
             line.extend_from_slice(available);
             reader.consume(available_len);
         }
+    }
+}
+
+fn close_directory(directory: Option<Arc<TempDir>>) {
+    if let Some(directory) = directory
+        && let Ok(directory) = Arc::try_unwrap(directory)
+        && let Err(error) = directory.close()
+    {
+        eprintln!("application working-directory cleanup failed: {error}");
     }
 }
 

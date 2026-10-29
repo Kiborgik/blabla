@@ -10,6 +10,7 @@ use super::{
     ObservedEvent, ObservedFact, SourceKind,
 };
 use crate::memory::{self, knowledge, process};
+use crate::project::task::machine::TaskState;
 use crate::project::{self, Project, task};
 use crate::runtime::strict_json::StrictValue;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -291,7 +292,7 @@ pub fn deterministic_result(
         .find(|(_, failed)| *failed)
         .map(|(observation, _)| observation.id.clone());
     let task_blocked = packet.context.get(&super::ContextSlot::Task).into_iter().flat_map(ContextValue::observations).any(|observation| {
-        observation.capture == "local:task-record" && (matches!(&observation.fact, Some(ObservedFact::TaskState { state, .. }) if state == "blocked") || serde_json::from_str::<serde_json::Value>(&observation.text).ok().and_then(|value| value.get("unresolved_findings").and_then(serde_json::Value::as_array).map(|findings| !findings.is_empty())).unwrap_or(false))
+        observation.capture == "local:task-record" && (matches!(&observation.fact, Some(ObservedFact::TaskState { state, .. }) if TaskState::from_word(state) == Some(TaskState::Blocked)) || serde_json::from_str::<serde_json::Value>(&observation.text).ok().and_then(|value| value.get("unresolved_findings").and_then(serde_json::Value::as_array).map(|findings| !findings.is_empty())).unwrap_or(false))
     });
     if failure.is_none() && !task_blocked {
         return None;
@@ -1478,7 +1479,7 @@ pub(crate) fn rebuild(
     let task = task::read(&project.manifest.root, task_name)
         .map_err(|_| TraceError::Io)?
         .ok_or(TraceError::Missing)?;
-    if !task.open() || task.state != "accepted" {
+    if !task.open() || task.state != TaskState::Accepted {
         return Err(TraceError::Stale);
     }
     let (judgments, bindings) = definitions(project)?;

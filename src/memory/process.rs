@@ -349,10 +349,10 @@ pub fn validate(memory: &ProcessMemory) -> Vec<String> {
         if !memory
             .roles
             .iter()
-            .any(|role| role.model.iter().any(|m| m == &alias.model))
+            .any(|role| admits(&role.model, &alias.model))
         {
             problems.push(format!(
-                "alias {:?} declares model {:?}, which no role lists; an alias must stand for a model in a role's permitted list",
+                "alias {:?} declares model {:?}, which no role's model list admits; an alias must stand for a model a role permits, by name or through a family entry ending in *",
                 alias.name, alias.model
             ));
         }
@@ -405,6 +405,13 @@ pub fn status(memory: &Memory<ProcessMemory>, file: &str) -> Option<ProcessStatu
             .map(|memory| memory.bindings.len())
             .unwrap_or(0),
         authority: AUTHORITY,
+    })
+}
+
+pub fn admits(permitted: &[String], model: &str) -> bool {
+    permitted.iter().any(|entry| match entry.strip_suffix('*') {
+        Some(family) => model.starts_with(family),
+        None => entry == model,
     })
 }
 

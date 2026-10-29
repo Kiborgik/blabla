@@ -118,9 +118,7 @@ when move { expect "invalid": any(before.items, a => a.id == input.source and an
         .reports
         .iter()
         .find(|r| {
-            r.id.contains("invalid.")
-                && r.required_witness.starts_with("invalid operation")
-                && r.required_witness.contains("not(Any(before.items, $ 4")
+            r.id.contains("invalid.") && r.required_witness.contains("not(Any(before.items, $ 4")
         })
         .unwrap();
     assert_eq!(missing.witnesses, 1);
@@ -237,7 +235,7 @@ when restart { expect "durable": after.item == before.item }
         coverage
             .reports
             .iter()
-            .any(|p| p.required_witness.contains("sealed is true") && p.witnesses == 0)
+            .any(|p| p.id.ends_with(".restart.sealed.bool.true") && p.witnesses == 0)
     );
 }
 

@@ -111,7 +111,7 @@ def tracked_paths(root):
         encoding="utf-8",
         check=True,
     )
-    return set(listing.stdout.splitlines())
+    return {path for path in listing.stdout.splitlines() if (root / path).exists()}
 
 
 def versions_in(root, path, pattern):

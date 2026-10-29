@@ -1,0 +1,16 @@
+module machine "src/project/task/machine.rs"
+module skeptic "src/skeptic.rs"
+module cli     "src/cli/mod.rs"
+module bridge  "bridge/component.rs"
+
+require "task-states-are-one-enum":                symbol machine::TaskState
+require "transitions-are-one-table":               symbol machine::TRANSITIONS
+require "a-transition-names-its-guards":           symbol machine::Transition.guards
+require "challenges-come-from-one-detector-table": symbol skeptic::DETECTORS
+forbid  "no-positional-class-names":               symbol skeptic::CLASSES
+forbid  "the-machine-stays-below-the-cli":         dependency machine -> cli
+
+require "bridge-components-share-one-shape": symbol bridge::Component
+
+module task_cli "src/cli/task"
+require "task-cli-files-stay-under-800-lines": lines task_cli <= 800

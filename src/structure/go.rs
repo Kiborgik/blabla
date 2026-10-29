@@ -802,8 +802,8 @@ mod tests {
         assert!(facts.error.is_some());
         let error = facts.error.unwrap();
         assert!(
-            error.contains("line"),
-            "error message should mention the line: {error}"
+            (1..=4).any(|line| error.ends_with(&crate::structure::treesitter::line_suffix(line))),
+            "{error}"
         );
     }
 

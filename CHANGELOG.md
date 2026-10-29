@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.12.0 (2026-10-29)
+
+0.12 was built and dogfooded on a real project: a zero-player civilization game, a procedural world whose towns, trade and research grow on their own while people watch, was built through BlaBla's task workflow and surfaced the frictions this release fixes. The 0.12 work itself ran through BlaBla's own tasks, challenges and `finish`. A hand-back is one command, the task lifecycle is one table, executed evidence survives a resume, and `finish` runs independent contract groups in parallel.
+
+### Breaking and upgrade
+
+- 0.12 reads only task records it wrote. Close or withdraw every task with the BlaBla that opened it, or move closed history out of `.blabla/tasks/`. [Upgrade note](docs/agent-workflow.md#upgrading-to-012)
+- A task declares its check one way, `--check PROG ARG…`; `--check-argv`, `task check --argv` and the shell-string form are gone
+- `finish` runs one campaign per group of behavior contracts that share state or actions, each with its own derived seed, so recorded sequences differ from 0.11. A record written by 0.11 shows STALE until `finish` runs
+
+### Added
+
+- `task ready NAME --lens PACK TEXT --note TEXT --outcome OUTCOME --claim INTENT=CLAIM` records the hand-back in one write and runs the assignment challenge; a refused ready records none of it
+- A task that serves a goal hands back with `delivered`, `partial`, `blocked` or `not-applicable`; `partial` and `blocked` leave a residual finding that survives close without blocking it
+- `task open --intent` asks the hand-back for one claim per affected intent: each system the write scope falls in, and the goal
+- `task budget NAME` reports time per phase from the record and executed runs, writing nothing
+- `task scope NAME --remove PATH` releases a path that has not changed since the task opened; `task reconcile-withdrawal` takes several paths
+- A role's model list may name a family such as `sonnet-*`
+- Structure fact `lines MODULE <= N`; its module may be a directory, and every tracked file under it is counted
+- Profile field `jobs` (default 2) runs independent campaigns at once; results are reported in manifest order and equal a serial run, and each campaign reports its own `elapsed_ms`
+- `run` and `finish` start the application in `.blabla/run/<pid>/` with its temporary directory there, and refuse to record a run during which the implementation changed (`BLA-RUN-INPUTS-CHANGED`)
+- `task show --json` carries `challenge_classes`, `affected_intents`, path `attributions` and whether each evidence entry was executed or claimed; `challenge --json` lists every unattributed path
+
+### Changed
+
+- Evidence BlaBla executed stays current across a new acceptance while its check and inputs are unchanged, except for a review, whose evidence must come from its current acceptance; an exit given with `--exit` is shown as claimed
+- Accepting a task again clears its hand-back claims, so the next hand-back claims its outcome and intents again; `task resolve` settles a residual finding on a closed task
+- Command output is shorter: authority statements are one line, `status` lists live tasks and counts the rest, a standing challenge prints its path count and the command that lists the paths, `task show --json` carries run internals only with `--verbose`, `task freshness` prints only changed members unless `--verbose`, printed commands quote their arguments, and a refused `task ready` names the guard that refused it
+- A task with an empty write scope closes against its opening snapshot on every platform; a changed tree still needs a current GREEN run
+- Task states, the commands that move them and the guards on each move are one table that challenge, hand-back, close and `task show` routes all read
+- `task show` attributes changed paths exactly as `challenge` does and keeps scope paths in their on-disk spelling; `challenge` without a task reports the project-wide challenges
+- A campaign's ceiling is its obligation share of the profile's case pool, rounded up, at least one case; it stops after twice the actions its full coverage took
+- BlaBla's own canonical profile runs 64-action cases from one pool shared by its campaigns, a larger total budget than 0.11's 8 cases of 512 actions; every campaign reaches full coverage inside its ceiling, and behavior verification takes under a minute
+- On Windows, BlaBla resumes each process it supervises from that process's own thread list instead of a system-wide snapshot, so checks and campaigns start faster
+- The agent workflow, the skill and the guides describe only 0.12 and are shorter
+- Every integration test lives in one test target, `it`
+
+### Removed
+
+- The game example moved to its own repository
+
 ## 0.11.0 (2026-10-16)
 
 `task falsify` catches a task whose tests pass without the change they claim to prove, by running the check against the code as it was before the task. The docs are shorter and plainer around one idea: contracts keep small coding models from drifting and claiming done too early, so a human or a strong model writes intent once and cheap models do checked, bounded work. Two dogfooding rounds, run with small worker models and independent reviewers through BlaBla's own task workflow, fixed the frictions they hit. No contract syntax or exit code changed; task JSON gains optional fields.
@@ -8,7 +49,7 @@
 
 - A task assigned to role `orchestrator` no longer records its own amendments as made during a carry, so it raises no `orchestrator-record-during-carry` challenge and needs no `task confirm`. Tasks of every other role behave as before. Records written by older versions keep their stored carry state
 - Task records gain optional `lenses`, `falsify` and `falsifications` lists; records without `lenses` require every consulted pack, as before
-- A review recorded before 0.11 on a target that had findings goes stale once; accept it again, rerun its check and challenge it. [Upgrade note](docs/agent-workflow.md#upgrading-task-records-to-011)
+- A review recorded before 0.11 on a target that had findings goes stale once; accept it again, rerun its check and challenge it. [Upgrade note](https://github.com/Kiborgik/blabla/blob/v0.11.0/docs/agent-workflow.md#upgrading-task-records-to-011)
 
 ### Added
 
@@ -58,7 +99,7 @@ Revision-bound handoffs and an experimental bounded expert layer. [Release evide
 ### Breaking and upgrade
 
 - Task evidence now binds exact text/argv boundaries, acceptance epoch and declared inputs. Old evidence remains history without current credit. Reaccept, rerun the exact check, reassess consulted lenses and challenge before hand-back; even same-model reacceptance starts a new epoch
-- Lens credit binds model/epoch/knowledge. Explicit `task open --review-of` binds review to its target revision; historical CLOSED may have `approval_current = false`. Legacy unlinked reviews gain no inferred approval. [Revalidation procedure](docs/agent-workflow.md#upgrading-task-records-to-010)
+- Lens credit binds model/epoch/knowledge. Explicit `task open --review-of` binds review to its target revision; historical CLOSED may have `approval_current = false`. Legacy unlinked reviews gain no inferred approval. [Revalidation procedure](https://github.com/Kiborgik/blabla/blob/v0.10.0/docs/agent-workflow.md#upgrading-task-records-to-010)
 - Windows task/snapshot/ignore identities now share case-insensitive normalization, preserving mixed-case tracked input credit and normalized directory deliverables; Unix matching remains case-sensitive
 - Windows task matching preserves observed filename spelling in snapshots/withdrawal history while normalizing declarations; C persistence checks give Windows compiler preparation 120 seconds without changing the 10-second runtime limit
 - Task input/deliverable declarations reject unsafe, symlink, ignored and built-in-skipped paths atomically. Safe aliases normalize; ordinary absent in-root dependencies remain supported. Legacy invalid declarations keep their history but lose evidence, readiness, review/approval and expert-resolution freshness credit; `unobservable-task-input` gives the correction route

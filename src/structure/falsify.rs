@@ -1,11 +1,13 @@
 #[cfg(test)]
 mod tests;
 
+use super::lines::LineFacts;
 use super::{
     DependencyTarget, EntryFact, Fact, ImportFact, Inspected, Literal, ModuleDecl, ModuleFacts,
     Polarity, Provider, RuleStatus, StructureContract, StructureRule, SymbolFact, evaluate_rule,
     module_names,
 };
+use crate::project::ignore::Ignore;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -84,8 +86,9 @@ pub fn falsify(
     contracts: &[StructureContract],
     root: &Path,
     providers: &[Box<dyn Provider>],
+    ignore: &Ignore,
 ) -> FalsifyReport {
-    let inspection = super::inspect(contracts, root, providers);
+    let inspection = super::inspect(contracts, root, providers, ignore);
     let mut rules = Vec::new();
     for contract in contracts {
         for rule in &contract.rules {
@@ -208,6 +211,13 @@ fn invert<'a>(
     let slot = modules
         .get_mut(&subject.key())
         .ok_or_else(|| format!("{} was not inspected", subject.display))?;
+    if let Fact::Lines { limit, .. } = &rule.fact {
+        let description = invert_lines(subject, slot.lines.as_mut(), *limit, holds)?;
+        return Ok(Counterfactual {
+            modules,
+            description,
+        });
+    }
     let facts = slot.facts.as_mut().map_err(|failure| {
         format!(
             "{} was not inspected: {}",
@@ -223,11 +233,43 @@ fn invert<'a>(
         Fact::Maps {
             path, key, value, ..
         } => invert_maps(subject, facts, path, key, value, holds),
+        Fact::Lines { .. } => unreachable!("lines facts are inverted before provider facts"),
     }?;
     Ok(Counterfactual {
         modules,
         description,
     })
+}
+
+fn invert_lines(
+    subject: &ModuleDecl,
+    lines: Option<&mut LineFacts>,
+    limit: usize,
+    holds: bool,
+) -> Result<String, String> {
+    let Some(LineFacts::Counted(files)) = lines else {
+        return Err(format!(
+            "{} has no countable files, so there is nothing to invert",
+            subject.display
+        ));
+    };
+    if holds {
+        let file = files.first_mut().ok_or_else(|| {
+            format!(
+                "{} holds no file, so the counterfactual would have to create one",
+                subject.display
+            )
+        })?;
+        file.lines = limit + 1;
+        return Ok(format!("{} has {} lines", file.path, file.lines));
+    }
+    for file in files.iter_mut() {
+        file.lines = file.lines.min(limit);
+    }
+    Ok(format!(
+        "every file in {} has at most {limit} lines",
+        subject.display
+    ))
 }
 
 fn absent_module(subject: &ModuleDecl, what: &str) -> String {

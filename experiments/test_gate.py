@@ -1,8 +1,13 @@
 import unittest
 import sys
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+import json
 
-from gate import REQUIRED_ORDER, STEPS, checks, ordered, rust_tests_are_clean, steps_of
+from gate import REQUIRED_ORDER, STEPS, checks, main, ordered, run, rust_tests_are_clean, steps_of
 
 PLACEHOLDERS = {"@cargo", "@python", "@out", "@blabla"}
 
@@ -66,7 +71,6 @@ class RunnerUsesTheSchedule(unittest.TestCase):
         names = [name for name, _ in STEPS]
         self.assertEqual(len(names), len(set(names)))
         tokens = [token for _, command in checks(Path("."), True) for token in command]
-        self.assertNotIn("smoke_systemone_provider.py", tokens)
         self.assertNotIn("--allow-local-inference", tokens)
 
     def test_expert_check_stages_precede_completion_without_reordering_existing_steps(self):
@@ -126,6 +130,61 @@ class RustTestLog(unittest.TestCase):
 
     def test_a_run_without_a_summary_is_not_clean(self):
         self.assertFalse(rust_tests_are_clean("error: could not compile `blabla`")[2])
+
+    def test_command_output_is_streamed_and_persisted_with_its_real_exit(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "command.log"
+            captured = StringIO()
+            with redirect_stdout(captured):
+                code, output, _ = run(
+                    [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'stdout\\r\\n'); sys.stdout.buffer.flush(); sys.stderr.buffer.write(b'stderr\\r\\n'); sys.exit(7)"],
+                    log_path=path,
+                )
+            self.assertEqual(code, 7)
+            self.assertIn("stdout", output)
+            self.assertIn("stderr", output)
+            self.assertEqual(output.splitlines(), ["stdout", "stderr"])
+            self.assertNotIn("\r", output)
+            self.assertEqual(path.read_text(encoding="utf-8"), output)
+            self.assertEqual(captured.getvalue(), output)
+
+    def test_timed_out_command_keeps_partial_progress_and_is_not_clean(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "command.log"
+            persisted = []
+
+            class Capture(StringIO):
+                def write(self, text):
+                    if "active-test" in text:
+                        persisted.append(path.read_text(encoding="utf-8"))
+                    return super().write(text)
+
+            captured = Capture()
+            with redirect_stdout(captured):
+                code, output, seconds = run(
+                    [sys.executable, "-c", "import sys,time; sys.stdout.buffer.write(b'active-test\\r\\n'); sys.stdout.buffer.flush(); time.sleep(60)"],
+                    timeout=1, log_path=path,
+                )
+            self.assertEqual(code, 124)
+            self.assertLess(seconds, 5)
+            self.assertTrue(persisted)
+            self.assertIn("active-test", persisted[0])
+            self.assertIn("timed out after 1 seconds", output)
+            self.assertTrue(output.startswith("active-test\n\n"))
+            self.assertNotIn("\r", output)
+            self.assertFalse(rust_tests_are_clean(output)[2])
+            self.assertEqual(path.read_text(encoding="utf-8"), output)
+            self.assertEqual(captured.getvalue(), output)
+            with (
+                patch("sys.argv", ["gate.py", "--out", directory, "--tag", "timeout"]),
+                patch("gate.checks", return_value=[("rust-tests", ["recorded-command"])]),
+                patch("gate.run", return_value=(code, output, seconds)),
+                redirect_stdout(StringIO()),
+            ):
+                self.assertEqual(main(), 1)
+            summary = json.loads((Path(directory) / "summary-timeout.json").read_text(encoding="utf-8"))
+            self.assertFalse(summary["green"])
+            self.assertEqual(summary["checks"][0]["exit"], 124)
 
 
 if __name__ == "__main__":

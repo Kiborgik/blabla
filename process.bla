@@ -2,7 +2,7 @@ role "orchestrator" {
     purpose "Decide what the work is, divide it, integrate what comes back, and decide completion."
     owns ["decomposition and worker assignment", "shared and hot files", "integration of every worker's result", "contract semantics and the manifest", "project-wide falsification", "the product gate and blabla finish", "every commit"]
     verification "product"
-    model ["opus-5", "claude-fable-5-1", "gpt-6-astra", "gpt-6.1-sol"]
+    model ["opus-*", "claude-fable-5-1", "gpt-6-astra", "gpt-6.1-sol"]
     consult ["engineering", "testing", "design"]
 }
 
@@ -11,7 +11,7 @@ role "worker" {
     owns ["the smallest correct edit inside its write scope", "the focused checks that cover that edit"]
     verification "focused"
     block_below "70"
-    model ["haiku-4.5", "haiku-5.5", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "opus-5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
+    model ["haiku-*", "sonnet-*", "opus-*", "qwen3.5:9b", "qwen3.5:4b", "gpt-5.6-luna", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["engineering", "testing"]
 }
 
@@ -19,7 +19,7 @@ role "reviewer" {
     purpose "Independently review one bounded worker patch and report the defects that block its integration."
     owns ["the independent review of one worker patch", "the blocking defects it reports, each with file and line evidence"]
     verification "focused"
-    model ["qwen3.5:4b", "opus-5", "sonnet-5.5", "gpt-5.6-sol", "haiku-4.5", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
+    model ["qwen3.5:4b", "opus-*", "sonnet-*", "haiku-*", "gpt-5.6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"]
     consult ["reviewing", "engineering", "testing", "design"]
 }
 
@@ -93,7 +93,7 @@ policy "review-follows-an-evidence-procedure" {
 }
 
 policy "worker-output-is-independently-reviewed" {
-    statement "Before integration, a reviewer that never saw the work being done reviews a worker's patch. It gets the task, the write scope, the relevant identities and the diff, and looks up anything else itself instead of reading a project summary. Its job is to falsify the patch: unrelated changes, deleted or restructured surroundings, reinvented capability, an edit wider than asked, a test pinned to wording where a structural assertion existed, a test passing for the wrong reason, malformed generated output, a claim resting on partial check output, and anything contradicting project memory. It reports blocking defects with file and line evidence; it never edits the patch, redesigns the architecture or runs a product or research gate, and runs a focused check only when a question needs one. The worker's own account is not evidence, and a review that finds nothing says so instead of approving."
+    statement "Before a milestone integrates, a reviewer that never saw the work being done reviews its whole diff. It gets the task, the write scope, the relevant identities and the diff, and looks up anything else itself instead of reading a project summary. Its job is to falsify the patch: unrelated changes, deleted or restructured surroundings, reinvented capability, an edit wider than asked, a test pinned to wording where a structural assertion existed, a test passing for the wrong reason, malformed generated output, a claim resting on partial check output, and anything contradicting project memory. It reports blocking defects with file and line evidence; it never edits the patch, redesigns the architecture or runs a product or research gate, and runs a focused check only when a question needs one. The worker's own account is not evidence, and a review that finds nothing says so instead of approving."
     applies_to ["orchestrator", "reviewer"]
     consult ["engineering", "testing"]
 }
@@ -147,7 +147,7 @@ step "verify-focused" {
     flow "development"
     role ["worker"]
     statement "Run only the declared check, read the whole run, exit code first, and record what it reported. The product and research gates are the orchestrator's; a worker that thinks a wider run is needed says so. A hand-back with no result, a failing result or a result whose inputs changed since is challenged."
-    command "blabla task evidence <name> --exit <code> --tool <tool>"
+    command "blabla task evidence <name> --run"
 }
 
 step "challenge" {

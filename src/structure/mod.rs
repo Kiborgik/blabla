@@ -2,6 +2,7 @@ pub mod cfamily;
 pub mod falsify;
 pub mod go;
 pub mod java;
+pub mod lines;
 pub mod python;
 pub mod rust;
 pub mod syntax;
@@ -11,8 +12,10 @@ pub mod treesitter;
 pub mod typescript;
 
 use crate::diagnostic::Location;
+use crate::project::ignore::Ignore;
+use lines::LineFacts;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Debug)]
@@ -142,6 +145,10 @@ pub enum Fact {
         key: Literal,
         value: Literal,
     },
+    Lines {
+        module: String,
+        limit: usize,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -199,6 +206,7 @@ impl Fact {
                 key.render(),
                 value.render()
             ),
+            Fact::Lines { module, limit } => format!("lines {module} <= {limit}"),
         }
     }
 
@@ -207,11 +215,24 @@ impl Fact {
             Fact::Module { module }
             | Fact::Symbol { module, .. }
             | Fact::Contains { module, .. }
-            | Fact::Maps { module, .. } => {
+            | Fact::Maps { module, .. }
+            | Fact::Lines { module, .. } => {
                 vec![module.as_str()]
             }
             Fact::Dependency { from, .. } => vec![from.as_str()],
         }
+    }
+
+    pub fn referenced_modules(&self) -> Vec<&str> {
+        let mut names = self.modules();
+        if let Fact::Dependency {
+            to: DependencyTarget::Module(name),
+            ..
+        } = self
+        {
+            names.push(name.as_str());
+        }
+        names
     }
 
     fn requirement(&self, polarity: Polarity) -> String {
@@ -257,6 +278,10 @@ impl Fact {
                 verb("must map", "must not map"),
                 key.render(),
                 value.render()
+            ),
+            Fact::Lines { module, limit } => format!(
+                "every file in {module} {} {limit} lines",
+                verb("must have at most", "must not all have at most")
             ),
         }
     }
@@ -510,6 +535,7 @@ impl StructureReport {
 struct Inspected<'a> {
     provider: Option<&'a dyn Provider>,
     facts: Result<ModuleFacts, ProviderFailure>,
+    lines: Option<LineFacts>,
 }
 
 pub struct Inspection<'a> {
@@ -517,17 +543,60 @@ pub struct Inspection<'a> {
     invocations: usize,
 }
 
+struct Usage {
+    lines: BTreeSet<String>,
+    provider: BTreeSet<String>,
+}
+
+fn usage(contracts: &[StructureContract]) -> Usage {
+    let mut usage = Usage {
+        lines: BTreeSet::new(),
+        provider: BTreeSet::new(),
+    };
+    for contract in contracts {
+        for rule in &contract.rules {
+            let keys = if matches!(rule.fact, Fact::Lines { .. }) {
+                &mut usage.lines
+            } else {
+                &mut usage.provider
+            };
+            for name in rule.fact.referenced_modules() {
+                if let Some(module) = contract.modules.iter().find(|module| module.name == name) {
+                    keys.insert(module.key());
+                }
+            }
+        }
+    }
+    usage
+}
+
 pub fn inspect<'a>(
     contracts: &[StructureContract],
     root: &Path,
     providers: &'a [Box<dyn Provider>],
+    ignore: &Ignore,
 ) -> Inspection<'a> {
+    let usage = usage(contracts);
+    let mut tree = lines::Tree::default();
     let mut modules: BTreeMap<String, Inspected<'a>> = BTreeMap::new();
     let mut by_provider: Vec<Vec<&ModuleDecl>> = providers.iter().map(|_| Vec::new()).collect();
     for contract in contracts {
         for module in &contract.modules {
             let key = module.key();
             if modules.contains_key(&key) {
+                continue;
+            }
+            let measured = usage.lines.contains(&key);
+            let line_facts = measured.then(|| lines::observe(root, module, ignore, &mut tree));
+            if module.path.is_dir() || (measured && !usage.provider.contains(&key)) {
+                modules.insert(
+                    key,
+                    Inspected {
+                        provider: None,
+                        facts: Ok(ModuleFacts::default()),
+                        lines: line_facts,
+                    },
+                );
                 continue;
             }
             match providers
@@ -541,6 +610,7 @@ pub fn inspect<'a>(
                         Inspected {
                             provider: Some(providers[index].as_ref()),
                             facts: Ok(ModuleFacts::default()),
+                            lines: line_facts,
                         },
                     );
                 }
@@ -555,6 +625,7 @@ pub fn inspect<'a>(
                         Inspected {
                             provider: None,
                             facts: Err(ProviderFailure::NoProvider { extension }),
+                            lines: line_facts,
                         },
                     );
                 }
@@ -602,7 +673,20 @@ pub fn verify(
     root: &Path,
     providers: &[Box<dyn Provider>],
 ) -> StructureReport {
-    evaluate(contracts, root, &inspect(contracts, root, providers))
+    verify_with(contracts, root, providers, &Ignore::default())
+}
+
+pub fn verify_with(
+    contracts: &[StructureContract],
+    root: &Path,
+    providers: &[Box<dyn Provider>],
+    ignore: &Ignore,
+) -> StructureReport {
+    evaluate(
+        contracts,
+        root,
+        &inspect(contracts, root, providers, ignore),
+    )
 }
 
 fn evaluate(
@@ -662,7 +746,11 @@ fn evaluate_rule(
     let module_by_name = |name: &str| contract.modules.iter().find(|module| module.name == name);
     let mut provider = None;
     let mut failure = None;
-    for name in rule.fact.modules() {
+    let provider_modules = match rule.fact {
+        Fact::Lines { .. } => Vec::new(),
+        _ => rule.fact.modules(),
+    };
+    for name in provider_modules {
         if let Some(module) = module_by_name(name)
             && let Some(slot) = inspected.get(&module.key())
         {
@@ -870,6 +958,17 @@ fn evaluate_rule(
                     }
                     None => Outcome::Error(format!("module {module} was not inspected")),
                 },
+                Fact::Lines { module, limit } => lines_outcome(
+                    module_by_name(module).map(|decl| {
+                        (
+                            decl,
+                            inspected
+                                .get(&decl.key())
+                                .and_then(|slot| slot.lines.as_ref()),
+                        )
+                    }),
+                    *limit,
+                ),
             }
         }
     };
@@ -954,6 +1053,35 @@ fn symbol_outcome(
             }
         }
         None => Outcome::Error("module was not inspected".to_owned()),
+    }
+}
+
+fn lines_outcome(found: Option<(&ModuleDecl, Option<&LineFacts>)>, limit: usize) -> Outcome {
+    let Some((decl, Some(observed))) = found else {
+        return Outcome::Error("module was not inspected".to_owned());
+    };
+    match observed {
+        LineFacts::Absent => Outcome::Absent(format!("{} does not exist", decl.display)),
+        LineFacts::OutsideRoot => Outcome::Error(format!(
+            "{} lies outside the project root, so its files cannot be listed",
+            decl.display
+        )),
+        LineFacts::Unreadable(message) => Outcome::Error(message.clone()),
+        LineFacts::Counted(files) if files.is_empty() => {
+            Outcome::Absent(format!("{} holds no file to count", decl.display))
+        }
+        LineFacts::Counted(files) => match files.iter().find(|file| file.lines > limit) {
+            Some(file) => Outcome::Absent(format!(
+                "{} has {} lines, over {limit}",
+                file.path, file.lines
+            )),
+            None => Outcome::Holds(format!(
+                "{}: {} files, the longest has {} lines",
+                decl.display,
+                files.len(),
+                files.iter().map(|file| file.lines).max().unwrap_or(0)
+            )),
+        },
     }
 }
 

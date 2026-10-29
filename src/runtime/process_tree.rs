@@ -4,14 +4,15 @@ use std::process::{Child, Command};
 #[cfg(windows)]
 use std::ffi::c_void;
 #[cfg(windows)]
-use std::os::windows::io::AsRawHandle;
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 #[cfg(windows)]
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::HANDLE;
 #[cfg(windows)]
-use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+use windows_sys::Win32::System::Diagnostics::ProcessSnapshotting::{
+    HPSS, HPSSWALK, PSS_CAPTURE_THREADS, PSS_THREAD_ENTRY, PSS_WALK_THREADS, PssCaptureSnapshot,
+    PssFreeSnapshot, PssWalkMarkerCreate, PssWalkMarkerFree, PssWalkSnapshot,
 };
 #[cfg(windows)]
 use windows_sys::Win32::System::JobObjects::{
@@ -22,20 +23,8 @@ use windows_sys::Win32::System::JobObjects::{
 };
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::{
-    CREATE_SUSPENDED, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+    CREATE_SUSPENDED, GetCurrentProcess, OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
 };
-
-#[cfg(windows)]
-struct OwnedHandle(HANDLE);
-
-#[cfg(windows)]
-impl Drop for OwnedHandle {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.0);
-        }
-    }
-}
 
 #[cfg(windows)]
 pub(crate) struct ProcessTree {
@@ -71,12 +60,12 @@ impl ProcessTree {
         if raw_job.is_null() {
             return Err(native_error("could not create application Job Object"));
         }
-        let job = OwnedHandle(raw_job);
+        let job = unsafe { OwnedHandle::from_raw_handle(raw_job.cast()) };
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         let configured = unsafe {
             SetInformationJobObject(
-                job.0,
+                job.as_raw_handle() as HANDLE,
                 JobObjectExtendedLimitInformation,
                 (&raw const limits).cast::<c_void>(),
                 std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
@@ -86,16 +75,16 @@ impl ProcessTree {
             return Err(native_error("could not configure application Job Object"));
         }
         let process = child.as_raw_handle() as HANDLE;
-        if unsafe { AssignProcessToJobObject(job.0, process) } == 0 {
+        if unsafe { AssignProcessToJobObject(job.as_raw_handle() as HANDLE, process) } == 0 {
             return Err(native_error("could not assign application to Job Object"));
         }
-        let thread_id = initial_thread_id(child.id())?;
+        let thread_id = initial_thread_id(process)?;
         let raw_thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, thread_id) };
         if raw_thread.is_null() {
             return Err(native_error("could not open suspended application thread"));
         }
-        let thread = OwnedHandle(raw_thread);
-        if unsafe { ResumeThread(thread.0) } == u32::MAX {
+        let thread = unsafe { OwnedHandle::from_raw_handle(raw_thread.cast()) };
+        if unsafe { ResumeThread(thread.as_raw_handle() as HANDLE) } == u32::MAX {
             return Err(native_error(
                 "could not resume suspended application thread",
             ));
@@ -106,7 +95,7 @@ impl ProcessTree {
     pub(crate) fn terminate(&mut self) {
         if let Some(job) = &self.job {
             unsafe {
-                TerminateJobObject(job.0, 1);
+                TerminateJobObject(job.as_raw_handle() as HANDLE, 1);
             }
         }
     }
@@ -118,7 +107,7 @@ impl ProcessTree {
         let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
         let success = unsafe {
             QueryInformationJobObject(
-                job.0,
+                job.as_raw_handle() as HANDLE,
                 JobObjectBasicAccountingInformation,
                 (&raw mut accounting).cast::<c_void>(),
                 std::mem::size_of_val(&accounting) as u32,
@@ -138,32 +127,47 @@ impl ProcessTree {
 }
 
 #[cfg(windows)]
-fn initial_thread_id(process_id: u32) -> Result<u32, AppError> {
-    let raw_snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
-    if raw_snapshot == INVALID_HANDLE_VALUE {
-        return Err(native_error(
+fn initial_thread_id(process: HANDLE) -> Result<u32, AppError> {
+    let failed = |context: &str, code: u32| {
+        AppError::new(
+            "APP_SPAWN",
+            format!(
+                "{context}: {}",
+                std::io::Error::from_raw_os_error(code as i32)
+            ),
+        )
+    };
+    let mut snapshot: HPSS = std::ptr::null_mut();
+    let captured = unsafe { PssCaptureSnapshot(process, PSS_CAPTURE_THREADS, 0, &mut snapshot) };
+    if captured != 0 {
+        return Err(failed(
             "could not enumerate suspended application threads",
+            captured,
         ));
     }
-    let snapshot = OwnedHandle(raw_snapshot);
-    let mut entry = THREADENTRY32 {
-        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
-        ..Default::default()
-    };
-    if unsafe { Thread32First(snapshot.0, &mut entry) } != 0 {
-        loop {
-            if entry.th32OwnerProcessID == process_id {
-                return Ok(entry.th32ThreadID);
-            }
-            if unsafe { Thread32Next(snapshot.0, &mut entry) } == 0 {
-                break;
-            }
-        }
+    let mut marker: HPSSWALK = std::ptr::null_mut();
+    let mut entry = PSS_THREAD_ENTRY::default();
+    let mut walked = unsafe { PssWalkMarkerCreate(std::ptr::null(), &mut marker) };
+    if walked == 0 {
+        walked = unsafe {
+            PssWalkSnapshot(
+                snapshot,
+                PSS_WALK_THREADS,
+                marker,
+                (&raw mut entry).cast::<c_void>(),
+                std::mem::size_of::<PSS_THREAD_ENTRY>() as u32,
+            )
+        };
+        unsafe { PssWalkMarkerFree(marker) };
     }
-    Err(AppError::new(
-        "APP_SPAWN",
-        "could not find suspended application thread",
-    ))
+    unsafe { PssFreeSnapshot(GetCurrentProcess(), snapshot) };
+    if walked != 0 {
+        return Err(failed(
+            "could not find suspended application thread",
+            walked,
+        ));
+    }
+    Ok(entry.ThreadId)
 }
 
 #[cfg(windows)]

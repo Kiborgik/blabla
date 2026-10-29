@@ -3,7 +3,7 @@
 **Contracts that keep small coding models on track.**
 
 [![Release](https://github.com/Kiborgik/blabla/actions/workflows/release.yml/badge.svg)](https://github.com/Kiborgik/blabla/actions/workflows/release.yml)
-![version 0.11.0](https://img.shields.io/badge/version-0.11.0-blue)
+![version 0.12.0](https://img.shields.io/badge/version-0.12.0-blue)
 ![license MIT](https://img.shields.io/badge/license-MIT-green)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22761364.svg)](https://doi.org/10.5281/zenodo.22761364)
 

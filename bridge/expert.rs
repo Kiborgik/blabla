@@ -1,3 +1,4 @@
+use super::component::Component;
 use blabla::expert::packet::{self, ContextValue};
 use blabla::expert::policy::{
     self, AdvisoryOutcome, CalibrationRecord, ConcernKind, PolicyRule, PolicySettings, Predicate,
@@ -52,15 +53,17 @@ impl Fixture {
             name: "expert-fixture".into(),
             role: "worker".into(),
             statement: "Check the selected fixture input.".into(),
-            state: "accepted".into(),
+            state: task::machine::TaskState::Accepted,
             scope: vec!["input.txt".into()],
             check_inputs: vec!["input.txt".into()],
-            check_argv: Some(vec!["fixture-check".into(), "input.txt".into()]),
+            check: Some(vec!["fixture-check".into(), "input.txt".into()]),
             acceptance_epoch: 1,
             ..Default::default()
         };
         let tree = project::snapshot(root.path(), &project.ignore);
         task.evidence.push(task::Evidence {
+            member_manifest: None,
+            reuse: None,
             identity: task::declared_check(&task),
             acceptance_epoch: Some(task.acceptance_epoch),
             check: "fixture-check input.txt".into(),
@@ -69,7 +72,7 @@ impl Fixture {
             tool: "run".into(),
             unix: 1,
             inputs: task::evidence_inputs(&task, &tree),
-            command: task.check_argv.clone(),
+            command: task.check.clone(),
             log: None,
         });
         task::write(root.path(), &task).expect("the actual task record is written");
@@ -222,8 +225,10 @@ impl Expert {
             revision_current,
         }
     }
+}
 
-    pub fn call(&mut self, name: &str) -> bool {
+impl Component for Expert {
+    fn call(&mut self, name: &str, _args: &Value) -> Option<Result<(), String>> {
         match name {
             "expert_evaluate_current_claim" | "expert_evaluate_missing_evidence" => {
                 let mut request = self.fixture.record.request.clone();
@@ -256,22 +261,27 @@ impl Expert {
                 std::fs::write(self.fixture.root.path().join("input.txt"), "initial")
                     .expect("the fixture input is restored");
             }
-            _ => return false,
+            _ => return None,
         }
-        true
+        Some(Ok(()))
     }
 
-    pub fn observe(&self) -> Value {
+    fn observe(&self, _observed: &Value) -> Value {
         json!({ "expert_outcome": self.outcome, "expert_has_message": self.has_message, "expert_revision_current": self.revision_current })
     }
 }
 
 #[cfg(test)]
+fn observed_after(action: &str) -> Value {
+    let mut expert = Expert::new();
+    assert!(expert.call(action, &Value::Null).is_some());
+    expert.observe(&Value::Null)
+}
+
+#[cfg(test)]
 #[test]
 fn current_claim_uses_the_product_policy_and_current_revision() {
-    let mut expert = Expert::new();
-    assert!(expert.call("expert_evaluate_current_claim"));
-    let state = expert.observe();
+    let state = observed_after("expert_evaluate_current_claim");
     assert_eq!(state["expert_outcome"], "nudge");
     assert_eq!(state["expert_revision_current"], true);
 }
@@ -279,9 +289,7 @@ fn current_claim_uses_the_product_policy_and_current_revision() {
 #[cfg(test)]
 #[test]
 fn missing_required_evidence_uses_the_product_abstention() {
-    let mut expert = Expert::new();
-    assert!(expert.call("expert_evaluate_missing_evidence"));
-    let state = expert.observe();
+    let state = observed_after("expert_evaluate_missing_evidence");
     assert_eq!(state["expert_outcome"], "abstain");
     assert_eq!(state["expert_has_message"], false);
 }
@@ -289,14 +297,12 @@ fn missing_required_evidence_uses_the_product_abstention() {
 #[cfg(test)]
 #[test]
 fn changed_input_uses_the_final_product_revision_guard() {
-    let mut expert = Expert::new();
-    assert!(expert.call("expert_recheck_changed_revision"));
-    let state = expert.observe();
+    let state = observed_after("expert_recheck_changed_revision");
     assert_eq!(state["expert_revision_current"], false);
 }
 
 #[cfg(test)]
 #[test]
 fn unrelated_actions_remain_available_to_other_bridge_modules() {
-    assert!(!Expert::new().call("open_a_task"));
+    assert!(Expert::new().call("open_a_task", &Value::Null).is_none());
 }

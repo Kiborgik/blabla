@@ -3,6 +3,7 @@ use super::{
     SourceKind, TemplateKind,
 };
 use crate::memory::knowledge::Judgment;
+use crate::project::task::machine::TaskState;
 use crate::project::task::revision::RelevantRevision;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -430,7 +431,7 @@ fn safe_fact(fact: &super::ObservedFact, task: &str, revision: &str, max: usize)
         super::ObservedFact::TaskState {
             task: observed,
             state,
-        } => observed == task && crate::project::task::STATES.contains(&state.as_str()),
+        } => observed == task && TaskState::from_word(state).is_some(),
         super::ObservedFact::Revision { fingerprint } => fingerprint == revision,
     }
 }

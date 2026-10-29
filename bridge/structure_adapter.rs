@@ -1,3 +1,5 @@
+mod source_cli;
+use blabla::skeptic::ChallengeReport;
 use blabla::structure::{
     CollectionFact, ImportFact, Literal, ModuleDecl, ModuleFacts, Provider, ProviderFailure,
     RuleStatus, SymbolFact, UnreadableImport, syntax::parse, verify,
@@ -197,25 +199,67 @@ fn observe(scenario: Scenario) -> Value {
     json!({ "verdicts": verdicts, "determinable": determinable })
 }
 
+struct Structure(Scenario);
+
+impl Component for Structure {
+    fn call(&mut self, name: &str, _args: &Value) -> Option<Result<(), String>> {
+        self.0 = Scenario::from_action(name)?;
+        Some(Ok(()))
+    }
+
+    fn observe(&self, _observed: &Value) -> Value {
+        observe(self.0)
+    }
+}
+
 mod assignment;
 mod attestation;
+mod bounded_results;
+mod component;
 mod decisions;
 mod expert;
 mod goals;
 mod lifecycle;
 mod questions;
+mod task_machine;
+mod task_roles;
 mod voice;
 
-fn main() {
-    let mut scenario = Scenario::CollectionHit;
-    let mut assignment = assignment::Assignment::new();
-    let mut tone = voice::Tone::new();
-    let mut app = lifecycle::Lifecycle::new();
-    let mut objectives = goals::Goals::new();
-    let mut ledger = decisions::Decisions::new();
-    let mut attested = attestation::Attestation::new();
-    let mut asked = questions::Questions::new();
-    let mut expert = expert::Expert::new();
+use component::Component;
+
+fn standing(report: &ChallengeReport) -> Vec<Value> {
+    report
+        .grounded
+        .iter()
+        .map(|class| json!({ "class": class }))
+        .collect()
+}
+
+fn components(campaign: &source_cli::Campaign) -> Vec<Box<dyn Component>> {
+    vec![
+        Box::new(Structure(Scenario::CollectionHit)),
+        Box::new(assignment::Assignment::new()),
+        Box::new(bounded_results::BoundedResults::with_campaign(
+            campaign.clone(),
+            bounded_results::Templates::default(),
+        )),
+        Box::new(task_roles::TaskRoles::with_campaign(campaign.clone())),
+        Box::new(task_machine::TaskMachine::with_campaign(campaign.clone())),
+        Box::new(voice::Tone::new()),
+        Box::new(lifecycle::Lifecycle::new()),
+        Box::new(goals::Goals::new()),
+        Box::new(decisions::Decisions::new()),
+        Box::new(attestation::Attestation::new()),
+        Box::new(questions::Questions::new()),
+        Box::new(expert::Expert::new()),
+    ]
+}
+
+fn main() -> Result<(), String> {
+    let scope =
+        source_cli::ImageScope::cached(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    let campaign = scope.campaign();
+    let mut registry = components(&campaign);
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -237,15 +281,7 @@ fn main() {
             .unwrap_or_default();
         let result = match operation {
             "reset" => {
-                scenario = Scenario::CollectionHit;
-                assignment = assignment::Assignment::new();
-                tone = voice::Tone::new();
-                app.reset();
-                objectives = goals::Goals::new();
-                ledger = decisions::Decisions::new();
-                attested = attestation::Attestation::new();
-                asked = questions::Questions::new();
-                expert = expert::Expert::new();
+                registry = components(&campaign);
                 json!({ "ok": true })
             }
             "call" => {
@@ -253,36 +289,22 @@ fn main() {
                     .get("name")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                match Scenario::from_action(name) {
-                    Some(chosen) => {
-                        scenario = chosen;
-                        json!({ "ok": true })
-                    }
-                    None if assignment.call(name) => json!({ "ok": true }),
-                    None if tone.call(name) => json!({ "ok": true }),
-                    None if app.call(name) => json!({ "ok": true }),
-                    None if objectives.call(name) => json!({ "ok": true }),
-                    None if ledger.call(name) => json!({ "ok": true }),
-                    None if attested.call(name) => json!({ "ok": true }),
-                    None if asked.call(name) => json!({ "ok": true }),
-                    None if expert.call(name) => json!({ "ok": true }),
+                let args = request.get("args").unwrap_or(&Value::Null);
+                match registry
+                    .iter_mut()
+                    .find_map(|component| component.call(name, args))
+                {
+                    Some(Ok(())) => json!({ "ok": true }),
+                    Some(Err(error)) => json!({ "ok": false, "error": error }),
                     None => json!({ "ok": false, "error": format!("unknown action: {name}") }),
                 }
             }
             "observe" => {
-                let mut state = observe(scenario);
-                let voiced = tone.observe(&assignment.report());
-                for source in [
-                    assignment.observe(),
-                    voiced,
-                    app.observe(),
-                    objectives.observe(),
-                    ledger.observe(),
-                    attested.observe(),
-                    asked.observe(),
-                    expert.observe(),
-                ] {
-                    if let (Some(state), Some(extra)) = (state.as_object_mut(), source.as_object())
+                let mut state = json!({});
+                for component in &registry {
+                    let observed = component.observe(&state);
+                    if let (Some(state), Some(extra)) =
+                        (state.as_object_mut(), observed.as_object())
                     {
                         for (key, value) in extra {
                             state.insert(key.clone(), value.clone());
@@ -297,4 +319,5 @@ fn main() {
         let _ = writeln!(stdout, "{response}");
         let _ = stdout.flush();
     }
+    scope.verify_content(std::time::Instant::now() + blabla::runtime::MAX_TIMEOUT)
 }

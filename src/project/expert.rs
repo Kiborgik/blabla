@@ -223,6 +223,7 @@ pub fn binding_source(project: &Project) -> Option<&str> {
         .map(|entry| entry.display.as_str())
 }
 
+use super::task::machine::TaskState;
 use super::task::{self, Task};
 use crate::expert::packet::{self, ContextValue, ExpertPacket, PacketError};
 use crate::expert::{
@@ -515,7 +516,7 @@ pub fn build_packet(
         }
     }
     if slots.contains(&ContextSlot::Task) {
-        let selected = serde_json::json!({"id": format!("task::{}", task.name), "statement": task.statement, "role": task.role, "goal": task.goal, "scope": task.scope, "check": task::declared_check(task), "state": task.state, "readiness": task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree), "unresolved_findings": task.unresolved().map(|f| (&f.id, &f.statement)).collect::<Vec<_>>(), "blocked": task.state == "blocked", "successful_current_check": task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree).supported});
+        let selected = serde_json::json!({"id": format!("task::{}", task.name), "statement": task.statement, "role": task.role, "goal": task.goal, "scope": task.scope, "check": task::declared_check(task), "state": task.state, "readiness": task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree), "unresolved_findings": task.unresolved().map(|f| (&f.id, &f.statement)).collect::<Vec<_>>(), "blocked": task.state == TaskState::Blocked, "successful_current_check": task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree).supported});
         context.insert(
             ContextSlot::Task,
             ContextValue::Present {
@@ -528,7 +529,7 @@ pub fn build_packet(
                     text: selected.to_string(),
                     fact: Some(ObservedFact::TaskState {
                         task: format!("task::{}", task.name),
-                        state: task.state.clone(),
+                        state: task.state.word().to_owned(),
                     }),
                 }],
             },

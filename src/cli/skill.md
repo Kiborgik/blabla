@@ -10,12 +10,12 @@ BlaBla turns behavioral and structural intent into executable contracts and repo
 
 ## Working under an assignment
 
-A project may hand you a bounded task instead of the whole repository. `blabla task show <name>` prints the assignment -- statement, role, write scope, deliverables, findings, declared check, scratch -- then the routes below, in the order they are taken. That view is the authority, never this file. `task falsify` is offered only when the task names falsify paths.
+A project may hand you a bounded task instead of the whole repository. `blabla task show <name>` prints the assignment -- statement, role, write scope, deliverables, findings, declared check, scratch -- then the routes below, in the order they are taken. That view is the authority, never this file.
+`blabla task evidence <name> --run` runs the declared check and records its exit code; read the whole log, not only the exit.
 {{routes}}
-Run the declared check from the project root. `--tool` is an evidence label, not the command to execute; `--exit` records the command's real exit code.
-Acceptance records that a role took the work through BlaBla, not that it read what it retrieved. Hand-back requires current successful evidence and an explicit assignment challenge receipt. Changes to the task or its inputs require another challenge; resume a READY task with `task accept` before further work. A path outside the write scope is a finding, never a widening; read the whole run before recording it.
-A hand-back is not acceptance: READY means await orchestrator review; assigned workers hand back without running `blabla finish`, closing is the orchestrator's decision, and only `blabla finish` decides project completion.
-When multiple tasks are open, choose a name explicitly; status never assigns one to the caller. Project verification GREEN and unfinished task obligations remain separate.
+Acceptance (`task accept`) records that a role took the work through BlaBla, not that it read what it retrieved. Executed evidence stays current across a new acceptance while the check and its inputs are unchanged; `task freshness` says what changed. Never rerun an unchanged check.
+The hand-back is one write: `task ready <name> --lens <pack> "..."` for each consulted pack, `--outcome` when the task serves a goal, `--claim <intent>=updated|unchanged` when it asks for intent claims. Ready runs the assignment challenge itself; a refused ready records nothing. Resume a READY task with `task accept`. A path outside the write scope is a finding, never a widening.
+READY awaits orchestrator review: workers never run `blabla finish` or close, and only `blabla finish` decides project completion. With several tasks open, name yours; status never picks one.
 
 ## Project-level implementation workflow
 
@@ -29,21 +29,9 @@ When multiple tasks are open, choose a name explicitly; status never assigns one
 
 Read a contract file only when `explain` is not enough. Never edit a `.bla` file to reach GREEN. `blabla run -- <application>` is a quick manual check; only `blabla finish` decides completion.
 
-## Contract authoring and bootstrap
+## Guides
 
-`blabla guide bootstrap` is the canonical procedure: source authority ordering, conflicts,
-unknowns, draft contracts (`draft behavior "path"` in `project.bla`), the skeptic pass and
-promotion to `use behavior` by a human.
-
-## Authoring project memory
-
-`blabla guide memory`: the declaration and registration shape for Mission, System, Process and
-Knowledge, and the check/register/explain loop. No memory state reaches OVERALL.
-
-## Changing intended behavior
-
-`blabla guide change`: the contract-author phase edits the rule first, then the
-implementation phase reaches GREEN.
+`blabla guide bootstrap` writes the first contracts: source authority, conflicts, unknowns, drafts, the skeptic pass and promotion by a human. `blabla guide memory` gives the Mission, System, Process and Knowledge shapes; no memory state reaches OVERALL. `blabla guide change` edits the rule first, then the implementation reaches GREEN. `blabla guide loop` is the task loop.
 
 ## Commands
 
@@ -56,9 +44,9 @@ implementation phase reaches GREEN.
 | `blabla explain system::<name>` | one system: purpose, paths, the responsibilities it owns and its seams |
 | `blabla explain knowledge::<pack>` | one reusable knowledge pack and the id of every ruling in it |
 | `blabla explain flow::<name>` | the order the roles are meant to work in, one line per step |
-| `blabla task <action>` | record one bounded change; `show <name>` prints the routes your role takes next; `open`, `ask`, `resolve`, `attribute`, `deliverable --remove`, `confirm`, `statement` and `close` are the orchestrator's; a question it asks is picked with `task decide <name> --on <id>` before hand-back; every `--model` is an attestation, not proof |
+| `blabla task <action>` | record one bounded change; `show <name>` prints your next routes; opening, scoping, asking, answering, resolving, confirming and closing are the orchestrator's; every `--model` is an attestation, not proof |
 | `blabla challenge` | one grounded challenge to the current account of the work; without a task, exit 1 when one stands; with a task that is not closed, exit 0 when its assignment check is clear and 1 otherwise |
 | `blabla finish` | structure check plus canonical behavior verification from project.bla; exit 0 only for OVERALL GREEN |
 | `blabla run -- <app>` | manual verification with explicit settings; records the result |
-| `blabla check` | compile the project, including drafts |
+| `blabla check` | compile active and draft contracts only; validate an edited memory file with `blabla check FILE.bla` |
 | `blabla guide <topic>` | agent, bootstrap, change, memory, loop |

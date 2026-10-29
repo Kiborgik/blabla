@@ -10,9 +10,8 @@ Product behavior change (intended behavior differs from the contract):
   3. implementation phase: make the application satisfy the changed contract
   4. blabla finish  until GREEN
 
-A .bla edit made only to turn RED or YELLOW into GREEN is a contract weakening, not a change of intent.
-Shrinking the verification profile in project.bla to reach GREEN is the same weakening.
+A .bla edit or a smaller verification profile made only to reach GREEN is a weakening, not a change of intent.
 When one agent plays both roles, do the phases in this order and say which phase you are in.
-With several tasks in flight, write the rules for work not started yet in a draft contract
-(draft behavior or draft structure in project.bla) and promote it to use when its task opens:
-an active RED rule blocks blabla finish, and every task close needs a current GREEN finish.
+With several tasks in flight, give each task not started yet its own draft contract (draft behavior
+or draft structure in project.bla) and promote it to use when that task opens: a draft serves one
+task, so promoting it never turns another task's work RED, and every task close needs a current GREEN finish.

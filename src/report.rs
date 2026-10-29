@@ -116,6 +116,25 @@ pub struct RunReport {
     pub metrics: CampaignMetrics,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub failure: Option<Failure>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub campaigns: Vec<CampaignReport>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct CampaignReport {
+    pub contracts: Vec<String>,
+    pub seed: u64,
+    pub status: RunStatus,
+    pub cases_executed: usize,
+    pub steps_executed: usize,
+    pub ceiling: usize,
+    pub elapsed_ms: u64,
+    pub actions_to_full_coverage: Option<usize>,
+    pub verified: usize,
+    pub unexercised: usize,
+    pub violated: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<Failure>,
 }
 
 #[derive(Clone, Debug, Serialize)]

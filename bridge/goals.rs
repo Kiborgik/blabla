@@ -1,3 +1,4 @@
+use super::component::Component;
 use blabla::memory::goal::{self, Goal, Outcome, Verdict};
 use blabla::project::status::{CompletionState, State, state_verdict};
 use blabla::skeptic::{self, Evidence};
@@ -23,28 +24,6 @@ impl Goals {
         }
     }
 
-    pub fn call(&mut self, name: &str) -> bool {
-        match name {
-            "declare_an_active_goal_on_a_green_rule" => {
-                self.recorded = State::Green;
-                self.stale = false;
-                self.goal = Some(declared(&[WRITTEN_RULE]));
-            }
-            "declare_an_active_goal_on_an_unwritten_rule" => {
-                self.goal = Some(declared(&[WRITTEN_RULE, UNWRITTEN_RULE]));
-            }
-            "the_expected_rule_turns_red" => {
-                self.recorded = State::Red;
-                self.stale = false;
-            }
-            "the_recorded_run_goes_stale" => self.stale = true,
-            "mark_the_goal_done" => self.mark(goal::STATES[1]),
-            "drop_the_goal" => self.mark(goal::STATES[2]),
-            _ => return false,
-        }
-        true
-    }
-
     fn mark(&mut self, state: &str) {
         if let Some(goal) = self.goal.as_mut() {
             goal.state = state.to_owned();
@@ -61,8 +40,32 @@ impl Goals {
             self.recorded
         })
     }
+}
 
-    pub fn observe(&self) -> Value {
+impl Component for Goals {
+    fn call(&mut self, name: &str, _args: &Value) -> Option<Result<(), String>> {
+        match name {
+            "declare_an_active_goal_on_a_green_rule" => {
+                self.recorded = State::Green;
+                self.stale = false;
+                self.goal = Some(declared(&[WRITTEN_RULE]));
+            }
+            "declare_an_active_goal_on_an_unwritten_rule" => {
+                self.goal = Some(declared(&[WRITTEN_RULE, UNWRITTEN_RULE]));
+            }
+            "the_expected_rule_turns_red" => {
+                self.recorded = State::Red;
+                self.stale = false;
+            }
+            "the_recorded_run_goes_stale" => self.stale = true,
+            "mark_the_goal_done" => self.mark(goal::STATES[1]),
+            "drop_the_goal" => self.mark(goal::STATES[2]),
+            _ => return None,
+        }
+        Some(Ok(()))
+    }
+
+    fn observe(&self, _observed: &Value) -> Value {
         let outcomes: Vec<Outcome> = self
             .goal
             .iter()
@@ -93,11 +96,7 @@ impl Goals {
             },
             &outcomes,
         );
-        let standing: Vec<Value> = report
-            .grounded
-            .iter()
-            .map(|class| json!({ "class": class }))
-            .collect();
+        let standing = super::standing(&report);
         let outcome = outcomes.first();
         json!({
             "goal_state": outcome.map(|outcome| outcome.state.as_str()).unwrap_or("none"),

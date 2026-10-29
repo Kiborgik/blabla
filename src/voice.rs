@@ -74,7 +74,7 @@ pub const BLUNT: [(&str, &str); 21] = [
     ),
     (
         "evidence-superseded",
-        "That evidence describes a tree that has moved. Run the declared check again.",
+        "That evidence describes a tree that has moved. Inspect task freshness, then run the declared check again.",
     ),
     (
         "attribution-unknown",
@@ -98,7 +98,7 @@ pub const BLUNT: [(&str, &str); 21] = [
     ),
     (
         "review-target-stale",
-        "That review no longer covers the current target. Reaccept and review it again; a CLOSED review is history, so open a new one.",
+        "That review no longer covers the current target. Inspect task freshness. Reaccept and review it again; a CLOSED review is history, so open a new one.",
     ),
     (
         "unobservable-task-input",
@@ -135,24 +135,27 @@ pub fn speaks_bluntly(rendered: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::skeptic::CLASSES;
+    use crate::skeptic::DETECTORS;
+
+    fn all_classes() -> Vec<&'static str> {
+        DETECTORS
+            .iter()
+            .map(|detector| detector.class.word())
+            .collect()
+    }
 
     #[test]
     fn every_challenge_class_has_exactly_one_blunt_rendering() {
-        use crate::skeptic::GOAL_CLASSES;
         let mut named: Vec<&str> = BLUNT.iter().map(|(name, _)| *name).collect();
         named.sort();
-        let mut classes: Vec<&str> = CLASSES.to_vec();
-        classes.extend_from_slice(&GOAL_CLASSES);
+        let mut classes = all_classes();
         classes.sort();
         assert_eq!(named, classes);
     }
 
     #[test]
     fn the_neutral_voice_never_speaks_bluntly() {
-        use crate::skeptic::GOAL_CLASSES;
-        let all_classes: Vec<&str> = CLASSES.iter().chain(GOAL_CLASSES.iter()).copied().collect();
-        for class in all_classes {
+        for class in all_classes() {
             let rendered = contradiction(Voice::Neutral, class, "the declared check failed");
             assert_eq!(rendered, "the declared check failed");
             assert!(!speaks_bluntly(&rendered));
@@ -161,9 +164,7 @@ mod tests {
 
     #[test]
     fn a_blunt_rendering_carries_the_whole_neutral_statement() {
-        use crate::skeptic::GOAL_CLASSES;
-        let all_classes: Vec<&str> = CLASSES.iter().chain(GOAL_CLASSES.iter()).copied().collect();
-        for class in all_classes {
+        for class in all_classes() {
             let neutral = format!("the evidence for {class} is what it is");
             let rendered = contradiction(Voice::Blunt, class, &neutral);
             assert!(keeps_the_neutral_statement(&neutral, &rendered));

@@ -53,7 +53,7 @@ const SKILL_TEMPLATE: &str = include_str!("skill.md");
 pub fn skill() -> String {
     SKILL_TEMPLATE.replace("\r\n", "\n").replace(
         "{{routes}}",
-        &super::task::routes_text("<name>", Some("<the declared check>")),
+        &super::task::routes_text("<name>", "<the declared check>"),
     )
 }
 
@@ -151,14 +151,9 @@ pub fn run(options: &Options) -> Result<Outcome, String> {
         None => project_name(&options.dir),
     };
     let mut steps = Vec::new();
-    if !options.dir.is_dir() {
-        if options.dry_run {
-            steps.push(step(&options.dir, &options.dir, "would create"));
-        } else {
-            std::fs::create_dir_all(&options.dir)
-                .map_err(|failure| format!("cannot create {}: {failure}", options.dir.display()))?;
-            steps.push(step(&options.dir, &options.dir, "create"));
-        }
+    if !options.dir.is_dir() && !options.dry_run {
+        std::fs::create_dir_all(&options.dir)
+            .map_err(|failure| format!("cannot create {}: {failure}", options.dir.display()))?;
     }
     let nested_in = options
         .dir
@@ -346,6 +341,23 @@ mod tests {
             skill(),
             "the installed entry has drifted from the one init generates"
         );
+    }
+
+    #[test]
+    fn initialising_a_missing_directory_lists_no_step_without_a_path() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path().join("fresh").join("project");
+        let outcome = run(&Options {
+            dir: dir.clone(),
+            name: Some("Demo".to_owned()),
+            agents: false,
+            dry_run: false,
+            command: Vec::new(),
+        })
+        .unwrap();
+        assert!(dir.join(MANIFEST_NAME).is_file());
+        assert!(!outcome.steps.is_empty());
+        assert!(outcome.steps.iter().all(|step| !step.path.is_empty()));
     }
 
     #[test]

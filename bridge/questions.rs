@@ -1,4 +1,6 @@
+use super::component::Component;
 use blabla::project::status::CompletionState;
+use blabla::project::task::machine::{self, Command, Facts, TaskState};
 use blabla::project::task::{self, Acceptance, Answer, Ask, Evidence, Opening, Pick, Task};
 use blabla::skeptic::{self, Evidence as Grounds};
 use blabla::structure::falsify::FalsifyReport;
@@ -65,14 +67,14 @@ impl Questions {
                 statement: "a probe the orchestrator questions before hand-back".to_owned(),
                 scope: vec!["src".to_owned()],
                 deliverables: vec![DELIVERABLE.to_owned()],
-                check: Some(CHECK.to_owned()),
+                check: Some(vec![CHECK.to_owned()]),
                 ..Default::default()
             },
             0,
             opened,
             vec![Some("asked-0".to_owned())],
         );
-        assert!(task::apply(&mut task, "accepted"));
+        assert!(machine::fire(&mut task, Command::Accept, &Facts::record_only()).is_ok());
         task.accepted = Some(Acceptance {
             model: WORKER.to_owned(),
             unix: 1,
@@ -80,6 +82,8 @@ impl Questions {
         });
         let tree = BTreeMap::from([(DELIVERABLE.to_owned(), "asked-1".to_owned())]);
         task.evidence.push(Evidence {
+            member_manifest: None,
+            reuse: None,
             identity: task::declared_check(&task),
             acceptance_epoch: Some(task.acceptance_epoch),
             check: CHECK.to_owned(),
@@ -104,8 +108,10 @@ impl Questions {
             handed_back: false,
         }
     }
+}
 
-    pub fn call(&mut self, name: &str) -> bool {
+impl Component for Questions {
+    fn call(&mut self, name: &str, _args: &Value) -> Option<Result<(), String>> {
         match name {
             "ask_a_question_as_the_orchestrator" => {
                 let floor = QUESTION_FLOORS[self.attempts % QUESTION_FLOORS.len()];
@@ -146,11 +152,26 @@ impl Questions {
             }
             "try_to_hand_back_the_asked_task" => self.hand_back(),
             "answer_the_blocking_pick_and_resume" => self.answer_and_resume(),
-            _ => return false,
+            _ => return None,
         }
-        true
+        Some(Ok(()))
     }
 
+    fn observe(&self, _observed: &Value) -> Value {
+        json!({
+            "role_floor": self.role_floor,
+            "questions_asked": self.task.questions.len(),
+            "questions_unpicked": self.task.unpicked().count(),
+            "ask_refused": self.ask_refused,
+            "pick_refused": self.pick_refused,
+            "asked_task_blocked": self.task.state == TaskState::Blocked,
+            "asked_task_handed_back": self.handed_back,
+            "question_standing": super::standing(&self.report()),
+        })
+    }
+}
+
+impl Questions {
     fn tick(&mut self) -> u64 {
         self.clock += 1;
         self.clock
@@ -231,7 +252,7 @@ impl Questions {
         assert!(answered.is_ok(), "{answered:?}");
         let unix = self.tick();
         task::attest(&mut self.task, "answer", Some(ORCHESTRATOR), unix);
-        if task::apply(&mut self.task, "accepted") {
+        if machine::fire(&mut self.task, Command::Accept, &Facts::record_only()).is_ok() {
             let unix = self.tick();
             task::record_acceptance(
                 &mut self.task,
@@ -267,29 +288,15 @@ impl Questions {
         let blockers = self.report().assignment_blockers().len();
         task::record_challenge(&mut self.task, &self.tree, blockers, unix);
         let blockers = self.report().assignment_blockers().len();
-        self.handed_back = task::mark_ready(&mut self.task, &self.tree, blockers).is_ok();
+        self.handed_back = task::hand_back(
+            &mut self.task,
+            &self.tree,
+            task::HandbackRequest::standing(blockers),
+        )
+        .is_ok();
         if self.handed_back {
-            assert!(task::apply(&mut self.task, "accepted"));
+            assert!(machine::fire(&mut self.task, Command::Accept, &Facts::record_only()).is_ok());
         }
-    }
-
-    pub fn observe(&self) -> Value {
-        let standing: Vec<Value> = self
-            .report()
-            .grounded
-            .iter()
-            .map(|class| json!({ "class": class }))
-            .collect();
-        json!({
-            "role_floor": self.role_floor,
-            "questions_asked": self.task.questions.len(),
-            "questions_unpicked": self.task.unpicked().count(),
-            "ask_refused": self.ask_refused,
-            "pick_refused": self.pick_refused,
-            "asked_task_blocked": self.task.state == "blocked",
-            "asked_task_handed_back": self.handed_back,
-            "question_standing": standing,
-        })
     }
 }
 
@@ -298,7 +305,7 @@ mod tests {
     use super::*;
 
     fn standing(questions: &Questions) -> Vec<String> {
-        questions.observe()["question_standing"]
+        questions.observe(&Value::Null)["question_standing"]
             .as_array()
             .unwrap()
             .iter()
@@ -309,23 +316,26 @@ mod tests {
     #[test]
     fn an_asked_question_holds_the_hand_back_until_a_confident_pick_settles_it() {
         let mut questions = Questions::new();
-        assert_eq!(questions.observe()["role_floor"], 70);
-        questions.call("ask_a_question_as_the_orchestrator");
-        let observed = questions.observe();
+        assert_eq!(questions.observe(&Value::Null)["role_floor"], 70);
+        questions.call("ask_a_question_as_the_orchestrator", &Value::Null);
+        let observed = questions.observe(&Value::Null);
         assert_eq!(observed["questions_asked"], 1, "{observed}");
         assert_eq!(observed["questions_unpicked"], 1, "{observed}");
         assert_eq!(observed["ask_refused"], false, "{observed}");
-        questions.call("try_to_hand_back_the_asked_task");
-        assert_eq!(questions.observe()["asked_task_handed_back"], false);
+        questions.call("try_to_hand_back_the_asked_task", &Value::Null);
+        assert_eq!(
+            questions.observe(&Value::Null)["asked_task_handed_back"],
+            false
+        );
         assert!(standing(&questions).contains(&"question-unpicked".to_owned()));
-        questions.call("pick_at_or_above_the_questions_floor");
-        let observed = questions.observe();
+        questions.call("pick_at_or_above_the_questions_floor", &Value::Null);
+        let observed = questions.observe(&Value::Null);
         assert_eq!(observed["questions_unpicked"], 0, "{observed}");
         assert_eq!(observed["asked_task_blocked"], false, "{observed}");
-        questions.call("pick_a_question_already_picked");
-        assert_eq!(questions.observe()["pick_refused"], true);
-        questions.call("try_to_hand_back_the_asked_task");
-        let observed = questions.observe();
+        questions.call("pick_a_question_already_picked", &Value::Null);
+        assert_eq!(questions.observe(&Value::Null)["pick_refused"], true);
+        questions.call("try_to_hand_back_the_asked_task", &Value::Null);
+        let observed = questions.observe(&Value::Null);
         assert_eq!(observed["asked_task_handed_back"], true, "{observed}");
         assert!(!standing(&questions).contains(&"question-unpicked".to_owned()));
     }
@@ -333,27 +343,30 @@ mod tests {
     #[test]
     fn a_pick_between_the_floors_blocks_and_a_worker_or_a_low_floor_cannot_ask() {
         let mut questions = Questions::new();
-        questions.call("ask_a_question_as_a_worker");
-        assert_eq!(questions.observe()["ask_refused"], true);
+        questions.call("ask_a_question_as_a_worker", &Value::Null);
+        assert_eq!(questions.observe(&Value::Null)["ask_refused"], true);
         for _ in 0..3 {
-            questions.call("ask_with_a_floor_below_the_roles_floor");
-            assert_eq!(questions.observe()["ask_refused"], true);
+            questions.call("ask_with_a_floor_below_the_roles_floor", &Value::Null);
+            assert_eq!(questions.observe(&Value::Null)["ask_refused"], true);
         }
-        assert_eq!(questions.observe()["questions_asked"], 0);
-        questions.call("ask_a_question_as_the_orchestrator");
-        questions.call("pick_between_the_roles_floor_and_the_questions_floor");
-        let observed = questions.observe();
+        assert_eq!(questions.observe(&Value::Null)["questions_asked"], 0);
+        questions.call("ask_a_question_as_the_orchestrator", &Value::Null);
+        questions.call(
+            "pick_between_the_roles_floor_and_the_questions_floor",
+            &Value::Null,
+        );
+        let observed = questions.observe(&Value::Null);
         assert_eq!(observed["asked_task_blocked"], true, "{observed}");
         assert_eq!(observed["questions_unpicked"], 0, "{observed}");
         assert!(standing(&questions).contains(&"decision-unanswered".to_owned()));
-        questions.call("answer_the_blocking_pick_and_resume");
-        let observed = questions.observe();
+        questions.call("answer_the_blocking_pick_and_resume", &Value::Null);
+        let observed = questions.observe(&Value::Null);
         assert_eq!(observed["asked_task_blocked"], false, "{observed}");
         assert!(!standing(&questions).contains(&"decision-unanswered".to_owned()));
-        questions.call("ask_a_question_as_the_orchestrator");
-        questions.call("pick_at_or_above_the_questions_floor");
-        questions.call("try_to_hand_back_the_asked_task");
-        let observed = questions.observe();
+        questions.call("ask_a_question_as_the_orchestrator", &Value::Null);
+        questions.call("pick_at_or_above_the_questions_floor", &Value::Null);
+        questions.call("try_to_hand_back_the_asked_task", &Value::Null);
+        let observed = questions.observe(&Value::Null);
         assert_eq!(observed["asked_task_handed_back"], false, "{observed}");
         assert!(standing(&questions).contains(&"readiness-without-evidence".to_owned()));
         assert_eq!(questions.task.acceptance_epoch, 1);
