@@ -8,11 +8,10 @@ A BOUNDED TASK is the handoff record between an orchestrator and a worker. It is
 not project memory: BlaBla writes it under .blabla/tasks/, no manifest registers it, nothing
 validates it for truth, and no state of it reaches OVERALL.
 
-THE ORCHESTRATOR opens it, which snapshots the tree the task starts from. That snapshot is the
-only reason anything can later tell a deliverable that was produced from one never touched, or a
-file changed inside the write scope from one changed outside it.
+THE ORCHESTRATOR opens it, which snapshots the tree; only that snapshot tells a produced
+deliverable from an untouched one, and a change inside the write scope from one outside it.
 
-  blabla task open <name> --role worker --statement "..." --scope <path> --deliverable <path> --check "..."
+  blabla task open <name> --role worker --statement "..." --scope <path> --deliverable <path> --check <prog> <arg>...
 
 Add --falsify <path> for each production file the change touches: the worker's task falsify then
 runs the declared check in a copy of the tree on the current files and on those files as they were

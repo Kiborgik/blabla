@@ -1,4 +1,6 @@
+use super::component::Component;
 use blabla::project::status::CompletionState;
+use blabla::project::task::machine::{self, Command, Facts, TaskState};
 use blabla::project::task::{self, Acceptance, Answer, Evidence, Question, Task};
 use blabla::skeptic::{self, Evidence as Grounds};
 use blabla::structure::falsify::FalsifyReport;
@@ -51,14 +53,14 @@ impl Decisions {
                 statement: "a probe that asks instead of guessing".to_owned(),
                 scope: vec!["src".to_owned()],
                 deliverables: vec![DELIVERABLE.to_owned()],
-                check: Some(CHECK.to_owned()),
+                check: Some(vec![CHECK.to_owned()]),
                 ..Default::default()
             },
             0,
             opened.clone(),
             vec![Some("deliverable-0".to_owned())],
         );
-        assert!(task::apply(&mut task, "accepted"));
+        assert!(machine::fire(&mut task, Command::Accept, &Facts::record_only()).is_ok());
         task.accepted = Some(Acceptance {
             model: WORKER.to_owned(),
             unix: 1,
@@ -66,6 +68,8 @@ impl Decisions {
         });
         let tree = BTreeMap::from([(DELIVERABLE.to_owned(), "deliverable-1".to_owned())]);
         task.evidence.push(Evidence {
+            member_manifest: None,
+            reuse: None,
             identity: task::declared_check(&task),
             acceptance_epoch: Some(task.acceptance_epoch),
             check: CHECK.to_owned(),
@@ -86,8 +90,10 @@ impl Decisions {
             handed_back: false,
         }
     }
+}
 
-    pub fn call(&mut self, name: &str) -> bool {
+impl Component for Decisions {
+    fn call(&mut self, name: &str, _args: &Value) -> Option<Result<(), String>> {
         match name {
             "decide_at_or_above_the_floor" => {
                 let confidence = if self.asked.is_multiple_of(2) {
@@ -126,13 +132,39 @@ impl Decisions {
             "answer_overruling_the_pick" => self.answer(false),
             "try_to_hand_back" => self.hand_back(),
             "resume_while_a_decision_is_unanswered" => {
-                task::apply(&mut self.task, "accepted");
+                let _ = machine::fire(&mut self.task, Command::Accept, &Facts::record_only());
             }
-            _ => return false,
+            _ => return None,
         }
-        true
+        Some(Ok(()))
     }
 
+    fn observe(&self, _observed: &Value) -> Value {
+        let calibration = task::calibration(std::slice::from_ref(&self.task), str::to_owned);
+        let total = |count: fn(&task::Calibration) -> usize| -> usize {
+            calibration.iter().map(count).sum()
+        };
+        json!({
+            "floor_percent": self.floor,
+            "decisions": self.task.decisions.len(),
+            "unanswered_below_floor": self
+                .task
+                .decisions
+                .iter()
+                .filter(|decision| decision.unanswered_below_floor())
+                .count(),
+            "blocked": self.task.state == TaskState::Blocked,
+            "answered": total(|model| model.answered),
+            "answers_held": total(|model| model.held),
+            "overruled": total(|model| model.overruled),
+            "last_refused": self.last_refused,
+            "handed_back": self.handed_back,
+            "decision_standing": super::standing(&self.report()),
+        })
+    }
+}
+
+impl Decisions {
     fn ask(&mut self, outside: Option<&str>, confidence: i64) {
         let choice = !self.asked.is_multiple_of(2);
         self.asked += 1;
@@ -225,40 +257,15 @@ impl Decisions {
     fn hand_back(&mut self) {
         let blockers = self.blockers();
         task::record_challenge(&mut self.task, &self.tree, blockers, 3);
-        self.handed_back = task::mark_ready(&mut self.task, &self.tree, blockers).is_ok();
+        self.handed_back = task::hand_back(
+            &mut self.task,
+            &self.tree,
+            task::HandbackRequest::standing(blockers),
+        )
+        .is_ok();
         if self.handed_back {
-            assert!(task::apply(&mut self.task, "accepted"));
+            assert!(machine::fire(&mut self.task, Command::Accept, &Facts::record_only()).is_ok());
         }
-    }
-
-    pub fn observe(&self) -> Value {
-        let calibration = task::calibration(std::slice::from_ref(&self.task), str::to_owned);
-        let total = |count: fn(&task::Calibration) -> usize| -> usize {
-            calibration.iter().map(count).sum()
-        };
-        let standing: Vec<Value> = self
-            .report()
-            .grounded
-            .iter()
-            .map(|class| json!({ "class": class }))
-            .collect();
-        json!({
-            "floor_percent": self.floor,
-            "decisions": self.task.decisions.len(),
-            "unanswered_below_floor": self
-                .task
-                .decisions
-                .iter()
-                .filter(|decision| decision.unanswered_below_floor())
-                .count(),
-            "blocked": self.task.state == "blocked",
-            "answered": total(|model| model.answered),
-            "answers_held": total(|model| model.held),
-            "overruled": total(|model| model.overruled),
-            "last_refused": self.last_refused,
-            "handed_back": self.handed_back,
-            "decision_standing": standing,
-        })
     }
 }
 
@@ -269,19 +276,19 @@ mod tests {
     #[test]
     fn a_decision_below_the_floor_blocks_until_answered_and_resumed() {
         let mut ledger = Decisions::new();
-        assert_eq!(ledger.observe()["floor_percent"], 60);
-        ledger.call("decide_below_the_floor");
-        assert_eq!(ledger.observe()["blocked"], true);
-        ledger.call("resume_while_a_decision_is_unanswered");
-        ledger.call("try_to_hand_back");
-        let observed = ledger.observe();
+        assert_eq!(ledger.observe(&Value::Null)["floor_percent"], 60);
+        ledger.call("decide_below_the_floor", &Value::Null);
+        assert_eq!(ledger.observe(&Value::Null)["blocked"], true);
+        ledger.call("resume_while_a_decision_is_unanswered", &Value::Null);
+        ledger.call("try_to_hand_back", &Value::Null);
+        let observed = ledger.observe(&Value::Null);
         assert_eq!(observed["blocked"], true, "{observed}");
         assert_eq!(observed["handed_back"], false, "{observed}");
-        ledger.call("answer_overruling_the_pick");
-        assert_eq!(ledger.observe()["blocked"], true);
-        ledger.call("resume_while_a_decision_is_unanswered");
-        ledger.call("try_to_hand_back");
-        let observed = ledger.observe();
+        ledger.call("answer_overruling_the_pick", &Value::Null);
+        assert_eq!(ledger.observe(&Value::Null)["blocked"], true);
+        ledger.call("resume_while_a_decision_is_unanswered", &Value::Null);
+        ledger.call("try_to_hand_back", &Value::Null);
+        let observed = ledger.observe(&Value::Null);
         assert_eq!(observed["handed_back"], true, "{observed}");
         assert_eq!(observed["overruled"], 1);
     }
@@ -289,8 +296,8 @@ mod tests {
     #[test]
     fn a_decision_at_the_floor_stands() {
         let mut ledger = Decisions::new();
-        ledger.call("decide_at_or_above_the_floor");
-        let observed = ledger.observe();
+        ledger.call("decide_at_or_above_the_floor", &Value::Null);
+        let observed = ledger.observe(&Value::Null);
         assert_eq!(observed["decisions"], 1);
         assert_eq!(observed["unanswered_below_floor"], 0);
         assert_eq!(observed["blocked"], false);

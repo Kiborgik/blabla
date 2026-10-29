@@ -6,7 +6,7 @@ use crate::syntax::{Lexer, Token, TokenKind};
 use std::collections::HashSet;
 use std::path::Path;
 
-pub const FACT_FORMS: &str = "`module <m>`, `symbol <m>::<Name>[.<member>]`, `dependency <m> -> <m>|\"<external>\"`, `value <m>::<Name> contains <literal>`, `value <m>::<Name> maps <literal> to <literal>`";
+pub const FACT_FORMS: &str = "`module <m>`, `symbol <m>::<Name>[.<member>]`, `dependency <m> -> <m>|\"<external>\"`, `value <m>::<Name> contains <literal>`, `value <m>::<Name> maps <literal> to <literal>`, `lines <m> <= <count>`";
 
 pub fn is_structure_source(source: &str) -> bool {
     source
@@ -156,6 +156,7 @@ impl StructureParser<'_> {
             line: start.line,
             column: start.column,
         };
+        self.refuse_directories(&fact, span)?;
         let text = self.source[span.start..span.end]
             .split_whitespace()
             .collect::<Vec<_>>()
@@ -172,6 +173,27 @@ impl StructureParser<'_> {
             location: self.location(span),
             source: text,
         });
+        Ok(())
+    }
+
+    fn refuse_directories(&self, fact: &Fact, span: Span) -> Result<(), Diagnostic> {
+        if matches!(fact, Fact::Lines { .. }) {
+            return Ok(());
+        }
+        for name in fact.referenced_modules() {
+            if let Some(module) = self.modules.iter().find(|module| module.name == name)
+                && module.path.is_dir()
+            {
+                return Err(self.error(
+                    span,
+                    "E_DIRECTORY_FACT",
+                    format!(
+                        "module '{name}' is the directory {}; only a `lines` fact can name a directory",
+                        module.display
+                    ),
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -217,6 +239,23 @@ impl StructureParser<'_> {
                     }
                 };
                 Ok((Fact::Dependency { from, to }, target.span.end))
+            }
+            "lines" => {
+                let (module, _) = self.module_reference()?;
+                self.expect(TokenKind::LessEqual, "expected '<=' after the module name")?;
+                let bound = self.current().clone();
+                self.position += 1;
+                let TokenKind::Integer(text) = &bound.kind else {
+                    return Err(self.error(
+                        bound.span,
+                        "E_STRUCTURE_FACT",
+                        "expected an integer line count after '<='",
+                    ));
+                };
+                let limit = text.parse().map_err(|_| {
+                    self.error(bound.span, "E_STRUCTURE_FACT", "line count out of range")
+                })?;
+                Ok((Fact::Lines { module, limit }, bound.span.end))
             }
             "value" => {
                 let (module, path, _) = self.symbol_reference()?;

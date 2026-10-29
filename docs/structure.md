@@ -26,10 +26,11 @@ fact     := "module" IDENT
           | "dependency" IDENT "->" (IDENT | STRING)
           | "value" IDENT "::" IDENT ("." IDENT)* "contains" literal
           | "value" IDENT "::" IDENT ("." IDENT)* "maps" literal "to" literal
+          | "lines" IDENT "<=" INTEGER
 literal  := STRING | INTEGER | "true" | "false"
 ```
 
-A module binds one file, relative to the manifest. Labels are unique per contract and become `group::label`.
+A module binds one file, relative to the manifest; only a `lines` fact may name a module bound to a directory. Labels are unique per contract and become `group::label`.
 
 | Fact | Meaning |
 | --- | --- |
@@ -39,6 +40,7 @@ A module binds one file, relative to the manifest. Labels are unique per contrac
 | `dependency a -> "name"` | `a` uses an external module, crate or package |
 | `value m::Name contains L` | a literal collection holds string, integer or Boolean `L`; for a dict or object, its keys |
 | `value m::Name maps K to V` | the entry with literal key `K` has a payload containing `V`; entries are pairs or dict items |
+| `lines m <= N` | every file of `m` has at most `N` lines; a directory module counts each tracked file under it |
 
 - **GREEN**: a required fact holds, or a forbidden fact is shown absent
 - **RED**: a required fact is absent, or a forbidden one holds; the evidence names file and line

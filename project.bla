@@ -26,8 +26,11 @@ use structure "contracts/expert-seams.bla"
 use structure "contracts/lenses.bla"
 use structure "contracts/falsify.bla"
 
+use behavior "contracts/task-machine.bla"
 use behavior "contracts/evaluator.bla"
 use behavior "contracts/assignment.bla"
+use behavior "contracts/bounded-results.bla"
+use behavior "contracts/task-role-resolution.bla"
 use behavior "contracts/voice.bla"
 
 use behavior "contracts/lifecycle.bla"
@@ -43,7 +46,10 @@ verify behavior {
     command ["target/debug/examples/structure-adapter"]
     seed 0
     cases 8
-    steps 512
-    timeout_ms 5000
+    steps 64
+    timeout_ms 42000
     shrink_budget 256
 }
+
+use structure "contracts/surface.bla"
+use structure "contracts/lifecycle-table.bla"

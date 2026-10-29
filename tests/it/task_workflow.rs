@@ -1,0 +1,6113 @@
+use crate::support::task_project::{code as cli_run, shows};
+use crate::support::{args, json_of, run_in};
+use blabla::project::task::machine::{self, Command, Facts, TaskState};
+use blabla::project::task::{self, Acceptance, Evidence, Opening};
+use std::collections::BTreeMap;
+use tempfile::TempDir;
+
+fn accepted() -> (task::Task, BTreeMap<String, String>) {
+    let tree = BTreeMap::from([("src/a.rs".to_owned(), "new".to_owned())]);
+    let mut task = task::record_from(
+        Opening {
+            name: "work".to_owned(),
+            role: "worker".to_owned(),
+            statement: "repair".to_owned(),
+            scope: vec!["src".to_owned()],
+            deliverables: vec!["src/a.rs".to_owned()],
+            check: Some(vec!["check".to_owned()]),
+            ..Default::default()
+        },
+        0,
+        BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]),
+        vec![Some("old".to_owned())],
+    );
+    assert!(machine::fire(&mut task, Command::Accept, &Facts::record_only()).is_ok());
+    task.accepted = Some(Acceptance {
+        model: "small".to_owned(),
+        unix: 1,
+        changed_at_acceptance: None,
+    });
+    (task, tree)
+}
+
+fn evidence(task: &mut task::Task, tree: &BTreeMap<String, String>) {
+    task.evidence.push(Evidence {
+        member_manifest: None,
+        reuse: None,
+        identity: task::declared_check(task),
+        acceptance_epoch: Some(task.acceptance_epoch),
+        check: "check".to_owned(),
+        exit: 0,
+        tree: "tree".to_owned(),
+        tool: "test".to_owned(),
+        unix: 2,
+        inputs: task::evidence_inputs(task, tree),
+        command: None,
+        log: None,
+    });
+}
+
+pub(crate) fn hand_back(
+    work: &mut task::Task,
+    tree: &BTreeMap<String, String>,
+) -> Result<(), &'static str> {
+    let held = work.clone();
+    task::hand_back(work, tree, task::HandbackRequest::standing(0))
+        .map_err(|refused| task::handback_code(&held, refused))
+}
+
+#[test]
+fn handback_requires_current_evidence_then_an_explicit_challenge() {
+    let (mut task, tree) = accepted();
+    assert_eq!(task::handback(&task, &tree), Err("record-evidence"));
+    evidence(&mut task, &tree);
+    assert_eq!(task::handback(&task, &tree), Err("challenge"));
+    assert!(task::record_challenge(&mut task, &tree, 0, 3));
+    assert!(hand_back(&mut task, &tree).is_ok());
+    assert_eq!(task.state, TaskState::Ready);
+}
+
+#[test]
+fn changed_inputs_and_new_evidence_invalidate_the_challenge() {
+    let (mut task, mut tree) = accepted();
+    evidence(&mut task, &tree);
+    assert!(task::record_challenge(&mut task, &tree, 0, 3));
+    tree.insert("src/a.rs".to_owned(), "changed".to_owned());
+    assert_eq!(task::handback(&task, &tree), Err("record-evidence"));
+    evidence(&mut task, &tree);
+    assert_eq!(task::handback(&task, &tree), Err("challenge"));
+    assert!(!task::record_challenge(&mut task, &tree, 1, 4));
+    assert_eq!(task::handback(&task, &tree), Err("challenge"));
+}
+
+#[test]
+fn concurrent_attributed_work_does_not_stale_a_workers_challenge() {
+    let (mut task, mut tree) = accepted();
+    task.attributions.push(task::Attribution {
+        path: "other".to_owned(),
+        kind: "concurrent".to_owned(),
+        digest: None,
+        model: None,
+    });
+    evidence(&mut task, &tree);
+    assert!(task::record_challenge(&mut task, &tree, 0, 3));
+    tree.insert("other/a.rs".to_owned(), "concurrent".to_owned());
+    assert!(hand_back(&mut task, &tree).is_ok());
+}
+
+#[test]
+fn reopening_a_handback_requires_another_challenge() {
+    let (mut task, tree) = accepted();
+    evidence(&mut task, &tree);
+    assert!(task::record_challenge(&mut task, &tree, 0, 3));
+    assert!(hand_back(&mut task, &tree).is_ok());
+    assert!(machine::fire(&mut task, Command::Accept, &Facts::record_only()).is_ok());
+    assert_eq!(task::handback(&task, &tree), Err("challenge"));
+}
+
+#[test]
+fn a_new_directory_deliverable_has_a_digest_and_child_changes_stale_its_evidence() {
+    let (mut task, mut tree) = accepted();
+    task.deliverables = vec![task::Deliverable {
+        path: "generated".to_owned(),
+        opened_digest: None,
+    }];
+    assert!(task::observed_digest(&tree, "generated").is_none());
+    tree.insert("generated/a.py".to_owned(), "first".to_owned());
+    assert!(task::observed_digest(&tree, "generated").is_some());
+    task.evidence.push(Evidence {
+        member_manifest: None,
+        reuse: None,
+        identity: task::declared_check(&task),
+        acceptance_epoch: Some(task.acceptance_epoch),
+        check: "check".to_owned(),
+        exit: 0,
+        tree: "tree".to_owned(),
+        tool: "test".to_owned(),
+        unix: 2,
+        inputs: task::evidence_inputs(&task, &tree),
+        command: None,
+        log: None,
+    });
+    assert!(task::readiness(&task, &tree).supported);
+    tree.insert("generated/b.py".to_owned(), "second".to_owned());
+    assert!(!task::readiness(&task, &tree).supported);
+}
+
+#[test]
+fn result_acceptance_rechecks_the_challenged_task_and_evidence() {
+    let (mut task, tree) = accepted();
+    evidence(&mut task, &tree);
+    assert!(task::record_challenge(&mut task, &tree, 0, 3));
+    assert!(hand_back(&mut task, &tree).is_ok());
+    task.findings.push(task::Finding {
+        id: 1,
+        statement: "new concern".to_owned(),
+        addressed: None,
+        resolution: None,
+        residual: false,
+    });
+    assert!(!task::accept_result(
+        &mut task,
+        &tree,
+        &Default::default(),
+        0,
+        "owner",
+        4
+    ));
+    assert_eq!(task.state, TaskState::Ready);
+}
+
+#[test]
+fn check_inputs_bind_dependencies_and_widening_requires_fresh_evidence() {
+    let (mut task, mut tree) = accepted();
+    task.check_inputs = vec!["shared/config".to_owned()];
+    evidence(&mut task, &tree);
+    assert_eq!(task.evidence[0].inputs.get("shared/config"), Some(&None));
+    tree.insert("src/notes.md".to_owned(), "unrelated".to_owned());
+    assert!(task::readiness(&task, &tree).supported);
+    tree.insert("shared/config".to_owned(), "created".to_owned());
+    assert!(!task::readiness(&task, &tree).supported);
+    evidence(&mut task, &tree);
+    tree.remove("shared/config");
+    assert!(!task::readiness(&task, &tree).supported);
+    evidence(&mut task, &tree);
+    tree.insert("src/a.rs".to_owned(), "changed".to_owned());
+    assert!(!task::readiness(&task, &tree).supported);
+
+    let (mut widened, plain) = accepted();
+    evidence(&mut widened, &plain);
+    widened.check_inputs = vec!["shared/config".to_owned()];
+    assert!(!task::readiness(&widened, &plain).supported);
+    evidence(&mut widened, &plain);
+    assert!(task::readiness(&widened, &plain).supported);
+}
+
+fn opened_task(statement: &str, opened_tree: &[(&str, &str)]) -> task::Task {
+    task::record_from(
+        Opening {
+            name: "work".to_owned(),
+            role: "worker".to_owned(),
+            statement: statement.to_owned(),
+            scope: vec!["src".to_owned()],
+            deliverables: vec!["src/a.rs".to_owned()],
+            check: Some(vec!["check".to_owned()]),
+            ..Default::default()
+        },
+        0,
+        opened_tree
+            .iter()
+            .map(|(path, digest)| ((*path).to_owned(), (*digest).to_owned()))
+            .collect(),
+        vec![Some("old".to_owned())],
+    )
+}
+
+#[test]
+fn acceptance_records_the_paths_changed_since_the_task_opened() {
+    let mut task = opened_task("repair", &[("src/a.rs", "old"), ("src/b.rs", "original")]);
+    let current_tree = BTreeMap::from([
+        ("src/a.rs".to_owned(), "changed".to_owned()),
+        ("src/b.rs".to_owned(), "original".to_owned()),
+        ("src/c.rs".to_owned(), "new".to_owned()),
+    ]);
+    assert!(machine::fire(&mut task, Command::Accept, &Facts::record_only()).is_ok());
+    task::record_acceptance(&mut task, &current_tree, &Default::default(), "small", 1);
+    let acceptance = task.accepted.as_ref().unwrap();
+    assert_eq!(acceptance.model, "small");
+    let changed_paths = acceptance.changed_at_acceptance.as_ref().unwrap();
+    assert_eq!(changed_paths.len(), 2);
+    assert!(changed_paths.contains(&"src/a.rs".to_string()));
+    assert!(changed_paths.contains(&"src/c.rs".to_string()));
+    let json = serde_json::to_string(&task).expect("task serializes");
+    let deserialized: task::Task = serde_json::from_str(&json).expect("task deserializes");
+    assert_eq!(
+        deserialized.accepted.unwrap().changed_at_acceptance,
+        acceptance.changed_at_acceptance
+    );
+
+    let mut unchanged = opened_task("review", &[("src/a.rs", "old")]);
+    let same_tree = BTreeMap::from([("src/a.rs".to_owned(), "old".to_owned())]);
+    assert!(machine::fire(&mut unchanged, Command::Accept, &Facts::record_only()).is_ok());
+    task::record_acceptance(&mut unchanged, &same_tree, &Default::default(), "small", 1);
+    let acceptance = unchanged.accepted.as_ref().unwrap();
+    assert_eq!(acceptance.model, "small");
+    assert!(acceptance.changed_at_acceptance.is_none());
+}
+
+fn setup_project(temp: &TempDir) {
+    let root = temp.path();
+    let manifest =
+        "project Test\n\nprocess \"process.bla\"\n\nuse structure \"contracts/arch.bla\"\n";
+    let contract = "module thing \"src/thing.rs\"\n\nrequire \"entry\": symbol thing::run\n";
+    let process = r#"
+role "orchestrator" {
+    purpose "divide the work"
+    model ["claude-opus-4-1", "claude-sonnet-4"]
+}
+
+role "worker" {
+    purpose "carry out one bounded task"
+    model "qwen3.5:4b"
+}
+
+flow "development" {
+    purpose "one bounded change"
+}
+
+step "assign" {
+    flow "development"
+    role ["orchestrator"]
+    statement "record the bounded task before the work starts"
+    command "blabla task open"
+}
+"#;
+    let source = "pub fn run() {}\n";
+
+    std::fs::create_dir_all(root.join("contracts")).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("project.bla"), manifest).unwrap();
+    std::fs::write(root.join("contracts/arch.bla"), contract).unwrap();
+    std::fs::write(root.join("process.bla"), process).unwrap();
+    std::fs::write(root.join("src/thing.rs"), source).unwrap();
+}
+
+fn offered_routes(view: &serde_json::Value) -> Vec<&str> {
+    view["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|route| route.as_str().unwrap())
+        .collect()
+}
+
+#[test]
+fn falsify_route_is_offered_only_to_an_accepted_task_that_names_falsify_paths() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "falsify-offered",
+                "--role",
+                "worker",
+                "--statement",
+                "offer the falsify route",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--falsify",
+                "src/thing.rs"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "falsify-offered", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    let (view, code) = json_of(&temp, &["task", "show", "falsify-offered", "--json"]);
+    assert_eq!(code, 0);
+    assert!(offered_routes(&view).contains(&"falsify"), "{view}");
+
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "falsify-unnamed",
+                "--role",
+                "worker",
+                "--statement",
+                "no falsify paths",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "falsify-unnamed", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    let (view, code) = json_of(&temp, &["task", "show", "falsify-unnamed", "--json"]);
+    assert_eq!(code, 0);
+    assert!(!offered_routes(&view).contains(&"falsify"), "{view}");
+}
+
+#[test]
+fn falsify_route_is_not_offered_once_the_task_is_handed_back() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    std::fs::write(temp.path().join("src/thing.rs"), "fn broken( {\n").unwrap();
+    let scratch = TempDir::new().unwrap();
+    let out_dir = scratch.path().display().to_string();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "falsify-ready",
+                "--role",
+                "worker",
+                "--statement",
+                "hand back after falsify",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--falsify",
+                "src/thing.rs",
+                "--check",
+                "rustc",
+                "--crate-type",
+                "lib",
+                "--emit=metadata",
+                "--out-dir",
+                out_dir.as_str(),
+                "src/thing.rs"
+            ]
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 42 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "falsify-ready", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "falsify-ready", "--run"]),
+        0
+    );
+    let (unfalsified, _) = json_of(&temp, &["challenge", "falsify-ready", "--json"]);
+    assert!(
+        unfalsified["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == blabla::skeptic::Class::CheckNotFalsified.word()),
+        "{unfalsified}"
+    );
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-ready"]), 0);
+    let (challenge, code) = json_of(&temp, &["challenge", "falsify-ready", "--json"]);
+    assert_eq!(code, 0, "{challenge}");
+    assert_eq!(cli_run(&temp, &["task", "ready", "falsify-ready"]), 0);
+    let (view, code) = json_of(&temp, &["task", "show", "falsify-ready", "--json"]);
+    assert_eq!(code, 0);
+    assert_eq!(view["task"]["state"], "ready");
+    assert!(!offered_routes(&view).contains(&"falsify"), "{view}");
+}
+
+#[test]
+fn cli_accept_records_changed_files_in_json_view() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "test-task",
+                "--role",
+                "worker",
+                "--statement",
+                "test work",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs"
+            ]
+        ),
+        0
+    );
+
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 42 }\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "test-task", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+
+    let (view, code) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    assert_eq!(code, 0);
+    assert!(view["task"]["accepted"].is_object());
+    assert_eq!(view["task"]["accepted"]["model"], "qwen3.5:4b");
+
+    let changed = &view["task"]["accepted"]["changed_at_acceptance"];
+    assert!(changed.is_array());
+    let changed_array = changed.as_array().unwrap();
+    assert_eq!(changed_array.len(), 1);
+    assert_eq!(changed_array[0], "src/thing.rs");
+}
+
+#[test]
+fn attribute_records_every_path_named_in_one_call() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "many-paths",
+                "--role",
+                "worker",
+                "--statement",
+                "attribute several paths at once",
+                "--scope",
+                "src",
+                "--check",
+                "cargo build",
+            ],
+        ),
+        0
+    );
+    std::fs::write(temp.path().join("notes-a.md"), "a\n").unwrap();
+    std::fs::write(temp.path().join("notes-b.md"), "b\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "many-paths",
+                "notes-a.md",
+                "notes-b.md",
+                "--kind",
+                "concurrent",
+                "--model",
+                "claude-opus-4-1",
+            ],
+        ),
+        0
+    );
+    let (view, code) = json_of(&temp, &["task", "show", "many-paths", "--json"]);
+    assert_eq!(code, 0);
+    let attributions = view["task"]["attributions"].as_array().unwrap();
+    let mut paths: Vec<&str> = attributions
+        .iter()
+        .map(|entry| entry["path"].as_str().unwrap())
+        .collect();
+    paths.sort_unstable();
+    assert_eq!(paths, ["notes-a.md", "notes-b.md"]);
+    assert!(
+        attributions
+            .iter()
+            .all(|entry| entry["kind"] == "concurrent" && entry["model"] == "claude-opus-4-1")
+    );
+}
+
+#[test]
+fn attribute_is_refused_to_a_model_the_orchestrator_role_does_not_permit() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "own-breach",
+                "--role",
+                "worker",
+                "--statement",
+                "a worker cannot declare its own change concurrent",
+                "--scope",
+                "src",
+                "--check",
+                "cargo build",
+            ],
+        ),
+        0
+    );
+    std::fs::write(temp.path().join("notes.md"), "outside\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "own-breach",
+                "notes.md",
+                "--kind",
+                "concurrent",
+                "--model",
+                "qwen3.5:4b",
+            ],
+        ),
+        2
+    );
+    let (view, code) = json_of(&temp, &["task", "show", "own-breach", "--json"]);
+    assert_eq!(code, 0);
+    assert!(view["task"]["attributions"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn attribute_refuses_a_path_that_has_not_changed_since_the_task_opened() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    std::fs::write(temp.path().join("notes.md"), "before\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "unchanged",
+                "--role",
+                "worker",
+                "--statement",
+                "attribute only what moved",
+                "--scope",
+                "src",
+                "--check",
+                "cargo build",
+            ],
+        ),
+        0
+    );
+    for path in ["notes.md", ".bashrc"] {
+        assert_eq!(
+            cli_run(
+                &temp,
+                &[
+                    "task",
+                    "attribute",
+                    "unchanged",
+                    path,
+                    "--kind",
+                    "concurrent",
+                    "--model",
+                    "claude-opus-4-1",
+                ],
+            ),
+            2
+        );
+    }
+    let (view, code) = json_of(&temp, &["task", "show", "unchanged", "--json"]);
+    assert_eq!(code, 0);
+    assert!(view["task"]["attributions"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn ignored_paths_leave_change_tracking_and_cannot_be_declared() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let root = temp.path();
+    let manifest = std::fs::read_to_string(root.join("project.bla")).unwrap();
+    std::fs::write(
+        root.join("project.bla"),
+        format!("{manifest}\nignore from \".gitignore\"\nignore \".eval-artifacts\"\n"),
+    )
+    .unwrap();
+    std::fs::write(root.join(".gitignore"), "build/\n*.log\n!keep.log\n").unwrap();
+    let open = |name: &str, extra: &[&str]| {
+        let mut arguments = vec![
+            "task",
+            "open",
+            name,
+            "--role",
+            "worker",
+            "--statement",
+            "touch only what is named",
+            "--scope",
+            "src",
+            "--check",
+            "cargo build",
+        ];
+        arguments.extend_from_slice(extra);
+        cli_run(&temp, &arguments)
+    };
+    assert_eq!(open("work", &[]), 0);
+    std::fs::create_dir_all(root.join("build")).unwrap();
+    for path in ["build/out.bin", "run.log", ".eval-artifacts"] {
+        std::fs::write(root.join(path), "made by a tool\n").unwrap();
+    }
+    let (quiet, _) = json_of(&temp, &["challenge", "work", "--json"]);
+    for path in ["build/out.bin", "run.log", ".eval-artifacts"] {
+        assert!(
+            !quiet.to_string().contains(path),
+            "{path} must stay out of change tracking: {quiet}"
+        );
+    }
+    std::fs::write(root.join("keep.log"), "re-included\n").unwrap();
+    let (seen, _) = json_of(&temp, &["challenge", "work", "--json"]);
+    assert!(seen.to_string().contains("keep.log"), "{seen}");
+    for extra in [["--deliverable", "build/out.bin"], ["--input", "run.log"]] {
+        assert_eq!(open("declared", &extra), 2, "{extra:?} is ignored");
+    }
+    std::fs::remove_file(root.join("keep.log")).unwrap();
+    std::fs::write(root.join(".gitignore"), "build/\n*.log\n!keep.log\nsrc/\n").unwrap();
+    let (widened, _) = json_of(&temp, &["challenge", "work", "--json"]);
+    assert!(
+        widened.to_string().contains(".gitignore"),
+        "an edited ignore list stays tracked: {widened}"
+    );
+}
+
+#[test]
+fn an_argv_only_check_round_trips_and_counts_as_declared_for_challenge_and_hand_back() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let blabla_path = env!("CARGO");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "argv-only",
+                "--role",
+                "worker",
+                "--statement",
+                "hand back on an argv check",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--check",
+                blabla_path,
+                "--help",
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "argv-only", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn thing() -> u8 { 2 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "argv-only", "--run"]),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "argv-only"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "argv-only"]), 0);
+    let (view, code) = json_of(&temp, &["task", "show", "argv-only", "--json"]);
+    assert_eq!(code, 0);
+    assert_eq!(view["task"]["state"], "ready");
+    assert_eq!(
+        view["task"]["check"],
+        serde_json::json!([blabla_path, "--help"])
+    );
+    let entries = view["task"]["evidence"].as_array().unwrap();
+    let last_entry = entries.last().unwrap();
+    assert_eq!(last_entry["exit"], 0);
+    assert_eq!(last_entry["tool"], "run");
+    assert!(last_entry["command"].is_array());
+    assert!(
+        temp.path()
+            .join(last_entry["log"].as_str().unwrap())
+            .exists()
+    );
+}
+
+#[test]
+fn argv_evidence_run_with_non_zero_exit_records_exit_code() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+
+    let blabla_path = env!("CARGO");
+    cli_run(
+        &temp,
+        &[
+            "task",
+            "open",
+            "argv-exit-nonzero",
+            "--role",
+            "worker",
+            "--statement",
+            "test argv exit nonzero",
+            "--scope",
+            "src",
+            "--deliverable",
+            "src/thing.rs",
+            "--check",
+            blabla_path,
+            "nonexistent-subcommand",
+        ],
+    );
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "accept",
+                "argv-exit-nonzero",
+                "--model",
+                "qwen3.5:4b"
+            ]
+        ),
+        0
+    );
+
+    let exit_code = cli_run(&temp, &["task", "evidence", "argv-exit-nonzero", "--run"]);
+    assert_eq!(exit_code, 0);
+
+    let (view, code) = json_of(&temp, &["task", "show", "argv-exit-nonzero", "--json"]);
+    assert_eq!(code, 0);
+    let evidence = &view["task"]["evidence"];
+    assert!(evidence.is_array());
+    let entries = evidence.as_array().unwrap();
+    assert!(!entries.is_empty());
+    let last_entry = &entries[entries.len() - 1];
+    assert!(last_entry["exit"].as_i64().unwrap() != 0);
+    assert_eq!(last_entry["tool"], "run");
+    assert!(last_entry["command"].is_array());
+    assert!(last_entry["log"].is_string());
+}
+
+#[test]
+fn orchestrator_verbs_require_a_model() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+
+    cli_run(
+        &temp,
+        &[
+            "task",
+            "open",
+            "remove-test",
+            "--role",
+            "worker",
+            "--statement",
+            "test remove",
+            "--scope",
+            "src",
+            "--deliverable",
+            "src/thing.rs",
+        ],
+    );
+
+    let exit_code = cli_run(
+        &temp,
+        &[
+            "task",
+            "deliverable",
+            "remove-test",
+            "--remove",
+            "src/thing.rs",
+            "--reason",
+            "test removal",
+        ],
+    );
+    assert_eq!(exit_code, 2);
+
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    cli_run(
+        &temp,
+        &[
+            "task",
+            "open",
+            "resolve-test",
+            "--role",
+            "worker",
+            "--statement",
+            "test resolve",
+            "--scope",
+            "src",
+            "--deliverable",
+            "src/thing.rs",
+        ],
+    );
+
+    cli_run(&temp, &["task", "finding", "resolve-test", "test issue"]);
+
+    let exit_code = cli_run(
+        &temp,
+        &[
+            "task",
+            "resolve",
+            "resolve-test",
+            "1",
+            "--evidence",
+            "test evidence",
+        ],
+    );
+    assert_eq!(exit_code, 2);
+    let refused = cli_run(
+        &temp,
+        &[
+            "task",
+            "resolve",
+            "resolve-test",
+            "1",
+            "--evidence",
+            "test evidence",
+            "--model",
+            "qwen3.5:4b",
+        ],
+    );
+    assert_eq!(refused, 2);
+    let (view, _) = json_of(&temp, &["task", "show", "resolve-test", "--json"]);
+    assert!(
+        view["task"]["findings"][0]["resolution"].is_null(),
+        "{view}"
+    );
+    let settled = cli_run(
+        &temp,
+        &[
+            "task",
+            "resolve",
+            "resolve-test",
+            "1",
+            "--evidence",
+            "test evidence",
+            "--model",
+            "claude-opus-4-1",
+        ],
+    );
+    assert_eq!(settled, 0);
+    let (view, _) = json_of(&temp, &["task", "show", "resolve-test", "--json"]);
+    assert_eq!(
+        view["task"]["findings"][0]["resolution"]["model"], "claude-opus-4-1",
+        "{view}"
+    );
+}
+
+fn open_and_accept(temp: &TempDir, deliverable: &str) {
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task",
+                "open",
+                "test-task",
+                "--role",
+                "worker",
+                "--statement",
+                "test work",
+                "--scope",
+                "src",
+                "--deliverable",
+                deliverable,
+                "--json",
+                "--check",
+                "cargo test",
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task",
+                "accept",
+                "test-task",
+                "--model",
+                "qwen3.5:4b",
+                "--json"
+            ],
+        ),
+        0
+    );
+}
+
+#[test]
+fn edited_file_added_as_deliverable_does_not_trigger_unchanged_challenge() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "edit-test",
+                "--role",
+                "worker",
+                "--statement",
+                "edit a file then add it",
+                "--scope",
+                "src",
+                "--json",
+                "--check",
+                "cargo test",
+            ],
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 42 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "deliverable",
+                "edit-test",
+                "--add",
+                "src/thing.rs",
+                "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "edit-test", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "edit-test",
+                "--exit",
+                "0",
+                "--tool",
+                "t",
+                "--json"
+            ],
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["challenge", "edit-test", "--json"]);
+    let grounded = view["grounded"]
+        .as_array()
+        .expect("grounded should be an array");
+    assert!(
+        !grounded
+            .iter()
+            .any(|v| v.as_str() == Some("deliverable-unchanged")),
+        "edited file added as deliverable should not trigger deliverable-unchanged challenge: {view:?}"
+    );
+}
+
+fn challenge_grounded(temp: &TempDir, name: &str) -> Vec<String> {
+    let (view, _) = json_of(temp, &["challenge", name, "--json"]);
+    view["grounded"]
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn grounded(temp: &TempDir) -> Vec<String> {
+    challenge_grounded(temp, "test-task")
+}
+
+#[test]
+fn a_note_is_not_a_finding_and_a_withdrawn_deliverable_stops_being_owed() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "test-task",
+                "--exit",
+                "0",
+                "--tool",
+                "t",
+                "--json"
+            ],
+        ),
+        0
+    );
+    assert!(grounded(&temp).contains(&"deliverable-unchanged".to_owned()));
+    let noted = run_in(
+        Some(temp.path()),
+        &args(&["task", "note", "test-task", "a status note", "--json"]),
+    );
+    assert_eq!(noted.status.code(), Some(0), "{noted:?}");
+    let (view, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    assert_eq!(view["task"]["notes"].as_array().unwrap().len(), 1, "{view}");
+    assert_eq!(view["unresolved"], 0, "{view}");
+    assert!(!grounded(&temp).contains(&"unresolved-finding".to_owned()));
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "deliverable",
+                "test-task",
+                "--remove",
+                "src/thing.rs",
+                "--reason",
+                "the fix never needed it",
+                "--model",
+                "claude-opus-4-1",
+                "--json",
+            ],
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    assert_eq!(
+        view["task"]["removed_deliverables"][0]["path"],
+        "src/thing.rs"
+    );
+    assert!(view["task"]["deliverables"].as_array().unwrap().is_empty());
+    assert!(!grounded(&temp).contains(&"deliverable-unchanged".to_owned()));
+}
+
+#[test]
+fn attributing_a_path_again_refreshes_its_digest() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    std::fs::write(temp.path().join("notes.md"), "one\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "test-task",
+                "notes.md",
+                "--kind",
+                "concurrent",
+                "--model",
+                "claude-opus-4-1",
+                "--json"
+            ],
+        ),
+        0
+    );
+    let (first, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    std::fs::write(temp.path().join("notes.md"), "two\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "test-task",
+                "notes.md",
+                "--kind",
+                "concurrent",
+                "--model",
+                "claude-opus-4-1",
+                "--json"
+            ],
+        ),
+        0
+    );
+    let (second, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    assert_eq!(second["task"]["attributions"].as_array().unwrap().len(), 1);
+    assert_ne!(
+        first["task"]["attributions"][0]["digest"],
+        second["task"]["attributions"][0]["digest"]
+    );
+    assert!(!grounded(&temp).contains(&"attribution-unknown".to_owned()));
+}
+
+#[test]
+fn the_assignment_view_offers_routes_by_state() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    let (accepted, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    let offered = offered_routes(&accepted);
+    assert!(offered.contains(&"accept"), "{accepted}");
+    assert!(offered.contains(&"note"), "{accepted}");
+    assert!(offered.contains(&"lens"), "{accepted}");
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() { let _ = 1; }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "test-task",
+                "--exit",
+                "0",
+                "--tool",
+                "t",
+                "--json"
+            ],
+        ),
+        0
+    );
+    let (challenged, _) = json_of(&temp, &["challenge", "test-task", "--json"]);
+    assert_eq!(challenged["assignment_clear"], true, "{challenged}");
+    let (handed_back, code) = json_of(&temp, &["task", "ready", "test-task", "--json"]);
+    assert_eq!(code, 0, "{handed_back}");
+    assert_eq!(handed_back["task"]["state"], "ready", "{handed_back}");
+    let (ready, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    let offered = offered_routes(&ready);
+    assert!(!offered.contains(&"lens"), "{ready}");
+    assert!(offered.contains(&"accept"), "{ready}");
+}
+
+#[test]
+fn a_receipt_survives_edits_outside_the_tasks_paths_and_dies_on_edits_inside() {
+    let (mut task, mut tree) = accepted();
+    evidence(&mut task, &tree);
+    assert!(task::record_challenge(&mut task, &tree, 0, 3));
+    tree.insert("docs/notes.md".to_owned(), "unrelated".to_owned());
+    tree.insert("other/worker.rs".to_owned(), "sibling".to_owned());
+    assert_eq!(task::handback(&task, &tree), Ok(()));
+    tree.insert("src/b.rs".to_owned(), "inside the scope".to_owned());
+    assert!(!task::challenge_current(&task, &tree));
+    assert_eq!(task::handback(&task, &tree), Err("record-evidence"));
+}
+
+#[test]
+fn an_addressed_finding_stops_blocking_hand_back_while_resolution_stays_the_orchestrators() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "finding", "test-task", "reviewer defect", "--json"],
+        ),
+        0
+    );
+    assert!(grounded(&temp).contains(&"unresolved-finding".to_owned()));
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "addressed",
+                "test-task",
+                "1",
+                "fixed at src/thing.rs",
+                "--model",
+                "claude-opus-4-1",
+                "--json",
+            ],
+        ),
+        2
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "addressed",
+                "test-task",
+                "1",
+                "fixed at src/thing.rs",
+                "--model",
+                "qwen3.5:4b",
+                "--json",
+            ],
+        ),
+        0
+    );
+    assert!(!grounded(&temp).contains(&"unresolved-finding".to_owned()));
+    let (view, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    assert_eq!(
+        view["task"]["findings"][0]["addressed"]["model"],
+        "qwen3.5:4b"
+    );
+    assert!(view["task"]["findings"][0]["resolution"].is_null());
+    assert_eq!(view["unresolved"], 1);
+}
+
+#[test]
+fn a_corrected_check_refuses_an_input_left_out_of_change_tracking() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let root = temp.path();
+    let manifest = std::fs::read_to_string(root.join("project.bla")).unwrap();
+    std::fs::write(
+        root.join("project.bla"),
+        format!("{manifest}\nignore \"build/\"\n"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("build")).unwrap();
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "check",
+                "test-task",
+                "--json",
+                "--input",
+                "build",
+                "--check",
+                "cargo test"
+            ],
+        ),
+        2
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    assert!(
+        view["task"]["check_inputs"].as_array().unwrap().is_empty(),
+        "{view}"
+    );
+}
+
+#[test]
+fn a_clear_assignment_challenge_leaves_project_verification_to_the_orchestrator() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn other() {}\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "test-task",
+                "--exit",
+                "0",
+                "--tool",
+                "t",
+                "--json"
+            ],
+        ),
+        0
+    );
+    let (view, code) = json_of(&temp, &["challenge", "test-task", "--json"]);
+    assert_eq!(code, 0, "{view}");
+    assert_eq!(view["assignment_clear"], true, "{view}");
+    assert_eq!(
+        view["challenge"]["class"], "verification-not-current",
+        "{view}"
+    );
+}
+
+#[test]
+fn a_check_is_declared_once_as_a_program_and_its_arguments() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let open = |name: &str, check: &[&str]| {
+        let mut arguments = vec![
+            "task",
+            "open",
+            name,
+            "--role",
+            "worker",
+            "--statement",
+            "one check",
+            "--scope",
+            "src",
+            "--json",
+        ];
+        arguments.extend_from_slice(check);
+        json_of(&temp, &arguments)
+    };
+    let (refusal, exit) = open("legacy", &["--check-argv", "cargo", "test"]);
+    assert_eq!(exit, 2, "{refusal}");
+    assert_eq!(refusal["category"], "invocation", "{refusal}");
+    assert_eq!(refusal["suggested"], "--check", "{refusal}");
+    assert_eq!(open("argv", &["--check", "cargo", "test"]).1, 0);
+    let (view, _) = json_of(&temp, &["task", "show", "argv", "--json"]);
+    assert_eq!(
+        view["task"]["check"],
+        serde_json::json!(["cargo", "test"]),
+        "{view}"
+    );
+    assert!(view["task"].get("check_argv").is_none(), "{view}");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task", "check", "argv", "--json", "--check", "cargo", "build"
+            ]
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "argv", "--json"]);
+    assert_eq!(
+        view["task"]["check"],
+        serde_json::json!(["cargo", "build"]),
+        "{view}"
+    );
+    assert_eq!(cli_run(&temp, &["task", "check", "argv", "cargo build"]), 2);
+    assert_eq!(
+        cli_run(&temp, &["task", "check", "argv", "--argv", "cargo", "test"]),
+        2
+    );
+}
+
+#[test]
+fn a_deliverable_withdrawal_names_what_the_task_owes_and_stands_alone() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    std::fs::write(temp.path().join("src/extra.rs"), "pub fn extra() {}\n").unwrap();
+    open_and_accept(&temp, "src");
+    let withdraw = |target: &[&str]| {
+        let mut arguments = vec![
+            "task",
+            "deliverable",
+            "test-task",
+            "--reason",
+            "not needed",
+            "--model",
+            "claude-opus-4-1",
+            "--json",
+        ];
+        arguments.extend_from_slice(target);
+        cli_run(&temp, &arguments)
+    };
+    assert_eq!(
+        withdraw(&["--remove", "src/thing.rs", "--add", "src/extra.rs"]),
+        2
+    );
+    assert_eq!(withdraw(&["--remove", "src/missing.rs"]), 2);
+    let (view, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    assert!(
+        view["task"]["removed_deliverables"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "{view}"
+    );
+    assert_eq!(
+        view["task"]["deliverables"].as_array().unwrap().len(),
+        2,
+        "{view}"
+    );
+    assert_eq!(withdraw(&["--remove", "src"]), 0);
+    let (view, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    assert!(
+        view["task"]["deliverables"].as_array().unwrap().is_empty(),
+        "{view}"
+    );
+    assert_eq!(
+        view["task"]["removed_deliverables"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2,
+        "{view}"
+    );
+}
+
+#[test]
+fn settling_a_finding_needs_process_memory_that_declares_the_orchestrator() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let root = temp.path();
+    let process = std::fs::read_to_string(root.join("process.bla")).unwrap();
+    std::fs::write(
+        root.join("project.bla"),
+        "project Test\n\nuse structure \"contracts/arch.bla\"\n",
+    )
+    .unwrap();
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "block", "test-task", "cannot go on", "--json"]
+        ),
+        0
+    );
+    let resolve = || {
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "resolve",
+                "test-task",
+                "1",
+                "--evidence",
+                "settled",
+                "--model",
+                "claude-opus-4-1",
+                "--json",
+            ],
+        )
+    };
+    assert_eq!(resolve(), 2);
+    std::fs::write(
+        root.join("project.bla"),
+        "project Test\n\nprocess \"process.bla\"\n\nuse structure \"contracts/arch.bla\"\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("process.bla"), process).unwrap();
+    assert_eq!(resolve(), 0);
+}
+
+fn lensed_evidence_fixture() -> TempDir {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let process = std::fs::read_to_string(temp.path().join("process.bla")).unwrap();
+    std::fs::write(
+        temp.path().join("process.bla"),
+        format!("{process}\nrole \"lensed\" {{\n purpose \"carry one lensed task\"\n consult [\"review-lens\"]\n model \"qwen3.5:4b\"\n}}\n"),
+    )
+    .unwrap();
+    let manifest = std::fs::read_to_string(temp.path().join("project.bla")).unwrap();
+    std::fs::write(
+        temp.path().join("project.bla"),
+        format!("{manifest}\nknowledge \"knowledge.bla\"\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        temp.path().join("knowledge.bla"),
+        "knowledge \"review-lens\" { purpose \"review fixture evidence\" }\nruling \"current\" { pack \"review-lens\" statement \"inspect current evidence\" }\n",
+    )
+    .unwrap();
+    temp
+}
+
+fn receipt_tool(evidence: &task::Evidence) -> String {
+    evidence.tool.clone()
+}
+
+fn two_lens_fixture() -> TempDir {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let process = std::fs::read_to_string(temp.path().join("process.bla")).unwrap();
+    std::fs::write(
+        temp.path().join("process.bla"),
+        format!(
+            "{process}\nrole \"lensed\" {{\n purpose \"carry one lensed task\"\n consult [\"review-lens\", \"second-lens\"]\n model \"qwen3.5:4b\"\n}}\n"
+        ),
+    )
+    .unwrap();
+    let manifest = std::fs::read_to_string(temp.path().join("project.bla")).unwrap();
+    std::fs::write(
+        temp.path().join("project.bla"),
+        format!("{manifest}\nknowledge \"knowledge.bla\"\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        temp.path().join("knowledge.bla"),
+        "knowledge \"review-lens\" { purpose \"review fixture evidence\" }\nruling \"current\" { pack \"review-lens\" statement \"inspect current evidence\" }\nknowledge \"second-lens\" { purpose \"second fixture evidence\" }\nruling \"second-current\" { pack \"second-lens\" statement \"inspect second evidence\" }\n",
+    )
+    .unwrap();
+    temp
+}
+
+#[test]
+fn a_task_naming_one_lens_hands_back_after_assessing_only_that_pack() {
+    let temp = two_lens_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "named",
+                "--role",
+                "lensed",
+                "--statement",
+                "assess one named pack",
+                "--scope",
+                "src",
+                "--lens",
+                "review-lens",
+                "--check",
+                env!("CARGO"),
+                "--version",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "accept", "named", "--model", "qwen3.5:4b"]),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "evidence", "named", "--run"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "named",
+                "review-lens",
+                "inspect the named pack"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "named"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "named"]), 0);
+
+    let record = task::read(temp.path(), "named").unwrap().unwrap();
+    assert_eq!(record.state, TaskState::Ready);
+    assert_eq!(record.lenses, vec!["review-lens".to_owned()]);
+    assert_eq!(
+        record
+            .assessments
+            .iter()
+            .map(|entry| entry.ruling.clone())
+            .collect::<Vec<_>>(),
+        vec!["review-lens".to_owned()]
+    );
+}
+
+#[test]
+fn without_a_named_lens_every_consulted_pack_is_still_required() {
+    let temp = two_lens_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "unnamed",
+                "--role",
+                "lensed",
+                "--statement",
+                "assess every consulted pack",
+                "--scope",
+                "src",
+                "--check",
+                env!("CARGO"),
+                "--version",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "unnamed", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "evidence", "unnamed", "--run"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "unnamed",
+                "review-lens",
+                "inspect the first pack"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "unnamed"]), 1);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "unnamed",
+                "second-lens",
+                "inspect the second pack"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "unnamed"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "unnamed"]), 0);
+
+    let record = task::read(temp.path(), "unnamed").unwrap().unwrap();
+    assert!(record.lenses.is_empty());
+    assert_eq!(record.state, TaskState::Ready);
+}
+
+#[test]
+fn a_lens_the_role_does_not_consult_is_refused_at_open() {
+    let temp = two_lens_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "stray",
+                "--role",
+                "lensed",
+                "--statement",
+                "name a pack nobody consults",
+                "--scope",
+                "src",
+                "--lens",
+                "unconsulted-lens",
+            ]
+        ),
+        2
+    );
+    assert!(task::read(temp.path(), "stray").unwrap().is_none());
+}
+
+#[test]
+fn a_lens_recorded_with_another_model_than_the_accepted_one_is_refused() {
+    let temp = two_lens_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "pinned",
+                "--role",
+                "lensed",
+                "--statement",
+                "pin the lens to the accepted model",
+                "--scope",
+                "src",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "pinned", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "pinned",
+                "review-lens",
+                "inspect the pinned pack",
+                "--model",
+                "qwen3.5:9b",
+            ]
+        ),
+        2
+    );
+    assert!(
+        task::read(temp.path(), "pinned")
+            .unwrap()
+            .unwrap()
+            .assessments
+            .is_empty()
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "pinned",
+                "review-lens",
+                "inspect the pinned pack",
+                "--model",
+                "qwen3.5:4b",
+            ]
+        ),
+        0
+    );
+}
+
+#[test]
+fn task_show_prints_manual_evidence_without_a_log() {
+    let temp = lensed_evidence_fixture();
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "manual-evidence",
+                "--role",
+                "lensed",
+                "--statement",
+                "record manual evidence",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--check",
+                "check",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "manual-evidence", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "manual-evidence",
+                "--exit",
+                "3",
+                "--tool",
+                "check",
+            ]
+        ),
+        0
+    );
+
+    let record = task::read(temp.path(), "manual-evidence").unwrap().unwrap();
+    let evidence = record.evidence.last().unwrap();
+    assert!(evidence.log.is_none());
+    let show = run_in(
+        Some(temp.path()),
+        &args(&["task", "show", "manual-evidence"]),
+    );
+    let stdout = String::from_utf8(show.stdout).unwrap();
+
+    assert!(
+        stdout.contains(&receipt_tool(evidence)),
+        "task show should print the receipt of manual evidence: {}",
+        stdout
+    );
+}
+
+#[test]
+fn task_show_prints_run_evidence_log_and_lens_assessment() {
+    let temp = lensed_evidence_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "passing-run",
+                "--role",
+                "lensed",
+                "--statement",
+                "record passing evidence and a lens",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--check",
+                env!("CARGO"),
+                "--version",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "passing-run", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "passing-run", "--run"]),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "passing-run",
+                "review-lens",
+                "inspect the fixture evidence",
+            ]
+        ),
+        0
+    );
+    let record = task::read(temp.path(), "passing-run").unwrap().unwrap();
+    let evidence = record.evidence.last().unwrap();
+    let assessment = record.assessments.last().unwrap();
+    let show = run_in(Some(temp.path()), &args(&["task", "show", "passing-run"]));
+    assert_eq!(show.status.code(), Some(0));
+    let stdout = String::from_utf8(show.stdout).unwrap();
+    assert!(stdout.contains(&receipt_tool(evidence)), "{stdout}");
+    assert!(stdout.contains(evidence.log.as_ref().unwrap()), "{stdout}");
+    assert!(stdout.contains(&assessment.ruling), "{stdout}");
+}
+
+#[test]
+fn failing_evidence_log_readable_from_subdirectory() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+
+    let blabla_path = env!("CARGO");
+    cli_run(
+        &temp,
+        &[
+            "task",
+            "open",
+            "subdir-test",
+            "--role",
+            "worker",
+            "--statement",
+            "test failing evidence from subdirectory",
+            "--scope",
+            "src",
+            "--deliverable",
+            "src/thing.rs",
+            "--check",
+            blabla_path,
+            "nonexistent-subcommand",
+        ],
+    );
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "subdir-test", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "subdir-test", "--run"]),
+        0
+    );
+
+    let subdir = temp.path().join("subdir");
+    std::fs::create_dir(&subdir).unwrap();
+
+    let output = run_in(Some(&subdir), &args(&["task", "show", "subdir-test"]));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+
+    let recorded = task::read(temp.path(), "subdir-test").unwrap().unwrap();
+    let evidence = recorded.evidence.last().unwrap();
+    assert!(
+        stdout.contains(&receipt_tool(evidence)),
+        "Output should carry the recorded receipt when run from subdirectory: {}",
+        stdout
+    );
+
+    assert!(
+        stdout.contains(
+            task::read(temp.path(), "subdir-test")
+                .unwrap()
+                .unwrap()
+                .evidence
+                .last()
+                .unwrap()
+                .log
+                .as_ref()
+                .unwrap()
+        ),
+        "Output should contain log path when run from subdirectory: {}",
+        stdout
+    );
+
+    let log_text =
+        std::fs::read_to_string(temp.path().join(evidence.log.as_ref().unwrap())).unwrap();
+    let last_line = log_text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap();
+    assert!(
+        stdout.contains(last_line),
+        "Output should carry the last non-empty log line when run from subdirectory: {}",
+        stdout
+    );
+}
+
+fn open_with_argv_check(temp: &TempDir, name: &str, argv: &[&str]) {
+    let mut arguments = vec![
+        "task",
+        "open",
+        name,
+        "--role",
+        "worker",
+        "--statement",
+        "a check that touches its own record",
+        "--scope",
+        "src",
+        "--deliverable",
+        "src/thing.rs",
+        "--check",
+    ];
+    arguments.extend_from_slice(argv);
+    assert_eq!(cli_run(temp, &arguments), 0);
+    assert_eq!(
+        cli_run(temp, &["task", "accept", name, "--model", "qwen3.5:4b"]),
+        0
+    );
+}
+
+#[test]
+fn a_note_the_check_itself_records_survives_evidence_run() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let blabla = env!("CARGO_BIN_EXE_blabla");
+    open_with_argv_check(
+        &temp,
+        "note-during-check",
+        &[
+            blabla,
+            "task",
+            "note",
+            "note-during-check",
+            "recorded while the check ran",
+        ],
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "note-during-check", "--run"]),
+        0
+    );
+
+    let (view, code) = json_of(&temp, &["task", "show", "note-during-check", "--json"]);
+    assert_eq!(code, 0, "{view}");
+    let notes: Vec<&str> = view["task"]["notes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|note| note["statement"].as_str())
+        .collect();
+    assert_eq!(notes, vec!["recorded while the check ran"], "{view}");
+    let evidence = view["task"]["evidence"].as_array().unwrap();
+    assert_eq!(evidence.len(), 1, "{view}");
+    assert_eq!(evidence[0]["exit"], 0, "{view}");
+    assert_eq!(evidence[0]["tool"], "run", "{view}");
+}
+
+#[test]
+fn evidence_run_records_nothing_when_its_check_moves_the_task_out_of_accepted() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let blabla = env!("CARGO_BIN_EXE_blabla");
+    open_with_argv_check(
+        &temp,
+        "block-during-check",
+        &[
+            blabla,
+            "task",
+            "block",
+            "block-during-check",
+            "blocked while the check ran",
+        ],
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "block-during-check", "--run"]),
+        2
+    );
+
+    let (view, _) = json_of(&temp, &["task", "show", "block-during-check", "--json"]);
+    assert_eq!(view["task"]["state"], "blocked", "{view}");
+    assert!(
+        view["task"]["evidence"]
+            .as_array()
+            .is_none_or(|entries| entries.is_empty()),
+        "{view}"
+    );
+}
+
+fn with_exception(model: &str, approved: bool) -> task::Exception {
+    task::Exception {
+        model: model.to_owned(),
+        acceptance_epoch: None,
+        superseded: false,
+        reason: "design heavy".to_owned(),
+        approval: approved.then(|| "owner approved".to_owned()),
+    }
+}
+
+#[test]
+fn a_model_outside_the_list_addresses_only_when_accepted_and_approved() {
+    let permitted = vec!["qwen3.5:4b".to_owned()];
+    let (mut task, _) = accepted();
+    assert!(task::can_address_finding(&task, "qwen3.5:4b", &permitted));
+    assert!(!task::can_address_finding(&task, "small", &permitted));
+    task.exceptions.push(with_exception("small", false));
+    assert!(!task::can_address_finding(&task, "small", &permitted));
+    task.exceptions.push(with_exception("other", true));
+    assert!(!task::can_address_finding(&task, "other", &permitted));
+    assert!(!task::can_address_finding(&task, "small", &permitted));
+    task.exceptions.push(with_exception("small", true));
+    assert!(task::can_address_finding(&task, "small", &permitted));
+    task.accepted = None;
+    assert!(!task::can_address_finding(&task, "small", &permitted));
+}
+
+fn address(temp: &TempDir, model: &str) -> i32 {
+    cli_run(
+        temp,
+        &[
+            "task",
+            "addressed",
+            "test-task",
+            "1",
+            "fixed at src/thing.rs",
+            "--model",
+            model,
+            "--json",
+        ],
+    )
+}
+
+fn addressed_model(temp: &TempDir) -> serde_json::Value {
+    let (view, _) = json_of(temp, &["task", "show", "test-task", "--json"]);
+    view["task"]["findings"][0]["addressed"]["model"].clone()
+}
+
+#[test]
+fn an_approved_model_the_task_was_not_accepted_on_may_not_address() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", "test-task", "defect", "--json"]),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "propose-model",
+                "test-task",
+                "claude-sonnet-4",
+                "--reason",
+                "design heavy",
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "approve-model",
+                "test-task",
+                "claude-sonnet-4",
+                "--approval",
+                "owner approved",
+            ],
+        ),
+        0
+    );
+    assert_eq!(address(&temp, "claude-sonnet-4"), 2);
+    assert!(addressed_model(&temp).is_null());
+    assert!(grounded(&temp).contains(&"unresolved-finding".to_owned()));
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "accept",
+                "test-task",
+                "--model",
+                "claude-sonnet-4",
+                "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(address(&temp, "claude-sonnet-4"), 0);
+    assert_eq!(addressed_model(&temp), "claude-sonnet-4");
+}
+
+#[test]
+fn an_accepted_model_without_an_approved_exception_may_not_address() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "accept",
+                "test-task",
+                "--model",
+                "gpt-4-turbo",
+                "--json"
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", "test-task", "defect", "--json"]),
+        0
+    );
+    assert_eq!(address(&temp, "gpt-4-turbo"), 2);
+    assert!(addressed_model(&temp).is_null());
+    assert!(grounded(&temp).contains(&"unresolved-finding".to_owned()));
+}
+
+#[test]
+fn a_worker_role_without_a_model_list_lets_any_model_address_its_finding() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let process = std::fs::read_to_string(temp.path().join("process.bla"))
+        .unwrap()
+        .replace("    model \"qwen3.5:4b\"\n", "");
+    std::fs::write(temp.path().join("process.bla"), process).unwrap();
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", "test-task", "defect", "--json"]),
+        0
+    );
+    assert_eq!(address(&temp, "any-model"), 0);
+    assert_eq!(addressed_model(&temp), "any-model");
+}
+
+#[test]
+fn a_closed_task_refuses_an_address_and_a_run() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", "test-task", "defect", "--json"]),
+        0
+    );
+    let path = temp.path().join(".blabla/tasks/test-task.json");
+    let mut record: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let fields = record.as_object_mut().unwrap();
+    fields.insert("state".to_owned(), serde_json::json!("closed"));
+    fields.insert("closed_unix".to_owned(), serde_json::json!(1234567890u64));
+    fields.insert(
+        "check".to_owned(),
+        serde_json::json!([env!("CARGO_BIN_EXE_blabla"), "--help"]),
+    );
+    let before = serde_json::to_string_pretty(&record).unwrap();
+    std::fs::write(&path, &before).unwrap();
+
+    assert_eq!(address(&temp, "qwen3.5:4b"), 2);
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "test-task", "--run", "--json"]),
+        2
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+fn task_tree(temp: &TempDir) -> BTreeMap<String, String> {
+    blabla::project::snapshot(temp.path(), &blabla::project::ignore::Ignore::default())
+}
+
+fn race_task(temp: &TempDir) -> task::Task {
+    task::read(temp.path(), "race").unwrap().unwrap()
+}
+
+fn race_fixture(temp: &TempDir, action: &str) -> Vec<String> {
+    setup_project(temp);
+    let executable = std::env::current_exe().unwrap();
+    let argv = vec![
+        executable.to_str().unwrap().to_owned(),
+        "--exact".to_owned(),
+        "task_workflow::run_task_record_mutation_child".to_owned(),
+        "--nocapture".to_owned(),
+    ];
+    open_with_argv_check(
+        temp,
+        "race",
+        &argv.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 1 }\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(temp.path().join(".blabla/scratch/race")).unwrap();
+    std::fs::write(temp.path().join(".blabla/scratch/race/action"), action).unwrap();
+    argv
+}
+
+fn assert_no_current_credit(temp: &TempDir) {
+    let work = race_task(temp);
+    let tree = task_tree(temp);
+    assert!(!task::readiness(&work, &tree).supported);
+    assert_eq!(task::handback(&work, &tree), Err("record-evidence"));
+    assert!(!task::accept_result(
+        &mut work.clone(),
+        &tree,
+        &Default::default(),
+        0,
+        "owner",
+        5
+    ));
+    assert_eq!(cli_run(temp, &["task", "ready", "race", "--json"]), 2);
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task",
+                "close",
+                "race",
+                "--model",
+                "claude-opus-4-1",
+                "--json"
+            ]
+        ),
+        2
+    );
+}
+
+#[test]
+fn run_task_record_mutation_child() {
+    let marker = std::path::Path::new(".blabla/scratch/race/action");
+    let Ok(action) = std::fs::read_to_string(marker) else {
+        return;
+    };
+    let root = std::env::current_dir().unwrap();
+    let invoke = |values: &[&str]| {
+        let output = run_in(Some(&root), &args(values));
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    };
+    match action.as_str() {
+        "check" => invoke(&[
+            "task",
+            "check",
+            "race",
+            "--check",
+            env!("CARGO"),
+            "nonexistent-subcommand",
+        ]),
+        "reaccept" => invoke(&["task", "accept", "race", "--model", "new-worker"]),
+        "close" => {
+            invoke(&["challenge", "race", "--json"]);
+            invoke(&["task", "ready", "race", "--json"]);
+            invoke(&[
+                "task",
+                "close",
+                "race",
+                "--model",
+                "claude-opus-4-1",
+                "--json",
+            ]);
+        }
+        "noop" => {}
+        other => panic!("unknown fixture action {other}"),
+    }
+}
+
+#[test]
+fn argv_change_invalidates_old_success() {
+    let temp = TempDir::new().unwrap();
+    race_fixture(&temp, "noop");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    assert!(task::readiness(&race_task(&temp), &task_tree(&temp)).supported);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "check",
+                "race",
+                "--check",
+                env!("CARGO"),
+                "nonexistent-subcommand"
+            ]
+        ),
+        0
+    );
+    assert_no_current_credit(&temp);
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    assert_ne!(race_task(&temp).evidence.last().unwrap().exit, 0);
+    assert_no_current_credit(&temp);
+}
+
+#[test]
+fn argv_boundaries_are_significant() {
+    let temp = TempDir::new().unwrap();
+    let original = race_fixture(&temp, "noop");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    let combined = format!("{} {}", original[1], original[2]);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "check",
+                "race",
+                "--check",
+                &original[0],
+                &combined,
+                &original[3]
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        original.join(" "),
+        race_task(&temp).check.unwrap().join(" ")
+    );
+    assert_no_current_credit(&temp);
+}
+
+#[test]
+fn run_changing_its_own_check_cannot_credit_replacement() {
+    let temp = TempDir::new().unwrap();
+    let original = race_fixture(&temp, "check");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    let work = race_task(&temp);
+    assert_eq!(
+        work.check,
+        Some(vec![
+            env!("CARGO").to_owned(),
+            "nonexistent-subcommand".to_owned()
+        ])
+    );
+    assert_eq!(work.evidence.len(), 1);
+    assert_eq!(work.evidence[0].exit, 0);
+    assert_eq!(work.evidence[0].command, Some(original));
+    assert_no_current_credit(&temp);
+}
+
+#[test]
+fn run_finishing_after_reaccept_credits_its_unchanged_inputs_until_one_changes() {
+    let temp = TempDir::new().unwrap();
+    let original = race_fixture(&temp, "reaccept");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    let work = race_task(&temp);
+    assert_eq!(work.accepted.as_ref().unwrap().model, "new-worker");
+    assert_eq!(work.evidence.len(), 1);
+    assert_eq!(work.evidence[0].exit, 0);
+    assert_eq!(work.evidence[0].command, Some(original));
+    assert!(task::readiness(&work, &task_tree(&temp)).supported);
+    assert!(task::executed(&work.evidence[0]));
+    assert!(shows_latest_evidence_kind(temp.path(), "race"));
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 2 }\n",
+    )
+    .unwrap();
+    assert_no_current_credit(&temp);
+}
+
+#[test]
+fn run_finishing_after_terminal_transition_cannot_restore_task() {
+    let temp = TempDir::new().unwrap();
+    race_fixture(&temp, "noop");
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 0);
+    std::fs::write(temp.path().join(".blabla/scratch/race/action"), "close").unwrap();
+    assert_eq!(cli_run(&temp, &["task", "evidence", "race", "--run"]), 2);
+    let work = race_task(&temp);
+    assert_eq!(work.state, TaskState::Closed);
+    assert_eq!(work.evidence.len(), 1);
+    assert!(work.closed_unix.is_some());
+    assert_eq!(work.result.unwrap().model, "claude-opus-4-1");
+}
+
+#[test]
+fn same_second_reacceptance_invalidates_success() {
+    let (mut work, tree) = accepted();
+    task::record_acceptance(&mut work, &tree, &Default::default(), "small", 7);
+    evidence(&mut work, &tree);
+    task::record_acceptance(&mut work, &tree, &Default::default(), "small", 7);
+    assert_eq!(serde_json::to_value(&work).unwrap()["acceptance_epoch"], 2);
+    assert!(!task::readiness(&work, &tree).supported);
+}
+
+#[test]
+fn an_orchestrator_model_family_admits_its_members_when_asking() {
+    let (mut work, _) = accepted();
+    let family = vec!["owner-*".to_owned(), "pinned:9b".to_owned()];
+    for (model, admitted) in [
+        ("owner-5", true),
+        ("pinned:9b", true),
+        ("pinned:4b", false),
+        ("owner", false),
+    ] {
+        let asked = task::Ask {
+            question: "Which path?".to_owned(),
+            options: Vec::new(),
+            floor: None,
+            model: model.to_owned(),
+        };
+        assert_eq!(
+            task::ask(&mut work, asked, 70, &family).is_ok(),
+            admitted,
+            "{model}"
+        );
+    }
+}
+
+#[test]
+fn narrowed_check_inputs_require_fresh_evidence() {
+    let (mut work, tree) = accepted();
+    work.check_inputs = vec!["src".to_owned(), "shared/config".to_owned()];
+    evidence(&mut work, &tree);
+    work.check_inputs = vec!["src/a.rs".to_owned()];
+    assert!(!task::readiness(&work, &tree).supported);
+}
+
+#[test]
+fn legacy_evidence_is_unbound_history() {
+    let (mut work, tree) = accepted();
+    evidence(&mut work, &tree);
+    let mut record = serde_json::to_value(&work).unwrap();
+    let fields = record["evidence"][0].as_object_mut().unwrap();
+    fields.remove("identity");
+    fields.remove("acceptance_epoch");
+    let work: task::Task = serde_json::from_value(record).unwrap();
+    assert_eq!(work.evidence.len(), 1);
+    assert!(task::latest_evidence(&work).is_none());
+    assert!(!task::readiness(&work, &tree).supported);
+}
+
+#[test]
+fn relevant_revision_binds_assignment_decisions_findings_and_identity_digests() {
+    let (work, tree) = accepted();
+    let identities = BTreeMap::from([("role::worker".to_owned(), "first".to_owned())]);
+    let revision = task::relevant_revision(&work, &tree, identities.clone());
+    assert_eq!(revision.paths, task::evidence_inputs(&work, &tree));
+    assert_eq!(revision.identities, identities);
+    let mut changed = work.clone();
+    changed.statement.push_str(" again");
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.role = "reviewer".to_owned();
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.goal = Some("ship".to_owned());
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.scope.push("shared".to_owned());
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.check = Some(vec!["check".to_owned(), "again".to_owned()]);
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.check_inputs = vec!["src/a.rs".to_owned()];
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.deliverables.clear();
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    changed.findings.push(task::Finding {
+        id: 1,
+        statement: "reconsider".to_owned(),
+        addressed: None,
+        resolution: None,
+        residual: false,
+    });
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    changed = work.clone();
+    task::decide(
+        &mut changed,
+        task::Question {
+            question: "ship?".to_owned(),
+            options: Vec::new(),
+            pick: "yes".to_owned(),
+            confidence: 90,
+            model: "small".to_owned(),
+        },
+        70,
+    )
+    .unwrap();
+    assert_ne!(
+        revision,
+        task::relevant_revision(&changed, &tree, identities.clone())
+    );
+    let changed_identities = BTreeMap::from([("role::worker".to_owned(), "second".to_owned())]);
+    assert_ne!(
+        revision.fingerprint(),
+        task::relevant_revision(&work, &tree, changed_identities).fingerprint()
+    );
+}
+
+#[test]
+fn relevant_revision_tracks_missing_paths_and_directory_children() {
+    let (mut work, mut tree) = accepted();
+    work.check_inputs = vec!["generated".to_owned(), "config".to_owned()];
+    let missing = task::relevant_revision(&work, &tree, BTreeMap::new());
+    assert_eq!(missing.paths["config"], None);
+    tree.insert("config".to_owned(), "created".to_owned());
+    let created = task::relevant_revision(&work, &tree, BTreeMap::new());
+    assert_ne!(missing.fingerprint(), created.fingerprint());
+    tree.remove("config");
+    assert_eq!(
+        missing,
+        task::relevant_revision(&work, &tree, BTreeMap::new())
+    );
+    tree.insert("generated/one.rs".to_owned(), "one".to_owned());
+    let first_child = task::relevant_revision(&work, &tree, BTreeMap::new());
+    assert_ne!(missing, first_child);
+    tree.insert("generated/two.rs".to_owned(), "two".to_owned());
+    assert_ne!(
+        first_child,
+        task::relevant_revision(&work, &tree, BTreeMap::new())
+    );
+    tree.remove("generated/one.rs");
+    assert_ne!(
+        first_child,
+        task::relevant_revision(&work, &tree, BTreeMap::new())
+    );
+}
+
+#[test]
+fn relevant_revision_ignores_history_metadata_and_unrelated_concurrent_paths() {
+    let (mut work, mut tree) = accepted();
+    work.attributions.push(task::Attribution {
+        path: "src/concurrent".to_owned(),
+        kind: "concurrent".to_owned(),
+        digest: None,
+        model: None,
+    });
+    let revision = task::relevant_revision(&work, &tree, BTreeMap::new());
+    work.notes.push(task::Note {
+        statement: "progress".to_owned(),
+        unix: 9,
+    });
+    work.orchestrator_records.push(task::OrchestratorRecord {
+        verb: "review".to_owned(),
+        model: Some("owner".to_owned()),
+        unix: 10,
+        carried_by: None,
+        confirmed: Some(task::Confirmation {
+            model: "owner".to_owned(),
+            unix: 11,
+        }),
+    });
+    work.build = Some("stamp".to_owned());
+    work.closed_unix = Some(12);
+    work.result = work.accepted.clone();
+    work.accepted.as_mut().unwrap().unix = 13;
+    work.challenged = Some(task::ChallengeReceipt {
+        fingerprint: "receipt".to_owned(),
+        unix: 14,
+    });
+    evidence(&mut work, &tree);
+    tree.insert("docs/unrelated.md".to_owned(), "change".to_owned());
+    tree.insert("src/concurrent/other.rs".to_owned(), "change".to_owned());
+    assert_eq!(
+        revision,
+        task::relevant_revision(&work, &tree, BTreeMap::new())
+    );
+}
+
+#[test]
+fn relevant_revision_changes_on_same_second_reacceptance() {
+    let (mut work, tree) = accepted();
+    task::record_acceptance(&mut work, &tree, &Default::default(), "small", 9);
+    let first = task::relevant_revision(&work, &tree, BTreeMap::new());
+    task::record_acceptance(&mut work, &tree, &Default::default(), "small", 9);
+    let second = task::relevant_revision(&work, &tree, BTreeMap::new());
+    assert_ne!(first.fingerprint(), second.fingerprint());
+    assert_eq!(second.acceptance_epoch, 2);
+}
+
+fn withdrawal_fixture() -> TempDir {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "withdraw-work",
+                "--role",
+                "worker",
+                "--statement",
+                "repair",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "withdraw-work", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 7 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "finding", "withdraw-work", "remaining work"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "withdraw-work",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    temp
+}
+
+fn withdraw_fixture_task(temp: &TempDir) {
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task",
+                "withdraw",
+                "withdraw-work",
+                "--reason",
+                "reassign remaining work",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+}
+
+#[test]
+fn withdraw_releases_scope_without_completing_work() {
+    let temp = withdrawal_fixture();
+    let before = task::read(temp.path(), "withdraw-work").unwrap().unwrap();
+    withdraw_fixture_task(&temp);
+    let after = task::read(temp.path(), "withdraw-work").unwrap().unwrap();
+    let view = serde_json::to_value(&after).unwrap();
+    assert_eq!(after.state, TaskState::Withdrawn);
+    assert!(!after.open());
+    assert!(after.result.is_none());
+    assert!(after.closed_unix.is_none());
+    assert!(after.closed_paths.is_empty());
+    assert_eq!(after.findings.len(), before.findings.len());
+    assert_eq!(after.evidence.len(), before.evidence.len());
+    assert_eq!(view["withdrawal"]["model"], "claude-opus-4-1");
+    assert_eq!(
+        view["withdrawal"]["unresolved_paths"]["src/thing.rs"],
+        blabla::project::snapshot(temp.path(), &Default::default())["src/thing.rs"]
+    );
+    for action in ["accept", "ready", "close", "block"] {
+        let mut values = vec!["task", action, "withdraw-work"];
+        if action == "accept" {
+            values.extend(["--model", "qwen3.5:4b"]);
+        }
+        if action == "close" {
+            values.extend(["--model", "claude-opus-4-1"]);
+        }
+        if action == "block" {
+            values.push("stop");
+        }
+        assert_eq!(cli_run(&temp, &values), 2);
+    }
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "finish",
+                "--scope",
+                "src"
+            ]
+        ),
+        0
+    );
+}
+
+#[test]
+fn human_task_show_renders_findings_notes_removed_deliverables_and_withdrawal() {
+    let temp = withdrawal_fixture();
+    let name = "withdraw-work";
+    shows(&temp, &["task", "show", name], "task::withdraw-work");
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", name, "second remaining work"]),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "addressed",
+                name,
+                "2",
+                "handled in src",
+                "--model",
+                "qwen3.5:4b"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "resolve",
+                name,
+                "1",
+                "--evidence",
+                "reconciled by the owner",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "note", name, "a plain note"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "deliverable",
+                name,
+                "--remove",
+                "src/thing.rs",
+                "--reason",
+                "no longer owed",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", name, "--json"]);
+    assert_eq!(view["task"]["findings"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        view["task"]["removed_deliverables"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    shows(&temp, &["task", "show", name], "src/thing.rs");
+    withdraw_fixture_task(&temp);
+    shows(&temp, &["task", "show", name], "src/thing.rs");
+}
+
+#[test]
+fn the_task_list_names_every_task_and_an_unnamed_challenge_reports_the_project() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(cli_run(&temp, &["task", "show"]), 0);
+    let names = ["first", "second"];
+    for (name, scope) in names.iter().zip(["src/a", "src/b"]) {
+        assert_eq!(
+            cli_run(
+                &temp,
+                &[
+                    "task",
+                    "open",
+                    name,
+                    "--role",
+                    "worker",
+                    "--statement",
+                    "list me",
+                    "--scope",
+                    scope,
+                ]
+            ),
+            0
+        );
+    }
+    for name in names {
+        shows(&temp, &["task", "show"], &format!("task::{name}"));
+    }
+    let (listed, code) = json_of(&temp, &["task", "show", "--json"]);
+    assert_eq!(code, 0);
+    assert_eq!(listed.as_array().unwrap().len(), 2);
+    let (report, code) = json_of(&temp, &["challenge", "--json"]);
+    let challenges = report["challenges"].as_array().unwrap();
+    assert_eq!(code, i32::from(!challenges.is_empty()), "{report}");
+    assert!(report["task"].is_null(), "{report}");
+    assert!(
+        report["assignment_blockers"].as_array().unwrap().is_empty(),
+        "{report}"
+    );
+}
+
+fn read_only_ready(temp: &TempDir) {
+    for arguments in [
+        &[
+            "task",
+            "open",
+            "reader",
+            "--role",
+            "worker",
+            "--statement",
+            "inspect only",
+            "--check",
+            "cargo",
+        ][..],
+        &["task", "accept", "reader", "--model", "qwen3.5:4b"][..],
+        &["task", "evidence", "reader", "--exit", "0", "--tool", "t"][..],
+        &["challenge", "reader"][..],
+        &["task", "ready", "reader"][..],
+    ] {
+        assert_eq!(cli_run(temp, arguments), 0, "{arguments:?}");
+    }
+}
+
+fn verification_stands_against_reader(temp: &TempDir) -> bool {
+    let (report, _) = json_of(temp, &["challenge", "reader", "--json"]);
+    report["project_challenges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|class| class == "verification-not-current")
+}
+
+fn close_reader(temp: &TempDir) -> i32 {
+    cli_run(
+        temp,
+        &["task", "close", "reader", "--model", "claude-opus-4-1"],
+    )
+}
+
+fn reader_state(temp: &TempDir) -> TaskState {
+    task::read(temp.path(), "reader").unwrap().unwrap().state
+}
+
+#[test]
+fn an_empty_scope_task_closes_against_its_opening_snapshot_without_a_current_run() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn other() {}\n").unwrap();
+    read_only_ready(&temp);
+    assert!(verification_stands_against_reader(&temp));
+    assert_eq!(close_reader(&temp), 0);
+    assert_eq!(reader_state(&temp), TaskState::Closed);
+}
+
+#[test]
+fn an_empty_scope_task_with_a_change_since_opening_needs_a_current_run_to_close() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn other() {}\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "writer",
+                "--role",
+                "worker",
+                "--statement",
+                "write",
+                "--scope",
+                "src"
+            ]
+        ),
+        0
+    );
+    read_only_ready(&temp);
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn changed() {}\n").unwrap();
+    let (report, code) = json_of(&temp, &["challenge", "reader", "--json"]);
+    assert_eq!(code, 0, "{report}");
+    assert!(verification_stands_against_reader(&temp));
+    assert_eq!(close_reader(&temp), 2);
+    assert_eq!(reader_state(&temp), TaskState::Ready);
+}
+
+#[test]
+fn task_show_attributes_every_changed_path_as_challenge_does() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let root = temp.path();
+    std::fs::create_dir_all(root.join("Docs")).unwrap();
+    std::fs::write(root.join("Docs/Guide.md"), "# guide\n").unwrap();
+    for (name, scope) in [("mine", "src"), ("theirs", "Docs")] {
+        assert_eq!(
+            cli_run(
+                &temp,
+                &[
+                    "task",
+                    "open",
+                    name,
+                    "--role",
+                    "worker",
+                    "--statement",
+                    "attributed",
+                    "--scope",
+                    scope,
+                    "--check",
+                    "cargo"
+                ]
+            ),
+            0
+        );
+    }
+    assert_eq!(
+        cli_run(&temp, &["task", "accept", "mine", "--model", "qwen3.5:4b"]),
+        0
+    );
+    for (path, text) in [
+        ("src/thing.rs", "pub fn run() -> u8 { 1 }\n"),
+        ("Docs/Guide.md", "# changed\n"),
+        ("extra/c.md", "c\n"),
+        ("notes/a.md", "a\n"),
+        ("notes/b.md", "b\n"),
+        ("other/z.md", "z\n"),
+    ] {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "mine",
+                "extra/c.md",
+                "--kind",
+                "concurrent",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "mine",
+                "--exit",
+                "0",
+                "--tool",
+                "attribution-check"
+            ]
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "mine", "--json"]);
+    let owners: Vec<(String, String)> = view["attributions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            (
+                entry["path"].as_str().unwrap().to_owned(),
+                entry["owner"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    let expected: Vec<(String, String)> = [
+        ("Docs/Guide.md", "theirs"),
+        ("extra/c.md", "concurrent"),
+        ("notes/a.md", "unknown"),
+        ("notes/b.md", "unknown"),
+        ("other/z.md", "unknown"),
+        ("src/thing.rs", "task"),
+    ]
+    .iter()
+    .map(|(path, owner)| ((*path).to_owned(), (*owner).to_owned()))
+    .collect();
+    assert_eq!(owners, expected, "{view}");
+    let (report, code) = json_of(&temp, &["challenge", "mine", "--json"]);
+    assert_eq!(code, 1, "{report}");
+    assert_eq!(
+        report["challenge"]["class"], "attribution-unknown",
+        "{report}"
+    );
+    let unknown: Vec<&str> = owners
+        .iter()
+        .filter(|(_, owner)| owner == "unknown")
+        .map(|(path, _)| path.as_str())
+        .collect();
+    assert_eq!(
+        report["challenge"]["unattributed"],
+        serde_json::json!(unknown),
+        "{report}"
+    );
+    let human = human_show(root, "mine");
+    for (path, owner) in &owners {
+        assert!(
+            human
+                .lines()
+                .any(|line| line.contains(path.as_str()) && line.contains(owner.as_str())),
+            "{path} {owner}: {human}"
+        );
+    }
+    assert!(shows_latest_evidence_kind(root, "mine"), "{human}");
+}
+
+#[test]
+fn task_show_lists_the_intents_ready_will_require_without_writing_the_record() {
+    use crate::task_claims::{fixture, open_task, record_bytes};
+    let shown_intents = |temp: &TempDir, name: &str| {
+        let (view, code) = json_of(temp, &["task", "show", name, "--json"]);
+        assert_eq!(code, 0, "{view}");
+        view["affected_intents"].clone()
+    };
+    let intent = fixture();
+    open_task(&intent, "worker", true, &["--intent"]);
+    let before = record_bytes(&intent);
+    assert_eq!(
+        shown_intents(&intent, "work"),
+        serde_json::json!(["system::app", "goal::deliver"])
+    );
+    assert_eq!(record_bytes(&intent), before);
+    let unasked = fixture();
+    open_task(&unasked, "worker", true, &[]);
+    assert_eq!(shown_intents(&unasked, "work"), serde_json::json!([]));
+    let untouched = fixture();
+    assert_eq!(
+        cli_run(
+            &untouched,
+            &[
+                "task",
+                "open",
+                "loose",
+                "--role",
+                "worker",
+                "--statement",
+                "touch no system",
+                "--scope",
+                "loose/file.rs",
+                "--intent",
+                "--check",
+                "true"
+            ]
+        ),
+        0
+    );
+    assert_eq!(shown_intents(&untouched, "loose"), serde_json::json!([]));
+}
+
+fn human_show(root: &std::path::Path, name: &str) -> String {
+    String::from_utf8(run_in(Some(root), &args(&["task", "show", name])).stdout).unwrap()
+}
+
+fn shows_latest_evidence_kind(root: &std::path::Path, name: &str) -> bool {
+    let human = human_show(root, name);
+    let record = task::read(root, name).unwrap().unwrap();
+    let latest = record.evidence.last().unwrap();
+    human
+        .lines()
+        .any(|line| line.contains(&latest.tool) && line.contains(task::evidence_kind(latest)))
+}
+
+#[test]
+fn an_alias_a_worker_family_admits_changes_the_reviewed_model_identity() {
+    let temp = review_fixture_shaped(false, |process| {
+        process
+            .replace("model \"qwen3.5:4b\"", "model [\"qwen3.5:*\"]")
+            .replace(
+                "\"claude-sonnet-4\"]",
+                "\"claude-sonnet-4\", \"qwen3.5:9b\"]",
+            )
+    });
+    let (before, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(before["review_current"], true, "{before}");
+    let path = temp.path().join("process.bla");
+    let process = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        format!("{process}alias \"small\" {{ model \"qwen3.5:9b\" }}\n"),
+    )
+    .unwrap();
+    let (after, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["review_current"], false, "{after}");
+}
+
+#[test]
+fn evidence_is_refused_for_a_task_that_declares_no_check_and_records_nothing() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "unchecked",
+                "--role",
+                "worker",
+                "--statement",
+                "no declared check",
+                "--scope",
+                "src",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "unchecked", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    for arguments in [
+        &["task", "evidence", "unchecked", "--run"][..],
+        &[
+            "task",
+            "evidence",
+            "unchecked",
+            "--exit",
+            "0",
+            "--tool",
+            "t",
+        ][..],
+    ] {
+        assert_eq!(cli_run(&temp, arguments), 2, "{arguments:?}");
+    }
+    let record = task::read(temp.path(), "unchecked").unwrap().unwrap();
+    assert!(record.evidence.is_empty());
+}
+
+#[test]
+fn withdrawn_changed_paths_remain_project_challenges() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    let (report, code) = json_of(&temp, &["challenge", "--json"]);
+    assert_eq!(code, 1);
+    assert!(
+        report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(report["challenge"]["class"], "withdrawal-residue");
+}
+
+#[test]
+fn restored_residue_clears_without_claiming_completion() {
+    let temp = withdrawal_fixture();
+    std::fs::write(temp.path().join("src/new.rs"), "new").unwrap();
+    withdraw_fixture_task(&temp);
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn run() {}\n").unwrap();
+    std::fs::remove_file(temp.path().join("src/new.rs")).unwrap();
+    let (report, _) = json_of(&temp, &["challenge", "--json"]);
+    assert!(
+        !report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(
+        task::read(temp.path(), "withdraw-work")
+            .unwrap()
+            .unwrap()
+            .state,
+        TaskState::Withdrawn
+    );
+}
+
+#[test]
+fn withdrawal_reconciliation_requires_current_closed_successor() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    let reconcile = [
+        "task",
+        "reconcile-withdrawal",
+        "withdraw-work",
+        "src/thing.rs",
+        "--successor",
+        "successor",
+        "--model",
+        "claude-opus-4-1",
+    ];
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "src",
+                "--input",
+                "src/thing.rs",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+    let mut successor = task::read(temp.path(), "successor").unwrap().unwrap();
+    let tree = blabla::project::snapshot(temp.path(), &Default::default());
+    assert!(machine::fire(&mut successor, Command::Accept, &Facts::record_only()).is_ok());
+    task::record_acceptance(&mut successor, &tree, &Default::default(), "qwen3.5:4b", 10);
+    evidence(&mut successor, &tree);
+    assert!(task::record_challenge(&mut successor, &tree, 0, 11));
+    assert!(hand_back(&mut successor, &tree).is_ok());
+    assert!(task::accept_result(
+        &mut successor,
+        &tree,
+        &Default::default(),
+        0,
+        "claude-opus-4-1",
+        12
+    ));
+    task::write(temp.path(), &successor).unwrap();
+    assert_eq!(cli_run(&temp, &reconcile), 0);
+    let after = task::read(temp.path(), "withdraw-work").unwrap().unwrap();
+    let value = serde_json::to_value(&after).unwrap();
+    assert_eq!(after.state, TaskState::Withdrawn);
+    assert!(after.result.is_none());
+    assert_eq!(
+        value["withdrawal"]["reconciliations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let (report, _) = json_of(&temp, &["challenge", "--json"]);
+    assert!(
+        !report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    successor.check = Some(vec!["replacement".to_owned(), "check".to_owned()]);
+    task::write(temp.path(), &successor).unwrap();
+    let (report, _) = json_of(&temp, &["challenge", "--json"]);
+    assert!(
+        !grounded_classes(&report)
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+}
+
+#[test]
+fn withdrawal_successor_can_close_and_reconcile_through_cli() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "src",
+                "--input",
+                "src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "successor", "--json"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let reconcile = [
+        "task",
+        "reconcile-withdrawal",
+        "withdraw-work",
+        "src/thing.rs",
+        "--successor",
+        "successor",
+        "--model",
+        "claude-opus-4-1",
+    ];
+    assert_eq!(cli_run(&temp, &reconcile), 0);
+    let (report, _) = json_of(&temp, &["challenge", "--json"]);
+    assert!(
+        !report["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 8 }\n",
+    )
+    .unwrap();
+    let (report, _) = json_of(&temp, &["challenge", "--json"]);
+    assert!(
+        !grounded_classes(&report)
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+}
+
+#[test]
+fn withdrawal_residue_is_visible_with_multiple_open_assignments() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    for (name, scope) in [("one", "src"), ("two", "tests")] {
+        assert_eq!(
+            cli_run(
+                &temp,
+                &[
+                    "task",
+                    "open",
+                    name,
+                    "--role",
+                    "worker",
+                    "--statement",
+                    "remaining work",
+                    "--scope",
+                    scope
+                ]
+            ),
+            0
+        );
+    }
+    let (report, code) = json_of(&temp, &["challenge", "--json"]);
+    assert_eq!(code, 1);
+    assert_eq!(report["challenge"]["class"], "withdrawal-residue");
+}
+
+#[test]
+fn simultaneous_evidence_runs_preserve_both_observations_and_logs() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_with_argv_check(&temp, "race", &[env!("CARGO_BIN_EXE_blabla"), "--help"]);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let barrier = barrier.clone();
+            let temp = &temp;
+            handles.push(scope.spawn(move || {
+                barrier.wait();
+                cli_run(temp, &["task", "evidence", "race", "--run"])
+            }));
+        }
+        barrier.wait();
+        for handle in handles {
+            assert_eq!(handle.join().unwrap(), 0);
+        }
+    });
+    let task = race_task(&temp);
+    assert_eq!(task.evidence.len(), 2);
+    let logs = task
+        .evidence
+        .iter()
+        .map(|evidence| evidence.log.as_ref().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(logs.len(), 2);
+    for evidence in &task.evidence {
+        assert_eq!(evidence.exit, 0);
+        assert_eq!(evidence.acceptance_epoch, Some(task.acceptance_epoch));
+        assert!(
+            !std::fs::read(temp.path().join(evidence.log.as_ref().unwrap()))
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn changed_work_withdrawal_successor_can_close_and_reconcile_through_cli() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "finish repair",
+                "--scope",
+                "src",
+                "--input",
+                "src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 9 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "successor", "--json"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let successor = task::read(temp.path(), "successor").unwrap().unwrap();
+    assert!(successor.closed_paths.contains_key("src/thing.rs"));
+    let reconcile = [
+        "task",
+        "reconcile-withdrawal",
+        "withdraw-work",
+        "src/thing.rs",
+        "--successor",
+        "successor",
+        "--model",
+        "claude-opus-4-1",
+    ];
+    assert_eq!(cli_run(&temp, &reconcile), 0);
+    assert!(task::challenge_current(&successor, &task_tree(&temp)));
+    assert!(
+        task::withdrawal_residue(
+            &task::read(temp.path(), "withdraw-work").unwrap().unwrap(),
+            &task::read_all(temp.path()),
+            &task_tree(&temp)
+        )
+        .is_empty()
+    );
+    let mut replaced = successor.clone();
+    replaced.evidence.last_mut().unwrap().exit = 1;
+    task::write(temp.path(), &replaced).unwrap();
+    let (report, _) = json_of(&temp, &["challenge", "--json"]);
+    assert!(
+        !grounded_classes(&report)
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+    task::write(temp.path(), &successor).unwrap();
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 10 }\n",
+    )
+    .unwrap();
+    assert!(!task::challenge_current(&successor, &task_tree(&temp)));
+    let (report, _) = json_of(&temp, &["challenge", "--json"]);
+    assert!(
+        !grounded_classes(&report)
+            .iter()
+            .any(|class| class == "withdrawal-residue")
+    );
+    assert_eq!(cli_run(&temp, &reconcile), 2);
+}
+
+fn close_successor(temp: &TempDir, inputs: &[&str]) {
+    let mut open = vec![
+        "task",
+        "open",
+        "successor",
+        "--role",
+        "worker",
+        "--statement",
+        "retain repair",
+        "--scope",
+        "src",
+        "--check",
+        "check",
+    ];
+    for input in inputs {
+        open.extend(["--input", *input]);
+    }
+    assert_eq!(cli_run(temp, &open), 0);
+    assert_eq!(
+        cli_run(
+            temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(temp, &["challenge", "successor", "--json"]), 0);
+    assert_eq!(cli_run(temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+}
+
+fn reconcile_thing(temp: &TempDir) -> i32 {
+    cli_run(
+        temp,
+        &[
+            "task",
+            "reconcile-withdrawal",
+            "withdraw-work",
+            "src/thing.rs",
+            "--successor",
+            "successor",
+            "--model",
+            "claude-opus-4-1",
+        ],
+    )
+}
+
+fn residue_grounded(temp: &TempDir) -> bool {
+    let (report, _) = json_of(temp, &["challenge", "--json"]);
+    grounded_classes(&report)
+        .iter()
+        .any(|class| class == "withdrawal-residue")
+}
+
+#[test]
+fn durable_reconciliation_survives_a_later_change_to_the_path() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    assert!(residue_grounded(&temp));
+    close_successor(&temp, &["src"]);
+    assert_eq!(reconcile_thing(&temp), 0);
+    assert!(!residue_grounded(&temp));
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 8 }\n",
+    )
+    .unwrap();
+    assert_eq!(reconcile_thing(&temp), 2);
+    assert!(!residue_grounded(&temp));
+}
+
+#[test]
+fn durable_reconciliation_survives_a_later_change_to_the_successors_inputs() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    std::fs::write(
+        temp.path().join("src/helper.rs"),
+        "pub fn helper() -> u8 { 1 }\n",
+    )
+    .unwrap();
+    close_successor(&temp, &["src/thing.rs", "src/helper.rs"]);
+    assert_eq!(reconcile_thing(&temp), 0);
+    std::fs::write(
+        temp.path().join("src/helper.rs"),
+        "pub fn helper() -> u8 { 2 }\n",
+    )
+    .unwrap();
+    assert_eq!(reconcile_thing(&temp), 2);
+    assert!(!residue_grounded(&temp));
+}
+
+#[test]
+fn reconciliation_against_a_successor_without_current_evidence_is_refused() {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    close_successor(&temp, &["src"]);
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 8 }\n",
+    )
+    .unwrap();
+    assert_eq!(reconcile_thing(&temp), 2);
+    let (view, _) = json_of(&temp, &["task", "show", "withdraw-work", "--json"]);
+    assert!(
+        view["task"]["withdrawal"]["reconciliations"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+fn durably_reconciled() -> TempDir {
+    let temp = withdrawal_fixture();
+    withdraw_fixture_task(&temp);
+    close_successor(&temp, &["src"]);
+    assert_eq!(reconcile_thing(&temp), 0);
+    assert!(!residue_grounded(&temp));
+    temp
+}
+
+#[test]
+fn durable_reconciliation_lapses_when_the_successor_closes_again() {
+    let temp = durably_reconciled();
+    let mut successor = task::read(temp.path(), "successor").unwrap().unwrap();
+    successor.closed_unix = successor.closed_unix.map(|unix| unix + 1);
+    task::write(temp.path(), &successor).unwrap();
+    assert!(residue_grounded(&temp));
+}
+
+#[test]
+fn durable_reconciliation_lapses_when_the_successor_is_no_longer_closed() {
+    let temp = durably_reconciled();
+    let mut successor = task::read(temp.path(), "successor").unwrap().unwrap();
+    successor.state = TaskState::Ready;
+    task::write(temp.path(), &successor).unwrap();
+    assert!(residue_grounded(&temp));
+}
+
+#[test]
+fn durable_reconciliation_lapses_when_its_successor_record_is_removed() {
+    let temp = durably_reconciled();
+    std::fs::remove_file(task::path_of(temp.path(), "successor")).unwrap();
+    assert!(residue_grounded(&temp));
+}
+
+#[test]
+fn withdrawal_reconciliation_preserves_observed_path_spelling() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let root = temp.path();
+    std::fs::rename(root.join("src"), root.join("Src")).unwrap();
+    std::fs::rename(root.join("Src/thing.rs"), root.join("Src/Thing.rs")).unwrap();
+    std::fs::write(
+        root.join("contracts/arch.bla"),
+        "module thing \"Src/Thing.rs\"\n\nrequire \"entry\": symbol thing::run\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "old",
+                "--role",
+                "worker",
+                "--statement",
+                "repair",
+                "--scope",
+                "Src"
+            ]
+        ),
+        0
+    );
+    std::fs::write(root.join("Src/Thing.rs"), "pub fn run() -> u8 { 7 }\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "withdraw",
+                "old",
+                "--reason",
+                "reassign",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    let old = task::read(root, "old").unwrap().unwrap();
+    assert!(
+        old.withdrawal
+            .as_ref()
+            .unwrap()
+            .unresolved_paths
+            .contains_key("Src/Thing.rs")
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "Src",
+                "--input",
+                "Src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "successor", "--json"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let spelling = if cfg!(windows) {
+        "sRC/tHING.RS"
+    } else {
+        "Src/Thing.rs"
+    };
+    let reconcile = |path: &str| {
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "reconcile-withdrawal",
+                "old",
+                path,
+                "--successor",
+                "successor",
+                "--model",
+                "claude-opus-4-1",
+            ],
+        )
+    };
+    #[cfg(not(windows))]
+    assert_eq!(reconcile("sRC/tHING.RS"), 2);
+    assert_eq!(reconcile(spelling), 0);
+    let old = task::read(root, "old").unwrap().unwrap();
+    assert_eq!(
+        old.withdrawal.as_ref().unwrap().reconciliations[0].path,
+        "Src/Thing.rs"
+    );
+    assert!(task::withdrawal_residue(&old, &task::read_all(root), &task_tree(&temp)).is_empty());
+    std::fs::write(root.join("Src/Thing.rs"), "pub fn run() {}\n").unwrap();
+    assert!(task::withdrawal_residue(&old, &task::read_all(root), &task_tree(&temp)).is_empty());
+}
+
+#[test]
+fn withdrawal_residue_does_not_hide_vacuous_close_blocker() {
+    let temp = withdrawal_fixture();
+    std::fs::write(temp.path().join("contracts/arch.bla"), "module missing \"src/missing.py\"\nforbid \"missing-restart\": symbol missing::Domain.restart\n").unwrap();
+    withdraw_fixture_task(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "src",
+                "--input",
+                "src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    let (report, _) = json_of(&temp, &["challenge", "successor", "--json"]);
+    let grounded = report["grounded"].as_array().unwrap();
+    assert!(grounded.iter().any(|class| class == "withdrawal-residue"));
+    assert!(grounded.iter().any(|class| class == "vacuous-rule"));
+    assert_eq!(cli_run(&temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        2
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "reconcile-withdrawal",
+                "withdraw-work",
+                "src/thing.rs",
+                "--successor",
+                "successor",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        2
+    );
+}
+
+#[test]
+fn a_closed_successor_covers_its_write_scope_when_it_declares_no_inputs() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let root = temp.path();
+    std::fs::rename(root.join("src"), root.join("Src")).unwrap();
+    std::fs::rename(root.join("Src/thing.rs"), root.join("Src/Thing.rs")).unwrap();
+    std::fs::write(
+        root.join("contracts/arch.bla"),
+        "module thing \"Src/Thing.rs\"\n\nrequire \"entry\": symbol thing::run\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "old",
+                "--role",
+                "worker",
+                "--statement",
+                "repair",
+                "--scope",
+                "Src"
+            ]
+        ),
+        0
+    );
+    std::fs::write(root.join("Src/Thing.rs"), "pub fn run() -> u8 { 7 }\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "withdraw",
+                "old",
+                "--reason",
+                "reassign",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "Src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "successor", "--json"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "successor"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "successor", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "reconcile-withdrawal",
+                "old",
+                "Src/Thing.rs",
+                "--successor",
+                "successor",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0,
+        "a CLOSED successor whose write scope covers the path reconciles it when it declares no inputs"
+    );
+    let old = task::read(root, "old").unwrap().unwrap();
+    assert_eq!(
+        old.withdrawal.as_ref().unwrap().reconciliations[0].path,
+        "Src/Thing.rs"
+    );
+}
+
+#[test]
+fn an_assignment_blocker_headlines_ahead_of_project_residue() {
+    let temp = withdrawal_fixture();
+    std::fs::write(temp.path().join("contracts/arch.bla"), "module missing \"src/missing.py\"\nforbid \"missing-restart\": symbol missing::Domain.restart\n").unwrap();
+    withdraw_fixture_task(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "successor",
+                "--role",
+                "worker",
+                "--statement",
+                "retain repair",
+                "--scope",
+                "src",
+                "--input",
+                "src",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "successor", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "finding",
+                "successor",
+                "an unsettled defect",
+                "--json"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "successor",
+                "--exit",
+                "0",
+                "--tool",
+                "test"
+            ]
+        ),
+        0
+    );
+    let (report, _) = json_of(&temp, &["challenge", "successor", "--json"]);
+    let grounded = report["grounded"].as_array().unwrap();
+    assert!(grounded.iter().any(|class| class == "withdrawal-residue"));
+    let blockers = report["assignment_blockers"].as_array().unwrap();
+    assert!(!blockers.is_empty());
+    assert_eq!(report["challenge"]["class"], blockers[0]);
+}
+
+#[test]
+fn the_task_view_names_each_declared_path_in_its_on_disk_spelling() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    std::fs::rename(temp.path().join("src"), temp.path().join("Src")).unwrap();
+    std::fs::rename(
+        temp.path().join("Src/thing.rs"),
+        temp.path().join("Src/Thing.rs"),
+    )
+    .unwrap();
+    std::fs::write(temp.path().join("CHANGELOG.md"), "# log\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "spelled",
+                "--role",
+                "worker",
+                "--statement",
+                "repair",
+                "--scope",
+                "Src",
+                "--deliverable",
+                "Src/Thing.rs",
+                "--input",
+                "CHANGELOG.md",
+                "--falsify",
+                "Src/Thing.rs",
+                "--check",
+                "cargo"
+            ]
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "spelled", "--json"]);
+    let scope = view["task"]["scope"][0].as_str().unwrap();
+    assert_eq!(view["on_disk"][scope], "Src");
+    let deliverable = view["task"]["deliverables"][0]["path"].as_str().unwrap();
+    assert_eq!(view["on_disk"][deliverable], "Src/Thing.rs");
+    let input = view["task"]["check_inputs"][0].as_str().unwrap();
+    assert_eq!(view["on_disk"][input], "CHANGELOG.md");
+    let falsify = view["task"]["falsify"][0].as_str().unwrap();
+    assert_eq!(view["on_disk"][falsify], "Src/Thing.rs");
+}
+
+#[test]
+fn a_blocked_route_names_every_unresolved_finding() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(&temp, &["task", "block", "target", "first block reason"]),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "finding", "target", "second defect"]),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    let unresolved: Vec<u64> = view["task"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["resolution"].is_null())
+        .map(|finding| finding["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(unresolved.len(), 2);
+    let (challenged, _) = json_of(&temp, &["challenge", "target", "--json"]);
+    let route = challenged["assignment_recovery"]["guidance"]
+        .as_str()
+        .expect("the blocked route is reported");
+    let listed: Vec<u64> = route[route.find('[').unwrap() + 1..route.find(']').unwrap()]
+        .split(", ")
+        .map(|id| id.parse().unwrap())
+        .collect();
+    assert_eq!(listed, unresolved);
+}
+
+#[test]
+fn a_review_lists_the_paths_its_target_changed() {
+    let temp = review_of_handed_back_target();
+    let (view, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    let changed: Vec<&str> = view["reviewed_changed_since_open"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|path| path.as_str())
+        .collect();
+    assert!(changed.contains(&"src/thing.rs"), "{changed:?}");
+}
+
+#[test]
+fn a_review_lists_only_the_paths_its_target_covers() {
+    let temp = review_of_handed_back_target();
+    std::fs::write(temp.path().join("elsewhere.md"), "unrelated\n").unwrap();
+    let (view, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    let changed: Vec<&str> = view["reviewed_changed_since_open"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|path| path.as_str())
+        .collect();
+    assert!(changed.contains(&"src/thing.rs"), "{changed:?}");
+    assert!(!changed.contains(&"elsewhere.md"), "{changed:?}");
+    assert!(view["reviewed_changed_elsewhere"].as_u64().unwrap() >= 1);
+}
+
+#[test]
+fn task_show_counts_changed_paths_outside_the_task() {
+    let temp = review_fixture();
+    std::fs::write(temp.path().join("elsewhere.md"), "unrelated\n").unwrap();
+    let (view, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    let changed: Vec<&str> = view["changed_since_open"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|path| path.as_str())
+        .collect();
+    assert!(!changed.contains(&"elsewhere.md"), "{changed:?}");
+    assert!(view["changed_elsewhere"].as_u64().unwrap() >= 1);
+}
+
+#[test]
+fn an_unreadable_review_target_is_reported_apart_from_no_changes() {
+    let temp = review_fixture();
+    std::fs::write(task::path_of(temp.path(), "target"), "not json").unwrap();
+    let (view, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(view["reviewed_target_readable"], false);
+    assert!(
+        view["reviewed_changed_since_open"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn an_amended_statement_voids_a_ready_tasks_challenge_receipt() {
+    let temp = review_of_handed_back_target();
+    let (before, _) = json_of(&temp, &["challenge", "target", "--json"]);
+    assert_eq!(before["assignment_clear"], true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "statement",
+                "target",
+                "a sharper statement",
+                "--model",
+                "claude-opus-4-1",
+            ]
+        ),
+        0
+    );
+    let (after, _) = json_of(&temp, &["challenge", "target", "--json"]);
+    assert_eq!(after["assignment_clear"], false);
+}
+
+#[test]
+fn an_amended_statement_makes_the_review_of_its_task_stale() {
+    let temp = review_of_handed_back_target();
+    let (before, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(before["review_current"], true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "statement",
+                "target",
+                "a sharper statement",
+                "--model",
+                "claude-opus-4-1",
+            ]
+        ),
+        0
+    );
+    let (after, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["review_current"], false);
+}
+
+#[test]
+fn a_ready_target_with_its_receipt_closes_on_the_same_fixture() {
+    let temp = review_of_handed_back_target();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "target", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+}
+
+#[test]
+fn an_amendment_while_a_worker_carries_the_task_awaits_confirmation() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "statement",
+                "target",
+                "a sharper statement",
+                "--model",
+                "claude-opus-4-1",
+            ]
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    let amendment = view["task"]["orchestrator_records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["verb"] == "statement")
+        .unwrap();
+    assert!(!amendment["carried_by"].is_null());
+    assert!(amendment["confirmed"].is_null());
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 42 }\n",
+    )
+    .unwrap();
+    handback(&temp, "target");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "confirm", "target", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    let amendment = view["task"]["orchestrator_records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["verb"] == "statement")
+        .unwrap();
+    assert!(!amendment["confirmed"].is_null());
+}
+
+#[test]
+fn an_option_after_the_opened_check_is_reported_and_kept_in_the_recorded_check() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let (view, code) = json_of(
+        &temp,
+        &[
+            "--json",
+            "task",
+            "open",
+            "swallowed",
+            "--role",
+            "worker",
+            "--statement",
+            "repair",
+            "--scope",
+            "src/thing.rs",
+            "--check",
+            "prog",
+            "--falsify",
+            "src/thing.rs",
+        ],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(
+        view["swallowed_check_argv"],
+        serde_json::json!(["--falsify"])
+    );
+    assert_eq!(
+        view["task"]["check"],
+        serde_json::json!(["prog", "--falsify", "src/thing.rs"])
+    );
+    let (shown, shown_code) = json_of(&temp, &["--json", "task", "show", "swallowed"]);
+    assert_eq!(shown_code, 0);
+    assert_eq!(
+        shown["task"]["check"],
+        serde_json::json!(["prog", "--falsify", "src/thing.rs"])
+    );
+}
+
+#[test]
+fn an_option_after_an_amended_check_is_reported_and_kept() {
+    let temp = review_fixture();
+    let (view, code) = json_of(
+        &temp,
+        &[
+            "--json",
+            "task",
+            "check",
+            "target",
+            "--check",
+            env!("CARGO_BIN_EXE_blabla"),
+            "task",
+            "accept",
+            "target",
+            "--model",
+            "qwen3.5:4b",
+        ],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(view["swallowed_check_argv"], serde_json::json!(["--model"]));
+    let argv = view["task"]["check"].as_array().unwrap();
+    assert!(argv.iter().any(|element| element == "--model"), "{argv:?}");
+}
+
+#[test]
+fn a_blocked_task_with_every_finding_resolved_lists_no_unresolved_finding() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(&temp, &["task", "block", "target", "first block reason"]),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    let id = view["task"]["findings"][0]["id"].as_u64().unwrap();
+    assert_eq!(view["unresolved_findings"], serde_json::json!([id]));
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "addressed",
+                "target",
+                &id.to_string(),
+                "fixed",
+                "--model",
+                "qwen3.5:4b"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "resolve",
+                "target",
+                &id.to_string(),
+                "--evidence",
+                "settled",
+                "--model",
+                "claude-opus-4-1",
+            ]
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    assert_eq!(view["unresolved_findings"], serde_json::json!([]));
+    assert_eq!(view["unresolved"], 0);
+}
+
+#[test]
+fn an_open_review_is_reported_as_not_yet_accepted() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "second-review",
+                "--role",
+                "reviewer",
+                "--statement",
+                "second review",
+                "--review-of",
+                "target",
+                "--input",
+                "manual.txt",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    let (open, _) = json_of(&temp, &["task", "show", "second-review", "--json"]);
+    assert_eq!(open["review_accepted"], false);
+    assert_eq!(open["review_current"], false);
+    let (accepted, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(accepted["review_accepted"], true);
+}
+
+#[test]
+fn a_printed_finding_id_addresses_the_finding_it_names() {
+    let temp = review_fixture();
+    let output = run_in(
+        Some(temp.path()),
+        &args(&["task", "finding", "target", "a defect to address"]),
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let printed = String::from_utf8(output.stdout).unwrap();
+    let id: u64 = printed
+        .split_whitespace()
+        .find_map(|token| token.parse().ok())
+        .expect("the recorded finding id is printed");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "addressed",
+                "target",
+                &id.to_string(),
+                "fixed in the target",
+                "--model",
+                "qwen3.5:4b"
+            ]
+        ),
+        0
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    let finding = view["task"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["id"].as_u64() == Some(id))
+        .expect("the printed id names a recorded finding");
+    assert!(!finding["addressed"].is_null());
+}
+
+fn review_fixture() -> TempDir {
+    review_fixture_configured(false)
+}
+
+fn review_fixture_configured(consults: bool) -> TempDir {
+    review_fixture_shaped(consults, str::to_owned)
+}
+
+fn review_fixture_shaped(consults: bool, shape: fn(&str) -> String) -> TempDir {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let process = shape(&std::fs::read_to_string(temp.path().join("process.bla")).unwrap());
+    let consultation = if consults {
+        " consult [\"review-lens\"]\n"
+    } else {
+        ""
+    };
+    std::fs::write(temp.path().join("process.bla"), format!("{process}\nrole \"reviewer\" {{\n purpose \"review one task\"\n{consultation} model \"qwen3.5:4b\"\n}}\n")).unwrap();
+    if consults {
+        let manifest = std::fs::read_to_string(temp.path().join("project.bla")).unwrap();
+        std::fs::write(
+            temp.path().join("project.bla"),
+            format!("{manifest}\nknowledge \"knowledge.bla\"\n"),
+        )
+        .unwrap();
+        std::fs::write(temp.path().join("knowledge.bla"), "knowledge \"review-lens\" { purpose \"review fixture evidence\" }\nruling \"current\" { pack \"review-lens\" statement \"inspect current evidence\" }\nknowledge \"unrelated\" { purpose \"unrelated expertise\" }\nruling \"other\" { pack \"unrelated\" statement \"unrelated advice\" }\n").unwrap();
+    }
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "target",
+                "--role",
+                "worker",
+                "--statement",
+                "repair target",
+                "--scope",
+                "src/thing.rs",
+                "--deliverable",
+                "src/thing.rs",
+                "--input",
+                "config.txt",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "target", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "review",
+                "--role",
+                "reviewer",
+                "--statement",
+                "review target",
+                "--review-of",
+                "target",
+                "--input",
+                "manual.txt",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "review", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    temp
+}
+
+fn review_of_handed_back_target() -> TempDir {
+    let temp = review_fixture();
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 42 }\n",
+    )
+    .unwrap();
+    handback(&temp, "target");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "review", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    temp
+}
+
+fn handback(temp: &TempDir, name: &str) {
+    assert_eq!(
+        cli_run(
+            temp,
+            &["task", "evidence", name, "--exit", "0", "--tool", "test"]
+        ),
+        0
+    );
+    assert_eq!(cli_run(temp, &["challenge", name]), 0);
+    assert_eq!(cli_run(temp, &["task", "ready", name]), 0);
+}
+
+fn review_handback(temp: &TempDir) {
+    handback(temp, "review");
+}
+
+#[test]
+fn review_rework_invalidates_approval() {
+    for closed in [false, true] {
+        let temp = review_fixture();
+        review_handback(&temp);
+        if closed {
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "close", "review", "--model", "claude-opus-4-1"]
+                ),
+                0
+            );
+        }
+        let (before, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+        assert_eq!(before["review_current"], true);
+        assert_eq!(before["approval_current"], closed);
+        assert_eq!(
+            cli_run(
+                &temp,
+                &["task", "accept", "target", "--model", "qwen3.5:4b"]
+            ),
+            0
+        );
+        let (stale, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+        assert_eq!(stale["review_current"], false);
+        assert_eq!(stale["approval_current"], false);
+        assert_eq!(
+            stale["task"]["state"],
+            if closed { "closed" } else { "ready" }
+        );
+        if !closed {
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "close", "review", "--model", "claude-opus-4-1"]
+                ),
+                2
+            );
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &[
+                        "task", "evidence", "review", "--exit", "0", "--tool", "test"
+                    ]
+                ),
+                2
+            );
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "accept", "review", "--model", "qwen3.5:4b"]
+                ),
+                0
+            );
+            review_handback(&temp);
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "close", "review", "--model", "claude-opus-4-1"]
+                ),
+                0
+            );
+        }
+    }
+}
+
+#[test]
+fn a_review_stays_current_through_a_finding_and_its_resolution_on_the_target() {
+    let temp = review_of_handed_back_target();
+    let (before, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(before["review_current"], true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "finding", "target", "reviewer defect", "--json"]
+        ),
+        0
+    );
+    let (found, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(found["review_current"], true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "resolve",
+                "target",
+                "1",
+                "--evidence",
+                "settled",
+                "--model",
+                "claude-opus-4-1",
+                "--json",
+            ]
+        ),
+        0
+    );
+    let (resolved, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(resolved["review_current"], true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task", "evidence", "review", "--exit", "0", "--tool", "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "review"]), 0);
+    assert_eq!(challenge_grounded(&temp, "review"), Vec::<String>::new());
+    assert_eq!(cli_run(&temp, &["task", "ready", "review"]), 0);
+    let (ready, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(ready["task"]["state"], "ready");
+}
+
+#[test]
+fn a_resolved_finding_on_a_ready_target_keeps_its_handback_receipt() {
+    let temp = review_of_handed_back_target();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "finding", "target", "reviewer defect", "--json"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "resolve",
+                "target",
+                "1",
+                "--evidence",
+                "settled",
+                "--model",
+                "claude-opus-4-1",
+                "--json",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "target", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let (closed, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    assert_eq!(closed["task"]["state"], "closed");
+}
+
+#[test]
+fn an_unresolved_finding_on_a_ready_target_still_voids_its_handback_receipt() {
+    let temp = review_of_handed_back_target();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "finding", "target", "reviewer defect", "--json"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "target", "--model", "claude-opus-4-1"]
+        ),
+        2
+    );
+    let (view, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    assert_eq!(view["task"]["state"], "ready");
+}
+
+#[test]
+fn an_addressed_then_resolved_finding_keeps_the_handback_receipt() {
+    let temp = review_fixture();
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() -> u8 { 42 }\n",
+    )
+    .unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "finding", "target", "reviewer defect", "--json"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "addressed",
+                "target",
+                "1",
+                "fixed at src/thing.rs",
+                "--model",
+                "qwen3.5:4b",
+                "--json",
+            ]
+        ),
+        0
+    );
+    handback(&temp, "target");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "resolve",
+                "target",
+                "1",
+                "--evidence",
+                "settled",
+                "--model",
+                "claude-opus-4-1",
+                "--json",
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "target", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let (closed, _) = json_of(&temp, &["task", "show", "target", "--json"]);
+    assert_eq!(closed["task"]["state"], "closed");
+}
+
+#[test]
+fn a_worker_reaccepting_the_target_stales_the_review() {
+    let temp = review_of_handed_back_target();
+    let (current, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(current["review_current"], true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task", "evidence", "review", "--exit", "0", "--tool", "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "review"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "target", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    let (stale, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(stale["review_current"], false);
+    assert_eq!(cli_run(&temp, &["task", "ready", "review"]), 2);
+}
+
+#[test]
+fn a_worker_addressing_a_target_finding_stales_the_review() {
+    let temp = review_of_handed_back_target();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task", "evidence", "review", "--exit", "0", "--tool", "test"
+            ]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "review"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "finding", "target", "reviewer defect", "--json"]
+        ),
+        0
+    );
+    let (found, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(found["review_current"], true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "addressed",
+                "target",
+                "1",
+                "fixed at src/thing.rs",
+                "--model",
+                "qwen3.5:4b",
+                "--json",
+            ]
+        ),
+        0
+    );
+    let (stale, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(stale["review_current"], false);
+    assert_eq!(cli_run(&temp, &["task", "ready", "review"]), 2);
+}
+
+#[test]
+fn review_ignores_unrelated_notes_and_paths() {
+    let temp = review_fixture();
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+
+    assert_eq!(
+        cli_run(&temp, &["task", "note", "target", "unrelated note"]),
+        0
+    );
+    std::fs::write(temp.path().join("unrelated.txt"), "unrelated").unwrap();
+    let (view, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(view["review_current"], true);
+    std::fs::write(temp.path().join("config.txt"), "new target input").unwrap();
+    let (view, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(view["review_current"], false);
+}
+
+#[test]
+fn review_manual_inputs_and_target_deliverables_are_dependencies() {
+    for path in ["manual.txt", "src/thing.rs"] {
+        let temp = review_fixture();
+        review_handback(&temp);
+        std::fs::write(temp.path().join(path), "changed").unwrap();
+        let (view, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+        assert_eq!(view["review_current"], false, "{path}");
+        assert_eq!(
+            cli_run(
+                &temp,
+                &["task", "close", "review", "--model", "claude-opus-4-1"]
+            ),
+            2
+        );
+    }
+}
+
+#[test]
+fn ready_and_closed_views_keep_declared_check() {
+    let temp = review_fixture();
+    review_handback(&temp);
+    for closed in [false, true] {
+        if closed {
+            assert_eq!(
+                cli_run(
+                    &temp,
+                    &["task", "close", "review", "--model", "claude-opus-4-1"]
+                ),
+                0
+            );
+        }
+        let output = run_in(Some(temp.path()), &args(&["task", "show", "review"]));
+        assert_eq!(output.status.code(), Some(0));
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("task::review")
+        );
+        let (view, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+        assert_eq!(view["task"]["check"], serde_json::json!(["check"]));
+    }
+}
+
+#[test]
+fn review_targets_reject_missing_self_withdrawn_and_cycles() {
+    let temp = review_fixture();
+    for target in ["missing", "fresh"] {
+        assert_eq!(
+            cli_run(
+                &temp,
+                &[
+                    "task",
+                    "open",
+                    "fresh",
+                    "--role",
+                    "reviewer",
+                    "--statement",
+                    "invalid review",
+                    "--review-of",
+                    target
+                ]
+            ),
+            2
+        );
+    }
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "withdraw",
+                "target",
+                "--reason",
+                "cancelled",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "fresh",
+                "--role",
+                "reviewer",
+                "--statement",
+                "invalid review",
+                "--review-of",
+                "target"
+            ]
+        ),
+        2
+    );
+    let path = temp.path().join(".blabla/tasks/review.json");
+    let mut review: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    review["review_of"]["task"] = serde_json::json!("review");
+    std::fs::write(path, serde_json::to_vec(&review).unwrap()).unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "fresh",
+                "--role",
+                "reviewer",
+                "--statement",
+                "invalid review",
+                "--review-of",
+                "review"
+            ]
+        ),
+        2
+    );
+}
+
+#[test]
+fn review_relevant_role_changes_invalidate_closed_approval() {
+    let temp = review_fixture();
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    let path = temp.path().join("process.bla");
+    let process = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        process.replace(
+            "carry out one bounded task",
+            "carry out one bounded task carefully",
+        ),
+    )
+    .unwrap();
+    let (view, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(view["review_current"], false);
+    assert_eq!(view["approval_current"], false);
+}
+
+#[test]
+fn review_stale_target_refuses_new_check_evidence_and_ready() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "target", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task", "evidence", "review", "--exit", "0", "--tool", "test"
+            ]
+        ),
+        2
+    );
+    assert_eq!(cli_run(&temp, &["task", "ready", "review"]), 2);
+    let (view, _) = json_of(&temp, &["challenge", "review", "--json"]);
+    assert!(
+        view["grounded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|class| class == "review-target-stale")
+    );
+    assert_eq!(view["assignment_clear"], false);
+}
+
+#[test]
+fn review_check_retains_observation_without_credit_when_target_advances_during_run() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "check",
+                "review",
+                "--check",
+                env!("CARGO_BIN_EXE_blabla"),
+                "task",
+                "accept",
+                "target",
+                "--model",
+                "qwen3.5:4b"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "review", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "evidence", "review", "--run"]), 0);
+    let (view, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(view["task"]["evidence"].as_array().unwrap().len(), 1);
+    assert_eq!(view["task"]["evidence"][0]["exit"], 0);
+    assert_eq!(view["review_current"], false);
+    assert_eq!(view["approval_current"], false);
+    assert_eq!(cli_run(&temp, &["task", "ready", "review"]), 2);
+}
+
+fn review_with_consulted_memory() -> TempDir {
+    let temp = review_fixture_configured(true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "lens",
+                "review",
+                "review-lens",
+                "checked current evidence"
+            ]
+        ),
+        0
+    );
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    temp
+}
+
+#[test]
+fn closed_review_approval_expires_when_its_own_consulted_knowledge_changes() {
+    let temp = review_with_consulted_memory();
+    let (before, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(before["approval_current"], true);
+    let path = temp.path().join("knowledge.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace(
+            "inspect current evidence",
+            "inspect current evidence with mutation proof",
+        ),
+    )
+    .unwrap();
+    let (after, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["assessment_current"], serde_json::json!([false]));
+    assert_eq!(after["approval_current"], false);
+    assert_eq!(after["task"]["state"], "closed");
+}
+
+#[test]
+fn closed_review_approval_expires_when_its_own_role_policy_changes() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("process.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace(
+            "purpose \"review one task\"",
+            "purpose \"review one task with a stricter policy\"",
+        ),
+    )
+    .unwrap();
+    let (after, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["approval_current"], false);
+    assert_eq!(after["task"]["state"], "closed");
+}
+
+#[test]
+fn closed_review_approval_ignores_unrelated_reviewer_memory_changes() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("knowledge.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace("unrelated advice", "changed unrelated advice"),
+    )
+    .unwrap();
+    let (after, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["assessment_current"], serde_json::json!([true]));
+    assert_eq!(after["approval_current"], true);
+}
+
+#[test]
+fn review_target_explicit_inputs_remain_dependencies_when_attributed_concurrent() {
+    let temp = review_fixture();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task", "check", "target", "--input", "shared", "--check", "check"
+            ]
+        ),
+        0
+    );
+    std::fs::create_dir(temp.path().join("shared")).unwrap();
+    std::fs::write(temp.path().join("shared/data.txt"), "initial input").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "target",
+                "shared",
+                "--kind",
+                "concurrent",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "review", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "review",
+                "shared",
+                "--kind",
+                "concurrent",
+                "--model",
+                "claude-opus-4-1"
+            ]
+        ),
+        0
+    );
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "confirm", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    std::fs::write(
+        temp.path().join("shared/data.txt"),
+        "changed explicit input",
+    )
+    .unwrap();
+    let (after, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["review_current"], false);
+    assert_eq!(after["approval_current"], false);
+}
+
+#[test]
+fn relevant_revision_keeps_explicit_dependencies_even_when_attributed_concurrent() {
+    for deliverable in [false, true] {
+        let (mut work, mut tree) = accepted();
+        tree.insert("shared/data.txt".to_owned(), "v1".to_owned());
+        if deliverable {
+            task::owe_path(&mut work, "shared".to_owned());
+        } else {
+            work.check_inputs.push("shared".to_owned());
+        }
+        work.attributions.push(task::Attribution {
+            path: "shared".to_owned(),
+            kind: "concurrent".to_owned(),
+            digest: None,
+            model: None,
+        });
+        let before = task::relevant_revision(&work, &tree, BTreeMap::new());
+        assert!(before.paths["shared"].is_some());
+        tree.insert("shared/data.txt".to_owned(), "v2".to_owned());
+        assert_ne!(
+            before,
+            task::relevant_revision(&work, &tree, BTreeMap::new())
+        );
+    }
+}
+
+#[test]
+fn nested_review_target_rework_expires_outer_closed_approval() {
+    let temp = review_fixture();
+    review_handback(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "review", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "outer",
+                "--role",
+                "reviewer",
+                "--statement",
+                "review the review",
+                "--review-of",
+                "review",
+                "--check",
+                "check"
+            ]
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(&temp, &["task", "accept", "outer", "--model", "qwen3.5:4b"]),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "evidence", "outer", "--exit", "0", "--tool", "test"]
+        ),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["challenge", "outer"]), 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "outer"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "close", "outer", "--model", "claude-opus-4-1"]
+        ),
+        0
+    );
+    std::fs::write(temp.path().join("unrelated.txt"), "unrelated").unwrap();
+    let (stable, _) = json_of(&temp, &["task", "show", "outer", "--json"]);
+    assert_eq!(stable["approval_current"], true);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &["task", "accept", "target", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+    for name in ["review", "outer"] {
+        let (stale, _) = json_of(&temp, &["task", "show", name, "--json"]);
+        assert_eq!(stale["review_current"], false, "{name}");
+        assert_eq!(stale["approval_current"], false, "{name}");
+        assert_eq!(stale["task"]["state"], "closed");
+    }
+}
+
+#[test]
+fn closed_review_approval_expires_when_a_new_reviewer_lens_is_required() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("process.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        text.replace(
+            "consult [\"review-lens\"]",
+            "consult [\"review-lens\", \"unrelated\"]",
+        ),
+    )
+    .unwrap();
+    let (after, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["assessment_current"], serde_json::json!([true]));
+    assert_eq!(after["approval_current"], false);
+}
+
+#[test]
+fn closed_review_approval_expires_when_its_reviewer_model_policy_changes() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("process.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let (unchanged, reviewer) = text.split_once("role \"reviewer\"").unwrap();
+    std::fs::write(
+        path,
+        format!(
+            "{unchanged}role \"reviewer\"{}",
+            reviewer.replace(
+                "model \"qwen3.5:4b\"",
+                "model \"different-permitted-model\""
+            )
+        ),
+    )
+    .unwrap();
+    let (after, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["approval_current"], false);
+}
+
+#[test]
+fn closed_review_approval_expires_when_a_reviewer_policy_is_added() {
+    let temp = review_with_consulted_memory();
+    let path = temp.path().join("process.bla");
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(path, format!("{text}\npolicy \"review-proof\" {{ statement \"require direct mutation evidence\" applies_to [\"reviewer\"] }}\n")).unwrap();
+    let (after, _) = json_of(&temp, &["task", "show", "review", "--json"]);
+    assert_eq!(after["approval_current"], false);
+}
+
+fn grounded_classes(report: &serde_json::Value) -> Vec<String> {
+    report["grounded"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|class| class.as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn an_ignore_rule_added_mid_task_stops_its_ignored_paths_from_grounding_a_challenge() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let root = temp.path();
+    std::fs::write(root.join(".gitignore"), "").unwrap();
+    let manifest = std::fs::read_to_string(root.join("project.bla")).unwrap();
+    std::fs::write(
+        root.join("project.bla"),
+        format!("{manifest}\nignore from \".gitignore\"\n"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join(".dup-detector")).unwrap();
+    for name in ["a.bin", "b.bin"] {
+        std::fs::write(root.join(".dup-detector").join(name), "cache\n").unwrap();
+    }
+    open_and_accept(&temp, "src/thing.rs");
+    std::fs::write(root.join("src/thing.rs"), "pub fn run() -> u8 { 42 }\n").unwrap();
+    for name in ["a.bin", "b.bin"] {
+        std::fs::write(root.join(".dup-detector").join(name), "cache changed\n").unwrap();
+    }
+    let (before, _) = json_of(&temp, &["challenge", "test-task", "--json"]);
+    assert!(
+        grounded_classes(&before)
+            .iter()
+            .any(|class| class == "attribution-unknown"),
+        "{before}"
+    );
+
+    std::fs::write(root.join(".gitignore"), ".dup-detector/\n").unwrap();
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "attribute",
+                "test-task",
+                ".gitignore",
+                "--kind",
+                "concurrent",
+                "--model",
+                "claude-opus-4-1",
+            ],
+        ),
+        0
+    );
+    let (after, _) = json_of(&temp, &["challenge", "test-task", "--json"]);
+    let grounded = grounded_classes(&after);
+    for class in [
+        "attribution-unknown",
+        "scope-breach",
+        "work-without-acceptance",
+    ] {
+        assert!(
+            !grounded.iter().any(|found| found == class),
+            "{class} must not ground once the ignore rule covers the cache: {after}"
+        );
+    }
+
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "evidence",
+                "test-task",
+                "--exit",
+                "0",
+                "--tool",
+                "t",
+                "--json",
+            ],
+        ),
+        0
+    );
+    let (_, code) = json_of(&temp, &["challenge", "test-task", "--json"]);
+    assert_eq!(code, 0);
+    assert_eq!(cli_run(&temp, &["task", "ready", "test-task", "--json"]), 0);
+    let (shown, _) = json_of(&temp, &["task", "show", "test-task", "--json"]);
+    assert_eq!(shown["task"]["state"], "ready");
+}
+
+#[test]
+fn a_tracked_out_of_scope_file_deleted_mid_task_still_grounds_a_challenge() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let root = temp.path();
+    std::fs::write(root.join(".gitignore"), ".dup-detector/\n").unwrap();
+    let manifest = std::fs::read_to_string(root.join("project.bla")).unwrap();
+    std::fs::write(
+        root.join("project.bla"),
+        format!("{manifest}\nignore from \".gitignore\"\n"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("docs")).unwrap();
+    std::fs::write(root.join("docs/notes.md"), "kept\n").unwrap();
+    open_and_accept(&temp, "src/thing.rs");
+    std::fs::remove_file(root.join("docs/notes.md")).unwrap();
+
+    let (report, _) = json_of(&temp, &["challenge", "test-task", "--json"]);
+    let grounded = grounded_classes(&report);
+    assert!(
+        grounded
+            .iter()
+            .any(|class| class == "scope-breach" || class == "attribution-unknown"),
+        "a deleted tracked path must still ground a change class: {report}"
+    );
+}
+
+fn falsify_fixture(temp: &TempDir, opened: &str) {
+    setup_project(temp);
+    std::fs::write(temp.path().join("src/thing.rs"), opened).unwrap();
+    std::fs::write(temp.path().join("src/other.rs"), "pub fn helper() {}\n").unwrap();
+    let blabla = env!("CARGO_BIN_EXE_blabla");
+    assert_eq!(
+        cli_run(
+            temp,
+            &[
+                "task",
+                "open",
+                "falsify-task",
+                "--role",
+                "worker",
+                "--statement",
+                "change the entry point",
+                "--scope",
+                "src/thing.rs",
+                "src/other.rs",
+                "--deliverable",
+                "src/thing.rs",
+                "--falsify",
+                "src/thing.rs",
+                "--check",
+                blabla,
+                "check",
+                "contracts/arch.bla",
+            ],
+        ),
+        0
+    );
+    assert_eq!(
+        cli_run(
+            temp,
+            &["task", "accept", "falsify-task", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+}
+
+fn grounds_check_not_falsified(view: &serde_json::Value) -> bool {
+    grounded_classes(view)
+        .iter()
+        .any(|class| class == "check-not-falsified")
+}
+
+#[test]
+fn a_check_that_fails_on_the_opened_contents_and_passes_now_lets_the_task_hand_back() {
+    let temp = TempDir::new().unwrap();
+    falsify_fixture(&temp, "pub fn other() {}\n");
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn run() {}\n").unwrap();
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "falsify-task", "--run"]),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 0);
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join("src/thing.rs")).unwrap(),
+        "pub fn run() {}\n"
+    );
+    let (view, code) = json_of(&temp, &["challenge", "falsify-task", "--json"]);
+    assert_eq!(code, 0, "{view}");
+    assert!(!grounds_check_not_falsified(&view), "{view}");
+    assert_eq!(cli_run(&temp, &["task", "ready", "falsify-task"]), 0);
+}
+
+#[test]
+fn a_check_that_passes_on_the_opened_contents_is_challenged_with_check_not_falsified() {
+    let temp = TempDir::new().unwrap();
+    falsify_fixture(&temp, "pub fn run() {}\n");
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 0);
+    let (view, _) = json_of(&temp, &["challenge", "falsify-task", "--json"]);
+    assert!(grounds_check_not_falsified(&view), "{view}");
+    assert_eq!(cli_run(&temp, &["task", "ready", "falsify-task"]), 2);
+}
+
+#[test]
+fn a_falsify_path_outside_the_write_scope_is_refused_at_open() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let blabla = env!("CARGO_BIN_EXE_blabla");
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "falsify-task",
+                "--role",
+                "worker",
+                "--statement",
+                "change the entry point",
+                "--scope",
+                "src",
+                "--deliverable",
+                "src/thing.rs",
+                "--falsify",
+                "contracts/arch.bla",
+                "--check",
+                blabla,
+                "check",
+                "contracts/arch.bla",
+            ],
+        ),
+        2
+    );
+}
+
+#[test]
+fn a_task_without_falsify_is_never_challenged_with_check_not_falsified_and_cannot_falsify() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    open_and_accept(&temp, "src/thing.rs");
+    let (view, _) = json_of(&temp, &["challenge", "test-task", "--json"]);
+    assert!(!grounds_check_not_falsified(&view), "{view}");
+    assert_eq!(cli_run(&temp, &["task", "falsify", "test-task"]), 2);
+}
+
+fn open_falsify(temp: &TempDir, program: &str, args: &[&str]) {
+    let mut argv = vec![
+        "task",
+        "open",
+        "falsify-task",
+        "--role",
+        "worker",
+        "--statement",
+        "change the entry point",
+        "--scope",
+        "src",
+        "--deliverable",
+        "src/thing.rs",
+        "--falsify",
+        "src/thing.rs",
+        "--check",
+        program,
+    ];
+    argv.extend_from_slice(args);
+    assert_eq!(cli_run(temp, &argv), 0);
+    assert_eq!(
+        cli_run(
+            temp,
+            &["task", "accept", "falsify-task", "--model", "qwen3.5:4b"]
+        ),
+        0
+    );
+}
+
+fn falsify_run(temp: &TempDir) -> serde_json::Value {
+    let (view, code) = json_of(temp, &["task", "show", "falsify-task", "--json"]);
+    assert_eq!(code, 0, "{view}");
+    view["task"]["falsifications"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone()
+}
+
+fn challenge_grounds_check_not_falsified(temp: &TempDir) -> bool {
+    let (view, _) = json_of(temp, &["challenge", "falsify-task", "--json"]);
+    grounds_check_not_falsified(&view)
+}
+
+#[test]
+fn falsify_runs_in_a_copy_and_never_changes_the_working_tree() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let thing = temp.path().join("src/thing.rs");
+    let raw = temp.path().join("src/raw.bin");
+    std::fs::write(&thing, "pub fn other() {}\r\n").unwrap();
+    std::fs::write(&raw, b"\xff\r\nraw").unwrap();
+    let contract = temp.path().join("contracts/arch.bla").display().to_string();
+    open_falsify(
+        &temp,
+        env!("CARGO_BIN_EXE_blabla"),
+        &["check", contract.as_str()],
+    );
+    std::fs::write(&thing, "pub fn run() {}\r\n").unwrap();
+    let before = (std::fs::read(&thing).unwrap(), std::fs::read(&raw).unwrap());
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 0);
+    let after = (std::fs::read(&thing).unwrap(), std::fs::read(&raw).unwrap());
+    assert_eq!(before, after);
+    assert!(challenge_grounds_check_not_falsified(&temp));
+    let run = falsify_run(&temp);
+    assert_eq!(run["current_exit"], 0, "{run}");
+    assert_eq!(run["opened_exit"], 0, "{run}");
+}
+
+#[test]
+fn falsify_releases_the_store_lock_while_its_check_runs() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "open",
+                "other-task",
+                "--role",
+                "worker",
+                "--statement",
+                "other work",
+                "--scope",
+                "contracts",
+            ],
+        ),
+        0
+    );
+    let root = temp.path().display().to_string();
+    open_falsify(
+        &temp,
+        env!("CARGO_BIN_EXE_blabla"),
+        &[
+            "--project",
+            root.as_str(),
+            "task",
+            "note",
+            "other-task",
+            "checked",
+        ],
+    );
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 0);
+    assert_eq!(falsify_run(&temp)["current_exit"], 0);
+}
+
+#[test]
+fn a_falsify_path_absent_at_open_is_removed_from_the_copy_for_the_opened_run() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    std::fs::remove_file(temp.path().join("src/thing.rs")).unwrap();
+    open_falsify(
+        &temp,
+        env!("CARGO_BIN_EXE_blabla"),
+        &["check", "contracts/arch.bla"],
+    );
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn run() {}\n").unwrap();
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 0);
+    let run = falsify_run(&temp);
+    assert_eq!(run["current_exit"], 0, "{run}");
+    assert!(
+        run["opened_exit"].as_i64().is_some_and(|exit| exit != 0),
+        "{run}"
+    );
+    assert!(!challenge_grounds_check_not_falsified(&temp));
+}
+
+#[test]
+fn a_check_that_fails_on_the_current_contents_records_no_opened_run() {
+    let temp = TempDir::new().unwrap();
+    falsify_fixture(&temp, "pub fn run() {}\n");
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn other() {}\n").unwrap();
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 0);
+    let run = falsify_run(&temp);
+    assert!(
+        run["current_exit"].as_i64().is_some_and(|exit| exit != 0),
+        "{run}"
+    );
+    assert!(run["opened_exit"].is_null(), "{run}");
+    assert!(challenge_grounds_check_not_falsified(&temp));
+}
+
+#[test]
+fn a_change_to_a_falsify_path_after_a_passing_falsification_regrounds_the_class() {
+    let temp = TempDir::new().unwrap();
+    falsify_fixture(&temp, "pub fn other() {}\n");
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn run() {}\n").unwrap();
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 0);
+    assert!(!challenge_grounds_check_not_falsified(&temp));
+    std::fs::write(
+        temp.path().join("src/thing.rs"),
+        "pub fn run() {}\npub fn extra() {}\n",
+    )
+    .unwrap();
+    assert!(challenge_grounds_check_not_falsified(&temp));
+}
+
+#[test]
+fn a_change_to_a_non_falsify_input_after_a_passing_falsification_regrounds_the_class() {
+    let temp = TempDir::new().unwrap();
+    falsify_fixture(&temp, "pub fn other() {}\n");
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn run() {}\n").unwrap();
+    std::fs::write(temp.path().join("src/other.rs"), "pub fn helper() {}\n").unwrap();
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 0);
+    assert!(!challenge_grounds_check_not_falsified(&temp));
+    std::fs::write(
+        temp.path().join("src/other.rs"),
+        "pub fn helper() {}\npub fn more() {}\n",
+    )
+    .unwrap();
+    assert!(challenge_grounds_check_not_falsified(&temp));
+}
+
+#[test]
+fn a_check_that_cannot_start_records_nothing_and_leaves_no_copy() {
+    let temp = TempDir::new().unwrap();
+    setup_project(&temp);
+    let thing = temp.path().join("src/thing.rs");
+    std::fs::write(&thing, "pub fn other() {}\n").unwrap();
+    open_falsify(&temp, "no-such-program-for-falsify", &[]);
+    std::fs::write(&thing, "pub fn run() {}\n").unwrap();
+    let before = std::fs::read(&thing).unwrap();
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 2);
+    assert_eq!(std::fs::read(&thing).unwrap(), before);
+    let (view, _) = json_of(&temp, &["task", "show", "falsify-task", "--json"]);
+    assert!(
+        view["task"]["falsifications"]
+            .as_array()
+            .is_none_or(|runs| runs.is_empty()),
+        "{view}"
+    );
+    let scratch = temp
+        .path()
+        .join(blabla::project::status::RECORD_DIRECTORY)
+        .join(blabla::project::task::SCRATCH_DIRECTORY)
+        .join("falsify-task");
+    let leftovers = std::fs::read_dir(&scratch)
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("falsify-tree")
+        })
+        .count();
+    assert_eq!(leftovers, 0);
+}
+
+#[test]
+fn closing_a_falsified_task_removes_its_opened_contents() {
+    let temp = TempDir::new().unwrap();
+    falsify_fixture(&temp, "pub fn other() {}\n");
+    std::fs::write(temp.path().join("src/thing.rs"), "pub fn run() {}\n").unwrap();
+    assert_eq!(
+        cli_run(&temp, &["task", "evidence", "falsify-task", "--run"]),
+        0
+    );
+    assert_eq!(cli_run(&temp, &["task", "falsify", "falsify-task"]), 0);
+    let store = temp
+        .path()
+        .join(blabla::project::status::RECORD_DIRECTORY)
+        .join(blabla::project::task::TASK_DIRECTORY);
+    let scratch = temp
+        .path()
+        .join(blabla::project::status::RECORD_DIRECTORY)
+        .join(blabla::project::task::SCRATCH_DIRECTORY)
+        .join("falsify-task");
+    let opened = store.join("falsify-task.opened");
+    let leftover = scratch.join("falsify-tree-1").join("src");
+    std::fs::create_dir_all(&leftover).unwrap();
+    std::fs::write(leftover.join("thing.rs"), "pub fn other() {}\n").unwrap();
+    assert!(opened.is_dir());
+    let _ = json_of(&temp, &["challenge", "falsify-task", "--json"]);
+    assert_eq!(cli_run(&temp, &["task", "ready", "falsify-task"]), 0);
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "close",
+                "falsify-task",
+                "--model",
+                "claude-opus-4-1",
+            ],
+        ),
+        0
+    );
+    assert!(!opened.exists());
+    assert!(!scratch.join("falsify-tree-1").exists());
+}
+
+#[test]
+fn withdrawing_a_falsified_task_removes_its_opened_contents() {
+    let temp = TempDir::new().unwrap();
+    falsify_fixture(&temp, "pub fn other() {}\n");
+    let opened = temp
+        .path()
+        .join(blabla::project::status::RECORD_DIRECTORY)
+        .join(blabla::project::task::TASK_DIRECTORY)
+        .join("falsify-task.opened");
+    assert!(opened.is_dir());
+    assert_eq!(
+        cli_run(
+            &temp,
+            &[
+                "task",
+                "withdraw",
+                "falsify-task",
+                "--reason",
+                "superseded",
+                "--model",
+                "claude-opus-4-1",
+            ],
+        ),
+        0
+    );
+    assert!(!opened.exists());
+}

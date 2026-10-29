@@ -2,6 +2,9 @@ type Voiced {
     class: string
 }
 
+type Standing { class: string }
+
+state standing: [Standing]
 state voice: string
 state voiced_standing: [Voiced]
 state voiced_keeps_the_statement: bool

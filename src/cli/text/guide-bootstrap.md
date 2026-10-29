@@ -1,7 +1,7 @@
 CONTRACT BOOTSTRAP: writing the first behavior contracts
 
-Roles: the contract author decides what observable behavior must stay true.
-The implementation agent makes it true. One model may play both roles, in separate phases.
+The contract author decides what observable behavior must stay true; the implementation agent
+makes it true. One model may play both roles, in separate phases.
 
 Authority of sources, highest first:
   1. explicit current human or product requirements
@@ -45,9 +45,7 @@ Skeptic pass, for every draft rule:
   Is the rule stricter than the intent requires?
   Which rules exist only because current code happens to behave that way?
 Before adding a rule ask: what regression becomes possible if this rule disappears?
-For a structure contract, blabla check --falsify <contract.bla> answers part of that mechanically:
-it names every rule whose verdict does not depend on the fact the rule states. It cannot tell you
-that a rule names the wrong thing, so it narrows the skeptic pass and never replaces it.
+For a structure contract, blabla check --falsify <contract.bla> names every rule whose verdict
+does not depend on the fact it states; it narrows the skeptic pass and never replaces it.
 
-Drafts are visible in blabla status, are never verified and are never treated as truth.
-Only contracts listed with  use behavior  are authoritative.
+Drafts show in blabla status and are never verified or treated as truth; only  use  contracts are authoritative.

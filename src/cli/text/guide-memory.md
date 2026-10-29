@@ -1,7 +1,8 @@
 AUTHORING PROJECT MEMORY
 
 Contracts say what must remain true. Project memory says the rest of what an agent would
-otherwise be told by hand. Five kinds, each answering one question, none repeating another.
+otherwise be told by hand about this project, and holds only this project's rules: personal
+and tool-wide habits stay out. Five kinds, each answering one question, none repeating another.
 
   Mission    mission, priority               why the project exists, what decides a tradeoff
   System     system, responsibility, seam    what part is being touched and who owns it
@@ -36,12 +37,9 @@ Registration in project.bla, one mission, one system, one process, one goal file
   knowledge "knowledge/engineering.bla"
   goal "goals.bla"
 
-A flow declares the order its roles are meant to work in; its steps are separate declarations
-naming the flow they belong to, and their declaration order is the flow's order. A step names
-every role that may carry it and, where one exists, the command that runs it. A flow with no
-step is invalid, because a loop with no steps describes nothing. Steps are surveyed one line
-each from the flow and cost one more explain to read in full, the same asymmetry a pack and its
-rulings already have. A step's command names the command that carries that step.
+A flow orders its roles: its steps are separate declarations naming the flow, in declaration
+order. A step names every role that may carry it and, where one exists, the command that runs
+it. A flow with no step is invalid. explain flow:: lists steps one line each; step:: opens one.
 
 Routing points into Knowledge and never out of it: a system names the packs its work needs,
 a role or a policy names the packs it consults. No content crosses. A ruling has exactly two
@@ -49,6 +47,9 @@ fields and can name no system, role, contract or path, which is what lets anothe
 register the same pack file unchanged.
 
 Authoring loop:
+
+Without FILE, blabla check checks active and draft contracts only, not registered memory
+contents. Run blabla check FILE.bla for each edited memory file, using its actual path:
 
   blabla check mission.bla     VALID or INVALID, while the file is still being authored
   (register the path in project.bla)
@@ -59,12 +60,9 @@ A name becomes part of an identity, so it starts with a letter or digit and cont
 letters, digits, _ or -. A pack that declares no ruling is invalid: routing would point at nothing.
 
 What this is not:
-  Project memory is never checked against the repository, and no state of it reaches OVERALL.
-  A project that declares none of it is not thereby incomplete; author the kind you need.
-  Process binds the role that carries the work; task transitions check acceptance, evidence,
-  the challenge receipt, scope and attribution.
-  Mission is owner intent rather than a gate; a planner who finds the evidence points elsewhere
-  is expected to say so instead of complying.
-  A ruling is expertise, never permission to widen the task you were given.
+  Memory is never checked against the repository and no state of it reaches OVERALL; author
+  only the kinds you need. Process binds the carrying role; task transitions check acceptance,
+  evidence, the challenge receipt, scope and attribution. Mission is owner intent, not a gate: a planner
+  whose evidence points elsewhere says so. A ruling never widens the task you were given.
 
 Fields of every declaration: docs/project.md.

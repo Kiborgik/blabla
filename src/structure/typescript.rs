@@ -1207,7 +1207,10 @@ mod tests {
         let facts = inspect_one(root, &declaration);
         assert!(facts.exists);
         let error = facts.error.expect("a syntax error was expected");
-        assert!(error.contains("line"), "{error}");
+        assert!(
+            (1..=2).any(|line| error.ends_with(&crate::structure::treesitter::line_suffix(line))),
+            "{error}"
+        );
     }
 
     #[test]

@@ -1,12 +1,15 @@
 use blabla::application::AppConfig;
-use blabla::diagnostic::{Diagnostic, Location};
+use blabla::diagnostic::{Diagnostic, ExchangeWitness, Location};
 use blabla::project::status::CompletionView;
 use blabla::report::{
     DEFAULT_CASES, DEFAULT_STEPS, DEFAULT_TIMEOUT_MS, Failure, MAX_SHRINK_ATTEMPTS, RunOptions,
     RunReport, RunStatus, VerifyError,
 };
 use blabla::{runtime, semantics, structure, verify};
-use clap::{CommandFactory, Parser, Subcommand, error::ErrorKind};
+use clap::{
+    CommandFactory, Parser, Subcommand,
+    error::{ContextKind, ContextValue, ErrorKind},
+};
 use serde::Serialize;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
@@ -53,7 +56,8 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     #[command(
-        about = "Check contract syntax, names and types without an application; without FILE, check the discovered project"
+        about = "Check syntax, names and types without an application; without FILE, check active and draft contracts only",
+        after_long_help = "Registered memory contents are not validated by a check without FILE. After editing memory, run blabla check FILE.bla with the edited file's path. Use blabla status to inspect registered memory and cross-file references. Checking a file does not decide project completion."
     )]
     Check {
         file: Option<PathBuf>,
@@ -107,7 +111,7 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
         shrink_budget: usize,
         #[arg(
             long,
-            value_parser = clap::value_parser!(u64).range(1..=5000),
+            value_parser = clap::value_parser!(u64).range(1..=runtime::MAX_TIMEOUT.as_millis() as u64),
             help = "Allowance for one request and its response; defaults to 1000 ms, or the project profile's timeout_ms if given a contract FILE inside a project"
         )]
         timeout_ms: Option<u64>,
@@ -128,6 +132,13 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
         about = "Show the project's BEHAVIOR, STRUCTURE and OVERALL status with the completion gate: the agent entry point (exit 0 only for OVERALL GREEN)"
     )]
     Status,
+    #[command(
+        about = "List registered files and discover unregistered .bla files without loading or verifying them"
+    )]
+    Inventory {
+        #[arg(long, default_value_t = blabla::project::inventory::DEFAULT_MAX_ENTRIES as u32, value_parser = clap::value_parser!(u32).range(1..=100_000), help = "Directory-entry budget including skipped entries, plus one probe to detect overflow; incomplete discovery exits 1")]
+        max_entries: u32,
+    },
     #[command(
         about = "Explain one rule: owning contract, rule text, required witnesses and counterexample, or the observed structural fact; also resolves a system, responsibility or seam from the project's architectural memory"
     )]
@@ -179,7 +190,7 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
     )]
     Task {
         #[command(subcommand)]
-        action: TaskAction,
+        action: Box<TaskAction>,
     },
     #[command(
         about = "Evaluate, record, reserve and replay bounded expert advice independently of completion"
@@ -192,7 +203,9 @@ Do not weaken the contract merely to make verification pass. Reuse --seed to rep
         about = "Hold current work against recorded evidence; for an accepted task, record whether its hand-back prerequisites are clear"
     )]
     Challenge {
-        #[arg(help = "Bounded task to challenge; default: the one open task")]
+        #[arg(
+            help = "Bounded task to challenge; without one, the project-wide challenges are reported"
+        )]
         task: Option<String>,
     },
 }
@@ -222,19 +235,12 @@ enum TaskAction {
         deliverable: Vec<String>,
         #[arg(
             long,
-            value_name = "COMMAND",
-            conflicts_with = "check_argv",
-            help = "The check that covers this task, run and recorded as its evidence"
-        )]
-        check: Option<String>,
-        #[arg(
-            long,
             value_name = "PROG",
-            num_args = 0..,
+            num_args = 1..,
             allow_hyphen_values = true,
-            help = "Check as argv list: program and arguments"
+            help = "The check that covers this task: a program and its arguments, run without a shell and recorded as its evidence"
         )]
-        check_argv: Vec<String>,
+        check: Vec<String>,
         #[arg(long, value_name = "PATH", num_args = 1.., help = "Check inputs; defaults to write scope. Deliverables are always included")]
         input: Vec<String>,
         #[arg(long, help = "The declared goal this task serves")]
@@ -258,6 +264,11 @@ enum TaskAction {
             help = "A file in the write scope whose opened contents the check must fail on; repeat or list several"
         )]
         falsify: Vec<String>,
+        #[arg(
+            long,
+            help = "Ask hand-back for one claim per affected intent: each system whose paths the write scope falls in, and the goal"
+        )]
+        intent: bool,
     },
     #[command(about = "Record something discovered during the task that is not yet settled")]
     Finding { name: String, statement: String },
@@ -384,7 +395,7 @@ enum TaskAction {
     #[command(about = "Record a note on the task that is not unsettled work")]
     Note { name: String, statement: String },
     #[command(
-        about = "Widen a bounded task's write scope deliberately, when the scope was declared too narrowly"
+        about = "Widen a bounded task's write scope deliberately, or release a path that has not changed since the task opened"
     )]
     Scope {
         name: String,
@@ -392,10 +403,20 @@ enum TaskAction {
             long,
             value_name = "PATH",
             num_args = 1..,
-            required = true,
+            required_unless_present = "remove",
+            conflicts_with = "remove",
             help = "A path to add to the write scope; repeat or list several"
         )]
         add: Vec<String>,
+        #[arg(
+            long,
+            value_name = "PATH",
+            num_args = 1..,
+            required_unless_present = "add",
+            conflicts_with = "add",
+            help = "A path to release from the write scope; refused when the path, or a file under it, changed since the task opened"
+        )]
+        remove: Vec<String>,
         #[arg(
             long,
             value_name = "ID",
@@ -423,6 +444,18 @@ enum TaskAction {
         name: String,
         #[arg(long, help = "The model recording the acceptance of the result")]
         model: String,
+        #[arg(
+            long,
+            group = "result_mode",
+            help = "Accept only the current bounded result after qualified implementation-only verification drift"
+        )]
+        bounded: bool,
+        #[arg(
+            long,
+            requires = "result_mode",
+            help = "Owner reason for the explicitly bounded result"
+        )]
+        reason: Option<String>,
     },
     #[command(about = "Withdraw an assignment, release ownership and retain unresolved changes")]
     Withdraw {
@@ -437,7 +470,8 @@ enum TaskAction {
     )]
     ReconcileWithdrawal {
         name: String,
-        path: String,
+        #[arg(num_args = 1.., required = true, value_name = "PATH")]
+        path: Vec<String>,
         #[arg(long)]
         successor: String,
         #[arg(long)]
@@ -445,16 +479,58 @@ enum TaskAction {
     },
     #[command(about = "Show one bounded task, or every recorded task without a name")]
     Show { name: Option<String> },
+    #[command(about = "Explain receipt-relative task freshness without changing records")]
+    Freshness { name: String },
     #[command(about = "Accept a task and record which model took it")]
     Accept {
         name: String,
         #[arg(long, help = "The model that accepted the task")]
         model: String,
+        #[arg(
+            long,
+            requires = "reason",
+            help = "Guarded original execution reuse for an ACCEPTED/READY review"
+        )]
+        reuse_evidence: bool,
+        #[arg(long, requires = "reuse_evidence")]
+        reason: Option<String>,
     },
     #[command(about = "Block a task due to a reason and record it as a finding")]
     Block { name: String, reason: String },
-    #[command(about = "Mark a task as ready for review")]
-    Ready { name: String },
+    #[command(
+        about = "Mark a task as ready for review, recording its goal outcome, intent claims, lens assessments and notes in the same write"
+    )]
+    Ready {
+        name: String,
+        #[arg(
+            long,
+            value_name = "OUTCOME",
+            help = "The goal outcome claimed: delivered, partial, blocked or not-applicable; required when the task serves a goal"
+        )]
+        outcome: Option<String>,
+        #[arg(
+            long,
+            num_args = 2,
+            value_names = ["PACK", "TEXT"],
+            action = clap::ArgAction::Append,
+            help = "One lens assessment, recorded as task lens would; repeat for several"
+        )]
+        lens: Vec<String>,
+        #[arg(
+            long,
+            value_name = "TEXT",
+            help = "A note, recorded as task note would; repeat for several"
+        )]
+        note: Vec<String>,
+        #[arg(
+            long,
+            value_name = "INTENT=CLAIM",
+            help = "One claim for an affected intent, updated or unchanged; repeat for several"
+        )]
+        claim: Vec<String>,
+    },
+    #[command(about = "Report time per task phase from the record, without writing anything")]
+    Budget { name: String },
     #[command(
         about = "Append an assessment against one lens the role consults, named by its knowledge pack"
     )]
@@ -488,18 +564,22 @@ enum TaskAction {
     )]
     Check {
         name: String,
-        #[arg(conflicts_with = "argv")]
-        command: Option<String>,
         #[arg(
             long,
             value_name = "PROG",
-            num_args = 0..,
+            num_args = 1..,
             allow_hyphen_values = true,
-            help = "Check as argv list: program and arguments"
+            help = "The check: a program and its arguments, run without a shell"
         )]
-        argv: Vec<String>,
-        #[arg(long, value_name = "PATH", num_args = 1.., help = "Check inputs; defaults to write scope. Deliverables are always included")]
+        check: Vec<String>,
+        #[arg(long, value_name = "PATH", num_args = 1.., help = "Replace the check inputs; omission preserves the current binding. Deliverables are always included")]
         input: Vec<String>,
+        #[arg(
+            long,
+            conflicts_with = "input",
+            help = "Explicitly reset check inputs to the write-scope default; deliverables remain included"
+        )]
+        reset_inputs: bool,
         #[arg(long, value_name = "PATH", num_args = 1.., help = "Also add write-scope paths in the same atomic check amendment")]
         add_scope: Vec<String>,
         #[arg(
@@ -552,11 +632,15 @@ enum TaskAction {
             help = "Tool that produced it, such as cargo or pytest"
         )]
         tool: Option<String>,
+        #[arg(long, help = "Execute the declared check and record what it reported")]
+        run: bool,
         #[arg(
             long,
-            help = "Execute the declared argv check and record what it reported"
+            requires = "run",
+            conflicts_with = "exit",
+            help = "After recording the check, return status 1 if its numeric exit was nonzero"
         )]
-        run: bool,
+        fail_on_check: bool,
     },
     #[command(
         about = "Run the declared check against the opened contents of the task's falsify paths and record whether it fails; the current files are restored"
@@ -604,6 +688,18 @@ struct ErrorReport {
     diagnostic: Option<Diagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     evidence: Option<Box<Failure>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exchange_witness: Option<Box<ExchangeWitness>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suggested: Option<String>,
+}
+
+fn suggested_argument(failure: &clap::Error) -> Option<String> {
+    match failure.get(ContextKind::SuggestedArg)? {
+        ContextValue::String(argument) => Some(argument.clone()),
+        ContextValue::Strings(arguments) => arguments.first().cloned(),
+        _ => None,
+    }
 }
 
 fn positive_count(value: &str) -> Result<usize, String> {
@@ -628,6 +724,14 @@ fn write_json(value: &impl Serialize) -> io::Result<()> {
     writeln!(output)
 }
 
+fn write_view<T: Serialize>(
+    json: bool,
+    view: &T,
+    render: impl FnOnce(&T) -> io::Result<()>,
+) -> io::Result<()> {
+    if json { write_json(view) } else { render(view) }
+}
+
 fn emit_error(error: ErrorReport, json: bool, exit: i32) -> i32 {
     let result = if json {
         write_json(&error)
@@ -647,6 +751,28 @@ fn emit_error(error: ErrorReport, json: bool, exit: i32) -> i32 {
                     diagnostic.location.column,
                     diagnostic.code,
                     diagnostic.message
+                )?;
+            }
+            if let Some(witness) = &error.exchange_witness {
+                writeln!(
+                    output,
+                    "exchange: request_id={} op={:?} pid={:?} bytes={} allowance={:?} budget_ms={} phase={:?} elapsed_ms={} phase_elapsed_ms={} remaining_ms={} child_before_cleanup={:?}; transport: writer={:?} completion_received={} reader={:?} received_ordinal={:?} correlated_ordinal={:?}",
+                    witness.request_id,
+                    witness.operation,
+                    witness.child_pid,
+                    witness.request_bytes,
+                    witness.allowance,
+                    witness.budget_ms,
+                    witness.phase,
+                    witness.elapsed_ms,
+                    witness.phase_elapsed_ms,
+                    witness.remaining_ms,
+                    witness.child_status,
+                    witness.writer_produced,
+                    witness.writer_completion_received,
+                    witness.reader_produced,
+                    witness.reader_received_ordinal,
+                    witness.reader_correlated_ordinal,
                 )?;
             }
             if error.completion.is_some() {
@@ -671,6 +797,8 @@ fn error(category: &'static str, message: impl Into<String>, seed: Option<u64>) 
         completion: None,
         diagnostic: None,
         evidence: None,
+        exchange_witness: None,
+        suggested: None,
     }
 }
 
@@ -695,6 +823,7 @@ fn verify_error(failure: VerifyError, seed: u64) -> (ErrorReport, i32) {
                 Some(seed),
             );
             report.code = Some(failure.code);
+            report.exchange_witness = failure.exchange_witness;
             (report, 3)
         }
         VerifyError::Unstable { message, failure } => {
@@ -807,7 +936,7 @@ fn emit_run(
                 }
                 match challenge {
                     Some(report) => {
-                        project::write_standing_challenge(&mut output, report, voice)
+                        project::write_standing_challenge(&mut output, report, voice, verbose)
                     }
                     None => Ok(()),
                 }
@@ -820,11 +949,7 @@ fn emit_run(
 
 fn write_human_run(report: &RunReport, verbose: bool) -> io::Result<()> {
     let mut output = io::stdout().lock();
-    let status = match report.status {
-        RunStatus::Green => "GREEN",
-        RunStatus::Yellow => "YELLOW",
-        RunStatus::Red => "RED",
-    };
+    let status = project::run_word(&report.status);
     let coverage = &report.coverage_summary;
     let total = coverage.verified + coverage.unexercised + coverage.violated;
     writeln!(
@@ -846,9 +971,34 @@ fn write_human_run(report: &RunReport, verbose: bool) -> io::Result<()> {
     writeln!(
         output,
         "cases checked: {} / {}",
-        report.cases_executed, report.cases
+        report.cases_executed,
+        report.metrics.action_budget / report.steps
     )?;
     writeln!(output, "actions checked: {}", report.steps_executed)?;
+    if !report.campaigns.is_empty() {
+        writeln!(output, "campaigns: {}", report.campaigns.len())?;
+    }
+    if verbose {
+        for campaign in &report.campaigns {
+            writeln!(
+                output,
+                "  {}  {}  seed {}  {} / {} actions  full coverage at {}",
+                campaign
+                    .contracts
+                    .iter()
+                    .map(|name| format!("contract::{name}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                project::run_word(&campaign.status),
+                campaign.seed,
+                campaign.steps_executed,
+                campaign.ceiling,
+                campaign
+                    .actions_to_full_coverage
+                    .map_or_else(|| "none".to_owned(), |actions| actions.to_string())
+            )?;
+        }
+    }
     if let Some(failure) = &report.failure {
         writeln!(output, "\n{} violated", failure.property)?;
         let fixed = failure.shrink.status == blabla::report::ShrinkStatus::FixedPoint;
@@ -987,6 +1137,7 @@ fn verb(command: &Command) -> &'static str {
         Command::Run { .. } => "run",
         Command::Finish => "finish",
         Command::Status => "status",
+        Command::Inventory { .. } => "inventory",
         Command::Explain { .. } => "explain",
         Command::Guide { .. } => "guide",
         Command::Init { .. } => "init",
@@ -1051,258 +1202,22 @@ fn execute(cli: Cli) -> i32 {
             }
         }
         Command::Status => match project::load(explicit, &cwd, json, None) {
-            Ok(project) => project::status(&project, json),
+            Ok(project) => project::status(&project, json, cli.verbose),
             Err(exit) => exit,
         },
+        Command::Inventory { max_entries } => {
+            project::inventory(explicit, &cwd, json, max_entries as usize)
+        }
         Command::Finish => match project::load(explicit, &cwd, json, None) {
             Ok(project) => project::finish(&project, json, cli.verbose),
             Err(exit) => exit,
         },
         Command::Task { action } => match project::load(explicit, &cwd, json, None) {
-            Ok(loaded) => {
-                let swallowed = swallowed_options(&action);
-                if !swallowed.is_empty() {
-                    eprintln!(
-                        "argv elements {} equal long options of this subcommand and are kept in the check argv; put BlaBla options before --check-argv or --argv if they were meant for BlaBla",
-                        swallowed.join(", ")
-                    );
-                }
-                if let TaskAction::Falsify { name } = action {
-                    return task::falsify(&loaded, &name, json);
-                }
-                if let TaskAction::Show { name } = action {
-                    return task::show(&loaded, name.as_deref(), json);
-                }
-                if let TaskAction::Evidence {
-                    name, run: true, ..
-                } = action
-                {
-                    return task::evidence_run(&loaded, &name, json);
-                }
-                task::locked(&loaded, json, || match action {
-                    TaskAction::Open {
-                        name,
-                        role,
-                        statement,
-                        scope,
-                        deliverable,
-                        check,
-                        check_argv,
-                        input,
-                        goal,
-                        review_of,
-                        lens,
-                        falsify,
-                    } => task::open(
-                        &loaded,
-                        blabla::project::task::Opening {
-                            name,
-                            role,
-                            statement,
-                            scope,
-                            deliverables: deliverable,
-                            check,
-                            check_argv: if check_argv.is_empty() {
-                                None
-                            } else {
-                                Some(check_argv)
-                            },
-                            inputs: input,
-                            goal,
-                            review_of,
-                            lenses: lens,
-                        },
-                        falsify,
-                        json,
-                        &swallowed,
-                    ),
-                    TaskAction::Finding { name, statement } => {
-                        task::finding(&loaded, &name, &statement, json)
-                    }
-                    TaskAction::Addressed {
-                        name,
-                        id,
-                        statement,
-                        model,
-                    } => task::addressed(&loaded, &name, id, &statement, &model, json),
-                    TaskAction::Resolve {
-                        name,
-                        id,
-                        evidence,
-                        model,
-                    } => task::resolve(&loaded, &name, id, &evidence, &model, json),
-                    TaskAction::Ask {
-                        name,
-                        question,
-                        options,
-                        floor,
-                        model,
-                    } => task::ask(
-                        &loaded,
-                        &name,
-                        blabla::project::task::Ask {
-                            question,
-                            options,
-                            floor,
-                            model,
-                        },
-                        json,
-                    ),
-                    TaskAction::Decide {
-                        name,
-                        question,
-                        on,
-                        pick,
-                        confidence,
-                        model,
-                        options,
-                    } => task::decide(
-                        &loaded,
-                        &name,
-                        task::Asked {
-                            question,
-                            on,
-                            pick,
-                            confidence,
-                            model,
-                            options,
-                        },
-                        json,
-                    ),
-                    TaskAction::Answer {
-                        name,
-                        id,
-                        pick,
-                        reason,
-                        model,
-                    } => task::answer(
-                        &loaded,
-                        &name,
-                        id,
-                        blabla::project::task::Answer {
-                            pick,
-                            model,
-                            reason,
-                        },
-                        json,
-                    ),
-                    TaskAction::Confirm { name, model } => {
-                        task::confirm(&loaded, &name, &model, json)
-                    }
-                    TaskAction::Note { name, statement } => {
-                        task::note(&loaded, &name, &statement, json)
-                    }
-                    TaskAction::Scope { name, add, model } => {
-                        task::widen(&loaded, &name, add, model.as_deref(), json)
-                    }
-                    TaskAction::Statement { name, text, model } => {
-                        task::restate(&loaded, &name, &text, model.as_deref(), json)
-                    }
-                    TaskAction::Close { name, model } => task::close(&loaded, &name, &model, json),
-                    TaskAction::Withdraw {
-                        name,
-                        reason,
-                        model,
-                    } => task::withdraw(&loaded, &name, &reason, &model, json),
-                    TaskAction::ReconcileWithdrawal {
-                        name,
-                        path,
-                        successor,
-                        model,
-                    } => {
-                        task::reconcile_withdrawal(&loaded, &name, &path, &successor, &model, json)
-                    }
-                    TaskAction::Show { name } => task::show(&loaded, name.as_deref(), json),
-                    TaskAction::Accept { name, model } => {
-                        task::accept(&loaded, &name, &model, json)
-                    }
-                    TaskAction::Block { name, reason } => {
-                        task::block(&loaded, &name, &reason, json)
-                    }
-                    TaskAction::Ready { name } => task::ready(&loaded, &name, json),
-                    TaskAction::Lens {
-                        name,
-                        lens,
-                        statement,
-                        model,
-                    } => task::lens(&loaded, &name, &lens, &statement, model.as_deref(), json),
-                    TaskAction::ProposeModel {
-                        name,
-                        model,
-                        reason,
-                    } => task::propose_model(&loaded, &name, &model, &reason, json),
-                    TaskAction::ApproveModel {
-                        name,
-                        model,
-                        approval,
-                    } => task::approve_model(&loaded, &name, &model, &approval, json),
-                    TaskAction::Attribute {
-                        name,
-                        paths,
-                        kind,
-                        model,
-                    } => task::attribute(&loaded, &name, &paths, &kind, &model, json),
-                    TaskAction::Check {
-                        name,
-                        command,
-                        argv,
-                        input,
-                        add_scope,
-                        model,
-                    } => task::declare_check(
-                        &loaded,
-                        &name,
-                        task::CheckAmendment {
-                            command,
-                            argv,
-                            inputs: input,
-                            add_scope,
-                            model,
-                        },
-                        json,
-                        &swallowed,
-                    ),
-                    TaskAction::Deliverable {
-                        name,
-                        add,
-                        remove,
-                        reason,
-                        model,
-                    } => {
-                        if let Some(path) = remove {
-                            task::unowe(
-                                &loaded,
-                                &name,
-                                &path,
-                                reason.as_deref(),
-                                model.as_deref(),
-                                json,
-                            )
-                        } else {
-                            task::owe(&loaded, &name, add, json)
-                        }
-                    }
-                    TaskAction::Evidence {
-                        name,
-                        exit,
-                        tool,
-                        run,
-                    } => match (run, exit, tool) {
-                        (true, _, _) => task::evidence_run(&loaded, &name, json),
-                        (false, Some(exit), Some(tool)) => {
-                            task::evidence(&loaded, &name, exit, &tool, json)
-                        }
-                        _ => 2,
-                    },
-                    TaskAction::Falsify { name } => task::falsify(&loaded, &name, json),
-                })
-            }
+            Ok(loaded) => task::execute(&loaded, *action, json, cli.verbose),
             Err(exit) => exit,
         },
         Command::Challenge { task: name } => match project::load(explicit, &cwd, json, None) {
-            Ok(loaded) => task::locked(&loaded, json, || {
-                task::challenge(&loaded, name.as_deref(), json)
-            }),
+            Ok(loaded) => task::challenge_locked(&loaded, name.as_deref(), json),
             Err(exit) => exit,
         },
         Command::Explain { rule } if rule.starts_with(runtime::primitives::PREFIX) => {
@@ -1487,22 +1402,33 @@ fn check_file(file: &Path, json: bool) -> i32 {
         };
     }
     let filename = file.to_string_lossy();
-    let here = file.parent().unwrap_or(Path::new("."));
+    let here = file
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     let manifest = blabla::project::locate(None, here).ok();
-    let root = manifest
-        .as_ref()
-        .and_then(|path| path.parent())
-        .unwrap_or(here);
+    let root = manifest.as_ref().map_or(here, |path| {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
+    });
     let group = registered_group(manifest.as_deref(), file);
     let contract = match structure::syntax::parse(&filename, &source, root, group.as_deref()) {
         Ok(contract) => contract,
         Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
     };
+    let ignore = manifest
+        .as_deref()
+        .and_then(|path| blabla::project::read_manifest(path).ok())
+        .and_then(|loaded| blabla::project::load(loaded).ok())
+        .map(|project| project.ignore)
+        .unwrap_or_default();
     let evaluation = manifest.as_ref().map(|_| {
-        structure::verify(
+        structure::verify_with(
             std::slice::from_ref(&contract),
             root,
             &structure::default_providers(),
+            &ignore,
         )
     });
     let exit = match &evaluation {
@@ -1773,6 +1699,7 @@ fn falsify_project(explicit: Option<&Path>, cwd: &Path, json: bool) -> i32 {
         &loaded.structure,
         &loaded.manifest.root,
         &structure::default_providers(),
+        &loaded.ignore,
     );
     let exit = report.exit_code();
     let contracts: Vec<String> = loaded
@@ -1822,15 +1749,23 @@ fn falsify_file(file: &Path, json: bool) -> i32 {
     };
     if !structure::syntax::is_structure_source(&source) {
         let display = file.display();
-        let reason = match blabla::memory::syntax::kind(&file.to_string_lossy(), &source) {
-            Some(kind) => format!(
-                "--falsify inverts a structural fact; {display} declares {kind} memory, which states no rule to invert. blabla check {display} validates it instead"
+        let (code, reason) = match blabla::memory::syntax::kind(&file.to_string_lossy(), &source) {
+            Some(kind) => (
+                "BLA-FALSIFY-MEMORY",
+                format!(
+                    "--falsify inverts a structural fact; {display} declares {kind} memory, which states no rule to invert. blabla check {display} validates it instead"
+                ),
             ),
-            None => format!(
-                "--falsify inspects structure contracts; {display} declares behavior, whose rules are falsified by running a campaign against an application rather than by inverting a structural fact"
+            None => (
+                "BLA-FALSIFY-BEHAVIOR",
+                format!(
+                    "--falsify inspects structure contracts; {display} declares behavior, whose rules are falsified by running a campaign against an application rather than by inverting a structural fact"
+                ),
             ),
         };
-        return emit_error(error("usage", reason, None), json, 2);
+        let mut report = error("usage", reason, None);
+        report.code = Some(code.to_string());
+        return emit_error(report, json, 2);
     }
     let here = file.parent().unwrap_or(Path::new("."));
     let Ok(manifest) = blabla::project::locate(None, here) else {
@@ -1858,6 +1793,7 @@ fn falsify_file(file: &Path, json: bool) -> i32 {
         std::slice::from_ref(&contract),
         &root,
         &structure::default_providers(),
+        &blabla::project::ignore::Ignore::default(),
     );
     let exit = report.exit_code();
     let view = FalsificationReport {
@@ -2033,10 +1969,12 @@ fn emit_init(outcome: &init::Outcome, json: bool) -> i32 {
     if result.is_ok() { 0 } else { 4 }
 }
 
+pub(crate) use blabla::project::command_line;
+
 fn swallowed_options(action: &TaskAction) -> Vec<String> {
     let (subcommand, argv) = match action {
-        TaskAction::Open { check_argv, .. } => ("open", check_argv),
-        TaskAction::Check { argv, .. } => ("check", argv),
+        TaskAction::Open { check, .. } => ("open", check),
+        TaskAction::Check { check, .. } => ("check", check),
         _ => return Vec::new(),
     };
     let root = Cli::command();
@@ -2080,7 +2018,11 @@ pub fn main() -> i32 {
         {
             return if failure.print().is_ok() { 0 } else { 4 };
         }
-        Err(failure) => return emit_error(error("invocation", failure.to_string(), seed), json, 2),
+        Err(failure) => {
+            let mut report = error("invocation", failure.to_string(), seed);
+            report.suggested = suggested_argument(&failure);
+            return emit_error(report, json, 2);
+        }
     };
     let run_seed = match &cli.command {
         Command::Run { seed, .. } => Some(*seed),

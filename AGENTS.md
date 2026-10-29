@@ -23,6 +23,12 @@ intent instead of reading whole files: `explain mission::blabla`, `explain syste
 cargo build --quiet --example structure-adapter
 ```
 
+Several agents at once. BlaBla's own commands run from this source, so a worker whose change needs
+an orchestrator record while the tree does not compile records a block at its next compiling
+state and stops. A lane whose check includes the source CLI tests takes its final evidence while
+no other lane edits `src/`, because those tests refuse a source tree that changes under them. The
+orchestrator orders the lanes' final runs; a lane never waits on a timer.
+
 `README.md`, `blabla guide agent` and the block from `blabla init --agents` say plain `blabla`.
 That is right for installed users and wrong here. If BlaBla seems not to understand its own
 project, you are running the wrong binary.
@@ -33,3 +39,5 @@ project, you are running the wrong binary.
 | `project.bla` | contracts and registered memory |
 | `docs/` | language, structure, project and workflow reference |
 | `experiments/gate.py` | the product gate |
+
+Publish only code, tests, contracts and documentation needed to use or maintain BlaBla or its examples. Keep task status, internal reviews, handoffs, raw logs and verification reports in local BlaBla records or ignored scratch, not in Git. Use existing project documentation when a durable explanation is necessary; do not create replacement report indexes.

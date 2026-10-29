@@ -13,7 +13,7 @@
              "--deliverable", "go/store/store.go", "--deliverable", "go/model/model.go",
              "--deliverable", "widget/store/WidgetStore.java", "--deliverable", "widget/model/Widget.java",
              "--deliverable", "c/store.c", "--deliverable", "c/model.c",
-             "--check", "blabla status"]}
+             "--check", "blabla", "status"]}
   ],
   "observations": [
     "challenge:repair-all-languages",

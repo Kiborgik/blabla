@@ -13,7 +13,8 @@ use blabla::memory::system::{SystemExplainView, SystemMemory, SystemStatus};
 use blabla::memory::{self, Memory, goal, knowledge, mission, process, routing, system};
 use blabla::project::expert::{self, ExpertStatus};
 use blabla::project::runstate::{
-    Classification, Marker, new_run_id, profile_identity, read_marker, remove_marker, write_marker,
+    Classification, Marker, new_run_id, process_started_unix, profile_identity, read_marker,
+    remove_marker, write_marker,
 };
 use blabla::project::status::{
     CompletionState, Evaluation, ExplainView, FINISH_COMMAND, PrimitiveView, Record, State,
@@ -21,7 +22,7 @@ use blabla::project::status::{
     now_unix, primitive_view, read_record, status_view, verdict, write_record,
 };
 use blabla::project::task::{self, TaskStatus};
-use blabla::project::{self, Layer, Project, ResolvedCommand};
+use blabla::project::{self, FingerprintObservation, Layer, Project, ResolvedCommand};
 use blabla::report::{CoverageStatus, RunOptions, RunReport, RunStatus, VerifyError};
 use blabla::structure::{LayerStatus, RuleStatus, StructureReport};
 use blabla::verify::Progress;
@@ -44,6 +45,94 @@ pub(super) fn load(
     let manifest = project::read_manifest(&manifest_path)
         .map_err(|diagnostic| emit_contract_error(diagnostic, json, seed))?;
     project::load(manifest).map_err(|diagnostic| emit_contract_error(diagnostic, json, seed))
+}
+
+pub(super) fn inventory(
+    explicit: Option<&Path>,
+    cwd: &Path,
+    json: bool,
+    max_entries: usize,
+) -> i32 {
+    let collected = project::locate(explicit, cwd)
+        .and_then(|path| project::read_manifest(&path))
+        .and_then(|manifest| project::inventory::collect(&manifest, max_entries));
+    let inventory = match collected {
+        Ok(inventory) => inventory,
+        Err(diagnostic) => return emit_contract_error(diagnostic, json, None),
+    };
+    let rendered = if json {
+        write_json(&inventory)
+    } else {
+        write_inventory(&mut io::stdout().lock(), &inventory)
+    };
+    if rendered.is_err() {
+        4
+    } else if inventory.successful() {
+        0
+    } else {
+        1
+    }
+}
+
+fn write_inventory(
+    output: &mut impl Write,
+    inventory: &project::inventory::Inventory,
+) -> io::Result<()> {
+    writeln!(output, "Project inventory: {}\n", inventory.project)?;
+    for entry in &inventory.entries {
+        writeln!(
+            output,
+            "  {}  {} {}  {}{}",
+            entry.path,
+            entry.registration,
+            entry.kind,
+            entry.readability,
+            if entry.external {
+                " (explicit external registration)"
+            } else {
+                ""
+            }
+        )?;
+        if let Some(location) = &entry.registered_at {
+            writeln!(
+                output,
+                "    registered at {}:{}:{}  {}",
+                location.file,
+                location.line,
+                location.column,
+                entry.identities.join(" ")
+            )?;
+        }
+    }
+    for boundary in &inventory.boundaries {
+        writeln!(
+            output,
+            "  stopped at {}: {}",
+            boundary.path, boundary.reason
+        )?;
+    }
+    for problem in &inventory.diagnostics {
+        writeln!(
+            output,
+            "  {} [{}]: {}",
+            problem.path, problem.code, problem.message
+        )?;
+    }
+    writeln!(
+        output,
+        "\nDiscovery {} within project boundaries ({} directory entries; limit {}).",
+        if inventory.complete {
+            "complete"
+        } else {
+            "INCOMPLETE"
+        },
+        inventory.scanned_entries,
+        inventory.max_entries
+    )?;
+    writeln!(
+        output,
+        "Inventory is read-only registration metadata. Unregistered files are not parsed or loaded; no contents, requirement coverage or semantic consistency are verified. Only blabla finish decides completion."
+    )
 }
 
 pub(super) fn evaluate_with_run_state(project: &Project) -> blabla::project::status::Evaluation {
@@ -274,29 +363,145 @@ pub(super) fn undeclared_goal(project: &Project, name: &str) -> Option<String> {
     Some(format!("goal {name:?} is not declared; {reason}"))
 }
 
+#[derive(Serialize)]
+struct GoalCoverageView {
+    #[serde(flatten)]
+    goal: GoalExplainView,
+    coverage: Vec<GoalExpectationView>,
+    linked_work: Vec<GoalWorkView>,
+    task_problems: Vec<String>,
+    coverage_authority: &'static str,
+}
+
+#[derive(Serialize)]
+struct GoalExpectationView {
+    identity: String,
+    contract: String,
+    registration: &'static str,
+    resolution: &'static str,
+    verdict: goal::Verdict,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    layer: Option<Layer>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    registered_at: Option<Location>,
+}
+
+#[derive(Serialize)]
+struct GoalWorkView {
+    id: String,
+    role: String,
+    state: String,
+    scope: Vec<String>,
+    evidence: task::Readiness,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    check: Option<task::CheckIdentity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latest_exit: Option<i32>,
+}
+
+fn goal_expectation(project: &Project, expectation: &goal::Expectation) -> GoalExpectationView {
+    let identity = expectation.identity.as_str();
+    let group = identity.strip_prefix("contract::").unwrap_or_else(|| {
+        identity
+            .split_once("::")
+            .map(|(group, _)| group)
+            .unwrap_or(identity)
+    });
+    let entry = project
+        .manifest
+        .entries
+        .iter()
+        .find(|entry| entry.group == group);
+    let registration = match entry {
+        Some(entry) if entry.draft => "draft",
+        Some(_) => "active",
+        None => "unregistered",
+    };
+    let resolution = match entry {
+        None => "missing_contract",
+        Some(entry) if entry.draft => {
+            if identity.starts_with("contract::") {
+                "draft_contract"
+            } else {
+                "draft_rule_unchecked"
+            }
+        }
+        Some(_) if expectation.verdict != goal::Verdict::Unresolved => "resolved",
+        Some(_) => "missing_rule",
+    };
+    GoalExpectationView {
+        identity: expectation.identity.clone(),
+        contract: format!("contract::{group}"),
+        registration,
+        resolution,
+        verdict: expectation.verdict,
+        path: entry.map(|entry| entry.display.clone()),
+        layer: entry.map(|entry| entry.layer),
+        registered_at: entry.map(|entry| Location {
+            file: project.manifest.path.display().to_string(),
+            line: entry.span.line,
+            column: entry.span.column,
+        }),
+    }
+}
+
 fn explain_goal(
     project: &Project,
     memory: &Memory<GoalMemory>,
     id: &str,
-) -> Option<GoalExplainView> {
+) -> Option<GoalCoverageView> {
     let name = id.strip_prefix("goal::")?;
     let evaluation = evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let view = status_view(project, &evaluation, &structure);
-    let serving = task::read_all(&project.manifest.root)
+    let tasks: Vec<task::Task> = task::read_all(&project.manifest.root)
         .into_iter()
         .filter(|task| task.goal.as_deref() == Some(name))
-        .map(|task| (task.name, task.state))
         .collect();
-    goal::explain(
+    let serving = tasks
+        .iter()
+        .map(|task| (task.name.clone(), task.state.word().to_owned()))
+        .collect();
+    let goal = goal::explain(
         memory,
         id,
         &judged(memory, project, &evaluation, &view),
         serving,
-    )
+    )?;
+    let tree = if tasks.is_empty() {
+        std::collections::BTreeMap::new()
+    } else {
+        project::snapshot(&project.manifest.root, &project.ignore)
+    };
+    let linked_work = tasks
+        .iter()
+        .map(|task| GoalWorkView {
+            id: format!("task::{}", task.name),
+            role: format!("role::{}", task.role),
+            state: task.state.word().to_owned(),
+            scope: task.scope.clone(),
+            evidence: task::tracked_readiness(task, &project.manifest.root, &project.ignore, &tree),
+            check: task::declared_check(task),
+            latest_exit: task::latest_evidence(task).map(|evidence| evidence.exit),
+        })
+        .collect();
+    Some(GoalCoverageView {
+        coverage: goal
+            .outcome
+            .expectations
+            .iter()
+            .map(|expectation| goal_expectation(project, expectation))
+            .collect(),
+        goal,
+        linked_work,
+        task_problems: task::unreadable(&project.manifest.root),
+        coverage_authority: "Registration and exact identity resolution are metadata; draft rule membership is not established. Task links are explicitly goal-level, never proof that a task implements each expectation. Evidence describes only its declared check and tracked inputs. No semantic coverage percentage, goal acceptance or completion is inferred; only blabla finish decides completion.",
+    })
 }
 
-pub(super) fn status(project: &Project, json: bool) -> i32 {
+pub(super) fn status(project: &Project, json: bool, verbose: bool) -> i32 {
     let evaluation = evaluate_with_run_state(project);
     let structure = project.verify_structure();
     let view = status_view(project, &evaluation, &structure);
@@ -305,6 +510,7 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
     let views = loaded.views(&goals);
     let tasks = task::status(&project.manifest.root);
     let capabilities = CapabilityReport::of(&project.manifest.root);
+    let challenge = (!json).then(|| super::task::standing(project, &view));
     let result = if json {
         write_json(&StatusWithMemory {
             project: &view,
@@ -326,7 +532,18 @@ pub(super) fn status(project: &Project, json: bool) -> i32 {
             tasks.as_ref(),
             &capabilities,
             &project.shared_state,
-        ).and_then(|()| {
+            verbose,
+        )
+        .and_then(|()| match &challenge {
+            Some(report) => write_standing_challenge(
+                &mut io::stdout().lock(),
+                report,
+                project.manifest.voice,
+                verbose,
+            ),
+            None => Ok(()),
+        })
+        .and_then(|()| {
             if let Some(runtime) = blabla::expert::trace::status(project) {
                 let mut output = io::stdout().lock();
                 writeln!(output, "EXPERT RUNTIME {:?}  trace retention {} days  payload limit {} bytes  unresolved limit {}/task  retained {:?} bytes  unknown deliveries {:?}  error {:?}", runtime.mode, runtime.trace_limits.retention_days, runtime.trace_limits.payload_bytes, runtime.trace_limits.unresolved_per_task, runtime.payload_bytes, runtime.unknown_deliveries, runtime.error)?;
@@ -830,7 +1047,8 @@ fn write_mission_explain(view: &MissionExplainView) -> io::Result<()> {
     writeln!(output, "\n{}", view.authority)
 }
 
-fn write_goal_explain(view: &GoalExplainView) -> io::Result<()> {
+fn write_goal_explain(coverage: &GoalCoverageView) -> io::Result<()> {
+    let view = &coverage.goal;
     let mut output = io::stdout().lock();
     writeln!(
         output,
@@ -863,6 +1081,44 @@ fn write_goal_explain(view: &GoalExplainView) -> io::Result<()> {
             expectation.identity
         )?;
     }
+    writeln!(output, "\nExpectation registration and exact resolution:")?;
+    for expectation in &coverage.coverage {
+        writeln!(
+            output,
+            "  {}  {}  {}  {}",
+            expectation.identity,
+            expectation.registration,
+            expectation.resolution,
+            expectation.path.as_deref().unwrap_or("no registered path")
+        )?;
+    }
+    if !coverage.linked_work.is_empty() {
+        writeln!(
+            output,
+            "\nExplicit goal-linked work (not per-rule implementation credit):"
+        )?;
+        for work in &coverage.linked_work {
+            writeln!(
+                output,
+                "  {}  {}  scope: {}",
+                work.id,
+                work.state,
+                work.scope.join(" ")
+            )?;
+            writeln!(
+                output,
+                "    evidence recorded: {}; current: {}; supports declared check: {}; latest matching exit: {:?}",
+                work.evidence.recorded,
+                work.evidence.current,
+                work.evidence.supported,
+                work.latest_exit
+            )?;
+        }
+    }
+    for problem in &coverage.task_problems {
+        writeln!(output, "\nUnreadable task record: {problem}")?;
+    }
+    writeln!(output, "\n{}", coverage.coverage_authority)?;
     writeln!(
         output,
         "\nOutcome acceptance: not established by these contract checks. Review the goal statement and outcome evidence separately; the recorded state is owner-declared."
@@ -970,6 +1226,8 @@ struct ContractView {
 #[derive(Serialize)]
 struct CheckView {
     status: &'static str,
+    scope: &'static str,
+    memory_check: &'static str,
     project: String,
     manifest: String,
     contracts: Vec<ContractView>,
@@ -1021,6 +1279,8 @@ pub(super) fn check(project: &Project, json: bool) -> i32 {
     let contract = project.contract.as_ref();
     let view = CheckView {
         status: if failures.is_empty() { "ok" } else { "error" },
+        scope: "active and draft contracts only; registered memory contents are not validated",
+        memory_check: "blabla check FILE.bla",
         project: project.manifest.name.clone(),
         manifest: project.manifest.path.display().to_string(),
         contracts,
@@ -1055,6 +1315,8 @@ fn write_check(view: &CheckView) -> io::Result<()> {
         if view.status == "ok" { "OK" } else { "ERROR" }
     )?;
     writeln!(output, "Project: {} ({})", view.project, view.manifest)?;
+    writeln!(output, "Scope: {}", view.scope)?;
+    writeln!(output, "To validate a memory file: {}", view.memory_check)?;
     if view.contracts.is_empty() {
         writeln!(output, "Contracts: none")?;
     } else {
@@ -1246,7 +1508,12 @@ pub(super) fn finish(project: &Project, json: bool, verbose: bool) -> i32 {
                 .and_then(|()| write_next(&mut output, &view, &MemoryViews::default()))
                 .and_then(|()| write_gate(&mut output, &view))
                 .and_then(|()| {
-                    write_standing_challenge(&mut output, &challenge, project.manifest.voice)
+                    write_standing_challenge(
+                        &mut output,
+                        &challenge,
+                        project.manifest.voice,
+                        verbose,
+                    )
                 })
         };
         return if result.is_ok() { view.exit } else { 4 };
@@ -1277,7 +1544,7 @@ pub(super) fn finish(project: &Project, json: bool, verbose: bool) -> i32 {
                         io::stdout(),
                         "prepared in {:.1}s: {}",
                         preparation.seconds,
-                        preparation.command.join(" ")
+                        super::command_line(&preparation.command)
                     );
                 }
             }
@@ -1343,11 +1610,12 @@ pub(super) fn finish(project: &Project, json: bool, verbose: bool) -> i32 {
     heartbeat.header(
         &structure_line(&structure),
         &format!(
-            "starting canonical verification (seed {}, {} cases x {} actions; {})",
+            "starting canonical verification (seed {}, {} campaigns sharing {} cases x {} actions; {})",
             profile.seed,
-            profile.cases,
+            project.campaigns.len(),
+            profile.cases.saturating_mul(project.campaigns.len()),
             profile.steps,
-            profile.command.join(" ")
+            super::command_line(&profile.command)
         ),
     );
     let outcome = verify_and_record(
@@ -1414,9 +1682,9 @@ fn verify_and_record(
     observer: &mut dyn FnMut(&Progress),
 ) -> Result<(RunReport, StatusView), Box<(ErrorReport, i32)>> {
     let seed = options.seed;
-    let Some(contract) = &project.contract else {
+    if project.contract.is_none() {
         return Err(Box::new(contract_error(no_contracts(project), Some(seed))));
-    };
+    }
     let timeout_ms = allowance.response_ms;
     let config = AppConfig::launched(
         command.program.clone(),
@@ -1424,13 +1692,36 @@ fn verify_and_record(
         Duration::from_millis(allowance.response_ms),
     )
     .booting_within(Duration::from_millis(allowance.startup_ms));
-    let report = verify::run_observed(
-        contract,
+    let jobs = project
+        .manifest
+        .profile
+        .as_ref()
+        .map_or(project::DEFAULT_JOBS, |profile| profile.jobs);
+    let runs = project
+        .manifest
+        .root
+        .join(blabla::project::status::RECORD_DIRECTORY)
+        .join(RUN_DIRECTORY);
+    clear_abandoned_runs(&runs);
+    let directory = runs.join(std::process::id().to_string());
+    let files = fingerprinted_files(&config.executable, &config.args);
+    let before = project.fingerprint_observation(&files);
+    let outcome = verify::run_campaigns(
+        &project.campaigns,
         &options,
-        || runtime::AppSession::spawn(&config),
+        jobs,
+        || runtime::AppSession::spawn_under(&config, &directory),
         observer,
-    )
-    .map_err(|failure| Box::new(verify_error(failure, seed)))?;
+    );
+    let _ = std::fs::remove_dir(&directory);
+    let report = outcome.map_err(|failure| Box::new(verify_error(failure, seed)))?;
+    let observed = project.fingerprint_observation(&files);
+    if observed.fingerprint != before.fingerprint {
+        return Err(Box::new(contract_error(
+            inputs_changed(&before, &observed),
+            Some(seed),
+        )));
+    }
     let output = super::RunOutput {
         timeout_ms,
         report: &report,
@@ -1440,13 +1731,13 @@ fn verify_and_record(
     };
     let value = serde_json::to_value(&output)
         .map_err(|failure| Box::new((error("internal", failure.to_string(), Some(seed)), 4)))?;
-    let files = fingerprinted_files(&config.executable, &config.args);
     let record = Record {
         verifier_version: env!("CARGO_PKG_VERSION").into(),
         project: project.manifest.name.clone(),
         manifest: project.manifest.path.display().to_string(),
         project_identity: project.identity.clone(),
-        implementation_fingerprint: project.fingerprint(&files),
+        implementation_fingerprint: observed.fingerprint,
+        implementation_inputs: Some(observed.inputs),
         fingerprinted_files: files
             .iter()
             .map(|file| file.display().to_string())
@@ -1483,6 +1774,39 @@ fn fingerprinted_files(executable: &Path, args: &[OsString]) -> Vec<PathBuf> {
     files
 }
 
+const RUN_DIRECTORY: &str = "run";
+
+fn clear_abandoned_runs(runs: &Path) {
+    let Ok(entries) = std::fs::read_dir(runs) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let owner = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok());
+        if owner.is_some_and(|pid| process_started_unix(pid).is_none()) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+fn inputs_changed(before: &FingerprintObservation, after: &FingerprintObservation) -> Diagnostic {
+    let changed = before.changed_paths(after);
+    Diagnostic {
+        location: Location {
+            file: changed.first().cloned().unwrap_or_else(|| "<run>".into()),
+            line: 1,
+            column: 1,
+        },
+        code: "BLA-RUN-INPUTS-CHANGED".into(),
+        message: format!(
+            "the implementation changed while the campaigns ran ({}), so nothing was recorded; run again once nothing edits those paths",
+            changed.join(", ")
+        ),
+    }
+}
+
 fn state_word(status: &CoverageStatus) -> &'static str {
     match status {
         CoverageStatus::Verified => "GREEN",
@@ -1491,7 +1815,7 @@ fn state_word(status: &CoverageStatus) -> &'static str {
     }
 }
 
-fn run_word(status: &RunStatus) -> &'static str {
+pub(super) fn run_word(status: &RunStatus) -> &'static str {
     match status {
         RunStatus::Green => "GREEN",
         RunStatus::Yellow => "YELLOW",
@@ -1503,7 +1827,7 @@ fn application_line(view: &StatusView) -> String {
     view.recorded
         .as_ref()
         .filter(|recorded| !recorded.application.is_empty())
-        .map(|recorded| recorded.application.join(" "))
+        .map(|recorded| super::command_line(&recorded.application))
         .unwrap_or_else(|| "<application>".into())
 }
 
@@ -1530,16 +1854,32 @@ pub(super) fn write_completion(output: &mut impl Write, view: &StatusView) -> io
             profile.steps,
             profile.timeout_ms,
             profile.shrink_budget,
-            profile.command.join(" ")
+            super::command_line(&profile.command)
         )?;
     }
     Ok(())
+}
+
+fn standing_path_count(challenge: &blabla::skeptic::Challenge) -> Option<usize> {
+    if !challenge.unattributed.is_empty() {
+        return Some(challenge.unattributed.len());
+    }
+    matches!(challenge.class, blabla::skeptic::Class::WithdrawalResidue)
+        .then_some(challenge.evidence.len())
+}
+
+fn standing_lister(report: &blabla::skeptic::ChallengeReport) -> String {
+    match &report.task {
+        Some(name) => format!("blabla challenge {name}"),
+        None => "blabla challenge".to_owned(),
+    }
 }
 
 pub(super) fn write_standing_challenge(
     output: &mut impl Write,
     report: &blabla::skeptic::ChallengeReport,
     voice: Voice,
+    verbose: bool,
 ) -> io::Result<()> {
     let Some(challenge) = &report.challenge else {
         return Ok(());
@@ -1550,12 +1890,23 @@ pub(super) fn write_standing_challenge(
         "{}",
         contradiction(voice, challenge.class.word(), &challenge.statement)
     )?;
-    for line in &challenge.evidence {
-        writeln!(output, "  {line}")?;
+    match standing_path_count(challenge).filter(|_| !verbose) {
+        Some(count) => writeln!(
+            output,
+            "  {count} path{}; {} lists them",
+            if count == 1 { "" } else { "s" },
+            standing_lister(report)
+        )?,
+        None => {
+            for line in &challenge.evidence {
+                writeln!(output, "  {line}")?;
+            }
+        }
     }
     writeln!(
         output,
-        "Reconcile it or say why it does not hold; it changes no verdict above. Full evidence: blabla challenge"
+        "Reconcile it or say why it does not hold; it changes no verdict above. Full evidence: {}",
+        standing_lister(report)
     )
 }
 
@@ -2157,16 +2508,36 @@ fn write_next_steps(
     }
 }
 
-fn write_bounded_tasks(output: &mut impl Write, tasks: Option<&TaskStatus>) -> io::Result<()> {
+fn write_bounded_tasks(
+    output: &mut impl Write,
+    tasks: Option<&TaskStatus>,
+    verbose: bool,
+) -> io::Result<()> {
     let Some(tasks) = tasks else {
         return Ok(());
     };
     writeln!(output, "\nBounded tasks ({}):", tasks.directory)?;
-    for task in &tasks.tasks {
+    let (live, finished): (Vec<_>, Vec<_>) = tasks
+        .tasks
+        .iter()
+        .partition(|task| verbose || task.state.live());
+    for task in live {
         writeln!(
             output,
             "  {}   {}   {}   {} deliverables, {} unresolved",
-            task.id, task.state, task.role, task.deliverables, task.unresolved
+            task.id,
+            task.state.label(),
+            task.role,
+            task.deliverables,
+            task.unresolved
+        )?;
+    }
+    if !finished.is_empty() {
+        writeln!(
+            output,
+            "  {} closed or withdrawn task{} not listed; blabla status --verbose lists every task",
+            finished.len(),
+            if finished.len() == 1 { "" } else { "s" }
         )?;
     }
     for problem in &tasks.unreadable {
@@ -2191,7 +2562,7 @@ fn write_bounded_tasks(output: &mut impl Write, tasks: Option<&TaskStatus>) -> i
                 output,
                 "  Multiple tasks are open; choose a task explicitly before challenging: blabla challenge <name>"
             )?;
-        } else if let Some(task) = tasks.tasks.iter().find(|task| task.state != "CLOSED") {
+        } else if let Some(task) = tasks.tasks.iter().find(|task| task.state.live()) {
             let name = task.id.strip_prefix("task::").unwrap_or(&task.id);
             writeln!(
                 output,
@@ -2202,12 +2573,65 @@ fn write_bounded_tasks(output: &mut impl Write, tasks: Option<&TaskStatus>) -> i
     writeln!(output, "  {}", tasks.authority)
 }
 
+fn write_input_drift(output: &mut impl Write, view: &StatusView) -> io::Result<()> {
+    let Some(recorded) = &view.recorded else {
+        return Ok(());
+    };
+    let drift = &recorded.input_drift;
+    if drift.availability == "legacy-unavailable" {
+        return writeln!(
+            output,
+            "\nVerification input changes: baseline unavailable for this legacy record; aggregate freshness still applies."
+        );
+    }
+    if drift.total_changes == Some(0) {
+        return Ok(());
+    }
+    writeln!(
+        output,
+        "\nVerification input changes: {} total (showing {})",
+        drift.total_changes.unwrap_or(0),
+        drift.changes.len()
+    )?;
+    for change in &drift.changes {
+        writeln!(
+            output,
+            "  {} {}: {} ({} -> {})",
+            change.change,
+            change.source,
+            change.path,
+            change
+                .recorded
+                .as_ref()
+                .map(|value| value.observation.as_str())
+                .unwrap_or("absent"),
+            change
+                .current
+                .as_ref()
+                .map(|value| value.observation.as_str())
+                .unwrap_or("absent")
+        )?;
+    }
+    if drift.omitted_changes > 0 {
+        writeln!(
+            output,
+            "  {} additional changes omitted (limit {}).",
+            drift.omitted_changes, drift.limit
+        )?;
+    }
+    writeln!(
+        output,
+        "  Observed fingerprint inputs only; no semantic dependency or completion inference."
+    )
+}
+
 fn write_status(
     view: &StatusView,
     views: &MemoryViews,
     tasks: Option<&TaskStatus>,
     capabilities: &CapabilityReport,
     shared_state: &[project::SharedState],
+    verbose: bool,
 ) -> io::Result<()> {
     let mut output = io::stdout().lock();
     writeln!(output, "BlaBla: executable project memory\n")?;
@@ -2217,6 +2641,7 @@ fn write_status(
         view.project, view.manifest
     )?;
     write_layers(&mut output, view)?;
+    write_input_drift(&mut output, view)?;
     write_mission_line(&mut output, views.mission.as_ref())?;
     write_system_line(&mut output, views.system.as_ref())?;
     write_process_line(&mut output, views.process.as_ref())?;
@@ -2239,7 +2664,7 @@ fn write_status(
     write_process_memory(&mut output, views.process.as_ref())?;
     write_knowledge_memory(&mut output, views.knowledge.as_ref())?;
     write_goal_memory(&mut output, views.goal.as_ref())?;
-    write_bounded_tasks(&mut output, tasks)?;
+    write_bounded_tasks(&mut output, tasks, verbose)?;
     capabilities.write(&mut output)?;
     write_structure_issues(&mut output, view)?;
     write_runtime_primitives(&mut output, view)?;
@@ -2253,7 +2678,7 @@ fn write_status(
             recorded.steps,
             recorded.steps_executed,
             recorded.timeout_ms,
-            recorded.application.join(" "),
+            super::command_line(&recorded.application),
             recorded.recorded_at,
             if recorded.stale.is_empty() {
                 "; contracts, implementation and profile unchanged since"
@@ -2391,4 +2816,72 @@ fn write_explain(view: &ExplainView) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use blabla::skeptic::{Challenge, ChallengeReport, Class};
+
+    fn residue(paths: usize) -> ChallengeReport {
+        ChallengeReport {
+            task: Some("work".to_owned()),
+            challenge: Some(Challenge {
+                class: Class::WithdrawalResidue,
+                statement: "residue".to_owned(),
+                evidence: (0..paths).map(|n| format!("changed path {n}")).collect(),
+                reconcile: "restore".to_owned(),
+                unattributed: Vec::new(),
+            }),
+            challenges: None,
+            grounded: Vec::new(),
+            assignment_blockers: Vec::new(),
+            project_challenges: Vec::new(),
+            ungrounded: Vec::new(),
+            authority: "",
+            limits: ["", "", ""],
+        }
+    }
+
+    fn written(report: &ChallengeReport, verbose: bool) -> usize {
+        let mut output = Vec::new();
+        write_standing_challenge(&mut output, report, Voice::default(), verbose).unwrap();
+        String::from_utf8(output).unwrap().lines().count()
+    }
+
+    #[test]
+    fn a_standing_challenge_over_many_paths_prints_the_same_lines_as_over_few() {
+        assert_eq!(written(&residue(2), false), written(&residue(40), false));
+    }
+
+    #[test]
+    fn a_standing_challenge_points_at_the_command_that_lists_it_in_each_place() {
+        let report = residue(2);
+        let mut output = Vec::new();
+        write_standing_challenge(&mut output, &report, Voice::default(), false).unwrap();
+        let lister = standing_lister(&report);
+        let mentions = String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .filter(|line| line.contains(&lister))
+            .count();
+        assert_eq!(mentions, 2);
+    }
+
+    #[test]
+    fn a_verbose_standing_challenge_prints_every_path() {
+        assert_eq!(written(&residue(40), true) - written(&residue(2), true), 38);
+    }
+
+    #[test]
+    fn a_standing_challenge_counts_the_unattributed_paths() {
+        let mut report = residue(0);
+        let challenge = report.challenge.as_mut().unwrap();
+        challenge.class = Class::AttributionUnknown;
+        challenge.unattributed = (0..7).map(|n| format!("src/{n}.rs")).collect();
+        assert_eq!(
+            standing_path_count(report.challenge.as_ref().unwrap()),
+            Some(7)
+        );
+    }
 }

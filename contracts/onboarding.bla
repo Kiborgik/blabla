@@ -1,7 +1,9 @@
 module init    "src/cli/init.rs"
-module clitask "src/cli/task.rs"
+module clitask "src/cli/task/mod.rs"
+module routes "src/cli/task/routes.rs"
 module guide   "src/cli/guide.rs"
 module experttests "src/cli/expert/tests.rs"
+module machine "src/project/task/machine.rs"
 
 require "a-portable-skill-is-shipped":        symbol init::skill
 require "the-skill-has-a-declared-location":  symbol init::SKILL_PATH
@@ -22,16 +24,16 @@ require "the-entry-leads-to-acceptance":      value init::SKILL_TOPICS contains 
 require "the-entry-leads-to-evidence":        value init::SKILL_TOPICS contains "evidence"
 require "the-entry-leads-to-a-challenge":     value init::SKILL_TOPICS contains "challenge"
 
-require "the-assignment-view-names-its-routes":   symbol clitask::ROUTES
-require "the-view-routes-to-acceptance":          value clitask::ROUTES contains "accept"
-require "the-view-routes-to-the-declared-check":  value clitask::ROUTES contains "check"
-require "the-view-routes-to-a-blocker":           value clitask::ROUTES contains "blocker"
-require "the-view-routes-to-a-finding":           value clitask::ROUTES contains "finding"
-require "the-view-routes-to-a-challenge":         value clitask::ROUTES contains "challenge"
-require "the-view-routes-to-a-hand-back":         value clitask::ROUTES contains "hand-back"
-require "the-routes-are-written-in-one-place":    symbol clitask::write_routes
-require "the-routes-render-without-a-record":     symbol clitask::route_text
-require "the-routes-render-as-one-text":          symbol clitask::routes_text
+require "the-assignment-view-names-its-routes":   symbol machine::Route
+require "the-view-routes-to-acceptance":          symbol machine::Route.Accept
+require "the-view-routes-to-the-declared-check":  symbol machine::Route.Check
+require "the-view-routes-to-a-blocker":           symbol machine::Route.Blocker
+require "the-view-routes-to-a-finding":           symbol machine::Route.Finding
+require "the-view-routes-to-a-challenge":         symbol machine::Route.Challenge
+require "the-view-routes-to-a-hand-back":         symbol machine::Route.HandBack
+require "the-routes-are-written-in-one-place":    symbol routes::write_routes
+require "the-routes-render-without-a-record":     symbol routes::route_text
+require "the-routes-render-as-one-text":          symbol routes::routes_text
 require "the-loop-guide-is-generated":            symbol guide::loop_text
 require "the-loop-guide-reuses-the-routes":       dependency guide -> clitask
 require "the-entry-reuses-the-routes":            dependency init -> clitask

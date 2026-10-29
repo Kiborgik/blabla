@@ -1,0 +1,555 @@
+use blabla::application::{AppConfig, Application};
+use blabla::ir::{Field, MAX_INT, Type};
+use blabla::report::Call;
+use blabla::runtime::{AppSession, project_observation};
+use serde_json::json;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use crate::process;
+use process::{assert_process_stopped, process_is_running};
+
+fn field(name: &str, ty: Type) -> Field {
+    Field {
+        name: name.into(),
+        ty,
+    }
+}
+
+const PYTHON_STARTUP: Duration = Duration::from_secs(10);
+
+fn python_config(script: &Path, mode: &str, timeout: Duration) -> AppConfig {
+    AppConfig {
+        executable: PathBuf::from("python"),
+        args: vec![OsString::from(script.as_os_str()), OsString::from(mode)],
+        timeout,
+        startup: PYTHON_STARTUP,
+    }
+}
+
+fn fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/protocol/app.py")
+}
+
+fn todo_app() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/todo/app.py")
+}
+
+fn todo_schema() -> Vec<Field> {
+    vec![field(
+        "todos",
+        Type::List(Box::new(Type::Record(vec![
+            field("id", Type::Int),
+            field("text", Type::String),
+            field("done", Type::Bool),
+        ]))),
+    )]
+}
+
+#[test]
+fn projects_declared_fields_recursively_and_ignores_extras() {
+    let schema = todo_schema();
+    let observed = json!({
+        "todos": [{"id": 7, "text": "milk", "done": false, "private": "ignored"}],
+        "debug": true
+    });
+
+    let projected = project_observation(&observed, &schema).unwrap();
+
+    assert_eq!(
+        projected,
+        json!({"todos": [{"id": 7, "text": "milk", "done": false}]})
+    );
+}
+
+#[test]
+fn rejects_missing_null_wrong_fractional_and_out_of_range_observations() {
+    let cases = [
+        (json!({}), vec![field("name", Type::String)]),
+        (json!({"name": null}), vec![field("name", Type::String)]),
+        (json!({"ready": "yes"}), vec![field("ready", Type::Bool)]),
+        (json!({"count": 1.5}), vec![field("count", Type::Int)]),
+        (
+            json!({"count": MAX_INT + 1}),
+            vec![field("count", Type::Int)],
+        ),
+    ];
+
+    for (value, schema) in cases {
+        let error = project_observation(&value, &schema).unwrap_err();
+        assert_eq!(error.code, "APP_OBSERVATION");
+    }
+}
+
+#[test]
+fn exchanges_jsonl_with_a_real_process_in_an_isolated_directory() {
+    let schema = vec![field("cwd", Type::String), field("calls", Type::Int)];
+    let config = python_config(&fixture(), "normal", Duration::from_secs(1));
+    let mut first = AppSession::spawn(&config).unwrap();
+    let mut second = AppSession::spawn(&config).unwrap();
+
+    first.reset().unwrap();
+    second.reset().unwrap();
+    first
+        .call(&Call {
+            action: "increment".into(),
+            args: vec![],
+        })
+        .unwrap();
+    let first_state = first.observe(&schema).unwrap();
+    let second_state = second.observe(&schema).unwrap();
+
+    assert_eq!(first_state["calls"], 1);
+    assert_eq!(second_state["calls"], 0);
+    assert_ne!(first_state["cwd"], second_state["cwd"]);
+}
+
+#[test]
+fn rejects_invalid_timeout_configuration_before_spawning() {
+    let mut maximum = AppSession::spawn(&python_config(
+        &fixture(),
+        "normal",
+        Duration::from_secs(42),
+    ))
+    .unwrap();
+    maximum.reset().unwrap();
+    maximum.finish().unwrap();
+    for timeout in [
+        Duration::ZERO,
+        Duration::from_secs(42) + Duration::from_nanos(1),
+    ] {
+        let error = match AppSession::spawn(&python_config(&fixture(), "normal", timeout)) {
+            Ok(_) => panic!("invalid timeout started a session"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "APP_CONFIG");
+    }
+}
+
+#[test]
+fn reports_process_start_failures() {
+    let config = AppConfig {
+        executable: PathBuf::from("blabla-executable-that-does-not-exist"),
+        args: vec![],
+        timeout: Duration::from_secs(1),
+        startup: Duration::from_secs(1),
+    };
+
+    let error = match AppSession::spawn(&config) {
+        Ok(_) => panic!("missing executable started a session"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.code, "APP_SPAWN");
+}
+
+#[test]
+fn a_bad_first_response_yields_its_error_code() {
+    let modes = [
+        ("failed_ack", "APP_FAILURE"),
+        ("pre_output", "APP_PROTOCOL"),
+        ("wrong_id", "APP_PROTOCOL"),
+        ("malformed", "APP_PROTOCOL"),
+        ("stdout_noise", "APP_PROTOCOL"),
+        ("json_noise", "APP_PROTOCOL"),
+        ("wrong_ack", "APP_PROTOCOL"),
+        ("unterminated", "APP_PROTOCOL"),
+        ("oversized", "APP_PROTOCOL"),
+        ("duplicate_ok", "APP_PROTOCOL"),
+        ("duplicate_result", "APP_PROTOCOL"),
+        ("eof", "APP_EOF"),
+        ("crash", "APP_CRASH"),
+    ];
+    std::thread::scope(|scope| {
+        let runs: Vec<_> = modes
+            .into_iter()
+            .map(|(mode, code)| {
+                scope.spawn(move || {
+                    let config = python_config(&fixture(), mode, Duration::from_secs(1));
+                    let mut session = AppSession::spawn(&config).unwrap();
+                    let error = session.reset().unwrap_err();
+                    assert_eq!(error.code, code, "mode {mode}");
+                })
+            })
+            .collect();
+        for handle in runs {
+            handle.join().unwrap();
+        }
+    });
+}
+
+#[test]
+fn finish_accepts_clean_eof_and_rejects_trailing_frames() {
+    let schema = vec![field("cwd", Type::String), field("calls", Type::Int)];
+    let mut healthy =
+        AppSession::spawn(&python_config(&fixture(), "normal", Duration::from_secs(1))).unwrap();
+    healthy.reset().unwrap();
+    healthy.observe(&schema).unwrap();
+    healthy.finish().unwrap();
+
+    let mut trailing = AppSession::spawn(&python_config(
+        &fixture(),
+        "trailing",
+        Duration::from_secs(1),
+    ))
+    .unwrap();
+    trailing.reset().unwrap();
+    trailing.observe(&schema).unwrap();
+
+    let error = trailing.finish().unwrap_err();
+
+    assert_eq!(error.code, "APP_PROTOCOL");
+}
+
+#[test]
+fn finish_rejects_crash_and_timeout_after_stdin_eof() {
+    for (mode, code, budget) in [
+        ("crash_on_eof", "APP_CRASH", Duration::from_secs(5)),
+        ("ignore_eof", "APP_TIMEOUT", Duration::from_millis(100)),
+    ] {
+        let mut session = AppSession::spawn(&python_config(&fixture(), mode, budget)).unwrap();
+        session.reset().unwrap();
+
+        let error = session.finish().unwrap_err();
+
+        assert_eq!(error.code, code, "mode {mode}");
+    }
+}
+
+#[test]
+fn finish_and_drop_terminate_inheriting_descendants_and_release_threads() {
+    let schema = vec![
+        field("cwd", Type::String),
+        field("calls", Type::Int),
+        field("descendant_pid", Type::Int),
+    ];
+    let config = python_config(&fixture(), "descendant", Duration::from_millis(500));
+    let mut finished = AppSession::spawn(&config).unwrap();
+    finished.reset().unwrap();
+    let state = finished.observe(&schema).unwrap();
+    let directory = PathBuf::from(state["cwd"].as_str().unwrap());
+    let process_id = state["descendant_pid"].as_i64().unwrap();
+    assert!(process_is_running(process_id));
+
+    let started = Instant::now();
+    finished.finish().unwrap();
+
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_process_stopped(process_id);
+    assert!(!directory.exists());
+
+    let mut dropped = AppSession::spawn(&config).unwrap();
+    dropped.reset().unwrap();
+    let state = dropped.observe(&schema).unwrap();
+    let directory = PathBuf::from(state["cwd"].as_str().unwrap());
+    let process_id = state["descendant_pid"].as_i64().unwrap();
+    assert!(process_is_running(process_id));
+
+    drop(dropped);
+
+    assert_process_stopped(process_id);
+    assert!(!directory.exists());
+
+    let mut timed_out = AppSession::spawn(&config).unwrap();
+    timed_out.reset().unwrap();
+    let state = timed_out.observe(&schema).unwrap();
+    let directory = PathBuf::from(state["cwd"].as_str().unwrap());
+    let process_id = state["descendant_pid"].as_i64().unwrap();
+    assert!(process_is_running(process_id));
+
+    let error = timed_out
+        .call(&Call {
+            action: "hang".into(),
+            args: vec![],
+        })
+        .unwrap_err();
+
+    assert_eq!(error.code, "APP_TIMEOUT");
+    assert_process_stopped(process_id);
+    assert!(!directory.exists());
+}
+
+#[test]
+fn rejects_wrong_observation_types_through_the_session_boundary() {
+    let mut session = AppSession::spawn(&python_config(
+        &fixture(),
+        "wrong_observation",
+        Duration::from_secs(1),
+    ))
+    .unwrap();
+    session.reset().unwrap();
+
+    let error = session.observe(&todo_schema()).unwrap_err();
+
+    assert_eq!(error.code, "APP_OBSERVATION");
+}
+
+#[test]
+fn bounds_read_and_blocking_write_deadlines() {
+    let mut read_session = AppSession::spawn(&AppConfig {
+        startup: Duration::from_millis(100),
+        ..python_config(&fixture(), "timeout_read", Duration::from_millis(25))
+    })
+    .unwrap();
+    let read_start = Instant::now();
+    let read_error = read_session.reset().unwrap_err();
+    assert_eq!(read_error.code, "APP_TIMEOUT");
+    assert!(read_start.elapsed() < Duration::from_secs(1));
+    let read_json = serde_json::to_value(&read_error).unwrap();
+    let read_witness = &read_json["exchange_witness"];
+    assert_eq!(read_witness["operation"], "reset");
+    assert_eq!(read_witness["allowance"], "startup");
+    assert_eq!(read_witness["budget_ms"], 100);
+    assert_eq!(read_witness["phase"], "wait_response");
+    assert_eq!(read_witness["writer_produced"], "flushed");
+    assert_eq!(read_witness["writer_completion_received"], true);
+    assert_eq!(read_witness["reader_produced"]["status"], "available");
+    assert!(read_witness["reader_produced"]["last_event"].is_null());
+    assert!(read_witness["reader_received_ordinal"].is_null());
+    assert!(read_witness["reader_correlated_ordinal"].is_null());
+    assert_eq!(read_witness["child_status"]["status"], "running");
+    assert_eq!(read_witness["remaining_ms"], 0);
+    assert!(read_witness["elapsed_ms"].as_u64().unwrap() >= 100);
+    let request_id = read_witness["request_id"].as_str().unwrap();
+    assert_eq!(request_id.len(), 32);
+    assert!(request_id.bytes().all(|b| b.is_ascii_hexdigit()));
+    let request_bytes = serde_json::to_vec(&json!({"id": request_id, "op": "reset"}))
+        .unwrap()
+        .len()
+        + 1;
+    assert_eq!(read_witness["request_bytes"], request_bytes);
+    let total_ms = read_witness["elapsed_ms"].as_u64().unwrap();
+    assert!(read_witness["phase_elapsed_ms"].as_u64().unwrap() <= total_ms);
+    let produced_ms = read_witness["writer_completed_at_session_ms"]
+        .as_u64()
+        .unwrap();
+    let received_ms = read_witness["writer_received_at_session_ms"]
+        .as_u64()
+        .unwrap();
+    let captured_ms = read_witness["captured_at_session_ms"].as_u64().unwrap();
+    assert!(produced_ms <= received_ms && received_ms <= captured_ms);
+    let child_pid = read_witness["child_pid"].as_i64().unwrap();
+    assert!(child_pid > 0);
+    assert_process_stopped(child_pid);
+
+    let mut write_session = AppSession::spawn(&python_config(
+        &fixture(),
+        "timeout_write",
+        Duration::from_millis(500),
+    ))
+    .unwrap();
+    write_session.reset().unwrap();
+    let argument_marker = "EXCHANGE_ARGUMENT_SECRET_MARKER";
+    let payload = json!(format!("{argument_marker}{}", "x".repeat(8 * 1024 * 1024)));
+    let write_start = Instant::now();
+    let write_error = write_session
+        .call(&Call {
+            action: "EXCHANGE_ACTION_SECRET_MARKER".into(),
+            args: vec![payload],
+        })
+        .unwrap_err();
+    assert_eq!(write_error.code, "APP_TIMEOUT");
+    assert!(write_start.elapsed() < Duration::from_millis(1500));
+    let encoded = serde_json::to_string(&write_error).unwrap();
+    assert!(!encoded.contains(argument_marker));
+    assert!(!encoded.contains("EXCHANGE_ACTION_SECRET_MARKER"));
+    assert!(encoded.len() < 2048);
+    let write_json: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+    let write_witness = &write_json["exchange_witness"];
+    assert_eq!(write_witness["operation"], "call");
+    assert_eq!(write_witness["allowance"], "response");
+    assert_eq!(write_witness["budget_ms"], 500);
+    assert_eq!(write_witness["phase"], "wait_write");
+    assert!(matches!(
+        write_witness["writer_produced"].as_str(),
+        Some("queued" | "writing")
+    ));
+    assert_eq!(write_witness["writer_completion_received"], false);
+    assert!(write_witness["request_bytes"].as_u64().unwrap() > 8 * 1024 * 1024);
+    assert_eq!(write_witness["reader_produced"]["last_event"]["ordinal"], 1);
+    assert_eq!(
+        write_witness["reader_produced"]["last_event"]["kind"],
+        "line"
+    );
+    assert!(write_witness["reader_received_ordinal"].is_null());
+    assert!(write_witness["reader_correlated_ordinal"].is_null());
+    assert_eq!(write_witness["child_status"]["status"], "running");
+    assert_eq!(write_witness["remaining_ms"], 0);
+    assert_process_stopped(write_witness["child_pid"].as_i64().unwrap());
+}
+
+#[test]
+fn drop_and_protocol_errors_release_the_isolated_directory() {
+    let schema = vec![field("cwd", Type::String), field("calls", Type::Int)];
+    let config = python_config(&fixture(), "normal", Duration::from_millis(100));
+    let mut session = AppSession::spawn(&config).unwrap();
+    session.reset().unwrap();
+    let directory = PathBuf::from(session.observe(&schema).unwrap()["cwd"].as_str().unwrap());
+    drop(session);
+    assert!(!directory.exists());
+
+    let mut session = AppSession::spawn(&config).unwrap();
+    session.reset().unwrap();
+    let directory = PathBuf::from(session.observe(&schema).unwrap()["cwd"].as_str().unwrap());
+    let error = session
+        .call(&Call {
+            action: "hang".into(),
+            args: vec![],
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "APP_TIMEOUT");
+    assert!(!directory.exists());
+    let before_drop = serde_json::to_value(&error).unwrap();
+    drop(session);
+    assert_eq!(serde_json::to_value(&error).unwrap(), before_drop);
+    assert_eq!(
+        before_drop["exchange_witness"]["child_status"]["status"],
+        "running"
+    );
+    assert!(!directory.exists());
+}
+
+const TEMP_PROBE: &str = "import json\nimport os\nimport sys\nfor line in sys.stdin:\n    request = json.loads(line)\n    if request[\"op\"] == \"observe\":\n        result = {name.lower(): os.environ.get(name, \"\") for name in (\"TMP\", \"TEMP\", \"TMPDIR\")}\n        result[\"cwd\"] = os.getcwd()\n    else:\n        result = {\"ok\": True}\n    print(json.dumps({\"id\": request[\"id\"], \"result\": result}), flush=True)\n";
+
+#[test]
+fn a_session_under_a_run_directory_keeps_its_temporary_folder_inside_its_own_directory() {
+    let scratch = tempfile::TempDir::new().unwrap();
+    let script = inline_app(scratch.path(), TEMP_PROBE);
+    let runs = scratch.path().join("run");
+    let schema: Vec<Field> = ["cwd", "tmp", "temp", "tmpdir"]
+        .into_iter()
+        .map(|name| field(name, Type::String))
+        .collect();
+    let config = python_config(&script, "probe", Duration::from_secs(1));
+    let mut session = AppSession::spawn_under(&config, &runs).unwrap();
+    let mut directories = Vec::new();
+    for _ in 0..2 {
+        session.reset().unwrap();
+        let state = session.observe(&schema).unwrap();
+        let cwd = PathBuf::from(state["cwd"].as_str().unwrap());
+        let temp = PathBuf::from(state["tmp"].as_str().unwrap());
+        assert_eq!(cwd.parent(), Some(runs.as_path()), "{state}");
+        assert!(temp.starts_with(&cwd) && temp != cwd, "{state}");
+        assert!(temp.is_dir(), "{state}");
+        assert_eq!(state["temp"], state["tmp"]);
+        assert_eq!(state["tmpdir"], state["tmp"]);
+        directories.push(cwd);
+    }
+    assert_ne!(directories[0], directories[1]);
+    drop(session);
+    assert_eq!(std::fs::read_dir(&runs).unwrap().count(), 0);
+}
+
+fn inline_app(directory: &Path, source: &str) -> PathBuf {
+    let script = directory.join("app.py");
+    std::fs::write(&script, source).unwrap();
+    script
+}
+
+const SLOW_CRASH: &str = "import json\nimport os\nimport sys\nimport time\nfirst = json.loads(sys.stdin.readline())\nprint(json.dumps({\"id\": first[\"id\"], \"result\": {\"ok\": True}}), flush=True)\nsys.stdin.readline()\nsys.stdout.close()\nos.close(1)\ntime.sleep(0.3)\nsys.exit(3)\n";
+
+#[test]
+fn an_application_that_closes_stdout_then_exits_unsuccessfully_later_is_a_crash() {
+    let scratch = tempfile::TempDir::new().unwrap();
+    let script = inline_app(scratch.path(), SLOW_CRASH);
+    let config = python_config(&script, "crash", Duration::from_secs(5));
+    let mut session = AppSession::spawn(&config).unwrap();
+    session.reset().unwrap();
+    let error = session
+        .call(&Call {
+            action: "increment".into(),
+            args: vec![],
+        })
+        .unwrap_err();
+    assert_eq!(error.code, "APP_CRASH");
+}
+
+#[test]
+fn adapter_json_cannot_supply_trusted_exchange_witness() {
+    let mut session = AppSession::spawn(&python_config(
+        &fixture(),
+        "spoof_witness",
+        Duration::from_secs(1),
+    ))
+    .unwrap();
+    let error = session.reset().unwrap_err();
+    assert_eq!(error.code, "APP_PROTOCOL");
+    let value = serde_json::to_value(error).unwrap();
+    assert!(value.get("exchange_witness").is_none());
+    assert!(!value.to_string().contains("ADAPTER_SPOOF_SECRET_MARKER"));
+}
+
+#[test]
+fn hello_and_todo_examples_exercise_real_application_behavior() {
+    let hello = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/hello/app.py");
+    let mut hello_session =
+        AppSession::spawn(&python_config(&hello, "", Duration::from_secs(1))).unwrap();
+    hello_session.reset().unwrap();
+    hello_session
+        .call(&Call {
+            action: "start".into(),
+            args: vec![],
+        })
+        .unwrap();
+    assert_eq!(
+        hello_session
+            .observe(&[field("stdout", Type::String)])
+            .unwrap(),
+        json!({"stdout": "Hello, world!"})
+    );
+    hello_session.finish().unwrap();
+
+    let mut todo_session =
+        AppSession::spawn(&python_config(&todo_app(), "", Duration::from_secs(1))).unwrap();
+    todo_session.reset().unwrap();
+    todo_session
+        .call(&Call {
+            action: "add".into(),
+            args: vec![json!("")],
+        })
+        .unwrap();
+    todo_session
+        .call(&Call {
+            action: "add".into(),
+            args: vec![json!("milk")],
+        })
+        .unwrap();
+    todo_session
+        .call(&Call {
+            action: "add".into(),
+            args: vec![json!("milk")],
+        })
+        .unwrap();
+    todo_session
+        .call(&Call {
+            action: "complete".into(),
+            args: vec![json!(999)],
+        })
+        .unwrap();
+    todo_session
+        .call(&Call {
+            action: "complete".into(),
+            args: vec![json!(1)],
+        })
+        .unwrap();
+    todo_session
+        .call(&Call {
+            action: "remove".into(),
+            args: vec![json!(999)],
+        })
+        .unwrap();
+    todo_session
+        .call(&Call {
+            action: "remove".into(),
+            args: vec![json!(2)],
+        })
+        .unwrap();
+    todo_session.restart().unwrap();
+
+    assert_eq!(
+        todo_session.observe(&todo_schema()).unwrap(),
+        json!({"todos": [{"id": 1, "text": "milk", "done": true}]})
+    );
+    todo_session.finish().unwrap();
+}

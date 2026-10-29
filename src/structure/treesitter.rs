@@ -143,6 +143,10 @@ impl Facts {
     }
 }
 
+pub(super) fn line_suffix(line: usize) -> String {
+    format!(" (line {line})")
+}
+
 pub fn inspect_module<F>(module: &ModuleDecl, language: &Language, scan: F) -> ModuleFacts
 where
     F: FnOnce(&str, &Tree) -> Facts,
@@ -173,7 +177,7 @@ where
         let lines = LineIndex::new(&source);
         facts.error = Some(match first_error(&tree.root_node(), &source, &lines) {
             Some((message, 0)) => message,
-            Some((message, line)) => format!("{message} (line {line})"),
+            Some((message, line)) => format!("{message}{}", line_suffix(line)),
             None => "syntax error".to_owned(),
         });
         return facts;

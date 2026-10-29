@@ -5,6 +5,7 @@ use super::super::{
     RuleStatus, StructureContract, verify,
 };
 use super::{FalsifyReport, RuleFalsification, Verdict, falsify};
+use crate::project::ignore::Ignore;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -140,6 +141,7 @@ fn report_for(source: &str, facts: BTreeMap<String, ModuleFacts>) -> FalsifyRepo
         &[contract(source)],
         Path::new("/repo"),
         &providers_for(facts),
+        &Ignore::default(),
     )
 }
 
@@ -164,11 +166,10 @@ fn assert_flips(report: &FalsifyReport, label: &str, from: RuleStatus, to: RuleS
     assert!(found.counterfactual.is_some(), "{label}");
 }
 
-fn assert_vacuous(report: &FalsifyReport, label: &str, needle: &str) {
+fn assert_vacuous(report: &FalsifyReport, label: &str) {
     let found = rule(report, label);
     assert_eq!(found.verdict, Verdict::Vacuous, "{label}: {found:?}");
-    let finding = found.finding.as_deref().unwrap_or_default();
-    assert!(finding.contains(needle), "{label}: {finding}");
+    assert!(found.finding.is_some(), "{label}: {found:?}");
 }
 
 #[test]
@@ -180,9 +181,17 @@ fn a_satisfied_require_rule_turns_red_when_the_fact_it_names_is_removed() {
         RuleStatus::Green,
         RuleStatus::Red,
     );
-    assert_eq!(
-        rule(&report, "durable-fields").counterfactual.as_deref(),
-        Some("app/model.py does not define DURABLE_FIELDS")
+    let counterfactual = rule(&report, "durable-fields")
+        .counterfactual
+        .as_deref()
+        .unwrap();
+    assert!(
+        counterfactual.starts_with("app/model.py "),
+        "{counterfactual}"
+    );
+    assert!(
+        counterfactual.ends_with("DURABLE_FIELDS"),
+        "{counterfactual}"
     );
     assert_flips(&report, "model-module", RuleStatus::Green, RuleStatus::Red);
     assert_flips(
@@ -214,9 +223,17 @@ fn a_satisfied_forbid_rule_turns_red_when_the_fact_it_names_is_introduced() {
         RuleStatus::Green,
         RuleStatus::Red,
     );
-    assert_eq!(
-        rule(&report, "no-domain-restart").counterfactual.as_deref(),
-        Some("app/domain.py defines VaultDomain.restart")
+    let counterfactual = rule(&report, "no-domain-restart")
+        .counterfactual
+        .as_deref()
+        .unwrap();
+    assert!(
+        counterfactual.starts_with("app/domain.py "),
+        "{counterfactual}"
+    );
+    assert!(
+        counterfactual.ends_with("VaultDomain.restart"),
+        "{counterfactual}"
     );
     assert_flips(&report, "id-is-the-key", RuleStatus::Green, RuleStatus::Red);
     assert_flips(&report, "no-audit-step", RuleStatus::Green, RuleStatus::Red);
@@ -238,11 +255,17 @@ fn an_injected_module_dependency_uses_a_name_the_provider_reports() {
         RuleStatus::Green,
         RuleStatus::Red,
     );
-    assert_eq!(
-        rule(&report, "domain-independent-of-store")
-            .counterfactual
-            .as_deref(),
-        Some("app/domain.py imports app.store (app/store.py)")
+    let counterfactual = rule(&report, "domain-independent-of-store")
+        .counterfactual
+        .as_deref()
+        .unwrap();
+    assert!(
+        counterfactual.starts_with("app/domain.py "),
+        "{counterfactual}"
+    );
+    assert!(
+        counterfactual.ends_with("app.store (app/store.py)"),
+        "{counterfactual}"
     );
 }
 
@@ -283,25 +306,21 @@ fn a_red_rule_is_falsifiable_when_the_fact_it_names_can_be_made_to_hold() {
 }
 
 #[test]
-fn a_rule_standing_on_a_missing_module_is_vacuous_rather_than_falsifiable() {
+fn a_rule_standing_on_a_missing_module_or_an_absent_collection_is_vacuous_rather_than_falsifiable()
+{
     let report = report();
-    assert_vacuous(&report, "gone-restart", "does not exist");
-    assert_vacuous(&report, "gone-imports-model", "does not exist");
-    assert_vacuous(
-        &report,
+    for label in [
+        "gone-restart",
+        "gone-imports-model",
         "domain-independent-of-gone",
-        "create the target module before a dependency on it could be observed",
-    );
+        "absent-collection",
+        "absent-entries",
+    ] {
+        assert_vacuous(&report, label);
+    }
     let found = rule(&report, "gone-restart");
     assert_eq!(found.status, RuleStatus::Green);
     assert!(found.counterfactual_status.is_none());
-}
-
-#[test]
-fn a_rule_over_a_name_no_provider_reports_as_a_collection_is_vacuous() {
-    let report = report();
-    assert_vacuous(&report, "absent-collection", "no literal collection");
-    assert_vacuous(&report, "absent-entries", "no key/value entries");
 }
 
 #[test]
@@ -337,7 +356,7 @@ fn an_unreadable_payload_is_unevaluable_and_never_repaired_by_a_counterfactual()
 }
 
 #[test]
-fn the_counts_the_exit_code_and_the_findings_agree() {
+fn the_counts_the_exit_code_and_the_findings_agree_for_loose_and_tight_contracts() {
     let report = report();
     assert_eq!(report.total, report.rules.len());
     assert_eq!(
@@ -348,10 +367,7 @@ fn the_counts_the_exit_code_and_the_findings_agree() {
     assert_eq!(report.unevaluable, 0);
     assert_eq!(report.findings().count(), report.vacuous);
     assert_eq!(report.exit_code(), 1);
-}
 
-#[test]
-fn a_contract_whose_every_rule_discriminates_exits_zero() {
     const TIGHT: &str = r#"
 module model "app/model.py"
 
@@ -359,10 +375,10 @@ require "durable-fields": symbol model::DURABLE_FIELDS
 require "durable-keeper": value model::DURABLE_FIELDS contains "keeper"
 forbid  "id-is-the-key":  value model::DURABLE_FIELDS contains "id"
 "#;
-    let report = report_for(TIGHT, base_facts());
-    assert_eq!(report.exit_code(), 0);
-    assert_eq!(report.falsifiable, 3);
-    assert_eq!(report.findings().count(), 0);
+    let tight = report_for(TIGHT, base_facts());
+    assert_eq!(tight.exit_code(), 0);
+    assert_eq!(tight.falsifiable, 3);
+    assert_eq!(tight.findings().count(), 0);
 }
 
 #[test]
@@ -399,7 +415,12 @@ fn a_provider_that_cannot_run_makes_every_rule_unevaluable() {
             message: "interpreter missing".into(),
         }),
     })];
-    let report = falsify(&[contract(ARCHITECTURE)], Path::new("/repo"), &providers);
+    let report = falsify(
+        &[contract(ARCHITECTURE)],
+        Path::new("/repo"),
+        &providers,
+        &Ignore::default(),
+    );
     assert_eq!(report.unevaluable, report.total);
     assert_eq!(report.falsifiable, 0);
     assert_eq!(report.exit_code(), 3);

@@ -102,3 +102,165 @@ goal "expert-loop-demonstrated-in-real-work" {
     expect ["contract::expert", "contract::expert-seams", "contract::assignment", "contract::gate", "contract::schedule"]
     state "active"
 }
+
+goal "bounded-results-preserve-integration-truth" {
+    serves ["proportionate-verification", "bounded-workers-free-planners", "truthful-over-convenient"]
+    statement "An explicit orchestrator decision may accept a current bounded task result after a prior canonical GREEN has only implementation drift, while live structure remains GREEN. Every other task, recursive review, model, finding, confirmation, vacuity and evidence blocker remains binding. Recheck task revision and verification eligibility before recording. Persist the limited basis, leave project verification stale, and keep ordinary CLOSE unchanged. This decision neither proves changed paths unrelated nor marks any goal complete. Concurrent filesystem atomicity is not claimed."
+    expect ["bounded-results::bounded-acceptance-requires-explicit-owner-reason", "bounded-results::bounded-acceptance-requires-qualified-prior-green", "bounded-results::bounded-acceptance-keeps-every-other-blocker", "bounded-results::recording-rechecks-task-and-verification-eligibility", "bounded-results::bounded-acceptance-records-its-limited-basis", "bounded-results::bounded-acceptance-never-refreshes-project-verification", "bounded-results::bounded-acceptance-does-not-complete-the-project", "bounded-results::ordinary-close-still-needs-current-project-verification"]
+    state "active"
+}
+
+
+goal "declared-task-roles-retain-authority" {
+    serves ["truthful-over-convenient", "bounded-workers-free-planners"]
+    statement "A task in a project with declared roles must name a registered role, so a typo cannot silently remove its model policy and required lenses. Refuse an unknown role before creating a task record. An unreadable or invalid registered process also refuses before writes; bootstrap means no process registration or a valid process with zero roles. Keep explicit role-free bootstrap usable, and preserve current declared-role behavior. Historical malformed assignments require an explicit accountable correction rather than retroactive invented authority."
+    expect ["task-role-resolution::configured-project-refuses-unknown-role", "task-role-resolution::broken-registered-process-never-becomes-bootstrap", "task-role-resolution::registered-role-remains-usable", "task-role-resolution::explicit-role-free-bootstrap-remains-supported"]
+    state "active"
+}
+
+goal "unshipped-process-surface-is-cut" {
+    serves ["disclosure-over-dumping", "steering-cost-over-token-cost"]
+    statement "The task commands and record fields the 0.11 dogfooding round added but never released are removed: phase logging, delivery obligations and reviews, intent disposition, goal reflection and their receipt refresh, the hand-back metadata batch, the Linux-only read-only tree walk and every reader of older record formats. Each need they served returns in the smaller shape another 0.12 goal names."
+    expect ["surface::no-phase-logging", "surface::no-delivery-obligations", "surface::no-delivery-reviews", "surface::no-intent-dispositions", "surface::no-goal-reflection", "surface::no-read-only-tree-baseline"]
+    state "active"
+}
+
+goal "the-task-lifecycle-is-one-table" {
+    serves ["truthful-over-convenient", "disclosure-over-dumping"]
+    statement "Task states, the commands that move a task between them and the obligations that guard each move are one table. Challenge, hand-back, close and the routes task show prints all read it; no state, route or obligation is a free string or a positional index."
+    expect ["lifecycle-table::task-states-are-one-enum", "lifecycle-table::transitions-are-one-table", "lifecycle-table::a-transition-names-its-guards", "lifecycle-table::challenges-come-from-one-detector-table", "lifecycle-table::no-positional-class-names", "task-machine::a-task-is-in-one-lifecycle-state", "task-machine::a-refused-command-changes-no-record", "task-machine::accept-resumes-every-live-state", "task-machine::accept-is-refused-once-a-task-ends", "task-machine::an-accepted-task-blocks", "task-machine::block-is-refused-outside-accepted", "task-machine::only-an-accepted-task-becomes-ready", "task-machine::ready-needs-current-passing-evidence", "task-machine::only-a-ready-task-closes", "task-machine::open-findings-block-close", "task-machine::withdraw-ends-every-live-task", "task-machine::an-ended-task-cannot-be-withdrawn"]
+    state "active"
+}
+
+goal "a-goal-outcome-is-claimed-at-hand-back" {
+    serves ["truthful-over-convenient", "bounded-workers-free-planners"]
+    statement "A task that serves a goal hands back with an outcome: delivered, partial, blocked or not-applicable. Partial or blocked leaves a residual finding that does not block close and stays visible after it until resolved, so a closed task never hides an undelivered outcome."
+    expect ["task-machine::a-goal-task-needs-an-outcome", "task-machine::an-outcome-without-a-goal-is-refused", "task-machine::an-unknown-outcome-is-refused", "task-machine::a-partial-or-blocked-outcome-leaves-a-residual", "task-machine::a-delivered-outcome-leaves-no-residual", "task-machine::residuals-survive-close"]
+    state "active"
+}
+
+goal "affected-intent-is-claimed-when-asked" {
+    serves ["truthful-over-convenient", "disclosure-over-dumping"]
+    statement "A task opened with --intent hands back with one claim per intent it touches, updated or unchanged: each system whose paths its write scope falls in and the goal it serves. Without the flag nothing is asked."
+    expect ["task-machine::an-intent-task-needs-its-claims", "task-machine::intent-claims-are-recorded-with-ready"]
+    state "active"
+}
+
+goal "read-only-results-close-on-every-platform" {
+    serves ["proportionate-verification", "truthful-over-convenient"]
+    statement "A task with an empty write scope closes without a fresh project run while the tree matches its opening snapshot, on every platform. A change since opening needs a current GREEN run, as every other close does."
+    expect ["task-machine::an-empty-scope-task-closes-against-its-opening-snapshot", "task-machine::a-changed-tree-needs-a-green-run", "task-machine::a-change-after-opening-is-seen"]
+    state "active"
+}
+
+goal "executed-evidence-survives-resume" {
+    serves ["proportionate-verification", "truthful-over-convenient"]
+    statement "Evidence BlaBla executed with task evidence --run stays current across re-acceptance while the check and its inputs are unchanged, and a changed input stales it; a review's evidence counts only in its current acceptance, because its inputs do not cover the target it reviews. An exit code given with --exit is recorded and shown as claimed, never as executed."
+    expect ["task-machine::run-records-executed-evidence", "task-machine::an-exit-code-is-recorded-as-claimed", "task-machine::a-changed-input-stales-evidence", "task-machine::executed-evidence-survives-reacceptance"]
+    state "active"
+}
+
+goal "one-check-form" {
+    serves ["disclosure-over-dumping", "steering-cost-over-token-cost"]
+    statement "A task declares its check one way, as a program and its arguments: task open --check PROG ARGS. The separate --check-argv flag and the shell-string form are gone, and using --check-argv gets an error that names --check."
+    expect ["surface::one-check-form"]
+    state "active"
+}
+
+goal "hand-back-records-in-one-step" {
+    serves ["steering-cost-over-token-cost"]
+    statement "task ready takes the hand-back's lens assessments and notes and records them with the readiness in one atomic write, through the same code as task lens and task note. A refused ready records none of them."
+    expect ["task-machine::ready-records-its-lens-assessments-atomically"]
+    state "active"
+}
+
+goal "effort-is-read-from-records" {
+    serves ["proportionate-verification", "truthful-over-convenient"]
+    statement "task budget reports time per task phase from timestamps the records already hold and from executed run durations. Workers log nothing extra, missing data is reported as unknown and the view writes nothing."
+    expect ["task-machine::budget-is-read-only"]
+    state "active"
+}
+
+goal "role-models-name-families" {
+    serves ["steering-cost-over-token-cost", "bounded-workers-free-planners"]
+    statement "A role's model list may name a family with a trailing *, such as sonnet-* or opus-*, which admits every model whose id or alias target starts with the text before the *. An exact name such as qwen3.5:9b still admits only that model."
+    expect ["task-machine::a-model-family-admits-its-members", "task-machine::an-exact-model-admits-only-itself"]
+    state "active"
+}
+
+goal "task-views-agree-with-challenge" {
+    serves ["truthful-over-convenient", "disclosure-over-dumping"]
+    statement "task show reports each changed path through the same attribution challenge uses, as this task's, another named task's or unknown; scope paths are shown in their on-disk spelling; and challenge without a task name reports the project-wide challenges with their evidence instead of picking an open task. challenge --json lists every unattributed path, not only the first, and task show --json carries the task's grounded challenge classes without recording a receipt."
+    expect ["task-machine::show-and-challenge-attribute-every-path-alike", "task-machine::scope-paths-keep-their-spelling", "task-machine::an-unnamed-challenge-reports-the-project"]
+    state "active"
+}
+
+goal "scope-can-be-released" {
+    serves ["steering-cost-over-token-cost", "truthful-over-convenient"]
+    statement "The orchestrator releases a path from a live task's write scope with task scope NAME --remove PATH, so another task can take it without a withdrawal. A path, or any file under a directory, that changed since the task opened stays in the scope and the command is refused, because the task owns that change. task reconcile-withdrawal takes several paths in one call."
+    expect ["task-machine::an-unchanged-path-leaves-the-scope", "task-machine::a-changed-path-stays-in-the-scope"]
+    state "active"
+}
+
+goal "structure-rules-can-limit-file-size" {
+    serves ["disclosure-over-dumping", "truthful-over-convenient"]
+    statement "A structure rule can bound a declared module's line count, read by every provider through the shared harness, so a file-size limit is an executable rule rather than a review comment."
+    expect ["lifecycle-table::task-cli-files-stay-under-800-lines"]
+    state "active"
+}
+
+goal "campaigns-scale-with-contracts" {
+    serves ["proportionate-verification", "truthful-over-convenient"]
+    statement "finish runs one campaign per independent behavior group, composing only groups that share state or actions, each with a seed derived from the profile seed and the group, and reports one aggregated result. The profile's cases per campaign form one pool, and each campaign's ceiling is its share of that pool by the obligations it owns, rounded up to whole cases, so no group runs below its exact proportional share. A campaign runs at least one case and stops once it has run twice the actions its full coverage took, so finish stays near its composed time instead of multiplying with the number of groups. An action that changes another campaign's state is a coupling error, never a silent pass. Adding a contract no larger than the average group never shrinks another campaign's ceiling, and a ceiling too small for a witness shows as YELLOW, never as a pass; bounded-results and task-machine are active and GREEN under it."
+    expect ["contract::bounded-results", "contract::task-machine"]
+    state "active"
+}
+
+goal "finish-stays-under-a-minute" {
+    serves ["proportionate-verification", "truthful-over-convenient"]
+    statement "finish spends under 60 seconds on behavior verification at the canonical profile on the development machine, down from 137.5 seconds, while task-machine drives the real CLI. The canonical profile pools 8 cases of 64 actions per campaign and shares the pool by the obligations each campaign owns, a larger total budget than 0.11's single campaign of 8 cases of 512 actions; every campaign reaches full coverage inside its ceiling, and a witness that needs a longer case shows YELLOW, never GREEN. The source CLI bridge builds the CLI into a project-local cache keyed by its source and build environment, shares the file between identical images, checks inputs and executable by content when a case starts and ends, and by size and modification time on each call. Independent campaigns run in parallel and are reported in campaign order, so seeds and results equal a serial run; the verify profile's jobs field sets how many run at once, 2 by default."
+    expect ["contract::bounded-results", "contract::task-role-resolution", "contract::task-machine"]
+    state "active"
+}
+
+goal "runs-stay-inside-the-project" {
+    serves ["truthful-over-convenient"]
+    statement "run and finish start the application in a private directory under the project's .blabla folder, with its temporary directory pointed there, instead of the system temporary folder, so a run leaves nothing outside the project and its leftovers are visible. That directory is outside every task snapshot and the implementation fingerprint, so a run never shows as a change to a task or makes verification stale. run and finish fingerprint the implementation before and after the campaigns; when it changed during the run they record nothing and exit with an error that names the changed paths, so a GREEN result always describes one tree."
+    expect ["contract::bounded-results", "contract::task-role-resolution"]
+    state "active"
+}
+
+goal "bridge-components-are-one-registry" {
+    serves ["disclosure-over-dumping"]
+    statement "The structure adapter drives every contract component through one registry with one reset, call and observe shape, so adding or removing a component is one line."
+    expect ["lifecycle-table::bridge-components-share-one-shape"]
+    state "active"
+}
+
+goal "task-cli-is-split-by-command" {
+    serves ["disclosure-over-dumping"]
+    statement "Each task command lives in its own module under src/cli/task/, execute dispatches each command group in one line, the repeated JSON-or-text rendering goes through one helper, and no file the task CLI owns exceeds 800 lines."
+    expect ["contract::workflow", "lifecycle-table::task-cli-files-stay-under-800-lines"]
+    state "active"
+}
+
+goal "docs-describe-0-12-in-plain-words" {
+    serves ["disclosure-over-dumping", "truthful-over-convenient"]
+    statement "agent-workflow.md, the skill and the guides describe only the 0.12 surface, each shorter than its 0.11 version, and command output states its authority in one line instead of repeated disclaimer paragraphs. By default status lists live tasks and counts the rest, task show groups withdrawal reconciliations by successor, task open and show print no readiness summary or trailing task-model paragraph, and task show --json carries run internals only with --verbose. finish and status name a standing challenge with its path count and the command that lists the paths, and task freshness prints only changed members unless --verbose. A refused task ready names the guard that refused it, such as a missing current challenge receipt, instead of generic blocker guidance. AGENTS.md says that a worker whose change needs an orchestrator record while the tree does not compile records a block at its next compiling state and stops, because BlaBla's own commands run from source, and that a lane whose check includes the source CLI tests takes its final evidence while no other lane edits src, because those tests refuse a source tree that changes under them. docs/project.md describes the jobs profile field, the .blabla/run directory and BLA-RUN-INPUTS-CHANGED. The guides say that project memory holds only this project's rules, that each draft contract serves one task so promoting it never turns another wave RED, and a verification record written by an older BlaBla says to run finish. The release notes say 0.12 was built and dogfooded on a real project."
+    expect ["contract::onboarding", "schedule::docs-links-resolve", "schedule::versions-agree"]
+    state "active"
+}
+
+goal "repository-holds-only-what-is-used" {
+    serves ["disclosure-over-dumping"]
+    statement "A file stays in the tree only when a tracked document links it or a gate or test runs it: REPORT.md, the research gate and the frozen gate_v04 and gate_v05 scripts leave, while the linked research package and 0.10 design notes stay. The gate structure contract describes the live product gate, CONTRIBUTING describes the single test target and the current gates, and system memory states each responsibility in one sentence."
+    expect ["schedule::docs-links-resolve"]
+    state "active"
+}
+
+goal "tests-prove-behavior-not-wording" {
+    serves ["proportionate-verification", "truthful-over-convenient"]
+    statement "BlaBla's tests keep what proves behavior: redundant tests, tests pinned to output wording and in-test runs of the full canonical campaign that blabla finish already runs go. Line and branch coverage measured with cargo llvm-cov before and after the trim does not drop, and the whole suite runs at least ten times faster than the 486 seconds cargo nextest run took when 0.12 work began."
+    expect ["contract::assignment", "contract::evaluator"]
+    state "active"
+}

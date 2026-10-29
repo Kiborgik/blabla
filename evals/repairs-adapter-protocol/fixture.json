@@ -9,7 +9,7 @@
     {"run": ["blabla", "task", "open", "fix-app-protocol", "--role", "worker",
              "--statement", "Running the application under its adapter stops with an application protocol error before any behavior is checked. Make the adapter protocol run correctly; the application, the adapter module, the store and the contracts stay as they are.",
              "--scope", "widget", "--scope", "widget.json",
-             "--input", "app.py", "--input", "widget", "--check", "python3 checks/restart.py"]}
+             "--input", "app.py", "--input", "widget", "--check", "python3", "checks/restart.py"]}
   ],
   "observations": ["syntax", "finish", "persistence", "challenge:fix-app-protocol"]
 }

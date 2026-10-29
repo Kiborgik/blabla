@@ -1,1 +1,1 @@
-Owner objectives. Each expectation judges only its named rule or contract against the current project view, never the whole goal statement. Goal state is an owner declaration, not recorded outcome-review evidence; a goal never decides completion.
+Owner objectives; each expectation judges only its named rule or contract, and a goal never decides completion.

@@ -51,10 +51,10 @@ require "challenge-exit-code":      symbol skeptic::ChallengeReport.exit_code
 require "challenge-evidence-seam":  symbol skeptic::Evidence
 require "challenge-states-limits":  symbol skeptic::LIMITS
 require "challenge-names-authority": symbol skeptic::AUTHORITY
-require "challenge-grounds-on-a-task":   value skeptic::CLASSES contains "unresolved-finding"
-require "challenge-grounds-on-deliverables": value skeptic::CLASSES contains "deliverable-unchanged"
-require "challenge-grounds-on-write-scope":  value skeptic::CLASSES contains "scope-breach"
-require "challenge-grounds-on-falsification": value skeptic::CLASSES contains "vacuous-rule"
+require "challenge-grounds-on-a-task":   symbol skeptic::Class.UnresolvedFinding
+require "challenge-grounds-on-deliverables": symbol skeptic::Class.DeliverableUnchanged
+require "challenge-grounds-on-write-scope":  symbol skeptic::Class.ScopeBreach
+require "challenge-grounds-on-falsification": symbol skeptic::Class.VacuousRule
 
 require "bounded-task":             symbol task::Task
 require "task-declares-deliverables": symbol task::Deliverable

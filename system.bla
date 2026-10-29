@@ -3,6 +3,11 @@ system "cli" {
     paths ["src/main.rs", "src/lib.rs", "src/cli/"]
 }
 
+responsibility "record-check-before-opt-in-failure-status" {
+    owner "cli"
+    statement "task evidence --run --fail-on-check exits 1 only after the check's real nonzero outcome is recorded; every other failure keeps its own status, and the option changes neither readiness nor completion."
+}
+
 system "project" {
     purpose "Compose a manifest's contracts into one project, fingerprint the implementation, and decide staleness and completion."
     paths ["src/project/"]
@@ -28,7 +33,7 @@ system "behavior-verify" {
 
 system "adapter" {
     purpose "Drive the application under test across the trust boundary: process, protocol, isolation and containment."
-    paths ["src/application.rs", "src/runtime/"]
+    paths ["src/application.rs", "src/runtime/", "bridge/source_cli.rs", "bridge/structure_adapter.rs"]
 }
 
 system "memory" {
@@ -119,6 +124,18 @@ responsibility "decide-structure-rule" {
 responsibility "execute-the-application" {
     owner "adapter"
     statement "Start, drive, restart and contain the process under test, and isolate each case's working directory."
+}
+
+responsibility "own-case-local-verified-images" {
+    owner "adapter"
+    statement "The canonical structure adapter keeps one verified executable image per source and build environment in the target directory's source-cli cache, shares the file between identical images and removes only entries built from other sources."
+}
+
+seam "case-owned-source-cli-images" {
+    between ["adapter", "cli"]
+    value "verified executable image"
+    statement "Where an image is cached decides who removes it, never whether it may run: source provenance and image verification do not depend on the cache entry."
+    moves_with ["bridge/source_cli.rs", "bridge/structure_adapter.rs", "project.bla", "tests/it/source_cli_transport.rs"]
 }
 
 responsibility "generate-behavior-cases" {

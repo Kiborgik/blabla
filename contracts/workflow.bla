@@ -1,8 +1,20 @@
 module task     "src/project/task.rs"
-module clitask  "src/cli/task.rs"
+module clitask  "src/cli/task/mod.rs"
+module opening  "src/cli/task/opening.rs"
+module handling "src/cli/task/lifecycle.rs"
+module closing  "src/cli/task/closing.rs"
+module amending "src/cli/task/scope.rs"
+module lensing  "src/cli/task/lenses.rs"
+module recording "src/cli/task/recording.rs"
+module receipts "src/cli/task/receipts.rs"
+module showing  "src/cli/task/showing.rs"
+module storage  "src/cli/task/storage.rs"
 module project  "src/project/mod.rs"
+module processmemory "src/memory/process.rs"
+module taskmodels "src/project/task/models.rs"
 module skeptic  "src/skeptic.rs"
 module recovery "src/cli/recovery.rs"
+module machine  "src/project/task/machine.rs"
 
 require "an-assignment-resolves-what-binds-it": symbol task::Resolution
 require "resolution-names-the-permitted-models": symbol task::Resolution.models
@@ -10,7 +22,7 @@ require "resolution-names-the-consulted-lenses": symbol task::Resolution.lenses
 require "resolution-names-the-binding-requirements": symbol task::Resolution.requirements
 require "resolution-names-the-verification-tier": symbol task::Resolution.verification
 require "every-role-resolves-the-same-way": symbol task::resolve
-require "task-show-prints-the-latest-evidence": symbol clitask::write_evidence
+require "task-show-prints-the-latest-evidence": symbol receipts::write_evidence
 
 require "assignment-acceptance-is-recorded": symbol task::Task.accepted
 require "result-acceptance-is-separate":     symbol task::Task.result
@@ -27,50 +39,53 @@ require "evidence-names-its-check":               symbol task::Evidence.check
 require "evidence-carries-its-outcome":           symbol task::Evidence.exit
 require "evidence-is-bound-to-the-source-it-saw": symbol task::Evidence.tree
 require "evidence-names-the-tool-that-saw-it":    symbol task::Evidence.tool
-require "stale-evidence-is-distinguished":        symbol task::stale
+require "stale-evidence-is-distinguished":        symbol task::Readiness.current
 require "evidence-names-the-inputs-it-saw":      symbol task::Evidence.inputs
 
 require "a-change-is-attributed-or-left-unknown": symbol task::Attribution
-require "attribution-has-a-readable-vocabulary":  symbol task::ATTRIBUTIONS
-require "a-change-can-be-attributed-to-the-task": value task::ATTRIBUTIONS contains "task"
-require "a-change-can-be-known-concurrent":       value task::ATTRIBUTIONS contains "concurrent"
-require "a-change-can-be-of-unknown-origin":      value task::ATTRIBUTIONS contains "unknown"
+require "attribution-has-a-readable-vocabulary":  symbol task::AttributionKind.word
+require "a-change-can-be-attributed-to-the-task": symbol task::AttributionKind.Task
+require "a-change-can-be-known-concurrent":       symbol task::AttributionKind.Concurrent
+require "a-change-can-be-of-unknown-origin":      symbol task::AttributionKind.Unknown
 require "attribution-is-decided-once":            symbol task::attribute
 require "an-attribution-is-bound-to-what-it-saw": symbol task::Attribution.digest
 
-require "task-states-are-a-readable-vocabulary": symbol task::STATES
-require "a-task-can-be-accepted":         value task::STATES contains "accepted"
-require "a-task-can-be-blocked":          value task::STATES contains "blocked"
-require "a-task-can-be-ready-for-review": value task::STATES contains "ready"
-require "a-task-can-be-closed":           value task::STATES contains "closed"
-require "invalid-transitions-are-refused": symbol task::transition
+require "task-states-are-a-readable-vocabulary": symbol machine::TaskState
+require "a-task-can-be-accepted":         symbol machine::TaskState.Accepted
+require "a-task-can-be-blocked":          symbol machine::TaskState.Blocked
+require "a-task-can-be-ready-for-review": symbol machine::TaskState.Ready
+require "a-task-can-be-closed":           symbol machine::TaskState.Closed
+require "invalid-transitions-are-refused": symbol machine::TRANSITIONS
 
-require "the-task-view-resolves-what-binds-it": symbol clitask::resolved
+require "the-task-view-resolves-what-binds-it": symbol showing::resolved
 require "one-resolution-path-serves-the-view-and-acceptance": symbol task::resolve
 
-require "opening-a-task-cannot-replace-a-live-one": symbol clitask::open
+require "opening-a-task-cannot-replace-a-live-one": symbol opening::open_with
 require "a-live-record-is-not-replaceable":          symbol task::replaceable
-require "a-lost-obligation-can-be-owed-again":       symbol clitask::owe
-require "accept-assignment-command": symbol clitask::accept
-require "accept-result-command":     symbol clitask::close
-require "blocked-command":           symbol clitask::block
-require "ready-for-review-command":  symbol clitask::ready
-require "lens-assessment-command":   symbol clitask::lens
-require "model-exception-command":   symbol clitask::propose_model
-require "attribution-command":       symbol clitask::attribute
-require "check-result-command":      symbol clitask::evidence
-require "declared-check-command":    symbol clitask::declare_check
+require "a-lost-obligation-can-be-owed-again":       symbol amending::owe
+require "accept-assignment-command": symbol handling::accept
+require "accept-result-command":     symbol closing::close
+require "blocked-command":           symbol handling::block
+require "ready-for-review-command":  symbol handling::ready_with
+require "lens-assessment-command":   symbol lensing::lens
+require "model-exception-command":   symbol lensing::propose_model
+require "attribution-command":       symbol lensing::attribute
+require "check-result-command":      symbol recording::evidence
+require "declared-check-command":    symbol amending::declare_check
 
-require "challenge-grounds-on-unaccepted-work":     value skeptic::CLASSES contains "work-without-acceptance"
-require "challenge-grounds-on-model-policy":        value skeptic::CLASSES contains "model-outside-role-policy"
-require "challenge-grounds-on-an-open-exception":   value skeptic::CLASSES contains "exception-unresolved"
-require "challenge-grounds-on-an-unassessed-lens":  value skeptic::CLASSES contains "lens-unassessed"
-require "challenge-grounds-on-unsupported-readiness": value skeptic::CLASSES contains "readiness-without-evidence"
-require "challenge-grounds-on-stale-evidence":        value skeptic::CLASSES contains "evidence-superseded"
-require "challenge-grounds-on-unknown-attribution":   value skeptic::CLASSES contains "attribution-unknown"
-require "challenge-grounds-on-a-failing-check":       value skeptic::CLASSES contains "declared-check-failed"
+require "challenge-grounds-on-unaccepted-work":     symbol skeptic::Class.WorkWithoutAcceptance
+require "challenge-grounds-on-model-policy":        symbol skeptic::Class.ModelOutsideRolePolicy
+require "challenge-grounds-on-an-open-exception":   symbol skeptic::Class.ExceptionUnresolved
+require "challenge-grounds-on-an-unassessed-lens":  symbol skeptic::Class.LensUnassessed
+require "challenge-grounds-on-unsupported-readiness": symbol skeptic::Class.ReadinessWithoutEvidence
+require "challenge-grounds-on-stale-evidence":        symbol skeptic::Class.EvidenceSuperseded
+require "challenge-grounds-on-unknown-attribution":   symbol skeptic::Class.AttributionUnknown
+require "challenge-grounds-on-a-failing-check":       symbol skeptic::Class.DeclaredCheckFailed
 require "a-closed-record-is-not-amended":             symbol clitask::mutate
-require "a-record-is-created-rather-than-amended":    symbol clitask::create
+require "a-record-is-created-rather-than-amended":    symbol storage::create
+
+forbid "process-memory-stays-below-tasks":        dependency processmemory -> task
+forbid "the-model-rule-lives-in-process-memory":  dependency processmemory -> taskmodels
 
 require "scratch-is-named":                      symbol task::SCRATCH_DIRECTORY
 require "task-metadata-is-outside-the-snapshot": value project::SKIPPED_DIRECTORIES contains ".blabla"
@@ -89,3 +104,7 @@ require "a-recovery-build-refuses-verification":     value recovery::WITHHELD co
 require "a-recovery-build-refuses-structure-checks": value recovery::WITHHELD contains "check"
 
 forbid "the-task-record-stays-below-the-cli": dependency task -> clitask
+
+require "handback-recovery-shares-authoritative-diagnostics": symbol handling::handback_recovery
+
+require "check-amendment-input-binding-is-explicit": symbol amending::amended_check_inputs

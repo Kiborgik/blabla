@@ -9,37 +9,33 @@ Stable Rust (edition 2024) with `rustfmt` and `clippy`, [cargo-nextest](https://
 ```sh
 git clone https://github.com/Kiborgik/blabla.git
 cd blabla
-cargo run --release --quiet --bin blabla -- status
+cargo run --quiet --bin blabla -- status
 ```
 
 Read [AGENTS.md](AGENTS.md) first. In this repository, always run current source through Cargo.
 
 ## Checks
 
-Run the focused checks for what you changed. The full gate belongs to the orchestrator.
+Run the focused checks for what you changed. The full gate belongs to the orchestrator. Every integration test lives in one test target, `it` (`tests/it/`); select a module with a filter.
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --release --all-targets -- -D warnings
-cargo nextest run --test TEST_NAME
+cargo clippy --all-targets -- -D warnings
+cargo nextest run -E "binary(it) & test(/^MODULE::/)"
 python -m unittest discover -s experiments -p 'test_CHANGED_BOUNDARY.py'
 python experiments/render_diagrams.py --check
 ```
 
-| Gate | Runs |
-| --- | --- |
-| `python experiments/gate.py --tag local` | the product gate: lint, tests, adapters, current-source bridge, composed `finish`, examples, public-tree audit, markdown links, version agreement, diagram hashes |
-| `python experiments/research_gate.py` | opt-in stress tests and frozen research reproductions |
-| `experiments/gate_v04.py`, `gate_v05.py` | frozen old releases; never retarget them |
+`python experiments/gate.py --tag local` is the product gate: format, lint, every Rust test, the gate's own and the adapters' Python tests, the current-source bridge, the composed `finish`, the examples, the public-tree audit, markdown links, version agreement and diagram hashes.
 
 [CI](.github/workflows/ci.yml) runs the product gate and the Hello check on Linux and Windows. A GREEN from an earlier commit does not cover later edits; report any stage you did not run.
 
 ## Who tests what
 
-- **Rust tests**: language semantics, authority, policy and task states. Behavior in `src/syntax`, `src/semantics`, `src/ir`, `src/verify`, end-to-end in `tests/`. Structure verdicts in `src/structure/tests.rs`, providers in `tests/structure*.rs`: cover GREEN, RED and ERROR, and prove no project code runs
+- **Rust tests**: language semantics, authority, policy and task states. Behavior in `src/syntax`, `src/semantics`, `src/ir`, `src/verify`, end-to-end in `tests/it/`. Structure verdicts in `src/structure/tests.rs`, providers in `tests/it/structure*.rs`: cover GREEN, RED and ERROR, and prove no project code runs
 - **Python tests**: the expert adapters; language adapters are proven by the example `finish` runs
 - **Bridge tests**: the bridge's translation to Rust
-- **Product gate**: runs the composed self-hosted campaign once. To diagnose one contract alone, build `cargo build --release --quiet --example structure-adapter`, then `cargo run --release --quiet --bin blabla -- run contracts/questions.bla --cases 8 --steps 512 --timeout-ms 5000 -- target/release/examples/structure-adapter`
+- **Product gate**: runs the composed self-hosted campaign once. To diagnose one contract alone, build `cargo build --quiet --example structure-adapter`, then `cargo run --quiet --bin blabla -- run contracts/questions.bla --cases 8 --steps 512 --timeout-ms 5000 -- target/debug/examples/structure-adapter`
 
 ## Rules
 

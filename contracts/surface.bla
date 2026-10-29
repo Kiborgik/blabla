@@ -1,0 +1,9 @@
+module task "src/project/task.rs"
+
+forbid "no-phase-logging":           symbol task::Task.work_intervals
+forbid "no-delivery-obligations":    symbol task::Task.delivery_obligations
+forbid "no-delivery-reviews":        symbol task::Task.delivery_reviews
+forbid "no-intent-dispositions":     symbol task::Task.intent_dispositions
+forbid "no-goal-reflection":         symbol task::Task.goal_reflection
+forbid "no-read-only-tree-baseline": symbol task::Task.readonly_baseline
+forbid "one-check-form":             symbol task::Task.check_argv

@@ -40,7 +40,8 @@
         "--deliverable",
         "widget/model.py",
         "--check",
-        "blabla status"
+        "blabla",
+        "status"
       ]
     },
     {

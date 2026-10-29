@@ -6,6 +6,7 @@ use crate::expert::calibration::{
 use crate::expert::native::{self, NativePlan};
 use crate::expert::policy::PolicySettings;
 use crate::expert::trace::{self, RuntimeConfig};
+use crate::project::task::machine::TaskState;
 use crate::project::{self, Project, task};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::collections::BTreeSet;
@@ -81,7 +82,10 @@ pub fn task_current(project: &Project, task_id: &str, epoch: u64) -> Result<task
     let current = task::read(&project.manifest.root, name)
         .map_err(|_| Error::Io)?
         .ok_or(Refusal::IdentityMismatch)?;
-    require(current.state == "accepted", Refusal::TaskNotAccepted)?;
+    require(
+        current.state == TaskState::Accepted,
+        Refusal::TaskNotAccepted,
+    )?;
     require(
         epoch > 0 && epoch == current.acceptance_epoch,
         Refusal::EpochMismatch,
@@ -109,7 +113,7 @@ pub fn approval(project: &Project, approval: &Approval) -> Result<(), Error> {
         .map_err(|_| Error::Io)?
         .ok_or(Refusal::IdentityMismatch)?;
     require(
-        issuer.state == "accepted"
+        issuer.state == TaskState::Accepted
             && issuer.role.trim_start_matches("role::") == task::ORCHESTRATOR_ROLE
             && task::carrier(&issuer) == Some(approval.issuer_model.as_str()),
         Refusal::PermitMismatch,

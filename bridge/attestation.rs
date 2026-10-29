@@ -1,4 +1,6 @@
+use super::component::Component;
 use blabla::project::status::CompletionState;
+use blabla::project::task::machine::{self, Command, Facts};
 use blabla::project::task::{self, Evidence, Opening, Task};
 use blabla::skeptic::{self, Evidence as Grounds};
 use blabla::structure::falsify::FalsifyReport;
@@ -40,7 +42,7 @@ impl Attestation {
                 statement: "a probe whose orchestrator records are attested, not proven".to_owned(),
                 scope: vec!["src".to_owned()],
                 deliverables: vec![DELIVERABLE.to_owned()],
-                check: Some(CHECK.to_owned()),
+                check: Some(vec![CHECK.to_owned()]),
                 ..Default::default()
             },
             0,
@@ -61,8 +63,10 @@ impl Attestation {
         self.clock += 1;
         self.clock
     }
+}
 
-    pub fn call(&mut self, name: &str) -> bool {
+impl Component for Attestation {
+    fn call(&mut self, name: &str, _args: &Value) -> Option<Result<(), String>> {
         match name {
             "take_the_task" => self.take(),
             "assign_the_task_to_the_orchestrator" => self.assign_to_orchestrator(),
@@ -87,13 +91,30 @@ impl Attestation {
                 }
             }
             "try_to_close_the_carried_task" => self.close(),
-            _ => return false,
+            _ => return None,
         }
-        true
+        Some(Ok(()))
     }
 
+    fn observe(&self, _observed: &Value) -> Value {
+        json!({
+            "carried": task::carrier(&self.task).is_some(),
+            "orchestrator_role": self.task.role == task::ORCHESTRATOR_ROLE,
+            "records_during_carry": self.task.recorded_during_carry().count(),
+            "unconfirmed_during_carry": self.task.unconfirmed_during_carry().count(),
+            "carry_closed": !self.task.open(),
+            "carry_close_refused": self.close_refused,
+            "confirm_refused": self.confirm_refused,
+            "attestation_standing": super::standing(&self.report()),
+        })
+    }
+}
+
+impl Attestation {
     fn take(&mut self) {
-        if self.task.open() && task::apply(&mut self.task, "accepted") {
+        if self.task.open()
+            && machine::fire(&mut self.task, Command::Accept, &Facts::record_only()).is_ok()
+        {
             let unix = self.tick();
             task::record_acceptance(
                 &mut self.task,
@@ -137,6 +158,8 @@ impl Attestation {
         self.tree
             .insert(DELIVERABLE.to_owned(), format!("deliverable-{unix}"));
         self.task.evidence.push(Evidence {
+            member_manifest: None,
+            reuse: None,
             identity: task::declared_check(&self.task),
             acceptance_epoch: Some(self.task.acceptance_epoch),
             check: CHECK.to_owned(),
@@ -151,7 +174,8 @@ impl Attestation {
         let blockers = self.report().assignment_blockers().len();
         task::record_challenge(&mut self.task, &self.tree, blockers, unix);
         let blockers = self.report().assignment_blockers().len();
-        let _ = task::mark_ready(&mut self.task, &self.tree, blockers);
+        let request = task::HandbackRequest::standing(blockers);
+        let _ = task::hand_back(&mut self.task, &self.tree, request);
     }
 
     fn close(&mut self) {
@@ -189,33 +213,15 @@ impl Attestation {
             other_tasks: &[],
         })
     }
-
-    pub fn observe(&self) -> Value {
-        let standing: Vec<Value> = self
-            .report()
-            .grounded
-            .iter()
-            .map(|class| json!({ "class": class }))
-            .collect();
-        json!({
-            "carried": task::carrier(&self.task).is_some(),
-            "orchestrator_role": self.task.role == task::ORCHESTRATOR_ROLE,
-            "records_during_carry": self.task.recorded_during_carry().count(),
-            "unconfirmed_during_carry": self.task.unconfirmed_during_carry().count(),
-            "carry_closed": !self.task.open(),
-            "carry_close_refused": self.close_refused,
-            "confirm_refused": self.confirm_refused,
-            "attestation_standing": standing,
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blabla::project::task::machine::TaskState;
 
     fn standing(attestation: &Attestation) -> Vec<String> {
-        attestation.observe()["attestation_standing"]
+        attestation.observe(&Value::Null)["attestation_standing"]
             .as_array()
             .unwrap()
             .iter()
@@ -226,29 +232,29 @@ mod tests {
     #[test]
     fn a_record_made_while_carried_stands_after_hand_back_and_holds_the_close_until_confirmed() {
         let mut attestation = Attestation::new();
-        attestation.call("take_the_task");
-        attestation.call("record_an_orchestrator_verb_while_carried");
-        attestation.call("hand_the_task_back");
-        let observed = attestation.observe();
+        attestation.call("take_the_task", &Value::Null);
+        attestation.call("record_an_orchestrator_verb_while_carried", &Value::Null);
+        attestation.call("hand_the_task_back", &Value::Null);
+        let observed = attestation.observe(&Value::Null);
         assert_eq!(observed["carried"], false, "{observed}");
         assert_eq!(observed["records_during_carry"], 1, "{observed}");
         assert_eq!(observed["unconfirmed_during_carry"], 1, "{observed}");
-        assert_eq!(attestation.task.state, "ready");
+        assert_eq!(attestation.task.state, TaskState::Ready);
         assert_eq!(
             standing(&attestation),
             vec!["orchestrator-record-during-carry".to_owned()]
         );
-        attestation.call("try_to_close_the_carried_task");
-        let observed = attestation.observe();
+        attestation.call("try_to_close_the_carried_task", &Value::Null);
+        let observed = attestation.observe(&Value::Null);
         assert_eq!(observed["carry_close_refused"], true, "{observed}");
         assert_eq!(observed["carry_closed"], false, "{observed}");
-        attestation.call("confirm_the_records_made_during_carry");
-        let observed = attestation.observe();
+        attestation.call("confirm_the_records_made_during_carry", &Value::Null);
+        let observed = attestation.observe(&Value::Null);
         assert_eq!(observed["unconfirmed_during_carry"], 0, "{observed}");
         assert_eq!(observed["records_during_carry"], 1, "{observed}");
         assert!(standing(&attestation).is_empty());
-        attestation.call("try_to_close_the_carried_task");
-        let observed = attestation.observe();
+        attestation.call("try_to_close_the_carried_task", &Value::Null);
+        let observed = attestation.observe(&Value::Null);
         assert_eq!(observed["carry_close_refused"], false, "{observed}");
         assert_eq!(observed["carry_closed"], true, "{observed}");
     }
@@ -256,43 +262,47 @@ mod tests {
     #[test]
     fn the_carrier_cannot_confirm_records_from_its_own_carry() {
         let mut attestation = Attestation::new();
-        attestation.call("take_the_task");
-        attestation.call("record_an_orchestrator_verb_while_carried");
-        attestation.call("confirm_while_the_task_is_carried");
-        let observed = attestation.observe();
+        attestation.call("take_the_task", &Value::Null);
+        attestation.call("record_an_orchestrator_verb_while_carried", &Value::Null);
+        attestation.call("confirm_while_the_task_is_carried", &Value::Null);
+        let observed = attestation.observe(&Value::Null);
         assert_eq!(observed["confirm_refused"], true, "{observed}");
         assert_eq!(observed["carried"], true, "{observed}");
         assert_eq!(observed["unconfirmed_during_carry"], 1, "{observed}");
-        attestation.call("confirm_the_records_made_during_carry");
-        let observed = attestation.observe();
+        attestation.call("confirm_the_records_made_during_carry", &Value::Null);
+        let observed = attestation.observe(&Value::Null);
         assert_eq!(observed["confirm_refused"], false, "{observed}");
         assert_eq!(observed["carried"], false, "{observed}");
         assert_eq!(observed["unconfirmed_during_carry"], 0, "{observed}");
-        assert_eq!(attestation.task.state, "ready");
+        assert_eq!(attestation.task.state, TaskState::Ready);
     }
 
     #[test]
     fn a_record_made_while_nobody_carries_the_task_is_kept_but_not_listed() {
         let mut attestation = Attestation::new();
-        attestation.call("record_an_orchestrator_verb_while_not_carried");
-        attestation.call("take_the_task");
-        attestation.call("hand_the_task_back");
-        attestation.call("record_an_orchestrator_verb_while_not_carried");
+        for action in [
+            "record_an_orchestrator_verb_while_not_carried",
+            "take_the_task",
+            "hand_the_task_back",
+            "record_an_orchestrator_verb_while_not_carried",
+        ] {
+            attestation.call(action, &Value::Null);
+        }
         assert_eq!(attestation.task.orchestrator_records.len(), 2);
-        let observed = attestation.observe();
+        let observed = attestation.observe(&Value::Null);
         assert_eq!(observed["records_during_carry"], 0, "{observed}");
         assert!(standing(&attestation).is_empty());
-        attestation.call("try_to_close_the_carried_task");
-        assert_eq!(attestation.observe()["carry_closed"], true);
+        attestation.call("try_to_close_the_carried_task", &Value::Null);
+        assert_eq!(attestation.observe(&Value::Null)["carry_closed"], true);
     }
 
     #[test]
     fn the_orchestrator_carrying_its_own_task_records_no_carry_counts() {
         let mut attestation = Attestation::new();
-        attestation.call("assign_the_task_to_the_orchestrator");
-        attestation.call("take_the_task");
-        attestation.call("record_an_orchestrator_verb_while_carried");
-        let observed = attestation.observe();
+        attestation.call("assign_the_task_to_the_orchestrator", &Value::Null);
+        attestation.call("take_the_task", &Value::Null);
+        attestation.call("record_an_orchestrator_verb_while_carried", &Value::Null);
+        let observed = attestation.observe(&Value::Null);
         assert_eq!(observed["orchestrator_role"], true, "{observed}");
         assert_eq!(observed["carried"], true, "{observed}");
         assert_eq!(observed["records_during_carry"], 0, "{observed}");

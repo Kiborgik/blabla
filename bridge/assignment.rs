@@ -1,4 +1,6 @@
+use super::component::Component;
 use blabla::project::status::CompletionState;
+use blabla::project::task::machine::{self, Command, Facts, TaskState};
 use blabla::project::task::{
     self, Acceptance, Assessment, Attribution, Evidence, Exception, Finding, FindingResolution,
     Note, Task,
@@ -67,7 +69,7 @@ fn opening(role: &str, revision: usize) -> task::Opening {
         statement: "a probe assignment".to_owned(),
         scope: vec!["src".to_owned()],
         deliverables: vec![DELIVERABLE.to_owned()],
-        check: Some(DECLARED_CHECK.to_owned()),
+        check: Some(vec![DECLARED_CHECK.to_owned()]),
         inputs: vec![SHARED_INPUT.to_owned()],
         ..Default::default()
     }
@@ -120,8 +122,12 @@ impl Assignment {
         if self.opened.is_multiple_of(2) {
             return;
         }
-        let blockers = self.assignment_blockers();
-        let _ = task::mark_ready(&mut self.task, &self.tree, blockers);
+        let _ = self.mark_ready();
+    }
+
+    fn mark_ready(&mut self) -> Result<(), task::machine::Refusal> {
+        let request = task::HandbackRequest::standing(self.assignment_blockers());
+        task::hand_back(&mut self.task, &self.tree, request)
     }
 
     fn open_again(&mut self) {
@@ -135,8 +141,7 @@ impl Assignment {
         self.accept_on(PERMITTED);
         self.bump(DELIVERABLE, "deliverable");
         self.reconcile();
-        let blockers = self.assignment_blockers();
-        task::mark_ready(&mut self.task, &self.tree, blockers).expect("reconciled handback");
+        self.mark_ready().expect("reconciled handback");
         let standing = self.standing().len();
         assert!(task::accept_result(
             &mut self.task,
@@ -192,7 +197,7 @@ impl Assignment {
     }
 
     fn accept_on(&mut self, model: &str) {
-        if task::apply(&mut self.task, "accepted") {
+        if machine::fire(&mut self.task, Command::Accept, &Facts::record_only()).is_ok() {
             task::record_acceptance(
                 &mut self.task,
                 &self.tree,
@@ -209,8 +214,10 @@ impl Assignment {
 
     fn record_result(&mut self, check: &str, exit: i32) {
         self.task.evidence.push(Evidence {
-            identity: Some(task::CheckIdentity::Text {
-                command: check.to_owned(),
+            member_manifest: None,
+            reuse: None,
+            identity: Some(task::CheckIdentity::Argv {
+                argv: vec![check.to_owned()],
             }),
             acceptance_epoch: Some(self.task.acceptance_epoch),
             check: check.to_owned(),
@@ -287,14 +294,16 @@ impl Assignment {
         let unknown: Vec<String> = self
             .tree
             .keys()
-            .filter(|path| task::attribute(&self.task, &self.tree, path) == task::ATTRIBUTIONS[2])
+            .filter(|path| {
+                task::attribute(&self.task, &self.tree, path) == task::AttributionKind::Unknown
+            })
             .cloned()
             .collect();
         for path in unknown {
             let digest = self.tree.get(&path).cloned();
             self.task.attributions.push(Attribution {
                 path,
-                kind: task::ATTRIBUTIONS[1].to_owned(),
+                kind: task::AttributionKind::Concurrent.word().to_owned(),
                 digest,
                 model: None,
             });
@@ -361,8 +370,8 @@ impl Assignment {
             }],
             opened_unix: 1,
             opened_tree: opened_tree_before_bump.clone(),
-            state: "closed".to_owned(),
-            check: Some(DECLARED_CHECK.to_owned()),
+            state: TaskState::Closed,
+            check: Some(vec![DECLARED_CHECK.to_owned()]),
             check_inputs: vec!["other".to_owned()],
             accepted: Some(Acceptance {
                 model: PERMITTED.to_owned(),
@@ -375,7 +384,7 @@ impl Assignment {
             }),
             attributions: vec![Attribution {
                 path: CONCURRENT_PATH.to_owned(),
-                kind: task::ATTRIBUTIONS[0].to_owned(),
+                kind: task::AttributionKind::Task.word().to_owned(),
                 digest: Some(digest(&format!("concurrent-{}", revision))),
                 model: None,
             }],
@@ -385,6 +394,8 @@ impl Assignment {
         let evidence_inputs = task::evidence_inputs(&concurrent_task, &self.tree);
 
         concurrent_task.evidence = vec![Evidence {
+            member_manifest: None,
+            reuse: None,
             identity: task::declared_check(&concurrent_task),
             acceptance_epoch: Some(concurrent_task.acceptance_epoch),
             check: DECLARED_CHECK.to_owned(),
@@ -401,7 +412,7 @@ impl Assignment {
         if let Some(path_digest) = self.tree.get(CONCURRENT_PATH) {
             concurrent_task
                 .closed_paths
-                .insert(CONCURRENT_PATH.to_owned(), path_digest.clone());
+                .insert(CONCURRENT_PATH.to_owned(), Some(path_digest.clone()));
         }
         self.other_tasks.push(concurrent_task);
     }
@@ -436,11 +447,13 @@ impl Assignment {
         "address_a_finding_with_an_unapproved_outside_model",
         "note_the_task_while_its_check_runs",
     ];
+}
 
-    pub fn call(&mut self, action: &str) -> bool {
+impl Component for Assignment {
+    fn call(&mut self, action: &str, _args: &Value) -> Option<Result<(), String>> {
         let records = Assignment::RECORDS.contains(&action);
         if records && !self.live() {
-            return true;
+            return Some(Ok(()));
         }
         match action {
             "open_a_task" => self.open(),
@@ -457,6 +470,7 @@ impl Assignment {
                         evidence: "settled inside the task".to_owned(),
                         model: None,
                     }),
+                    residual: false,
                 });
             }
             "widen_the_scope_to_cover_the_breach" => {
@@ -515,8 +529,7 @@ impl Assignment {
                 });
             }
             "mark_ready_for_review" => {
-                let blockers = self.assignment_blockers();
-                let _ = task::mark_ready(&mut self.task, &self.tree, blockers);
+                let _ = self.mark_ready();
             }
             "challenge_the_assignment" => {
                 let blockers = self.assignment_blockers();
@@ -550,7 +563,7 @@ impl Assignment {
                 if self.live() {
                     self.task.attributions.push(Attribution {
                         path: OUTSIDE_SCOPE.to_owned(),
-                        kind: task::ATTRIBUTIONS[1].to_owned(),
+                        kind: task::AttributionKind::Concurrent.word().to_owned(),
                         digest: self.tree.get(OUTSIDE_SCOPE).cloned(),
                         model: None,
                     });
@@ -565,7 +578,7 @@ impl Assignment {
                 if self.live() {
                     self.task.attributions.push(Attribution {
                         path: BREACHED.to_owned(),
-                        kind: task::ATTRIBUTIONS[0].to_owned(),
+                        kind: task::AttributionKind::Task.word().to_owned(),
                         digest: self.tree.get(BREACHED).cloned(),
                         model: None,
                     });
@@ -608,6 +621,8 @@ impl Assignment {
                 task::apply_evidence(
                     &mut self.task,
                     Evidence {
+                        member_manifest: None,
+                        reuse: None,
                         identity: task::declared_check(&copy),
                         acceptance_epoch: Some(copy.acceptance_epoch),
                         check: DECLARED_CHECK.to_owned(),
@@ -621,11 +636,17 @@ impl Assignment {
                     },
                 );
             }
-            _ => return false,
+            _ => return None,
         }
-        true
+        Some(Ok(()))
     }
 
+    fn observe(&self, _observed: &Value) -> Value {
+        self.observation()
+    }
+}
+
+impl Assignment {
     fn address_a_finding(&mut self, model: &str, unix: u64) {
         if self.task.findings.is_empty() {
             let id = self.task.next_finding_id();
@@ -634,6 +655,7 @@ impl Assignment {
                 statement: "finding to address".to_owned(),
                 addressed: None,
                 resolution: None,
+                residual: false,
             });
         }
         let allowed = task::can_address_finding(&self.task, model, &self.resolution.models);
@@ -660,14 +682,15 @@ impl Assignment {
         }
     }
 
-    pub fn observe(&self) -> Value {
+    fn observation(&self) -> Value {
         let readiness = task::readiness(&self.task, &self.tree);
-        let standing: Vec<Value> = self
-            .standing()
-            .into_iter()
-            .map(|class| json!({ "class": class }))
-            .collect();
+        let report = self.report();
+        let standing = super::standing(&report);
+        let headline = report.challenge.as_ref().map(|challenge| {
+            json!({ "class": challenge.class.word(), "statement": challenge.statement })
+        });
         json!({
+            "headline": headline,
             "phase": self.task.state,
             "role": self.task.role,
             "lenses": self.resolution.lenses.iter().map(|id| json!({ "id": id })).collect::<Vec<Value>>(),
@@ -700,29 +723,32 @@ mod tests {
     #[test]
     fn a_bridge_reacceptance_expires_the_prior_workers_lens_credit() {
         let mut assignment = Assignment::new();
-        assignment.call("accept_with_a_permitted_model");
+        assignment.call("accept_with_a_permitted_model", &Value::Null);
         assignment.bump(DELIVERABLE, "current-deliverable");
         assignment.reconcile();
         let epoch = assignment.task.acceptance_epoch;
         assert!(!assignment.report().grounded.contains(&"lens-unassessed"));
         assert_eq!(
-            assignment.observe()["current_assessed"]
+            assignment.observe(&Value::Null)["current_assessed"]
                 .as_array()
                 .unwrap()
                 .len(),
             assignment.resolution.lenses.len()
         );
-        assignment.call("accept_with_a_permitted_model");
+        assignment.call("accept_with_a_permitted_model", &Value::Null);
         assert!(assignment.task.acceptance_epoch > epoch);
         assert!(assignment.report().grounded.contains(&"lens-unassessed"));
         assert!(
-            assignment.observe()["current_assessed"]
+            assignment.observe(&Value::Null)["current_assessed"]
                 .as_array()
                 .unwrap()
                 .is_empty()
         );
         assert_eq!(
-            assignment.observe()["assessed"].as_array().unwrap().len(),
+            assignment.observe(&Value::Null)["assessed"]
+                .as_array()
+                .unwrap()
+                .len(),
             assignment.resolution.lenses.len()
         );
         assignment.record_evidence(DECLARED_CHECK);
@@ -734,7 +760,14 @@ mod tests {
             blockers,
             4
         ));
-        assert!(task::mark_ready(&mut assignment.task, &assignment.tree, blockers).is_err());
+        assert!(
+            task::hand_back(
+                &mut assignment.task,
+                &assignment.tree,
+                task::HandbackRequest::standing(blockers)
+            )
+            .is_err()
+        );
         assignment.reconcile();
         assert!(!assignment.report().grounded.contains(&"lens-unassessed"));
     }
@@ -742,7 +775,7 @@ mod tests {
     #[test]
     fn check_result_bindings_preserve_the_observed_check_and_acceptance() {
         let mut assignment = Assignment::new();
-        assignment.call("accept_with_a_permitted_model");
+        assignment.call("accept_with_a_permitted_model", &Value::Null);
         task::record_acceptance(
             &mut assignment.task,
             &assignment.tree,
@@ -750,7 +783,7 @@ mod tests {
             PERMITTED,
             1,
         );
-        assignment.call("record_a_check_result");
+        assignment.call("record_a_check_result", &Value::Null);
         let evidence = assignment.task.evidence.last().unwrap();
         assert_eq!(evidence.identity, task::declared_check(&assignment.task));
         assert_eq!(
@@ -759,12 +792,12 @@ mod tests {
         );
         assert!(task::evidence_matches(&assignment.task, evidence));
         assignment.task.evidence.clear();
-        assignment.call("record_a_result_for_a_different_check");
+        assignment.call("record_a_result_for_a_different_check", &Value::Null);
         let evidence = assignment.task.evidence.last().unwrap();
         assert_eq!(
             evidence.identity,
-            Some(task::CheckIdentity::Text {
-                command: OTHER_CHECK.to_owned()
+            Some(task::CheckIdentity::Argv {
+                argv: vec![OTHER_CHECK.to_owned()]
             })
         );
         assert_eq!(
@@ -777,24 +810,32 @@ mod tests {
     #[test]
     fn resumed_work_exercises_both_guarded_handback_and_result_acceptance() {
         let mut assignment = Assignment::new();
-        assignment.call("resume_a_task_already_under_way");
-        assert_eq!(assignment.observe()["phase"], "accepted");
-        assignment.call("mark_ready_for_review");
-        assert_eq!(assignment.observe()["phase"], "ready");
-        assignment.call("accept_the_result");
-        assert_eq!(assignment.observe()["closed"], true);
-        assignment.call("resume_a_task_already_under_way");
-        assert_eq!(assignment.observe()["phase"], "ready");
-        assignment.call("change_the_source_after_a_check");
-        assignment.call("accept_the_result");
-        assert_eq!(assignment.observe()["closed"], false);
+        assignment.call("resume_a_task_already_under_way", &Value::Null);
+        assert_eq!(assignment.observe(&Value::Null)["phase"], "accepted");
+        assignment.call("mark_ready_for_review", &Value::Null);
+        assert_eq!(assignment.observe(&Value::Null)["phase"], "ready");
+        assignment.call("accept_the_result", &Value::Null);
+        assert_eq!(assignment.observe(&Value::Null)["closed"], true);
+        assignment.call("resume_a_task_already_under_way", &Value::Null);
+        assert_eq!(assignment.observe(&Value::Null)["phase"], "ready");
+        assignment.call("change_the_source_after_a_check", &Value::Null);
+        assignment.call("accept_the_result", &Value::Null);
+        assert_eq!(assignment.observe(&Value::Null)["closed"], false);
+    }
+
+    fn closed_after_a_concurrent_change() -> Assignment {
+        let mut assignment = Assignment::new();
+        assignment.call(
+            "resume_a_closed_task_after_a_concurrent_change",
+            &Value::Null,
+        );
+        assignment
     }
 
     #[test]
     fn closed_history_reports_later_changes_without_absorbing_a_scope_breach() {
-        let mut assignment = Assignment::new();
-        assignment.call("resume_a_closed_task_after_a_concurrent_change");
-        let observed = assignment.observe();
+        let assignment = closed_after_a_concurrent_change();
+        let observed = assignment.observe(&Value::Null);
         assert_eq!(observed["closed"], true);
         assert_eq!(observed["result_accepted"], true);
         let standing = observed["standing"].as_array().unwrap();
@@ -808,16 +849,15 @@ mod tests {
 
     #[test]
     fn a_closed_task_takes_no_address_and_no_note() {
-        let mut assignment = Assignment::new();
-        assignment.call("resume_a_closed_task_after_a_concurrent_change");
-        assert_eq!(assignment.observe()["closed"], true);
+        let mut assignment = closed_after_a_concurrent_change();
+        assert_eq!(assignment.observe(&Value::Null)["closed"], true);
         let before = serde_json::to_value(&assignment.task).unwrap();
         for action in [
             "address_a_finding_under_an_approved_exception",
             "address_a_finding_with_an_unapproved_outside_model",
             "note_the_task_while_its_check_runs",
         ] {
-            assert!(assignment.call(action));
+            assert!(assignment.call(action, &Value::Null).is_some());
             assert_eq!(serde_json::to_value(&assignment.task).unwrap(), before);
         }
     }
@@ -825,24 +865,30 @@ mod tests {
     #[test]
     fn an_approved_model_the_task_was_not_accepted_on_is_refused() {
         let mut assignment = Assignment::new();
-        assignment.call("accept_with_a_permitted_model");
-        assignment.call("propose_an_outside_policy_model");
-        assignment.call("approve_the_proposed_model");
+        assignment.call("accept_with_a_permitted_model", &Value::Null);
+        assignment.call("propose_an_outside_policy_model", &Value::Null);
+        assignment.call("approve_the_proposed_model", &Value::Null);
         assignment.address_a_finding(OUTSIDE_POLICY, 6);
-        assert_eq!(assignment.observe()["exception_approved"], true);
-        assert_eq!(assignment.observe()["address_refused"], true);
+        assert_eq!(assignment.observe(&Value::Null)["exception_approved"], true);
+        assert_eq!(assignment.observe(&Value::Null)["address_refused"], true);
         assert!(assignment.task.findings[0].addressed.is_none());
-        assignment.call("address_a_finding_under_an_approved_exception");
-        assert_eq!(assignment.observe()["address_refused"], false);
+        assignment.call(
+            "address_a_finding_under_an_approved_exception",
+            &Value::Null,
+        );
+        assert_eq!(assignment.observe(&Value::Null)["address_refused"], false);
         assert!(assignment.task.findings[0].addressed.is_some());
     }
 
     #[test]
     fn a_refused_address_leaves_the_finding_standing() {
         let mut assignment = Assignment::new();
-        assignment.call("accept_with_a_permitted_model");
-        assignment.call("address_a_finding_with_an_unapproved_outside_model");
-        let observed = assignment.observe();
+        assignment.call("accept_with_a_permitted_model", &Value::Null);
+        assignment.call(
+            "address_a_finding_with_an_unapproved_outside_model",
+            &Value::Null,
+        );
+        let observed = assignment.observe(&Value::Null);
         assert_eq!(observed["address_refused"], true);
         assert!(assignment.task.findings[0].addressed.is_none());
         assert!(

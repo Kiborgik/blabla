@@ -1,6 +1,13 @@
-use super::{ATTRIBUTIONS, Task, attribute, covers, declared_check, evidence_inputs};
+use super::{AttributionKind, Task, attribute, covers, declared_check, evidence_inputs};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+pub const FRESHNESS_LIMITS: [&str; 4] = [
+    "Fingerprint equality does not prove semantic equivalence.",
+    "Assignment field history is unavailable. Review digests include composite receipt context.",
+    "Child differences are tracking-set differences; unreadable and ignored members may be absent, and large-file hashes may be metadata-only.",
+    "Check children use validated evidence-input-manifest baselines; review receipts require digest-matched opening trees. Counts include changed roots beyond the presentation cap. No receipt is refreshed or target repinned.",
+];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -62,7 +69,7 @@ pub fn relevant_revision(
                     .deliverables
                     .iter()
                     .any(|deliverable| covers(&deliverable.path, path))
-                || attribute(task, tree, path) != ATTRIBUTIONS[1]
+                || attribute(task, tree, path) != AttributionKind::Concurrent
         })
         .map(|(path, digest)| (path.clone(), digest.clone()))
         .collect();

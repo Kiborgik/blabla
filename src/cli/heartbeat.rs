@@ -23,11 +23,14 @@ impl<W: Write> Heartbeat<W> {
         }
     }
 
-    pub fn header(&mut self, structure: &str, behavior: &str) {
-        let _ = writeln!(
-            self.output,
+    fn header_text(structure: &str, behavior: &str) -> String {
+        format!(
             "BlaBla finish\n\nCOMPLETION GATE: VERIFYING\n\nStructure:\n  {structure}\n\nBehavior:\n  {behavior}"
-        );
+        )
+    }
+
+    pub fn header(&mut self, structure: &str, behavior: &str) {
+        let _ = writeln!(self.output, "{}", Self::header_text(structure, behavior));
         let _ = self.output.flush();
     }
 
@@ -36,10 +39,7 @@ impl<W: Write> Heartbeat<W> {
         if progress.shrinking {
             if !self.shrinking_announced {
                 self.shrinking_announced = true;
-                self.line(&format!(
-                    "violation found after {} actions; confirming and reducing the counterexample",
-                    progress.actions_executed
-                ));
+                self.line(&Self::violation_line(progress.actions_executed));
             }
             return;
         }
@@ -60,6 +60,12 @@ impl<W: Write> Heartbeat<W> {
         }
         let _ = writeln!(self.output);
         let _ = self.output.flush();
+    }
+
+    fn violation_line(actions_executed: usize) -> String {
+        format!(
+            "violation found after {actions_executed} actions; confirming and reducing the counterexample"
+        )
     }
 
     fn progress_line(progress: &Progress) -> String {
@@ -109,30 +115,21 @@ mod tests {
         );
         heartbeat.finish();
         let text = String::from_utf8(heartbeat.output).unwrap();
-        assert_eq!(
-            text.lines()
-                .filter(|line| line.contains("obligations") || line.contains("violation found"))
-                .count(),
-            5,
-            "{text}"
+        let lines = [
+            Heartbeat::<Vec<u8>>::progress_line(&progress(1, 3, false)),
+            Heartbeat::<Vec<u8>>::progress_line(&progress(4, 6, false)),
+            Heartbeat::<Vec<u8>>::violation_line(6),
+            Heartbeat::<Vec<u8>>::progress_line(&progress(4096, 355, false)),
+            Heartbeat::<Vec<u8>>::progress_line(&progress(4096, 355, false)),
+        ];
+        let expected = format!(
+            "{}\n{}\n",
+            Heartbeat::<Vec<u8>>::header_text("none declared", "starting"),
+            lines
+                .iter()
+                .map(|line| format!("  {line}\n"))
+                .collect::<String>()
         );
-        assert!(
-            text.starts_with("BlaBla finish\n\nCOMPLETION GATE: VERIFYING\n"),
-            "{text}"
-        );
-        assert!(
-            text.contains("  3/355 obligations   1/4096 actions\n"),
-            "{text}"
-        );
-        assert!(!text.contains("4/355 obligations"), "{text}");
-        assert!(
-            text.contains("  6/355 obligations   4/4096 actions\n"),
-            "{text}"
-        );
-        assert!(text.contains("violation found after 6 actions"), "{text}");
-        assert!(
-            text.ends_with("  355/355 obligations   4096/4096 actions\n\n"),
-            "{text}"
-        );
+        assert_eq!(text, expected);
     }
 }

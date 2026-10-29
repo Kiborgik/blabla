@@ -1,10 +1,13 @@
 mod campaign;
+mod campaigns;
 mod corpus;
 mod coverage;
 mod evaluator;
 mod generator;
 #[cfg(test)]
 mod tests;
+
+pub use campaigns::{Campaign, campaign_seed, run_campaigns};
 
 use crate::application::Application;
 use crate::diagnostic::{AppError, Diagnostic, Location, Span};
@@ -64,6 +67,30 @@ pub struct Progress {
 pub fn run_observed<A: Application, F: FnMut() -> Result<A, AppError>>(
     contract: &Contract,
     options: &RunOptions,
+    make_app: F,
+    observer: &mut dyn FnMut(&Progress),
+) -> Result<RunReport, VerifyError> {
+    run_counted(contract, options, Budget::Exhaust, make_app, observer)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Budget {
+    Exhaust,
+    Ceiling,
+}
+
+impl Budget {
+    fn spent(self, actions: usize, floor: usize, full_coverage: Option<usize>) -> bool {
+        self == Budget::Ceiling
+            && actions >= floor
+            && full_coverage.is_some_and(|reached| actions >= reached.saturating_mul(2))
+    }
+}
+
+fn run_counted<A: Application, F: FnMut() -> Result<A, AppError>>(
+    contract: &Contract,
+    options: &RunOptions,
+    budget: Budget,
     mut make_app: F,
     observer: &mut dyn FnMut(&Progress),
 ) -> Result<RunReport, VerifyError> {
@@ -71,6 +98,7 @@ pub fn run_observed<A: Application, F: FnMut() -> Result<A, AppError>>(
     campaign::campaign(
         contract,
         options,
+        budget,
         || {
             make_app().map(|app| CountedApplication {
                 app,
@@ -274,6 +302,7 @@ fn finish_failure<A: Application, F: FnMut() -> Result<A, AppError>>(
                 coverage_summary: Default::default(),
                 metrics: Default::default(),
                 failure: Some(failure),
+                campaigns: Vec::new(),
             })
         }
         Ok(ReplayOutcome::Failure(found)) => {

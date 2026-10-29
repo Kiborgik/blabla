@@ -1,10 +1,11 @@
 use crate::diagnostic::{Diagnostic, Location, Span};
-use crate::ir::{Contract, Type};
+use crate::ir::{Contract, Expr, ExprKind, Predicate, Type};
 use crate::report::{DEFAULT_CASES, DEFAULT_STEPS, DEFAULT_TIMEOUT_MS, MAX_SHRINK_ATTEMPTS};
 use crate::runtime::{MAX_STARTUP, MAX_TIMEOUT, primitives};
 use crate::semantics::{Unit, compile_units};
 use crate::structure::{self, StructureContract, StructureReport, StructureRule};
 use crate::syntax::{self, Lexer, Token, TokenKind};
+use crate::verify::Campaign;
 use crate::voice::{VOICES, Voice};
 use ignore::{Ignore, IgnoreDeclaration};
 use serde::{Deserialize, Serialize};
@@ -14,13 +15,15 @@ use std::path::{Component, Path, PathBuf};
 
 pub mod expert;
 pub mod ignore;
+pub mod inventory;
 pub mod runstate;
 pub mod status;
 pub mod task;
 
 pub const MANIFEST_NAME: &str = "project.bla";
 pub const PROFILE_FIELDS: &str =
-    "command, prepare, seed, cases, steps, timeout_ms, startup_ms, shrink_budget";
+    "command, prepare, seed, cases, steps, timeout_ms, startup_ms, shrink_budget, jobs";
+pub const DEFAULT_JOBS: usize = 2;
 
 const SKIPPED_DIRECTORIES: &[&str] = &[
     ".blabla",
@@ -80,7 +83,7 @@ pub struct MemoryEntry {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Serialize, Deserialize)]
 pub struct Profile {
     pub command: Vec<String>,
     #[serde(default)]
@@ -92,6 +95,47 @@ pub struct Profile {
     #[serde(default)]
     pub startup_ms: Option<u64>,
     pub shrink_budget: usize,
+    #[serde(default = "default_jobs")]
+    pub jobs: usize,
+}
+
+fn default_jobs() -> usize {
+    DEFAULT_JOBS
+}
+
+impl PartialEq for Profile {
+    fn eq(&self, other: &Self) -> bool {
+        let Self {
+            command,
+            prepare,
+            seed,
+            cases,
+            steps,
+            timeout_ms,
+            startup_ms,
+            shrink_budget,
+            jobs: _,
+        } = self;
+        (
+            command,
+            prepare,
+            seed,
+            cases,
+            steps,
+            timeout_ms,
+            startup_ms,
+            shrink_budget,
+        ) == (
+            &other.command,
+            &other.prepare,
+            &other.seed,
+            &other.cases,
+            &other.steps,
+            &other.timeout_ms,
+            &other.startup_ms,
+            &other.shrink_budget,
+        )
+    }
 }
 
 impl Profile {
@@ -217,6 +261,7 @@ pub struct Project {
     pub identity: String,
     pub ignore: Ignore,
     pub shared_state: Vec<SharedState>,
+    pub campaigns: Vec<Campaign>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -802,6 +847,7 @@ impl ManifestParser<'_> {
         let mut steps = None;
         let mut timeout_ms = None;
         let mut shrink_budget = None;
+        let mut jobs = None;
         let close = loop {
             let token = self.current().clone();
             match &token.kind {
@@ -839,6 +885,7 @@ impl ManifestParser<'_> {
                         "shrink_budget" => shrink_budget
                             .replace(self.integer(field, 0, MAX_SHRINK_ATTEMPTS as u64)?)
                             .is_some(),
+                        "jobs" => jobs.replace(self.integer(field, 1, u64::MAX)?).is_some(),
                         other => {
                             return Err(self.error(
                                 token.span,
@@ -891,6 +938,7 @@ impl ManifestParser<'_> {
                 shrink_budget: shrink_budget
                     .map(|value| value as usize)
                     .unwrap_or(MAX_SHRINK_ATTEMPTS),
+                jobs: jobs.map(|value| value as usize).unwrap_or(DEFAULT_JOBS),
             },
             span,
         ))
@@ -1093,6 +1141,10 @@ pub fn load(manifest: Manifest) -> Result<Project, Diagnostic> {
         Some(compile_units(&units)?)
     };
     let shared_state = shared_state(&active, contract.as_ref());
+    let campaigns = contract
+        .as_ref()
+        .map(|contract| campaigns(&active, contract))
+        .unwrap_or_default();
     let drafts = pending_drafts
         .into_iter()
         .map(|pending| match pending {
@@ -1160,6 +1212,7 @@ pub fn load(manifest: Manifest) -> Result<Project, Diagnostic> {
         identity: hasher.finish(),
         ignore,
         shared_state,
+        campaigns,
     })
 }
 
@@ -1187,6 +1240,164 @@ fn shared_state(active: &[Loaded<'_>], contract: Option<&Contract>) -> Vec<Share
             })
         })
         .collect()
+}
+
+const POSTCONDITION_ROOTS: &[usize] = &[0, 2];
+const INVARIANT_ROOTS: &[usize] = &[0];
+
+fn campaigns(active: &[Loaded<'_>], contract: &Contract) -> Vec<Campaign> {
+    let mut state: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    let mut actions: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (unit, loaded) in active.iter().enumerate() {
+        for declaration in &loaded.syntax.declarations {
+            match declaration {
+                syntax::Declaration::State(declared) => {
+                    state.entry(&declared.name).or_default().push(unit)
+                }
+                syntax::Declaration::Action(declared) => {
+                    actions.entry(&declared.name).or_default().push(unit)
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut parent: Vec<usize> = (0..active.len()).collect();
+    for units in state.values().chain(actions.values()) {
+        for &unit in units {
+            join(&mut parent, units[0], unit);
+        }
+    }
+    let owner = |predicate: &Predicate| {
+        active
+            .iter()
+            .position(|loaded| declares(loaded.entry, predicate))
+    };
+    let predicates = contract
+        .actions
+        .iter()
+        .flat_map(|action| {
+            action
+                .postconditions
+                .iter()
+                .map(move |predicate| (predicate, Some(action.name.as_str()), POSTCONDITION_ROOTS))
+        })
+        .chain(
+            contract
+                .invariants
+                .iter()
+                .map(|predicate| (predicate, None, INVARIANT_ROOTS)),
+        );
+    for (predicate, action, roots) in predicates {
+        let mut whole = false;
+        let mut names = BTreeSet::new();
+        state_reads(&predicate.expr, roots, &mut whole, &mut names);
+        let related: Vec<usize> = action
+            .into_iter()
+            .filter_map(|name| actions.get(name))
+            .chain(names.iter().filter_map(|name| state.get(name.as_str())))
+            .flatten()
+            .copied()
+            .collect();
+        match owner(predicate) {
+            Some(declarer) if !whole => related
+                .into_iter()
+                .for_each(|unit| join(&mut parent, declarer, unit)),
+            _ => (0..active.len()).for_each(|unit| join(&mut parent, 0, unit)),
+        }
+    }
+    let mut members: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for unit in 0..active.len() {
+        members.entry(root(&parent, unit)).or_default().push(unit);
+    }
+    members
+        .into_values()
+        .filter_map(|units| {
+            let performed = declared_by(&contract.actions, |action| &action.name, &actions, &units);
+            let invariants: Vec<Predicate> = contract
+                .invariants
+                .iter()
+                .filter(|predicate| owner(predicate).is_none_or(|unit| units.contains(&unit)))
+                .cloned()
+                .collect();
+            if performed.is_empty() && invariants.is_empty() {
+                return None;
+            }
+            let contracts: Vec<String> = units
+                .iter()
+                .map(|&unit| active[unit].entry.group.clone())
+                .collect();
+            let mut sorted = contracts.clone();
+            sorted.sort();
+            let mut hasher = Fnv::new();
+            sorted.iter().for_each(|name| hasher.write_str(name));
+            Some(Campaign {
+                contracts,
+                key: hasher.value(),
+                contract: Contract {
+                    state: declared_by(&contract.state, |field| &field.name, &state, &units),
+                    actions: performed,
+                    invariants,
+                },
+            })
+        })
+        .collect()
+}
+
+fn declared_by<T: Clone>(
+    items: &[T],
+    name: impl Fn(&T) -> &String,
+    declarers: &BTreeMap<&str, Vec<usize>>,
+    units: &[usize],
+) -> Vec<T> {
+    items
+        .iter()
+        .filter(|&item| {
+            declarers
+                .get(name(item).as_str())
+                .is_some_and(|found| found.iter().any(|unit| units.contains(unit)))
+        })
+        .cloned()
+        .collect()
+}
+
+fn state_reads(expr: &Expr, roots: &[usize], whole: &mut bool, names: &mut BTreeSet<String>) {
+    match &expr.kind {
+        ExprKind::Literal(_) => {}
+        ExprKind::Load(slot) => *whole |= roots.contains(slot),
+        ExprKind::Field { base, name } => match base.kind {
+            ExprKind::Load(slot) if roots.contains(&slot) => {
+                names.insert(name.clone());
+            }
+            _ => state_reads(base, roots, whole, names),
+        },
+        ExprKind::Unary { operand, .. } => state_reads(operand, roots, whole, names),
+        ExprKind::Count(inner) => state_reads(inner, roots, whole, names),
+        ExprKind::Binary { left, right, .. }
+        | ExprKind::Query {
+            list: left,
+            body: right,
+            ..
+        } => {
+            state_reads(left, roots, whole, names);
+            state_reads(right, roots, whole, names);
+        }
+    }
+}
+
+fn root(parent: &[usize], mut unit: usize) -> usize {
+    while parent[unit] != unit {
+        unit = parent[unit];
+    }
+    unit
+}
+
+fn join(parent: &mut [usize], left: usize, right: usize) {
+    let (left, right) = (root(parent, left), root(parent, right));
+    parent[left.max(right)] = left.min(right);
+}
+
+fn declares(entry: &Entry, predicate: &Predicate) -> bool {
+    entry.display == predicate.location.file
 }
 
 fn state_type(ty: &Type) -> String {
@@ -1249,7 +1460,7 @@ fn rules(contract: &Contract, manifest: &Manifest) -> Vec<Rule> {
             let group = manifest
                 .entries
                 .iter()
-                .find(|entry| entry.display == predicate.location.file)
+                .find(|entry| declares(entry, predicate))
                 .map(|entry| entry.group.clone())
                 .unwrap_or_default();
             let label = predicate
@@ -1429,10 +1640,11 @@ impl Project {
     }
 
     pub fn verify_structure(&self) -> StructureReport {
-        structure::verify(
+        structure::verify_with(
             &self.structure,
             &self.manifest.root,
             &structure::default_providers(),
+            &self.ignore,
         )
     }
 
@@ -1503,6 +1715,10 @@ impl Fnv {
     pub fn finish(&self) -> String {
         format!("{:016x}", self.0)
     }
+
+    pub fn value(&self) -> u64 {
+        self.0
+    }
 }
 
 impl Default for Fnv {
@@ -1511,27 +1727,110 @@ impl Default for Fnv {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct InputFingerprint {
+    pub fingerprint: String,
+    pub observation: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FingerprintedInput {
+    pub source: String,
+    pub path: String,
+    pub value: InputFingerprint,
+}
+
+pub struct FingerprintObservation {
+    pub fingerprint: String,
+    pub inputs: Vec<FingerprintedInput>,
+}
+
+impl FingerprintObservation {
+    pub fn changed_paths(&self, later: &Self) -> Vec<String> {
+        pair_inputs(&self.inputs, &later.inputs)
+            .into_iter()
+            .filter(|(_, (earlier, now))| earlier != now)
+            .map(|((_, path), _)| path.to_owned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+}
+
+pub type InputPair<'a> = (Option<&'a InputFingerprint>, Option<&'a InputFingerprint>);
+
+pub fn pair_inputs<'a>(
+    earlier: &'a [FingerprintedInput],
+    later: &'a [FingerprintedInput],
+) -> BTreeMap<(&'a str, &'a str), InputPair<'a>> {
+    let mut pairs: BTreeMap<(&'a str, &'a str), InputPair<'a>> = BTreeMap::new();
+    for input in earlier {
+        let key = (input.source.as_str(), input.path.as_str());
+        pairs.entry(key).or_default().0 = Some(&input.value);
+    }
+    for input in later {
+        let key = (input.source.as_str(), input.path.as_str());
+        pairs.entry(key).or_default().1 = Some(&input.value);
+    }
+    pairs
+}
+
 pub fn fingerprint(
     root: &Path,
     extra_files: &[PathBuf],
     excluded: &[PathBuf],
     ignore: &Ignore,
 ) -> String {
+    fingerprint_observation(root, extra_files, excluded, ignore).fingerprint
+}
+
+pub fn fingerprint_observation(
+    root: &Path,
+    extra_files: &[PathBuf],
+    excluded: &[PathBuf],
+    ignore: &Ignore,
+) -> FingerprintObservation {
     let mut hasher = Fnv::new();
+    let mut inputs = BTreeMap::new();
     let excluded: Vec<PathBuf> = excluded.iter().map(|path| normalize(path)).collect();
-    walk(root, root, &excluded, ignore, &mut |visit| match visit {
-        Visit::UnreadableDirectory(name) => {
-            hasher.write_str("unreadable-directory");
-            hasher.write_str(name);
-        }
-        Visit::File(name, path) => hash_file(name, path, &mut hasher),
+    walk(root, root, &excluded, ignore, &mut |visit| {
+        let (source, name, value) = match visit {
+            Visit::UnreadableDirectory(name) => {
+                let mut input = InputHasher::new(&mut hasher);
+                input.write_str("unreadable-directory");
+                input.write_str(name);
+                (
+                    "unreadable-directory",
+                    name,
+                    input.finish("unreadable-directory"),
+                )
+            }
+            Visit::File(name, path) => (
+                "tree-file",
+                name,
+                hash_file_observation(name, path, &mut hasher),
+            ),
+        };
+        inputs.insert((source.to_owned(), name.to_owned()), value);
     });
     for file in extra_files {
         if file.is_file() {
-            hash_file(&file.display().to_string(), file, &mut hasher);
+            let name = file.display().to_string();
+            let value = hash_file_observation(&name, file, &mut hasher);
+            inputs.insert(("command-file".to_owned(), name), value);
         }
     }
-    hasher.finish()
+    FingerprintObservation {
+        fingerprint: hasher.finish(),
+        inputs: inputs
+            .into_iter()
+            .map(|((source, path), value)| FingerprintedInput {
+                source,
+                path,
+                value,
+            })
+            .collect(),
+    }
 }
 
 fn executable_form(candidate: &Path) -> Option<PathBuf> {
@@ -1629,7 +1928,11 @@ impl Project {
     }
 
     pub fn fingerprint(&self, extra_files: &[PathBuf]) -> String {
-        fingerprint(
+        self.fingerprint_observation(extra_files).fingerprint
+    }
+
+    pub fn fingerprint_observation(&self, extra_files: &[PathBuf]) -> FingerprintObservation {
+        fingerprint_observation(
             &self.manifest.root,
             extra_files,
             &self.contract_files(),
@@ -1695,6 +1998,36 @@ pub fn snapshot(root: &Path, ignore: &Ignore) -> BTreeMap<String, String> {
     digests
 }
 
+pub fn command_word(argument: &str) -> String {
+    let plain = !argument.is_empty()
+        && argument
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || "_-./:=,@%+".contains(ch));
+    if plain {
+        argument.to_owned()
+    } else {
+        format!("'{}'", argument.replace('\'', r"'\''"))
+    }
+}
+
+pub fn command_line(argv: &[String]) -> String {
+    argv.iter()
+        .map(|argument| command_word(argument))
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
+pub fn file_names(root: &Path, ignore: &Ignore) -> Vec<String> {
+    let mut names = Vec::new();
+    walk(root, root, &[], ignore, &mut |visit| {
+        if let Visit::File(name, _) = visit {
+            names.push(name.to_owned());
+        }
+    });
+    names.sort();
+    names
+}
+
 pub fn digest_of(root: &Path, relative_path: &str) -> Option<String> {
     let path = root.join(relative_path);
     if !path.is_file() {
@@ -1720,24 +2053,140 @@ fn relative_with_case(root: &Path, path: &Path, case_insensitive: bool) -> Strin
     )
 }
 
+struct InputHasher<'a> {
+    aggregate: &'a mut Fnv,
+    input: Fnv,
+}
+
+impl<'a> InputHasher<'a> {
+    fn new(aggregate: &'a mut Fnv) -> Self {
+        Self {
+            aggregate,
+            input: Fnv::new(),
+        }
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.aggregate.write(bytes);
+        self.input.write(bytes);
+    }
+
+    fn write_str(&mut self, text: &str) {
+        self.write(text.as_bytes());
+        self.write(&[0]);
+    }
+
+    fn finish(self, observation: &str) -> InputFingerprint {
+        InputFingerprint {
+            fingerprint: self.input.finish(),
+            observation: observation.to_owned(),
+        }
+    }
+}
+
 fn hash_file(name: &str, path: &Path, hasher: &mut Fnv) {
+    hash_file_observation(name, path, hasher);
+}
+
+fn hash_file_observation(name: &str, path: &Path, aggregate: &mut Fnv) -> InputFingerprint {
+    let mut hasher = InputHasher::new(aggregate);
     hasher.write_str(name);
     let Ok(metadata) = std::fs::metadata(path) else {
         hasher.write_str("unreadable-metadata");
-        return;
+        return hasher.finish("unreadable-metadata");
     };
     hasher.write(&metadata.len().to_le_bytes());
-    if metadata.len() <= CONTENT_HASH_LIMIT {
+    let observation = if metadata.len() <= CONTENT_HASH_LIMIT {
         match std::fs::read(path) {
-            Ok(content) => hasher.write(&content),
-            Err(failure) => hasher.write_str(&format!("unreadable-file:{}", failure.kind())),
+            Ok(content) => {
+                hasher.write(&content);
+                "content"
+            }
+            Err(failure) => {
+                hasher.write_str(&format!("unreadable-file:{}", failure.kind()));
+                "unreadable-file"
+            }
         }
     } else if let Ok(modified) = metadata.modified()
         && let Ok(since_epoch) = modified.duration_since(std::time::UNIX_EPOCH)
     {
         hasher.write(&since_epoch.as_nanos().to_le_bytes());
-    }
+        "modified-time"
+    } else {
+        "length-only"
+    };
+    hasher.finish(observation)
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod command_line_tests {
+    use super::command_line;
+
+    fn posix_split(line: &str) -> Vec<String> {
+        let mut words = Vec::new();
+        let mut current = String::new();
+        let mut started = false;
+        let mut quoted = false;
+        let mut chars = line.chars();
+        while let Some(ch) = chars.next() {
+            match (quoted, ch) {
+                (true, '\'') => quoted = false,
+                (true, _) => current.push(ch),
+                (false, '\'') => {
+                    quoted = true;
+                    started = true;
+                }
+                (false, '\\') => {
+                    current.push(chars.next().unwrap());
+                    started = true;
+                }
+                (false, ' ') => {
+                    if started {
+                        words.push(std::mem::take(&mut current));
+                        started = false;
+                    }
+                }
+                (false, _) => {
+                    current.push(ch);
+                    started = true;
+                }
+            }
+        }
+        if started {
+            words.push(current);
+        }
+        words
+    }
+
+    #[test]
+    fn a_printed_command_line_splits_back_into_the_same_argv() {
+        let argv: Vec<String> = [
+            "python",
+            "-c",
+            "print('a b')\nraise SystemExit(0)",
+            "",
+            "two  words",
+            "a;b|c&d$e`f\"g\\h",
+            "it's",
+            "C:\\tools\\run.exe",
+            "--flag=value",
+            "src/thing.rs",
+        ]
+        .iter()
+        .map(|argument| (*argument).to_owned())
+        .collect();
+        assert_eq!(posix_split(&command_line(&argv)), argv);
+    }
+
+    #[test]
+    fn plain_arguments_print_unquoted() {
+        let argv: Vec<String> = ["cargo", "test", "--lib", "src/a.rs", "a=b"]
+            .iter()
+            .map(|argument| (*argument).to_owned())
+            .collect();
+        assert_eq!(command_line(&argv), argv.join(" "));
+    }
+}

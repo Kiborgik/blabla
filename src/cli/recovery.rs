@@ -59,14 +59,18 @@ pub fn foreign(identity: Option<&Identity>, recorded: Option<&str>) -> bool {
     identity.is_some_and(|identity| identity.recovery && !matches(identity, recorded))
 }
 
+fn recorded_account(recorded: Option<&str>) -> String {
+    match recorded {
+        Some(stamp) => format!("was last written by {stamp}"),
+        None => "names no build that wrote it".to_owned(),
+    }
+}
+
 pub fn refuse_write(identity: &Identity, recorded: Option<&str>) -> Option<String> {
     if !foreign(Some(identity), recorded) {
         return None;
     }
-    let seen = match recorded {
-        Some(stamp) => format!("was last written by {stamp}"),
-        None => "names no build that wrote it".to_owned(),
-    };
+    let seen = recorded_account(recorded);
     Some(format!(
         "this recovery build is {stamp} and the record {seen}; writing it back would silently drop whatever this build cannot represent. Read it here, write it with the build that owns it, or open a new task with this one.",
         stamp = identity.stamp()
@@ -146,8 +150,8 @@ mod tests {
         let absent = refuse_write(&identity, None).unwrap();
         let mismatched = refuse_write(&identity, Some("0.0.0 elsewhere")).unwrap();
         assert_ne!(absent, mismatched);
-        assert!(absent.contains("names no build"));
-        assert!(mismatched.contains("0.0.0 elsewhere"));
+        assert!(absent.contains(&recorded_account(None)));
+        assert!(mismatched.contains(&recorded_account(Some("0.0.0 elsewhere"))));
     }
 
     #[test]

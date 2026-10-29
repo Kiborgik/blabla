@@ -1,4 +1,5 @@
 use super::ignore::Ignore;
+use super::runstate::profile_identity;
 use super::status::{
     CompletionState, Record, State, evaluate, explain_view, format_unix, primitive_view,
     status_view,
@@ -254,6 +255,191 @@ fn load_shares_declarations_across_files_and_qualifies_rule_ids() {
     assert_eq!(project.groups[0].rules, 1);
     assert_eq!(project.groups[1].rules, 3);
     assert!(project.drafts.is_empty());
+}
+
+const ALPHA: &str = "state alpha: int\naction raise_alpha()\nwhen raise_alpha { expect \"alpha-grows\": after.alpha == before.alpha + 1 }\n";
+const BETA: &str = "state beta: int\naction raise_beta()\nwhen raise_beta { expect \"beta-grows\": after.beta == before.beta + 1 }\n";
+const GAMMA: &str = "state alpha: int\naction lower_alpha()\nwhen lower_alpha { expect \"alpha-shrinks\": after.alpha < before.alpha }\n";
+const WATCHER: &str = "always \"alpha-non-negative\" { alpha >= 0 }\n";
+const SNAPSHOT: &str =
+    "action restart()\nwhen restart { expect \"nothing-moves\": after == before }\n";
+
+fn behavior_project(root: &Path, contracts: &[(&str, &str)]) -> super::Project {
+    let manifest: String = std::iter::once("project Groups\n".to_owned())
+        .chain(
+            contracts
+                .iter()
+                .map(|(name, _)| format!("use behavior \"{name}.bla\"\n")),
+        )
+        .collect();
+    let files: Vec<(String, &str)> = contracts
+        .iter()
+        .map(|(name, text)| (format!("{name}.bla"), *text))
+        .collect();
+    let files: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(file, text)| (file.as_str(), *text))
+        .collect();
+    project(root, &manifest, &files)
+}
+
+fn campaign_members(project: &super::Project) -> Vec<Vec<&str>> {
+    project
+        .campaigns
+        .iter()
+        .map(|campaign| campaign.contracts.iter().map(String::as_str).collect())
+        .collect()
+}
+
+fn campaign_rules(campaign: &crate::verify::Campaign) -> Vec<&str> {
+    campaign
+        .contract
+        .actions
+        .iter()
+        .flat_map(|action| &action.postconditions)
+        .chain(&campaign.contract.invariants)
+        .map(|predicate| predicate.label.as_str())
+        .collect()
+}
+
+#[test]
+fn contracts_sharing_no_state_or_action_verify_in_separate_campaigns() {
+    let temp = TempDir::new().unwrap();
+    let project = behavior_project(temp.path(), &[("alpha", ALPHA), ("beta", BETA)]);
+    assert_eq!(campaign_members(&project), [["alpha"], ["beta"]]);
+    for (campaign, (state, action)) in project
+        .campaigns
+        .iter()
+        .zip([("alpha", "raise_alpha"), ("beta", "raise_beta")])
+    {
+        let states: Vec<&str> = campaign
+            .contract
+            .state
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect();
+        let actions: Vec<&str> = campaign
+            .contract
+            .actions
+            .iter()
+            .map(|action| action.name.as_str())
+            .collect();
+        assert_eq!(states, [state]);
+        assert_eq!(actions, [action]);
+    }
+    assert_ne!(project.campaigns[0].key, project.campaigns[1].key);
+}
+
+#[test]
+fn shared_state_composes_contracts_into_one_campaign() {
+    let temp = TempDir::new().unwrap();
+    let project = behavior_project(
+        temp.path(),
+        &[("alpha", ALPHA), ("beta", BETA), ("gamma", GAMMA)],
+    );
+    assert_eq!(
+        campaign_members(&project),
+        [vec!["alpha", "gamma"], vec!["beta"]]
+    );
+}
+
+#[test]
+fn a_rule_on_another_contracts_action_or_state_composes_them() {
+    let temp = TempDir::new().unwrap();
+    let project = behavior_project(
+        temp.path(),
+        &[
+            ("core", CORE),
+            ("beta", BETA),
+            ("feature", FEATURE),
+            ("alpha", ALPHA),
+            ("watcher", WATCHER),
+        ],
+    );
+    assert_eq!(
+        campaign_members(&project),
+        [
+            vec!["core", "feature"],
+            vec!["beta"],
+            vec!["alpha", "watcher"]
+        ]
+    );
+}
+
+#[test]
+fn a_whole_state_comparison_composes_with_every_contract() {
+    let temp = TempDir::new().unwrap();
+    let project = behavior_project(
+        temp.path(),
+        &[("alpha", ALPHA), ("beta", BETA), ("snapshot", SNAPSHOT)],
+    );
+    assert_eq!(campaign_members(&project), [["alpha", "beta", "snapshot"]]);
+}
+
+#[test]
+fn campaign_projection_keeps_every_rule_exactly_once() {
+    let temp = TempDir::new().unwrap();
+    let project = behavior_project(
+        temp.path(),
+        &[
+            ("core", CORE),
+            ("beta", BETA),
+            ("feature", FEATURE),
+            ("alpha", ALPHA),
+            ("watcher", WATCHER),
+            ("gamma", GAMMA),
+        ],
+    );
+    let composed = project.contract.as_ref().unwrap();
+    let mut expected: Vec<&str> = project.rules.iter().map(|rule| rule.id.as_str()).collect();
+    let mut projected: Vec<&str> = project.campaigns.iter().flat_map(campaign_rules).collect();
+    expected.sort_unstable();
+    projected.sort_unstable();
+    assert_eq!(projected, expected);
+    let mut actions: Vec<&str> = project
+        .campaigns
+        .iter()
+        .flat_map(|campaign| &campaign.contract.actions)
+        .map(|action| action.name.as_str())
+        .collect();
+    let mut states: Vec<&str> = project
+        .campaigns
+        .iter()
+        .flat_map(|campaign| &campaign.contract.state)
+        .map(|field| field.name.as_str())
+        .collect();
+    actions.sort_unstable();
+    states.sort_unstable();
+    let mut composed_actions: Vec<&str> = composed
+        .actions
+        .iter()
+        .map(|action| action.name.as_str())
+        .collect();
+    let mut composed_states: Vec<&str> = composed
+        .state
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    composed_actions.sort_unstable();
+    composed_states.sort_unstable();
+    assert_eq!(actions, composed_actions);
+    assert_eq!(states, composed_states);
+}
+
+#[test]
+fn campaign_keys_ignore_manifest_order_and_unrelated_contracts() {
+    let alone = TempDir::new().unwrap();
+    let alone = behavior_project(alone.path(), &[("alpha", ALPHA), ("gamma", GAMMA)]);
+    let crowded = TempDir::new().unwrap();
+    let crowded = behavior_project(
+        crowded.path(),
+        &[("beta", BETA), ("gamma", GAMMA), ("alpha", ALPHA)],
+    );
+    assert_eq!(
+        campaign_members(&crowded),
+        [vec!["beta"], vec!["gamma", "alpha"]]
+    );
+    assert_eq!(alone.campaigns[0].key, crowded.campaigns[1].key);
 }
 
 #[test]
@@ -616,6 +802,7 @@ fn record(project: &super::Project, report: serde_json::Value, fingerprint_value
         manifest: project.manifest.path.display().to_string(),
         project_identity: project.identity.clone(),
         implementation_fingerprint: fingerprint_value.into(),
+        implementation_inputs: None,
         fingerprinted_files: Vec::new(),
         application: vec!["python".into(), "app.py".into()],
         timeout_ms: 1000,
@@ -893,6 +1080,7 @@ fn manifest_parses_one_verification_profile_with_defaults_and_rejects_bad_ones()
             timeout_ms: 1000,
             startup_ms: None,
             shrink_budget: 256,
+            jobs: 2,
         })
     );
     assert_eq!(full.profile_span.unwrap().line, 4);
@@ -913,9 +1101,16 @@ fn manifest_parses_one_verification_profile_with_defaults_and_rejects_bad_ones()
             timeout_ms: 1000,
             startup_ms: None,
             shrink_budget: 256,
+            jobs: 2,
         })
     );
     assert_eq!(minimal.entries[0].group, "a");
+    let maximum = parse_manifest(
+        path,
+        "project X\nverify behavior { command [\"a\"] timeout_ms 42000 }",
+    )
+    .unwrap();
+    assert_eq!(maximum.profile.unwrap().timeout_ms, 42000);
     let none = parse_manifest(path, "project X\nuse behavior \"a.bla\"").unwrap();
     assert!(none.profile.is_none());
     for (source, code) in [
@@ -952,7 +1147,7 @@ fn manifest_parses_one_verification_profile_with_defaults_and_rejects_bad_ones()
             "E_PROFILE_FIELD",
         ),
         (
-            "project X\nverify behavior { command [\"a\"] timeout_ms 5001 }",
+            "project X\nverify behavior { command [\"a\"] timeout_ms 42001 }",
             "E_PROFILE_FIELD",
         ),
         (
@@ -991,6 +1186,76 @@ fn identity_ignores_the_verification_profile_but_fingerprint_and_staleness_see_i
     assert_eq!(without.identity, with.identity);
     let renamed = project(root, "project Other\nuse behavior \"core.bla\"\n", &files);
     assert_ne!(without.identity, renamed.identity);
+}
+
+#[test]
+fn jobs_is_parsed_and_changes_neither_profile_identity_nor_staleness() {
+    let path = Path::new("project.bla");
+    let jobs =
+        |source: &str| parse_manifest(path, source).map(|manifest| manifest.profile.unwrap().jobs);
+    assert_eq!(super::DEFAULT_JOBS, 2);
+    assert_eq!(
+        jobs("project X\nverify behavior { command [\"a\"] }").unwrap(),
+        super::DEFAULT_JOBS
+    );
+    assert_eq!(
+        jobs("project X\nverify behavior { command [\"a\"] jobs 3 }").unwrap(),
+        3
+    );
+    for source in [
+        "project X\nverify behavior { command [\"a\"] jobs 0 }",
+        "project X\nverify behavior { command [\"a\"] jobs 2 jobs 3 }",
+    ] {
+        assert_eq!(
+            jobs(source).unwrap_err().code,
+            "E_PROFILE_FIELD",
+            "{source}"
+        );
+    }
+
+    let temp = TempDir::new().unwrap();
+    let project = project(temp.path(), PROFILE_MANIFEST, &[("core.bla", CORE)]);
+    let profile = project.manifest.profile.clone().unwrap();
+    let wider = Profile {
+        jobs: profile.jobs + 3,
+        ..profile.clone()
+    };
+    assert_eq!(
+        profile_identity(Some(&wider)),
+        profile_identity(Some(&profile))
+    );
+    let mut recorded = record(
+        &project,
+        report("green", Vec::new()),
+        &project.fingerprint(&[]),
+    );
+    recorded.profile = Some(wider);
+    let evaluation = evaluate(&project, Ok(Some(recorded)));
+    assert!(!evaluation.stale);
+    assert!(evaluation.recorded.unwrap().stale.is_empty());
+}
+
+#[test]
+fn project_structure_rules_skip_what_the_project_ignores() {
+    let temp = TempDir::new().unwrap();
+    let project = project(
+        temp.path(),
+        "project Demo\nignore from \".gitignore\"\nuse structure \"size.bla\"\n",
+        &[
+            (
+                "size.bla",
+                "module pack \"pack\"\nrequire \"bounded\": lines pack <= 3\n",
+            ),
+            (".gitignore", "pack/generated.txt\n"),
+            ("pack/kept.txt", "a\nb\n"),
+            ("pack/generated.txt", "a\nb\nc\nd\ne\n"),
+        ],
+    );
+    let report = project.verify_structure();
+    assert_eq!(
+        report.result("size::bounded").map(|rule| rule.status),
+        Some(crate::structure::RuleStatus::Green)
+    );
 }
 
 #[test]
